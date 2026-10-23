@@ -314,9 +314,10 @@
 //!     `MeshDispatch::object_arguments`): it reads Metal's arguments, reserves the object
 //!     threadgroups' slots and offsets in the records pool (`lower::mesh::work::SLOTS`), and
 //!     writes the object dispatch, which reads its counts from the work buffer; then the scan as
-//!     above. A grid Metal's GPU discards, one past the compute limits or whose threads per grid
-//!     wrap, and one whose slots the pool cannot hold draw nothing and say so in the command
-//!     buffer's `ExecutionStatus`.
+//!     above. Every threadgroup of a grid whose threads per grid wrap runs, reporting the wrapped
+//!     grid as Metal's (`lower::dispatch`'s object grid). A grid Metal's GPU discards, one past the
+//!     compute limits, and one whose slots the pool cannot hold draw nothing and say so in the
+//!     command buffer's `ExecutionStatus`.
 
 use std::collections::BTreeMap;
 
@@ -3363,8 +3364,7 @@ fn mesh_draw(
     let (command, dispatch) = match &t.records {
         None => (command, None),
         Some(r) => {
-            let (command, dispatch) =
-                emulated_draw(r, t.object.is_some(), draw, (groups, lo), launches)?;
+            let (command, dispatch) = emulated_draw(r, t.object.is_some(), draw, groups, launches)?;
             (command, Some(dispatch))
         }
     };
@@ -3473,7 +3473,7 @@ fn emulated_draw(
     r: &RecordsTemplate,
     object: bool,
     draw: &DrawCall,
-    (groups, lo): (Option<[u32; 3]>, [u32; 3]),
+    groups: Option<[u32; 3]>,
     launches: bool,
 ) -> Result<(vk::DrawCommand, MeshDispatch), BindError> {
     use crate::lower::mesh::work;
@@ -3605,10 +3605,7 @@ fn emulated_draw(
             let range = arguments_range(indirect.offset);
             let mut out = scanned(0, None, None)?;
             let word = u32::try_from(range.1 / 4 + 1).map_err(|_| count_past())?;
-            let packed = crate::lower::dispatch::pack_nominal(lo)
-                .ok_or_else(|| internal(format!("object threadgroups of {lo:?} threads")))?;
             out.1.work[work::OBJECT_ARGUMENTS as usize] = word;
-            out.1.work[work::OBJECT_THREADS as usize] = packed;
             out.1.object_arguments = Some(range.0);
             Ok(out)
         }

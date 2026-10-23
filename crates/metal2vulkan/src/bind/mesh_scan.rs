@@ -557,9 +557,9 @@ pub fn scan_typed_module() -> BResult<TypedModule> {
 /// - a grid with a zero count runs nothing;
 /// - one of more threadgroups than [`METAL_OBJECT_GRID_TOTAL`], which Metal's GPU discards, runs
 ///   nothing and sets [`StatusBits::MESH_GRID_DISCARDED`];
-/// - one with a count past `compute` on its axis, or whose threads per grid wrap to 32 bits along
-///   an axis (whose grid builtins the object dispatch cannot report as Metal's), runs nothing and
-///   sets [`StatusBits::MESH_GRID_PAST_LIMITS`];
+/// - one with a count past `compute` on its axis runs nothing and sets
+///   [`StatusBits::MESH_GRID_PAST_LIMITS`] (a grid whose threads per grid wrap along an axis runs:
+///   the object function reports the wrapped grid, `lower::dispatch`'s object grid);
 /// - else it reserves `O · S + O + 1` words of the records pool from its cursor for the slots and
 ///   offsets, and writes `O` (`OBJECT_GROUPS`), their first word plus 1 (`SLOTS`) and the object
 ///   dispatch (`OBJECT_DISPATCH`, the grid); where the rest of the pool cannot hold them it runs
@@ -588,8 +588,6 @@ pub fn object_arguments_typed_module(compute: [u32; 3]) -> BResult<TypedModule> 
     let one = k(&mut f, 1)?;
     let argument_word = load_at(&mut f, work, work::OBJECT_ARGUMENTS)?;
     let at = f.binary(BinOp::ISub, argument_word, one)?;
-    let packed = load_at(&mut f, work, work::OBJECT_THREADS)?;
-    let mask = k(&mut f, (1 << crate::lower::dispatch::NOMINAL_AXIS_BITS) - 1)?;
     let mut grid = [zero; 3];
     let mut any_zero = boolean(&mut f, false)?;
     let mut past = boolean(&mut f, false)?;
@@ -602,12 +600,6 @@ pub fn object_arguments_typed_module(compute: [u32; 3]) -> BResult<TypedModule> 
         let limit = k(&mut f, compute[i])?;
         let over = f.binary(BinOp::UGreaterThan, *g, limit)?;
         past = f.binary(BinOp::LogicalOr, past, over)?;
-        let shift = k(&mut f, crate::lower::dispatch::NOMINAL_AXIS_BITS * i as u32)?;
-        let t = f.binary(BinOp::ShiftRightLogical, packed, shift)?;
-        let t = f.binary(BinOp::BitwiseAnd, t, mask)?;
-        let t = f.binary(BinOp::IAdd, t, one)?;
-        let (_, wraps) = checked_mul(&mut f, *g, t, zero)?;
-        past = f.binary(BinOp::LogicalOr, past, wraps)?;
     }
     let some = f.unary(UnOp::LogicalNot, any_zero)?;
     let (xy, wraps_xy) = checked_mul(&mut f, grid[0], grid[1], zero)?;

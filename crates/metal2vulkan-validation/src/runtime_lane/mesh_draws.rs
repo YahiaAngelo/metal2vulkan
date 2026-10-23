@@ -747,8 +747,8 @@ const PAST_GRID: [u32; 3] = [(1 << 29) + 1, 1, 1];
 /// grid folded into the task stage's limits where it passes them, and each draw of [`PAST_GRID`]
 /// draws nothing and fails its command buffer as Metal's GPU discards it, a direct one from its
 /// encoder on. The emulation refuses a direct grid past its compute limits
-/// (`Unsupported{MeshShading}`), and an indirect one past them, or whose threads per grid wrap
-/// along an axis, draws nothing and fails its command buffer (`MeshGridPastLimits`), each printed.
+/// (`Unsupported{MeshShading}`), and an indirect one past them draws nothing and fails its command
+/// buffer (`MeshGridPastLimits`), each printed.
 #[test]
 fn object_grids_run_as_metal_runs_them() {
     let cache = ScratchCache::new().unwrap();
@@ -837,8 +837,7 @@ fn object_grids_run_as_metal_runs_them() {
             }
             _ => false,
         };
-        // An indirect grid the emulation cannot dispatch as Metal runs it: an axis past its
-        // compute limits, or whose threads per grid reach 2^32 (Metal reports the wrapped grid).
+        // An indirect grid the emulation cannot dispatch: an axis past its compute limits.
         let limits = device
             .compile_device()
             .profile()
@@ -848,9 +847,7 @@ fn object_grids_run_as_metal_runs_them() {
             emulates(&device)
                 && !c.direct
                 && !c.groups.contains(&0)
-                && (0..3).any(|i| {
-                    c.groups[i] > limits[i] || u64::from(c.groups[i]) * c.threads[i] >= 1 << 32
-                })
+                && (0..3).any(|i| c.groups[i] > limits[i])
         };
         for c in &OBJECT_GRID_CASES {
             // The threadgroups Metal ran.

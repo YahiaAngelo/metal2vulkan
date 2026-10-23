@@ -97,7 +97,9 @@
 //! where its object arguments pass reserved them (`work::SLOTS`); the wrappers and the scan read
 //! the header's word to find them. An object function is a `GLCompute` entry too: its payload is
 //! workgroup memory, its wrapper zeroes its grid, runs the body between two barriers, and writes
-//! the grid it set (held to Metal's limit) and its payload into its slot. The binder or a scan
+//! the grid it set (held to Metal's limit) and its payload into its slot, numbered by its
+//! workgroup in the dispatch (whose grid is the threadgroups the draw runs, which an indirect
+//! draw's wrapped threads make more than the grid Metal reports). The binder or a scan
 //! (`bind::mesh_scan_module`) fills the rest of the header. The mesh wrapper's threadgroup is
 //! number `w` of the draw's `T` (past `T` it returns); it finds its object threadgroup by
 //! bisecting the offsets, and its place in that threadgroup's grid, which every grid builtin
@@ -1828,8 +1830,9 @@ fn builtin(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, b: KernelBuiltin) 
 }
 
 /// The builtins an entry wrapper reads (`dispatch::plan_kernel` derives them): its thread and
-/// its threadgroup's threads, and an emulated mesh function's its threadgroup's position in the
-/// grid and the grid's threadgroups (for its first word of the records).
+/// its threadgroup's threads, and an emulated object function's its threadgroup's position and
+/// the grid's threadgroups, which declare the dispatch's `WorkgroupId` and `NumWorkgroups` that
+/// number its slot (`KernelDecl::dispatch_groups`).
 pub fn builtins(plan: &MeshPlan) -> &'static [KernelBuiltin] {
     if plan.emulated && plan.mesh.is_none() {
         &[
@@ -2110,7 +2113,7 @@ fn payload_word(
 
 /// An emulated object function's wrapper (the module docs): its grid zeroed, the body between
 /// two barriers, then its slot ([`Slots`]: in the work buffer, or in the records for an indirect
-/// draw), placed by its threadgroup's linear index in the grid: the grid it stored, held to
+/// draw), placed by its workgroup's linear index in the dispatch: the grid it stored, held to
 /// Metal's limit, and its payload's words that the slot holds.
 fn emulated_object_wrapper(
     cx: &mut EmitCx<'_>,
@@ -2135,10 +2138,14 @@ fn emulated_object_wrapper(
     device_barrier(cx, &mut fb)?;
     fb.call(body, &[])?;
     device_barrier(cx, &mut fb)?;
-    // Its slot: word `o · S` of the slots, `o = x + X · (y + Y · z)` its threadgroup's linear
-    // index.
-    let at = builtin(cx, &mut fb, KernelBuiltin::ThreadgroupPositionInGrid)?;
-    let grid = builtin(cx, &mut fb, KernelBuiltin::ThreadgroupsPerGrid)?;
+    // Its slot: word `o · S` of the slots, `o = x + X · (y + Y · z)` its workgroup's linear index
+    // in the dispatch, which runs Metal's threadgroups at their positions (no region of an
+    // emulated draw has a base). The dispatch's grid, not the one Metal reports, which an indirect
+    // draw's wrapped threads make smaller than the threadgroups it runs.
+    let Some(k) = cx.decl.families.dispatch.kernel.as_ref() else {
+        return Err(cx.fail("an emulated object wrapper without its dispatch"));
+    };
+    let (at, grid) = k.dispatch_groups(&mut fb)?;
     let [x, y, z] = [0, 1, 2].map(|i| fb.composite_extract(at, &[i]));
     let [gx, gy] = [0, 1].map(|i| fb.composite_extract(grid, &[i]));
     let yz = fb.binary(BinOp::IMul, gy?, z?)?;

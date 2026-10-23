@@ -47,11 +47,8 @@ pub const OBJECT_DISPATCH: u32 = 18;
 /// arguments (the object grid of an indirect draw with an object function) begin, which the
 /// object arguments pass reads.
 pub const OBJECT_ARGUMENTS: u32 = 21;
-/// The threads per object threadgroup, packed as a region record packs them
-/// (`lower::dispatch::pack_nominal`), of an indirect draw with an object function.
-pub const OBJECT_THREADS: u32 = 22;
 /// The header's words.
-pub const HEADER: u32 = 24;
+pub const HEADER: u32 = 22;
 /// The words of a slot before its payload: the grid's three counts and a zero.
 pub const GRID: u32 = 4;
 
