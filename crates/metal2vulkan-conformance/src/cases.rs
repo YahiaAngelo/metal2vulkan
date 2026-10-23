@@ -49,6 +49,7 @@ pub mod extended_swizzles;
 pub mod fetch_ordered;
 pub mod format_copies;
 pub mod fresh_contents;
+pub mod half_output_blends;
 pub mod half_read_nans;
 pub mod half_storage_writes;
 pub mod half_texel_nans;
@@ -187,6 +188,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.push(Box::new(denormal_word_fetches::all().remove(0)));
     for case in half_storage_writes::all() {
+        cases.push(Box::new(case));
+    }
+    for case in half_output_blends::all() {
         cases.push(Box::new(case));
     }
     cases.extend(extended_range_targets::all());
