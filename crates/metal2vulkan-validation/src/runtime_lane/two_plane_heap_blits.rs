@@ -8,7 +8,9 @@
 //! and the heap's bytes read back through the buffer. Metal's answer: the first 16 hex digits of
 //! the SHA-256 of the heap's bytes after the blit, as the probe printed them (an Apple M4 under
 //! macOS 27.0.1, each blit three times on the same bytes and every case twice, alike; and an Apple
-//! M3 Max under macOS 26.7, the same digests). The copy's alpha bytes land past the destination's
+//! M3 Max under macOS 26.7, the same digests), and the runs of bytes the blit changed
+//! ([`METAL_RUNS`]), which say where it wrote without committing 356 KiB of moved bytes: a
+//! differing case names the first run whose offset or length is not Metal's. The copy's alpha bytes land past the destination's
 //! alpha plane, on the heap's other bytes, and in `end255` past the heap's end, which Metal's blit
 //! writes and the device's announces (`two-plane-texture-copy`). A differing heap's digest is
 //! printed on one `XR-TWO-PLANE-HEAP-BLITS-DIFFERS` line.
@@ -25,6 +27,14 @@ use std::time::Duration;
 
 /// The longest a command buffer may take.
 const WAIT: Duration = Duration::from_secs(60);
+
+/// The runs of bytes each case's blit changed in the heap, as `<offset>+<length>` each, a line a
+/// case in [`CASES`] order (recovered on an Apple M3 Max under MoltenVK, where every case's
+/// recorded digest held).
+const METAL_RUNS: &str = include_str!("../../fixtures/public/two_plane_heap_blits/metal_runs.txt");
+
+/// The SHA-256 of [`METAL_RUNS`].
+const METAL_RUNS_SHA: &str = "3954b19855ca0951cfa70a2a8748832472dde14f457a24047276473e0c7ff62c";
 
 /// One of the probe's cases.
 struct Case {
@@ -364,7 +374,8 @@ fn blits_into_a_heap_s_two_plane_texture_write_metal_s_bytes() {
             let source = texture(case.formats.0, case.source.0, case.source.1);
             let destination = texture(case.formats.1, case.destination.0, case.destination.1);
             let bytes = heap.new_buffer_at_offset(case.heap, options, 0).unwrap();
-            put(device, &queue, &bytes, &random_bytes(case.heap, case.seed));
+            let before = random_bytes(case.heap, case.seed);
+            put(device, &queue, &bytes, &before);
             let (from, to, [w, h]) = case.copy;
             let command_buffer = queue.command_buffer().unwrap();
             let mut blit = command_buffer.blit_command_encoder().unwrap();
@@ -395,8 +406,11 @@ fn blits_into_a_heap_s_two_plane_texture_write_metal_s_bytes() {
                 .map(|b| format!("{b:02x}"))
                 .collect();
             if digest[..16] != *case.metal {
+                let runs = changed_runs(&before, &got);
+                let unlike = unlike_metal(&runs, &metal_runs(case.name))
+                    .unwrap_or_else(|| "the same runs hold other bytes".to_owned());
                 println!(
-                    "XR-TWO-PLANE-HEAP-BLITS-DIFFERS {} {} (Metal's {})",
+                    "XR-TWO-PLANE-HEAP-BLITS-DIFFERS {} {} (Metal's {}): {unlike}",
                     case.name,
                     &digest[..16],
                     case.metal
@@ -413,9 +427,9 @@ fn blits_into_a_heap_s_two_plane_texture_write_metal_s_bytes() {
     });
 }
 
-/// The runs of `after` that differ from `before`, as ` | <offset>: <bytes>` each.
-fn changed_runs(before: &[u8], after: &[u8]) -> String {
-    let mut out = String::new();
+/// The runs of `after` that differ from `before`: each run's first byte and its length.
+fn changed_runs(before: &[u8], after: &[u8]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
     let mut at = 0;
     while at < after.len() {
         if after[at] == before[at] {
@@ -426,75 +440,60 @@ fn changed_runs(before: &[u8], after: &[u8]) -> String {
         while end < after.len() && after[end] != before[end] {
             end += 1;
         }
-        out += &format!(" | {at:#x}:");
-        for byte in &after[at..end] {
-            out += &format!(" {byte:02x}");
-        }
+        out.push((at, end - at));
         at = end;
     }
     out
 }
 
-#[test]
-fn dump_scratch() {
-    on_device(|device, messages| {
-        let queue = device.new_command_queue().unwrap();
-        let mut out = String::new();
-        for case in &CASES {
-            let options = if case.private {
-                ResourceOptions::private()
-            } else {
-                ResourceOptions::shared()
-            };
-            let heap = device
-                .new_heap(&HeapDescriptor::new(
-                    HeapType::Placement,
-                    case.heap,
-                    options,
-                ))
-                .unwrap();
-            let texture = |format, [w, h]: [u64; 2], at| {
-                let mut descriptor = TextureDescriptor::texture_2d(format, w, h, false);
-                descriptor.usage = TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE;
-                descriptor.resource_options = options;
-                heap.new_texture_at_offset(&descriptor, at).unwrap()
-            };
-            let source = texture(case.formats.0, case.source.0, case.source.1);
-            let destination = texture(case.formats.1, case.destination.0, case.destination.1);
-            let bytes = heap.new_buffer_at_offset(case.heap, options, 0).unwrap();
-            let before = random_bytes(case.heap, case.seed);
-            put(device, &queue, &bytes, &before);
-            let (from, to, [w, h]) = case.copy;
-            let command_buffer = queue.command_buffer().unwrap();
-            let mut blit = command_buffer.blit_command_encoder().unwrap();
-            blit.copy_from_texture_to_texture(
-                &source,
-                0,
-                0,
-                Origin::new(from[0], from[1], 0),
-                Size::new(w, h, 1),
-                &destination,
-                0,
-                0,
-                Origin::new(to[0], to[1], 0),
+/// Metal's runs of the case `name` ([`METAL_RUNS`]).
+fn metal_runs(name: &str) -> Vec<(usize, usize)> {
+    let line = METAL_RUNS
+        .lines()
+        .find(|line| {
+            line.split_once(' ')
+                .map_or(*line == name, |(case, _)| case == name)
+        })
+        .unwrap_or_else(|| panic!("no Metal runs of {name}"));
+    line.split_whitespace()
+        .skip(1)
+        .map(|run| {
+            let (at, length) = run.split_once('+').expect("a run's length");
+            (
+                usize::from_str_radix(at.trim_start_matches("0x"), 16).expect("an offset"),
+                length.parse().expect("a length"),
             )
-            .unwrap();
-            blit.end_encoding().unwrap();
-            command_buffer.commit().unwrap();
-            command_buffer.wait_until_completed_for(WAIT).unwrap();
-            let got = get(device, &queue, &bytes, case.heap);
-            let digest: String = Sha256::digest(&got)
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect();
-            assert_eq!(digest[..16], *case.metal, "{}", case.name);
-            out += &format!("{}{}\n", case.name, changed_runs(&before, &got));
-        }
-        messages.take_notices();
-        std::fs::write(
-            "/Users/aneesiqbal/.cache/m2v-conformance/evidence/scratch/two_plane_heap_blits.txt",
-            out,
-        )
-        .unwrap();
-    });
+        })
+        .collect()
+}
+
+/// How `runs` differ from Metal's, or `None` where they are alike: the first run they part at.
+fn unlike_metal(runs: &[(usize, usize)], metal: &[(usize, usize)]) -> Option<String> {
+    if runs == metal {
+        return None;
+    }
+    let counts = format!("{} runs changed, Metal's {}", runs.len(), metal.len());
+    Some(
+        match runs.iter().zip(metal).position(|(got, want)| got != want) {
+            Some(i) => format!(
+                "{counts}: run {i} is {:#x}+{}, Metal's {:#x}+{}",
+                runs[i].0, runs[i].1, metal[i].0, metal[i].1
+            ),
+            None => format!("{counts}, the shorter their first"),
+        },
+    )
+}
+
+/// The recorded runs are the probes': their own SHA-256, and a line a case.
+#[test]
+fn the_recorded_runs_are_the_probes() {
+    assert_eq!(
+        crate::hash::hex_encode(Sha256::digest(METAL_RUNS)),
+        METAL_RUNS_SHA,
+        "the recorded runs"
+    );
+    assert_eq!(METAL_RUNS.lines().count(), CASES.len(), "a line a case");
+    for case in &CASES {
+        assert!(!metal_runs(case.name).is_empty(), "{}", case.name);
+    }
 }
