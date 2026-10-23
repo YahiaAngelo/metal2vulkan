@@ -63,9 +63,10 @@ use objc2::sel;
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLBlitOption, MTLBuffer, MTLClearColor, MTLCommandBuffer,
     MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState,
-    MTLDevice, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLLoadAction, MTLOrigin, MTLPixelFormat,
-    MTLRegion, MTLRenderPassDescriptor, MTLResourceOptions, MTLSize, MTLStorageMode,
-    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
+    MTLDevice, MTLFence, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLLoadAction, MTLOrigin,
+    MTLPixelFormat, MTLRegion, MTLRenderPassDescriptor, MTLResource, MTLResourceOptions, MTLSize,
+    MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureType,
+    MTLTextureUsage,
 };
 
 /// A per-sample read-back's compute pipeline state, by the kernel it runs.
@@ -136,6 +137,7 @@ enum Made {
     Buffer(Retained<ProtocolObject<dyn MTLBuffer>>),
     Heap(Retained<ProtocolObject<dyn MTLHeap>>),
     Texture(Retained<ProtocolObject<dyn MTLTexture>>),
+    Fence(Retained<ProtocolObject<dyn MTLFence>>),
     /// The resource a [`Step::Release`] dropped, as [`crate::runtime_work`] keeps one.
     Released,
 }
@@ -337,6 +339,11 @@ fn make(
                 })?;
             Ok(Made::Buffer(buffer))
         }
+        Resource::Fence => {
+            Ok(Made::Fence(device.newFence().ok_or_else(|| {
+                Failure::named("NewFence", "returned nil")
+            })?))
+        }
         Resource::Heap { size, storage } => heap_of(*size, *storage),
         Resource::HeapForTexture { spec, storage } => {
             let descriptor = descriptor(spec)?;
@@ -483,6 +490,29 @@ impl Run<'_> {
         match self.made.get(at) {
             Some(Made::Texture(texture)) => Ok(texture.clone()),
             _ => Err(Failure::named("NoSuchResource", format!("texture {at}"))),
+        }
+    }
+
+    /// The fence resource `at`.
+    fn fence(&self, at: usize) -> Answer<Retained<ProtocolObject<dyn MTLFence>>> {
+        match self.made.get(at) {
+            Some(Made::Fence(fence)) => Ok(fence.clone()),
+            _ => Err(Failure::named("NoSuchResource", format!("fence {at}"))),
+        }
+    }
+
+    /// The resource `at`, whichever kind it is, as `id<MTLResource>`: what a call that takes one
+    /// of Metal's resources rather than a buffer or a texture needs
+    /// ([`Step::SynchronizeResource`]).
+    fn resource(&self, at: usize) -> Answer<Retained<ProtocolObject<dyn MTLResource>>> {
+        match self.made.get(at) {
+            Some(Made::Buffer(buffer)) => Ok(Retained::from(
+                ProtocolObject::<dyn MTLResource>::from_ref(&**buffer),
+            )),
+            Some(Made::Texture(texture)) => Ok(Retained::from(
+                ProtocolObject::<dyn MTLResource>::from_ref(&**texture),
+            )),
+            _ => Err(Failure::named("NoSuchResource", format!("resource {at}"))),
         }
     }
 
@@ -635,6 +665,171 @@ impl Run<'_> {
                 }
                 Ok(())
             }
+            Step::CopyBufferToTextureWithoutOptions {
+                buffer,
+                offset,
+                bytes_per_row,
+                bytes_per_image,
+                size,
+                texture,
+                slice,
+                level,
+                origin,
+            } => {
+                let buffer = self.buffer(*buffer)?;
+                let texture = self.texture(*texture)?;
+                let encoder = self.encoder()?;
+                // SAFETY: the buffer holds `bytes_per_image` bytes from `offset` for the depth the
+                // size names, and the region is inside the texture's level and slice; both are the
+                // case's own statement of what the probe encoded.
+                unsafe {
+                    encoder.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                        &buffer,
+                        *offset as usize,
+                        *bytes_per_row as usize,
+                        *bytes_per_image as usize,
+                        size_of(size),
+                        &texture,
+                        *slice as usize,
+                        *level as usize,
+                        origin_of(origin),
+                    );
+                }
+                Ok(())
+            }
+            Step::CopyTextureToBufferWithoutOptions {
+                texture,
+                slice,
+                level,
+                origin,
+                size,
+                buffer,
+                offset,
+                bytes_per_row,
+                bytes_per_image,
+            } => {
+                let buffer = self.buffer(*buffer)?;
+                let texture = self.texture(*texture)?;
+                let encoder = self.encoder()?;
+                // SAFETY: the region is inside the texture's level and slice and the buffer holds
+                // the bytes the pitches name from `offset`, as the case states.
+                unsafe {
+                    encoder.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                        &texture,
+                        *slice as usize,
+                        *level as usize,
+                        origin_of(origin),
+                        size_of(size),
+                        &buffer,
+                        *offset as usize,
+                        *bytes_per_row as usize,
+                        *bytes_per_image as usize,
+                    );
+                }
+                Ok(())
+            }
+            Step::CopyWholeTexture { from, to } => {
+                let source = self.texture(*from)?;
+                let destination = self.texture(*to)?;
+                let encoder = self.encoder()?;
+                // SAFETY: the two textures share a level of one size and a slice, which the case
+                // states by making both; the encoder outlives the call.
+                unsafe { encoder.copyFromTexture_toTexture(&source, &destination) };
+                Ok(())
+            }
+            Step::CopyTextureSlices {
+                from,
+                from_slice,
+                from_level,
+                to,
+                to_slice,
+                to_level,
+                slice_count,
+                level_count,
+            } => {
+                let source = self.texture(*from)?;
+                let destination = self.texture(*to)?;
+                let encoder = self.encoder()?;
+                // SAFETY: the counts stay inside both textures' slices and levels, as the case
+                // states; the encoder outlives the call.
+                unsafe {
+                    encoder.copyFromTexture_sourceSlice_sourceLevel_toTexture_destinationSlice_destinationLevel_sliceCount_levelCount(
+                        &source,
+                        *from_slice as usize,
+                        *from_level as usize,
+                        &destination,
+                        *to_slice as usize,
+                        *to_level as usize,
+                        *slice_count as usize,
+                        *level_count as usize,
+                    );
+                }
+                Ok(())
+            }
+            Step::GenerateMipmaps { texture } => {
+                let texture = self.texture(*texture)?;
+                let encoder = self.encoder()?;
+                encoder.generateMipmapsForTexture(&texture);
+                Ok(())
+            }
+            Step::OptimizeForGpuAccess { texture, at } => {
+                let texture = self.texture(*texture)?;
+                let encoder = self.encoder()?;
+                match at {
+                    None => encoder.optimizeContentsForGPUAccess(&texture),
+                    // SAFETY: the slice and the level are inside the texture, as the case states,
+                    // and the encoder outlives the call.
+                    Some((slice, level)) => unsafe {
+                        encoder.optimizeContentsForGPUAccess_slice_level(
+                            &texture,
+                            *slice as usize,
+                            *level as usize,
+                        )
+                    },
+                }
+                Ok(())
+            }
+            Step::OptimizeForCpuAccess { texture, at } => {
+                let texture = self.texture(*texture)?;
+                let encoder = self.encoder()?;
+                // SAFETY: the slice and the level, where the case names them, are inside the
+                // texture, and the encoder outlives the call.
+                unsafe {
+                    match at {
+                        None => encoder.optimizeContentsForCPUAccess(&texture),
+                        Some((slice, level)) => encoder.optimizeContentsForCPUAccess_slice_level(
+                            &texture,
+                            *slice as usize,
+                            *level as usize,
+                        ),
+                    }
+                }
+                Ok(())
+            }
+            Step::SynchronizeResource { resource } => {
+                let resource = self.resource(*resource)?;
+                let encoder = self.encoder()?;
+                encoder.synchronizeResource(&resource);
+                Ok(())
+            }
+            Step::SynchronizeTexture {
+                texture,
+                slice,
+                level,
+            } => {
+                let texture = self.texture(*texture)?;
+                let encoder = self.encoder()?;
+                // SAFETY: the slice and the level are inside the texture, as the case states, and
+                // the encoder outlives the call.
+                unsafe {
+                    encoder.synchronizeTexture_slice_level(
+                        &texture,
+                        *slice as usize,
+                        *level as usize,
+                    );
+                }
+                Ok(())
+            }
             Step::CopyBufferToBuffer {
                 from,
                 from_offset,
@@ -775,6 +970,20 @@ impl Run<'_> {
                 let bytes = read_buffer(&buffer, *offset, *length)?;
                 let slot = self.slot();
                 self.reads[slot] = Some(bytes);
+                Ok(())
+            }
+            Step::EndEncoder => {
+                self.end_encoding();
+                Ok(())
+            }
+            Step::UpdateFence { fence } => {
+                let fence = self.fence(*fence)?;
+                self.encoder()?.updateFence(&fence);
+                Ok(())
+            }
+            Step::WaitForFence { fence } => {
+                let fence = self.fence(*fence)?;
+                self.encoder()?.waitForFence(&fence);
                 Ok(())
             }
             Step::Commit => self.close(),

@@ -44,6 +44,7 @@
 
 pub mod argument_encoders;
 pub mod astc_textures;
+pub mod blit_encoder_commands;
 pub mod border_swizzles;
 pub mod buffer_blits;
 pub mod buffer_depth_samples;
@@ -301,6 +302,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.extend(compute_threadgroups::all());
     cases.extend(buffer_blits::all());
+    cases.extend(blit_encoder_commands::all());
     cases.extend(buffer_texture_blits::all());
     cases.extend(buffer_textures::all());
     cases.extend(buffer_target_clears::all());

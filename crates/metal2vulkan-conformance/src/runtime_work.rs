@@ -15,9 +15,9 @@ use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
-    BlitCommandEncoder, BlitOption, Buffer, ClearColor, CommandBuffer, CommandQueue, Device, Heap,
-    HeapDescriptor, HeapType, LoadAction, Origin, PipelineOptions, Region, RenderPassDescriptor,
-    ResourceOptions, Size, StoreAction, Texture, TextureDescriptor,
+    BlitCommandEncoder, BlitOption, Buffer, ClearColor, CommandBuffer, CommandQueue, Device, Fence,
+    Heap, HeapDescriptor, HeapType, LoadAction, Origin, PipelineOptions, Region,
+    RenderPassDescriptor, ResourceOptions, Size, StoreAction, Texture, TextureDescriptor,
 };
 use std::time::Duration;
 
@@ -29,10 +29,18 @@ enum Made {
     Buffer(Buffer),
     Heap(Heap),
     Texture(Texture),
+    Fence(Fence),
     /// The resource a [`Step::Release`] dropped. It is an explicit state rather than a hole: a
     /// step that names a released resource is refused by the same path that refuses one that was
     /// never made, and a [`Step::Make`] fills the slot again.
     Released,
+}
+
+/// One of the resource kinds a call that takes Metal's `id<MTLResource>` can be handed, held so
+/// the encoder can be borrowed after the pool was read ([`Run::resource`]).
+enum OneResource {
+    Buffer(Buffer),
+    Texture(Texture),
 }
 
 /// A read-back the device has to run before its bytes can be answered.
@@ -163,6 +171,7 @@ fn make(device: &Device, made: &[Made], resource: &Resource) -> Answer<Made> {
                 .map_err(|error| Failure::of(&error))?;
             Ok(Made::Buffer(buffer))
         }
+        Resource::Fence => Ok(Made::Fence(device.new_fence())),
         Resource::Heap { size, storage } => {
             let options = crate::runtime_side::resource_options(*storage);
             let heap = device
@@ -277,6 +286,24 @@ impl Run<'_> {
         match self.made.get(at) {
             Some(Made::Texture(texture)) => Ok(texture.clone()),
             _ => Err(Failure::named("NoSuchResource", format!("texture {at}"))),
+        }
+    }
+
+    /// The fence resource `at`.
+    fn fence(&self, at: usize) -> Answer<Fence> {
+        match self.made.get(at) {
+            Some(Made::Fence(fence)) => Ok(fence.clone()),
+            _ => Err(Failure::named("NoSuchResource", format!("fence {at}"))),
+        }
+    }
+
+    /// The resource `at` as one of the two kinds a call over `id<MTLResource>` takes
+    /// ([`Step::SynchronizeResource`]).
+    fn resource(&self, at: usize) -> Answer<OneResource> {
+        match self.made.get(at) {
+            Some(Made::Buffer(buffer)) => Ok(OneResource::Buffer(buffer.clone())),
+            Some(Made::Texture(texture)) => Ok(OneResource::Texture(texture.clone())),
+            _ => Err(Failure::named("NoSuchResource", format!("resource {at}"))),
         }
     }
 
@@ -443,6 +470,145 @@ impl Run<'_> {
                     )
                     .map_err(|error| Failure::of(&error))
             }
+            Step::CopyBufferToTextureWithoutOptions {
+                buffer,
+                offset,
+                bytes_per_row,
+                bytes_per_image,
+                size,
+                texture,
+                slice,
+                level,
+                origin,
+            } => {
+                let buffer = self.buffer(*buffer)?;
+                let texture = self.texture(*texture)?;
+                // Metal binds two selectors and the runtime one method: the un-optioned selector
+                // **is** the optioned one with `MTLBlitOptionNone`, which is what Apple's header
+                // says of it, so our leg reaches the same call with [`BlitOption::None`]. What a
+                // case over this step can still fail on is Metal's own two selectors disagreeing,
+                // which is where the item is unexercised.
+                self.encoder()?
+                    .copy_from_buffer_to_texture(
+                        &buffer,
+                        *offset,
+                        *bytes_per_row,
+                        *bytes_per_image,
+                        size_of(size),
+                        &texture,
+                        *slice,
+                        *level,
+                        origin_of(origin),
+                        BlitOption::None,
+                    )
+                    .map_err(|error| Failure::of(&error))
+            }
+            Step::CopyTextureToBufferWithoutOptions {
+                texture,
+                slice,
+                level,
+                origin,
+                size,
+                buffer,
+                offset,
+                bytes_per_row,
+                bytes_per_image,
+            } => {
+                let buffer = self.buffer(*buffer)?;
+                let texture = self.texture(*texture)?;
+                // One method for Metal's two selectors, as above.
+                self.encoder()?
+                    .copy_from_texture_to_buffer(
+                        &texture,
+                        *slice,
+                        *level,
+                        origin_of(origin),
+                        size_of(size),
+                        &buffer,
+                        *offset,
+                        *bytes_per_row,
+                        *bytes_per_image,
+                        BlitOption::None,
+                    )
+                    .map_err(|error| Failure::of(&error))
+            }
+            Step::CopyWholeTexture { from, to } => {
+                let source = self.texture(*from)?;
+                let destination = self.texture(*to)?;
+                self.encoder()?
+                    .copy_texture(&source, &destination)
+                    .map_err(|error| Failure::of(&error))
+            }
+            Step::CopyTextureSlices {
+                from,
+                from_slice,
+                from_level,
+                to,
+                to_slice,
+                to_level,
+                slice_count,
+                level_count,
+            } => {
+                let source = self.texture(*from)?;
+                let destination = self.texture(*to)?;
+                self.encoder()?
+                    .copy_texture_slices(
+                        &source,
+                        *from_slice,
+                        *from_level,
+                        &destination,
+                        *to_slice,
+                        *to_level,
+                        *slice_count,
+                        *level_count,
+                    )
+                    .map_err(|error| Failure::of(&error))
+            }
+            Step::GenerateMipmaps { texture } => {
+                let texture = self.texture(*texture)?;
+                self.encoder()?
+                    .generate_mipmaps(&texture)
+                    .map_err(|error| Failure::of(&error))
+            }
+            Step::OptimizeForGpuAccess { texture, at } => {
+                let texture = self.texture(*texture)?;
+                let encoder = self.encoder()?;
+                match at {
+                    None => encoder.optimize_contents_for_gpu_access(&texture),
+                    Some((slice, level)) => encoder
+                        .optimize_contents_for_gpu_access_slice_level(&texture, *slice, *level),
+                }
+                .map_err(|error| Failure::of(&error))
+            }
+            Step::OptimizeForCpuAccess { texture, at } => {
+                let texture = self.texture(*texture)?;
+                let encoder = self.encoder()?;
+                match at {
+                    None => encoder.optimize_contents_for_cpu_access(&texture),
+                    Some((slice, level)) => encoder
+                        .optimize_contents_for_cpu_access_slice_level(&texture, *slice, *level),
+                }
+                .map_err(|error| Failure::of(&error))
+            }
+            Step::SynchronizeResource { resource } => {
+                let held = self.resource(*resource)?;
+                let encoder = self.encoder()?;
+                match &held {
+                    OneResource::Buffer(buffer) => encoder.synchronize_resource(buffer.into()),
+                    OneResource::Texture(texture) => encoder.synchronize_resource(texture.into()),
+                }
+                .map_err(|error| Failure::of(&error))
+            }
+            Step::SynchronizeTexture {
+                texture,
+                slice,
+                level,
+            } => {
+                let texture = self.texture(*texture)?;
+                self.encoder()?
+                    .synchronize_texture(&texture, *slice, *level)
+                    .map_err(|error| Failure::of(&error))
+            }
             Step::CopyBufferToBuffer {
                 from,
                 from_offset,
@@ -561,6 +727,19 @@ impl Run<'_> {
                     *texel_bytes,
                     *words,
                 )
+            }
+            Step::EndEncoder => self.end_encoding(),
+            Step::UpdateFence { fence } => {
+                let fence = self.fence(*fence)?;
+                self.encoder()?
+                    .update_fence(&fence)
+                    .map_err(|error| Failure::of(&error))
+            }
+            Step::WaitForFence { fence } => {
+                let fence = self.fence(*fence)?;
+                self.encoder()?
+                    .wait_for_fence(&fence)
+                    .map_err(|error| Failure::of(&error))
             }
             Step::Commit => self.close(),
         }
