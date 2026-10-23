@@ -10,7 +10,8 @@
 //!   <a>`, the `float` lanes' bits.
 //! - **Writes.** A kernel's write (`fpv_bfloat_write`) of `k / 16384` in red, green and blue and
 //!   `(k mod 4096) / 4095` in alpha, `k` from 0 to 16384, then 16 specials in every channel, into a
-//!   texture 4096 texels wide: `write <k> <word>`.
+//!   texture 4096 texels wide: `write <k> <word>`. The grid is 4096 by 5, so it writes 20,480
+//!   texels and the 4,079 past the sweep take the input's zeros; every one of them is digested.
 //! - **Samples.** A 16 x 16 texture of the probe's xorshift words, sampled through a runtime
 //!   sampler (clamp to edge, nearest and linear) at 4096 of its positions `(n, m) / 4096`, with
 //!   `float` and `half` results (`xr_sample_runtime`, `xr_sample_runtime_half`): `s <linear> <f|h>
@@ -21,7 +22,10 @@
 //!   `half`.
 //! - **Stores.** A full-screen draw of the owned fixture `rt6_samples`'s fill (`float4` and
 //!   `half4` outputs) of the writes' values into a new 4096 x 5 target: `store <float|half> <k>
-//!   <word>`. A `float` output rounds to `half` toward zero first.
+//!   <word>`. A `float` output rounds to `half` toward zero first. The digest holds the 16,405
+//!   texels of the sweep and its specials; Metal's words for the 4,075 past them were never
+//!   recorded, so the lane asserts they are zero on the device it runs rather than claiming
+//!   Metal's. Closing that needs a fresh Metal probe of the whole target.
 //! - **Loads.** A 1024 x 4 target holding every color code in each channel and each alpha code,
 //!   loaded and stored by a pass whose draw writes another attachment alone: `load <i> <before>
 //!   <after>`. Each color code moves as `R10Unorm_X6_sRGB`'s does (`ExtendedRange::load_code`,
@@ -51,7 +55,10 @@ const PF: PixelFormat = PixelFormat::RGB10A2UnormSRGB;
 /// Metal's digests: reads, writes, samples (nearest `float`, nearest `half`, linear `float`,
 /// linear `half`), clears (1 x 1, 64 x 64), stores (`float`, `half`) and loads.
 const READS: &str = "492c1e326a4685c8";
-const WRITES: &str = "631db99cd110dab6";
+/// The writes' digest over the whole 4096 by 5 grid, from the 20,480 words the conformance
+/// recording `rgb10a2-srgb-writes` holds of this chip's Metal run (the first 16,401 of them
+/// digest to `631db99cd110dab6`, the digest this lane compared while it printed only those).
+const WRITES: &str = "59cd54549c914e4e";
 const SAMPLES: [[&str; 2]; 2] = [
     ["5f73627c39064d55", "4460054d432720d8"],
     ["36b79f318a83d9ac", "e1978cceb4591a05"],
@@ -59,6 +66,17 @@ const SAMPLES: [[&str; 2]; 2] = [
 const CLEARS: [&str; 2] = ["325c8263917a086f", "8b361b1736bc7625"];
 const STORES: [&str; 2] = ["27b2e44d676d4976", "26b22082a3e6db54"];
 const LOADS: &str = "308f150fdcbbb82a";
+
+/// Every word `question` read back has a line in `text`, the string its digest is taken over: a
+/// formatter that prints fewer lines than the readback holds digests less than it appears to, and
+/// the question then passes whatever lies past the last line it printed.
+fn covers(text: &str, read_back: usize, question: &str) {
+    assert_eq!(
+        text.lines().count(),
+        read_back,
+        "{question}: the digested lines do not cover every word read back"
+    );
+}
 
 /// The first 16 hex digits of the SHA-256 of `text`.
 fn digest(text: &str) -> String {
@@ -262,6 +280,7 @@ fn kernels_read_write_and_sample_rgb10a2_srgb_as_metal_does() {
             )
             .unwrap();
         }
+        covers(&text, got.len() / 4, "reads");
         if digest(&text) != READS {
             wrong.push(format!("reads {} (Metal's {READS})", digest(&text)));
         }
@@ -286,9 +305,10 @@ fn kernels_read_write_and_sample_rgb10a2_srgb_as_metal_does() {
         );
         let got = words_of(&t, (4096, height));
         let mut text = String::new();
-        for (k, w) in got.iter().take(n).enumerate() {
+        for (k, w) in got.iter().enumerate() {
             writeln!(text, "write {k} {w:08x}").unwrap();
         }
+        covers(&text, got.len(), "writes");
         if digest(&text) != WRITES {
             wrong.push(format!("writes {} (Metal's {WRITES})", digest(&text)));
         }
@@ -360,6 +380,7 @@ fn kernels_read_write_and_sample_rgb10a2_srgb_as_metal_does() {
                     }
                     .unwrap();
                 }
+                covers(&text, bytes.len() / size, "samples");
                 let want = SAMPLES[linear][half];
                 if digest(&text) != want {
                     wrong.push(format!(
@@ -510,6 +531,7 @@ fn passes_clear_store_and_load_rgb10a2_srgb_as_metal_does() {
         for (k, w) in got.iter().enumerate() {
             writeln!(text, "clear {shape_index} {k} {w:08x}").unwrap();
         }
+        covers(&text, got.len(), "clears");
         let want = CLEARS[shape_index];
         if digest(&text) != want {
             wrong.push(format!(
@@ -562,6 +584,22 @@ fn passes_clear_store_and_load_rgb10a2_srgb_as_metal_does() {
         for (k, w) in got.iter().take(n).enumerate() {
             writeln!(text, "store {kind} {k} {w:08x}").unwrap();
         }
+        covers(&text, n, "stores");
+        // The target's texels past the sweep, whose inputs are zeros. Metal's words there were
+        // never recorded, so the lane holds the device to zero and claims nothing of Metal's; a
+        // probe of the whole target would let the digest cover them instead.
+        let past: Vec<(usize, u32)> = (got.iter().enumerate().skip(n))
+            .filter(|(_, &w)| w != 0)
+            .map(|(k, &w)| (k, w))
+            .collect();
+        assert!(
+            past.is_empty(),
+            "stores {kind}: {} of the {} texels past the sweep are not zero, the first {:08x?}; \
+             Metal's words there are unrecorded",
+            past.len(),
+            got.len() - n,
+            &past[..past.len().min(4)]
+        );
         if digest(&text) != STORES[half] {
             wrong.push(format!(
                 "stores {kind}: {} (Metal's {})",
@@ -625,6 +663,7 @@ fn passes_clear_store_and_load_rgb10a2_srgb_as_metal_does() {
     for (i, (b, a)) in before.iter().zip(&after).enumerate() {
         writeln!(text, "load {i} {b:08x} {a:08x}").unwrap();
     }
+    covers(&text, after.len(), "loads");
     if digest(&text) != LOADS {
         wrong.push(format!("loads {} (Metal's {LOADS})", digest(&text)));
     }
