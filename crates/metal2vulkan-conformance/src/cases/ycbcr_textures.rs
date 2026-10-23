@@ -15,13 +15,20 @@
 //!   `heapTextureSizeAndAlignWithDescriptor:` and whether `newTextureWithDescriptor:` answers a
 //!   texture, over every two-plane YCbCr format the translator names. Both are CPU calls over a
 //!   descriptor Metal makes no texture of, so the case allocates nothing and reaches no GPU.
-//! - [`TexelReads`] is **carried**, and record mode is forbidden from running it: the Metal side
-//!   has no call that makes a texture over a surface's plane, so there is nothing for it to run.
-//!   What it carries is not a model of ours — it is Metal's own `read()` of every texel of one
-//!   surface, taken on **this oracle**: `fixtures/public/ycbcr/metal_m3_max.bin`, 960 texels of
-//!   red, green and blue steps, written by the committed probe `fixtures/public/ycbcr/probe.swift`
-//!   over a real IOSurface laid out as the lane lays its stand-in buffer out, on an Apple M3 Max
-//!   under macOS 27.0.1.
+//! - [`TexelReads`] is **recorded on Metal too**, since the Metal side lays a texture over a real
+//!   IOSurface laid out as the case says its stand-in buffer is (`metal_surface.rs`). It was
+//!   carried while no call here could make one.
+//!
+//! # The probe stays, as the cross-check
+//!
+//! What the case used to carry is `fixtures/public/ycbcr/metal_m3_max.bin`: 960 texels of red,
+//! green and blue steps, written by the committed probe `fixtures/public/ycbcr/probe.swift` over a
+//! real IOSurface, on an Apple M3 Max under macOS 27.0.1. That file is no longer the case's answer
+//! — the recording is — so it is no longer one of the case's inputs either. It is better used than
+//! discarded: `the_recorded_reads_are_the_committed_probes` holds the recorded transcript to it,
+//! so two independent Metal paths over the same surface, a Swift probe and this suite's own Metal
+//! side, must answer the same 5,760 bytes. That is the strongest check the case can carry, and it
+//! is what says the IOSurface this side builds is the surface the probe built.
 //!
 //! # What the port changes
 //!
@@ -39,19 +46,15 @@
 //! [`FormatDescriptors`] runs no GPU work at all. The multisample descriptors of the lane's own
 //! sweep are **left out by construction**: the runtime answers them `Error::Invalid`, which is its
 //! word for "Metal's validation stops it, ending the process", and the suite's standing rule is
-//! that no case may end Metal's process. [`TexelReads`] is one 40 x 24 texture and one dispatch
-//! of 960 threads, and its Metal leg never runs at all.
+//! that no case may end Metal's process. [`TexelReads`] is one 40 x 24 texture, one 4 KiB surface
+//! and one dispatch of 960 threads, and the one pair it hands Metal — format 500 over a `420v`
+//! surface — is the pair the committed probe already ran on this machine.
 
-use crate::case::{
-    answered, made, Abort, Bindings, Case, Failure, Input, MetalSource, PlaneTexture, Side,
-};
+use crate::case::{made, Abort, Bindings, Case, Failure, Input, MetalSource, PlaneTexture, Side};
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
-use crate::replay::NOTICES_SITE;
 use crate::texture_query::{HeapTextureQuery as Q, Storage};
-use crate::transcript::{
-    ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Transcript, Value,
-};
+use crate::transcript::{ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value};
 use metal2vulkan::metal::format::ycbcr_format;
 use metal2vulkan::metal::{PixelFormat, TextureType};
 
@@ -197,23 +200,10 @@ const TEXELS: usize = (W * H) as usize;
 /// `1 / 2048`, which is what lets the measurement be kept as steps rather than as floats.
 const STEPS: f32 = 2048.0;
 
-/// The committed measurement, under the public fixtures.
+/// The committed measurement the recorded answer is cross-checked against, under the public
+/// fixtures. Read by the tests alone: the case's answer is its recording.
+#[cfg(test)]
 const MEASURED_FILE: &str = "ycbcr/metal_m3_max.bin";
-
-/// Where the carried answer came from.
-const MEASURED_IN: &str =
-    "the runtime lane's committed measurement fixtures/public/ycbcr/metal_m3_max.bin, written by \
-     fixtures/public/ycbcr/probe.swift over a real IOSurface (an Apple M3 Max, macOS 27.0.1)";
-
-/// Why record mode must not run the case on Metal.
-const NO_PUBLIC_CALL: &str =
-    "a texture of a two-plane YCbCr format exists only over an IOSurface, and the Metal side has \
-     no call that makes one, so there is nothing for record mode to run";
-
-/// The runs the carried measurement stands on: the probe's one pass over the surface. (An Apple M4
-/// answered the same bytes, which the lane keeps as their FNV-1a, but that is a second machine
-/// rather than a second run here.)
-const MEASURED_RUNS: u32 = 1;
 
 /// The fixture whose kernel reads the texels, and its entry.
 const READ_FIXTURE: &str = "fpv_swizzled_reads";
@@ -269,6 +259,7 @@ fn positions() -> Vec<u8> {
 }
 
 /// The committed measurement's bytes: 960 texels of three little-endian 16-bit steps.
+#[cfg(test)]
 fn measured() -> Result<Vec<u8>, String> {
     let file = metal2vulkan_devtools::fixtures_dir().join(MEASURED_FILE);
     let bytes = std::fs::read(&file).map_err(|error| format!("{}: {error}", file.display()))?;
@@ -359,7 +350,7 @@ impl Case for TexelReads {
     }
 
     fn metal_source(&self) -> MetalSource {
-        MetalSource::carried_only(MEASURED_IN, NO_PUBLIC_CALL)
+        MetalSource::Run
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -397,39 +388,7 @@ impl Case for TexelReads {
             Input::bytes("surface:bytes", &surface_bytes()),
             Input::bytes("positions", &positions()),
             Input::bytes("buffer:blank", &[BLANK]),
-            // The measurement the carried answer *is*: a change to the file makes the case
-            // unrecorded rather than comparing our reads against other bytes.
-            Input::bytes("metal:reads", &measured()?),
         ])
-    }
-
-    fn carried_transcript(&self) -> Result<Option<(u32, Transcript)>, String> {
-        let mut sites = Sites::new();
-        sites.push(crate::case::inputs_node(&self.inputs()?));
-        for call in [
-            "library",
-            "pipeline",
-            "surface",
-            "texture",
-            "positions",
-            "output",
-            "dispatch",
-            "status",
-            "read-back",
-        ] {
-            sites.leaf(call, answered());
-        }
-        let steps = measured()?;
-        let digest = Digest::sha256(&steps);
-        sites.push(Node::leaf(
-            STEPS_SITE,
-            Observed::bytes(steps, step_layout()).digested(digest),
-        ));
-        // The probe printed three channels a texel and nothing of the alpha, so the carried answer
-        // says what the lane's own check says of ours: no texel read an alpha other than one.
-        sites.value(ALPHA_SITE, Value::Uint(0));
-        sites.notices(NOTICES_SITE, &[] as &[&str]);
-        Ok(Some((MEASURED_RUNS, sites.finish())))
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
@@ -549,16 +508,63 @@ mod tests {
         );
     }
 
-    /// The carried measurement is the committed one, by its length and its SHA-256, which the lane
-    /// pins too.
+    /// The committed probe's measurement is the one it has always been, by its length and its
+    /// SHA-256, which the lane pins too.
     #[test]
-    fn the_carried_reads_are_the_committed_measurement() {
+    fn the_probes_reads_are_the_committed_measurement() {
         let bytes = measured().expect("the committed measurement");
         assert_eq!(bytes.len(), TEXELS * 6);
         assert_eq!(
             crate::sha256_hex(&bytes),
             "88301e8b9aea601017cfc7466ba830c9255fb1875dcb9d62ffd2d4a8e14d8b8e"
         );
+    }
+
+    /// **The recorded answer is the committed probe's answer, byte for byte.**
+    ///
+    /// Two independent Metal paths over one surface: `fixtures/public/ycbcr/probe.swift`, which
+    /// built its own `420v` IOSurface in Swift and read every texel through a runtime-compiled
+    /// MSL kernel, and this case, which builds the surface through `metal_surface.rs` and reads it
+    /// through the committed `fpv_swizzled_reads` fixture. Nothing but Metal's own `read()` of the
+    /// same bytes is common to the two, so an equal 5,760 bytes is what says the surface this
+    /// suite lays out is the surface the probe laid out, and that the fixture's kernel reads what
+    /// the probe's kernel read.
+    ///
+    /// It is also the only check that can say so: the case's own verdict compares our side with
+    /// the recording, and would read exact however the recording was taken.
+    #[test]
+    fn the_recorded_reads_are_the_committed_probes() {
+        let recording = crate::recording::read(TEXEL_READS).expect("the committed recording");
+        let answer = recording
+            .answers
+            .first()
+            .expect("the recording holds an answer");
+        assert!(
+            answer.provenance.measured_elsewhere().is_none(),
+            "the answer is no longer carried, so it names no other chip: {:?}",
+            answer.provenance
+        );
+        let outcome = answer
+            .outcomes
+            .first()
+            .expect("the answer holds an outcome");
+        assert_eq!(answer.outcomes.len(), 1, "the reads are deterministic");
+        let node = outcome
+            .transcript
+            .root
+            .child(STEPS_SITE)
+            .unwrap_or_else(|| panic!("the recording holds no {STEPS_SITE}"));
+        let recorded = match &node.observed.value {
+            Value::Bytes(bytes) => bytes.clone(),
+            other => panic!("{STEPS_SITE}: the recording holds {}", other.kind()),
+        };
+        let probe = measured().expect("the committed measurement");
+        assert_eq!(
+            crate::sha256_hex(&recorded),
+            crate::sha256_hex(&probe),
+            "the recorded reads and the committed probe's"
+        );
+        assert_eq!(recorded, probe);
     }
 
     /// The layout covers every step and names the texel's row, so a diff over 960 texels says

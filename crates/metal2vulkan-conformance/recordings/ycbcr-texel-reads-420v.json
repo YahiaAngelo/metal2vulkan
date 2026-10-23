@@ -22,16 +22,12 @@
         "os_build": "26A434",
         "metal_level": "27.0.1"
       },
-      "provenance": {
-        "carried": {
-          "from": "the runtime lane's committed measurement fixtures/public/ycbcr/metal_m3_max.bin, written by fixtures/public/ycbcr/probe.swift over a real IOSurface (an Apple M3 Max, macOS 27.0.1)"
-        }
-      },
-      "device": "apple-m3-max",
-      "runs": 1,
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
       "outcomes": [
         {
-          "runs": 1,
+          "runs": 3,
           "transcript": {
             "root": {
               "name": "case",
@@ -112,16 +108,6 @@
                         "digest": {
                           "kind": "sha256",
                           "hex": "087d80f7f182dd44f184aa86ca34488853ebcc04f0c60d5294919a466b463831"
-                        }
-                      }
-                    },
-                    {
-                      "name": "metal:reads",
-                      "observed": {
-                        "value": "absent",
-                        "digest": {
-                          "kind": "sha256",
-                          "hex": "88301e8b9aea601017cfc7466ba830c9255fb1875dcb9d62ffd2d4a8e14d8b8e"
                         }
                       }
                     }
@@ -293,7 +279,7 @@
           }
         }
       ],
-      "validated": "not_run"
+      "validated": "ran"
     }
   ],
   "costs": [
