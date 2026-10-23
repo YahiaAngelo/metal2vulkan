@@ -187,8 +187,10 @@ fn command() -> Result<bool, String> {
             let rows: Vec<String> = unexpected.iter().filter_map(Expectation::row).collect();
             if !rows.is_empty() {
                 println!(
-                    "\nknown-gaps.tsv rows for the {} gap(s) above, one per line, tab-separated; \
-                     replace the last field with the open bug before committing:",
+                    "\nknown-gaps.tsv rows for the {} gap(s) above, one per line, tab-separated. \
+                     Replace the last field with the open bug, and narrow the venue field to a \
+                     stable part of this venue's name (an LLVM or driver version in it will move) \
+                     or widen it to * if the gap is every venue's:",
                     rows.len()
                 );
                 for row in rows {

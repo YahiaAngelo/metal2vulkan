@@ -915,9 +915,34 @@ fn an_ordered_list_of_lines_names_the_line_that_moved() {
         Offered::notices(&[]),
     );
     assert_eq!(found.divergences.len(), 1);
-    let printed = found.divergences[0].to_string();
-    assert!(printed.contains("line 1"), "{printed}");
-    assert!(printed.contains("\"TWO\""), "{printed}");
+    // The summary says how many lines moved and, for one, what the two sides hold. The line's
+    // index is a walk position, so it sits in the detail and not in the row's identity.
+    let summary = found.divergences[0].kind.to_string();
+    assert!(summary.contains("1 line differs"), "{summary}");
+    assert!(summary.contains("\"TWO\""), "{summary}");
+    assert!(!summary.contains("line 1"), "{summary}");
+    let detail = found.divergences[0].kind.detail().unwrap();
+    assert!(detail.contains("line 1"), "{detail}");
+
+    // More than one line moving is a count, because the row's job is to say how much: the index
+    // of the first is in the detail either way.
+    let found = compare(
+        &lines(&["one", "two", "three"]),
+        &lines(&["ONE", "TWO", "three"]),
+        &[],
+        Offered::notices(&[]),
+    );
+    let summary = found.divergences[0].kind.to_string();
+    assert_eq!(summary, "2 lines differ");
+    assert!(
+        found.divergences[0]
+            .kind
+            .detail()
+            .unwrap()
+            .contains("line 0"),
+        "{:?}",
+        found.divergences[0].kind
+    );
 }
 
 #[test]
@@ -1682,9 +1707,14 @@ fn the_known_gaps_ledger_parses_and_names_real_cases() {
     for known in quads {
         assert_eq!(known.expects, crate::known_gaps::Expects::Divergent);
         assert_eq!(known.venue, "llvmpipe");
-        // A divergence row carries both answers, because the leaf fact that moved names them.
-        assert!(known.answer.contains("Metal 1"), "{known:?}");
-        assert!(known.answer.contains("ours 0"), "{known:?}");
+        // A divergence row says how much moved -- how many of the site's leaves differ and how
+        // far -- and never where the walk first noticed, which is a property of the data and not
+        // of the bug. All four texels of the kept quad differ, which the first-mismatch answer
+        // this row used to carry hid entirely: it named one element and read as one difference.
+        assert_eq!(
+            known.answer, "4 elements differ (I32), the largest difference 1",
+            "{known:?}"
+        );
         // And it is honest about what is not established, which is the whole cause.
         assert!(known.waiting_on.contains("NOT established"), "{known:?}");
     }
