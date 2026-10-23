@@ -18,6 +18,7 @@ use crate::allowance::Allowance;
 use crate::recording::ShaderRef;
 use crate::transcript::{Node, NodeName, Observed, Sites, Transcript, Value};
 use crate::verdict::device_gap;
+use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{
     AttributeFormat, BindingAccess, IndexType, PixelFormat, RenderStages, SamplerAddressMode,
     SamplerBorderColor, SamplerMinMagFilter, StepFunction,
@@ -884,6 +885,17 @@ pub trait Side {
     ) -> Answer<Handle> {
         let _ = (library, spec);
         Err(Failure::unavailable("render_pipeline"))
+    }
+
+    /// `newDepthStencilStateWithDescriptor:` of the state `spec` names.
+    ///
+    /// The descriptor is `MTLDepthStencilDescriptor` as the translator's public API already names
+    /// it, so a compare function and a stencil operation have one spelling across the two sides.
+    /// Its own handle space: `MTLDepthStencilState` is its own Metal object, not another name for
+    /// one of the pools above.
+    fn depth_stencil_state(&mut self, spec: &DepthStencilDescriptor) -> Answer<Handle> {
+        let _ = spec;
+        Err(Failure::unavailable("depth_stencil_state"))
     }
 
     /// **One** command buffer holding every piece of `work` in order, `commit`, and a bounded

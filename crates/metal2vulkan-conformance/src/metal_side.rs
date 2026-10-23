@@ -24,6 +24,7 @@ use crate::render::{
 };
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
+use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
 use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -32,20 +33,7 @@ use objc2_foundation::{NSString, NSURL};
 use objc2_metal::{
     MTLAttributeFormat, MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType,
     MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor,
-    MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
-    MTLComputeCommandEncoder, MTLComputePipelineDescriptor, MTLComputePipelineState,
-    MTLCreateSystemDefaultDevice, MTLDevice, MTLEvent, MTLFunction, MTLIndexType,
-    MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
-    MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor,
-    MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLPrimitiveType,
-    MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
-    MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
-    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerAddressMode,
-    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
-    MTLSharedEvent, MTLSize, MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode,
-    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels,
-    MTLTextureType, MTLTextureUsage, MTLTileRenderPipelineDescriptor,
+    MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder, MTLComputePipelineDescriptor, MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction, MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter, MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap, MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLSharedEvent, MTLSize, MTLStageInputOutputDescriptor, MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage, MTLTileRenderPipelineDescriptor, MTLVisibilityResultMode,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -77,6 +65,9 @@ pub struct MetalSide {
     /// kernel reaches through an argument buffer resident only where the encoder was told so, so
     /// binding the buffer makes them resident. Not a pool — the buffer itself lives in `buffers`.
     argument_residents: Vec<(Handle, Vec<Handle>)>,
+    /// The depth and stencil states the case has made. Its own pool: an `MTLDepthStencilState` is
+    /// its own Metal object, not another name for one of the pools above.
+    depth_stencil_states: Vec<Retained<ProtocolObject<dyn MTLDepthStencilState>>>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
 }
@@ -125,6 +116,7 @@ impl MetalSide {
             command_buffers_indirect: Vec::new(),
             rate_maps: Vec::new(),
             argument_residents: Vec::new(),
+            depth_stencil_states: Vec::new(),
             scratch: Scratch::new()?,
         })
     }
@@ -1460,12 +1452,19 @@ impl Side for MetalSide {
             descriptor.setFragmentFunction(Some(&*function(fragment)?));
         }
         descriptor.setRasterSampleCount(spec.samples as usize);
+        if let Some(format) = spec.depth_format {
+            descriptor.setDepthAttachmentPixelFormat(MTLPixelFormat(format.as_raw() as usize));
+        }
+        if let Some(format) = spec.stencil_format {
+            descriptor.setStencilAttachmentPixelFormat(MTLPixelFormat(format.as_raw() as usize));
+        }
         for (at, color) in spec.colors.iter().enumerate() {
             let Some(color) = color else { continue };
             // SAFETY: `at` is below the eight color attachments every Metal pipeline holds, which
             // the case's own guard keeps it to.
             let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(at) };
             attachment.setPixelFormat(MTLPixelFormat(color.format.as_raw() as usize));
+            attachment.setWriteMask(MTLColorWriteMask(color.write_mask.as_raw() as usize));
             if let Some(blend) = &color.blend {
                 let factor = |factor: metal2vulkan::metal::BlendFactor| {
                     MTLBlendFactor(factor.as_raw() as usize)
@@ -1490,6 +1489,19 @@ impl Side for MetalSide {
             &mut self.render_pipelines,
             RenderPipeline::unreflected(state),
         ))
+    }
+
+    fn depth_stencil_state(&mut self, spec: &DepthStencilDescriptor) -> Answer<Handle> {
+        let descriptor = MTLDepthStencilDescriptor::new();
+        descriptor.setDepthCompareFunction(compare_function(spec.depth_compare_function));
+        descriptor.setDepthWriteEnabled(spec.depth_write_enabled);
+        descriptor.setFrontFaceStencil(Some(&stencil_descriptor(&spec.front_face_stencil)));
+        descriptor.setBackFaceStencil(Some(&stencil_descriptor(&spec.back_face_stencil)));
+        let state = self
+            .device
+            .newDepthStencilStateWithDescriptor(&descriptor)
+            .ok_or_else(|| Failure::named("NewDepthStencilState", "returned nil".to_owned()))?;
+        Ok(keep(&mut self.depth_stencil_states, state))
     }
 
     fn render(&mut self, work: &[RenderWork]) -> Answer<PassOutcome> {
@@ -1671,6 +1683,27 @@ fn queried_descriptor(query: &HeapTextureQuery) -> Retained<MTLTextureDescriptor
         Storage::Shared => MTLStorageMode::Shared,
         Storage::Private => MTLStorageMode::Private,
     });
+    descriptor
+}
+
+/// The case's enumerations reach Metal's by their raw ordinals, which are Metal's own.
+fn compare_function(function: metal2vulkan::metal::CompareFunction) -> MTLCompareFunction {
+    MTLCompareFunction(function.as_raw() as usize)
+}
+
+fn stencil_operation(operation: metal2vulkan::metal::StencilOperation) -> MTLStencilOperation {
+    MTLStencilOperation(operation.as_raw() as usize)
+}
+
+/// One face's stencil state as Metal's descriptor.
+fn stencil_descriptor(face: &StencilDescriptor) -> Retained<MTLStencilDescriptor> {
+    let descriptor = MTLStencilDescriptor::new();
+    descriptor.setStencilCompareFunction(compare_function(face.stencil_compare_function));
+    descriptor.setStencilFailureOperation(stencil_operation(face.stencil_failure_operation));
+    descriptor.setDepthFailureOperation(stencil_operation(face.depth_failure_operation));
+    descriptor.setDepthStencilPassOperation(stencil_operation(face.depth_stencil_pass_operation));
+    descriptor.setReadMask(face.read_mask);
+    descriptor.setWriteMask(face.write_mask);
     descriptor
 }
 
@@ -2012,20 +2045,6 @@ impl MetalSide {
         }
         Ok(())
     }
-}
-
-/// The render vocabulary ([`crate::render`]) on native Metal.
-impl MetalSide {
-    /// The render pipeline state `handle` names.
-    fn held_render_state(
-        &self,
-        handle: Handle,
-    ) -> Answer<Retained<ProtocolObject<dyn MTLRenderPipelineState>>> {
-        self.render_pipelines
-            .get(handle.0 as usize)
-            .map(|held| held.state.clone())
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("render pipeline {}", handle.0)))
-    }
 
     /// Encode one render pass of a program into `command_buffer`.
     fn encode_pass(
@@ -2058,53 +2077,190 @@ impl MetalSide {
                 attachment.setResolveTexture(Some(&resolve));
             }
         }
+        if let Some(depth) = &pass.depth {
+            let texture: Retained<ProtocolObject<dyn MTLTexture>> =
+                Retained::from(self.held_texture(depth.texture)?);
+            let attachment = descriptor.depthAttachment();
+            attachment.setTexture(Some(&texture));
+            attachment.setLoadAction(MTLLoadAction(depth.load.raw() as usize));
+            attachment.setStoreAction(MTLStoreAction(depth.store.raw() as usize));
+            attachment.setClearDepth(depth.clear);
+            attachment.setDepthResolveFilter(MTLMultisampleDepthResolveFilter(
+                depth.filter.raw() as usize
+            ));
+            if let Some(resolve) = depth.resolve {
+                let resolve: Retained<ProtocolObject<dyn MTLTexture>> =
+                    Retained::from(self.held_texture(resolve)?);
+                attachment.setResolveTexture(Some(&resolve));
+            }
+        }
+        if let Some(stencil) = &pass.stencil {
+            let texture: Retained<ProtocolObject<dyn MTLTexture>> =
+                Retained::from(self.held_texture(stencil.texture)?);
+            let attachment = descriptor.stencilAttachment();
+            attachment.setTexture(Some(&texture));
+            attachment.setLoadAction(MTLLoadAction(stencil.load.raw() as usize));
+            attachment.setStoreAction(MTLStoreAction(stencil.store.raw() as usize));
+            attachment.setClearStencil(stencil.clear);
+            attachment.setStencilResolveFilter(MTLMultisampleStencilResolveFilter(
+                stencil.filter.raw() as usize,
+            ));
+            if let Some(resolve) = stencil.resolve {
+                let resolve: Retained<ProtocolObject<dyn MTLTexture>> =
+                    Retained::from(self.held_texture(resolve)?);
+                attachment.setResolveTexture(Some(&resolve));
+            }
+        }
+        if let Some(buffer) = pass.visibility {
+            descriptor.setVisibilityResultBuffer(Some(self.held(buffer)?));
+        }
         let encoder = command_buffer
             .renderCommandEncoderWithDescriptor(&descriptor)
             .ok_or_else(|| Failure::named("RenderCommandEncoder", "returned nil".to_owned()))?;
         for step in &pass.steps {
-            match step {
-                RenderStep::Pipeline(state) => {
-                    encoder.setRenderPipelineState(&*self.held_render_state(*state)?);
-                }
-                RenderStep::FragmentBuffer {
-                    buffer,
-                    offset,
-                    index,
-                } => {
-                    let held = self.held(*buffer)?;
-                    // SAFETY: the buffer is at least as long as the fragment function's binding
-                    // from that offset, which the case states as one of its inputs, and the
-                    // encoder outlives the call.
-                    unsafe {
-                        encoder.setFragmentBuffer_offset_atIndex(
-                            Some(held),
-                            *offset as usize,
-                            *index as usize,
-                        );
-                    }
-                }
-                RenderStep::Draw {
-                    primitive,
-                    first,
-                    count,
-                    instances,
-                } => {
-                    // SAFETY: the draw names a vertex range of the case's own fullscreen triangle
-                    // and binds no vertex buffer, so nothing is read out of bounds.
-                    unsafe {
-                        encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
-                            MTLPrimitiveType(primitive.as_raw() as usize),
-                            *first as usize,
-                            *count as usize,
-                            *instances as usize,
-                            0,
-                        );
-                    }
-                }
-            }
+            self.encode_step_of(&encoder, step)?;
         }
         encoder.endEncoding();
         Ok(())
+    }
+
+    /// Encode one of a case's render-pass steps into `encoder`.
+    fn encode_step_of(
+        &self,
+        encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
+        step: &RenderStep,
+    ) -> Answer<()> {
+        let primitive =
+            |kind: metal2vulkan::metal::PrimitiveType| MTLPrimitiveType(kind.as_raw() as usize);
+        match step {
+            RenderStep::Pipeline(state) => {
+                let state = self.held_render_state(*state)?;
+                encoder.setRenderPipelineState(&state);
+            }
+            RenderStep::DepthStencilState(state) => {
+                let state = self
+                    .depth_stencil_states
+                    .get(state.0 as usize)
+                    .ok_or_else(|| {
+                        Failure::named("NoSuchHandle", format!("depth/stencil state {}", state.0))
+                    })?;
+                encoder.setDepthStencilState(Some(state));
+            }
+            RenderStep::StencilReference(value) => encoder.setStencilReferenceValue(*value),
+            RenderStep::VertexBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: the buffer is at least as long as the vertex function's binding from
+                // that offset, which the case states as one of its inputs, and the encoder
+                // outlives the call.
+                unsafe {
+                    encoder.setVertexBuffer_offset_atIndex(
+                        Some(held),
+                        *offset as usize,
+                        *index as usize,
+                    );
+                }
+            }
+            RenderStep::FragmentBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: as the vertex buffer's, for the fragment function's binding.
+                unsafe {
+                    encoder.setFragmentBuffer_offset_atIndex(
+                        Some(held),
+                        *offset as usize,
+                        *index as usize,
+                    );
+                }
+            }
+            RenderStep::VisibilityResultMode { mode, offset } => {
+                encoder.setVisibilityResultMode_offset(
+                    MTLVisibilityResultMode(mode.raw() as usize),
+                    *offset as usize,
+                );
+            }
+            RenderStep::Draw {
+                primitive: kind,
+                first,
+                count,
+                instances,
+            } => {
+                // SAFETY: the draw names a vertex range of the case's own triangle, and every
+                // buffer the vertex function reads was bound by a step before it.
+                unsafe {
+                    encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
+                        primitive(*kind),
+                        *first as usize,
+                        *count as usize,
+                        *instances as usize,
+                        0,
+                    );
+                }
+            }
+            RenderStep::DrawIndexed {
+                primitive: kind,
+                count,
+                index_type,
+                indices,
+                offset,
+                instances,
+                base_vertex,
+                base_instance,
+            } => {
+                let buffer = self.held(*indices)?;
+                // SAFETY: the index buffer holds the case's own indices from that offset, which
+                // the case states as one of its inputs, and the counts are its own.
+                unsafe {
+                    encoder.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount_baseVertex_baseInstance(
+                        primitive(*kind),
+                        *count as usize,
+                        MTLIndexType(index_type.as_raw() as usize),
+                        buffer,
+                        *offset as usize,
+                        *instances as usize,
+                        *base_vertex as isize,
+                        *base_instance as usize,
+                    );
+                }
+            }
+            RenderStep::DrawIndirect {
+                primitive: kind,
+                arguments,
+                offset,
+            } => {
+                let buffer = self.held(*arguments)?;
+                // SAFETY: the buffer holds the draw's four 32-bit arguments at that offset, which
+                // the case wrote before the pass.
+                unsafe {
+                    encoder.drawPrimitives_indirectBuffer_indirectBufferOffset(
+                        primitive(*kind),
+                        buffer,
+                        *offset as usize,
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The render vocabulary ([`crate::render`]) on native Metal.
+impl MetalSide {
+    /// The render pipeline state `handle` names.
+    fn held_render_state(
+        &self,
+        handle: Handle,
+    ) -> Answer<Retained<ProtocolObject<dyn MTLRenderPipelineState>>> {
+        self.render_pipelines
+            .get(handle.0 as usize)
+            .map(|held| held.state.clone())
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("render pipeline {}", handle.0)))
     }
 
     /// Encode one compute dispatch of a program into `command_buffer`.

@@ -20,6 +20,7 @@ use crate::render::{
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
+use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{
     BarrierScope, BindingAccess, IndexType, IndirectCommandType, PixelFormat, PrimitiveType,
     RenderStages, ResourceUsage, TextureType, TextureUsage,
@@ -30,12 +31,12 @@ use metal2vulkan::pipeline::{
     TileRenderPipelineDescriptor,
 };
 use metal2vulkan_runtime::{
-    Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue, ComputePipelineState,
-    Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer,
-    IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
-    LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
-    RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState,
-    SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor,
+    BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue,
+    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, IndirectCommand,
+    IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane,
+    IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption, PipelineOptions,
+    RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
+    ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor,
 };
 use std::time::Duration;
 
@@ -77,6 +78,9 @@ pub struct RuntimeSide<'a> {
     render_pipelines: Vec<RenderPipelineState>,
     /// The indirect command buffers the case has made.
     command_buffers_indirect: Vec<IndirectCommandBuffer>,
+    /// The depth and stencil states the case has made. Its own pool: a `DepthStencilState` is its
+    /// own runtime object, not another name for one of the pools above.
+    depth_stencil_states: Vec<DepthStencilState>,
     /// The degrade-notice codes the device has delivered so far, which `announced` takes away.
     notices: Box<dyn FnMut() -> Vec<String> + 'a>,
 }
@@ -98,6 +102,7 @@ impl<'a> RuntimeSide<'a> {
             command_buffers: Vec::new(),
             render_pipelines: Vec::new(),
             command_buffers_indirect: Vec::new(),
+            depth_stencil_states: Vec::new(),
             notices: Box::new(notices),
         }
     }
@@ -1511,12 +1516,21 @@ impl Side for RuntimeSide<'_> {
         })
     }
 
+    fn depth_stencil_state(&mut self, spec: &DepthStencilDescriptor) -> Answer<Handle> {
+        let state = self
+            .device
+            .new_depth_stencil_state(spec)
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.depth_stencil_states, state))
+    }
+
     fn render(&mut self, work: &[RenderWork]) -> Answer<PassOutcome> {
         // The pools are cloned once, so each piece of the program can reach the case's objects
         // while the command buffer is borrowed.
         let textures: Vec<Texture> = self.textures.clone();
         let buffers: Vec<Buffer> = self.buffers.clone();
         let states: Vec<RenderPipelineState> = self.render_pipelines.clone();
+        let depth_stencil: Vec<DepthStencilState> = self.depth_stencil_states.clone();
         let computes: Vec<ComputePipelineState> = self.pipelines.clone();
         let texture = |handle: Handle| -> Answer<&Texture> {
             textures
@@ -1535,9 +1549,14 @@ impl Side for RuntimeSide<'_> {
         let mut refused = Vec::with_capacity(work.len());
         for piece in work {
             let answered = match piece {
-                RenderWork::Pass(pass) => {
-                    encode_pass(&command_buffer, pass, &textures, &buffers, &states)
-                }
+                RenderWork::Pass(pass) => encode_pass(
+                    &command_buffer,
+                    pass,
+                    &textures,
+                    &buffers,
+                    &states,
+                    &depth_stencil,
+                ),
                 RenderWork::ReadTexture {
                     texture: from,
                     into,
@@ -1559,7 +1578,7 @@ impl Side for RuntimeSide<'_> {
                         *offset,
                         u64::from(*row_pitch),
                         u64::from(*row_pitch) * u64::from(extent[1]),
-                        metal2vulkan_runtime::BlitOption::None,
+                        BlitOption::None,
                     )
                     .map_err(Failure::from_error)?;
                     blit.end_encoding().map_err(Failure::from_error)
@@ -1782,6 +1801,7 @@ fn encode_pass(
     textures: &[Texture],
     buffers: &[Buffer],
     states: &[RenderPipelineState],
+    depth_stencil: &[DepthStencilState],
 ) -> Answer<()> {
     let texture = |handle: Handle| -> Answer<&Texture> {
         textures
@@ -1813,6 +1833,31 @@ fn encode_pass(
             attachment.resolve_texture = Some(texture(resolve)?.clone());
         }
     }
+    if let Some(depth) = &pass.depth {
+        let attachment = &mut descriptor.depth_attachment;
+        attachment.texture = Some(texture(depth.texture)?.clone());
+        attachment.load_action = depth.load;
+        attachment.store_action = depth.store;
+        attachment.clear_depth = depth.clear;
+        attachment.depth_resolve_filter = depth.filter;
+        if let Some(resolve) = depth.resolve {
+            attachment.resolve_texture = Some(texture(resolve)?.clone());
+        }
+    }
+    if let Some(stencil) = &pass.stencil {
+        let attachment = &mut descriptor.stencil_attachment;
+        attachment.texture = Some(texture(stencil.texture)?.clone());
+        attachment.load_action = stencil.load;
+        attachment.store_action = stencil.store;
+        attachment.clear_stencil = stencil.clear;
+        attachment.stencil_resolve_filter = stencil.filter;
+        if let Some(resolve) = stencil.resolve {
+            attachment.resolve_texture = Some(texture(resolve)?.clone());
+        }
+    }
+    if let Some(held) = pass.visibility {
+        descriptor.visibility_result_buffer = Some(buffer(held)?.clone());
+    }
     let mut encoder = command_buffer
         .render_command_encoder(&descriptor)
         .map_err(Failure::from_error)?;
@@ -1826,12 +1871,31 @@ fn encode_pass(
                     .set_render_pipeline_state(state)
                     .map_err(Failure::from_error)?;
             }
+            RenderStep::DepthStencilState(state) => {
+                let state = depth_stencil.get(state.0 as usize).ok_or_else(|| {
+                    Failure::named("NoSuchHandle", format!("depth/stencil state {}", state.0))
+                })?;
+                encoder
+                    .set_depth_stencil_state(state)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::StencilReference(value) => encoder.set_stencil_reference_value(*value),
+            RenderStep::VertexBuffer {
+                buffer: held,
+                offset,
+                index,
+            } => encoder
+                .set_vertex_buffer(Some(buffer(*held)?), *offset, *index)
+                .map_err(Failure::from_error)?,
             RenderStep::FragmentBuffer {
                 buffer: held,
                 offset,
                 index,
             } => encoder
                 .set_fragment_buffer(Some(buffer(*held)?), *offset, *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::VisibilityResultMode { mode, offset } => encoder
+                .set_visibility_result_mode(*mode, *offset)
                 .map_err(Failure::from_error)?,
             RenderStep::Draw {
                 primitive,
@@ -1840,6 +1904,34 @@ fn encode_pass(
                 instances,
             } => encoder
                 .draw_primitives(*primitive, *first, *count, *instances, 0)
+                .map_err(Failure::from_error)?,
+            RenderStep::DrawIndexed {
+                primitive,
+                count,
+                index_type,
+                indices,
+                offset,
+                instances,
+                base_vertex,
+                base_instance,
+            } => encoder
+                .draw_indexed_primitives(
+                    *primitive,
+                    *count,
+                    *index_type,
+                    buffer(*indices)?,
+                    *offset,
+                    *instances,
+                    *base_vertex,
+                    *base_instance,
+                )
+                .map_err(Failure::from_error)?,
+            RenderStep::DrawIndirect {
+                primitive,
+                arguments,
+                offset,
+            } => encoder
+                .draw_primitives_indirect(*primitive, buffer(*arguments)?, *offset)
                 .map_err(Failure::from_error)?,
         }
     }
