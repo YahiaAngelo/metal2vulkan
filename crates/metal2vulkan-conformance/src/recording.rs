@@ -212,7 +212,12 @@ pub struct Outcome {
 pub struct Answer {
     pub key: OracleKey,
     pub provenance: Provenance,
-    /// The device Metal named, for the reader. Nothing compares against it.
+    /// Where the answer came from: the device Metal named, for a run, and for a row Metal did not
+    /// return from, the chip the probe died on, as the suite names it.
+    ///
+    /// Nothing in a transcript compares against it. One thing reads it:
+    /// [`Answer::measured_elsewhere`], because a never-returned row has no other field that says
+    /// which machine it came from, and the report's per-chip count must not miss it.
     pub device: String,
     /// The runs behind the answer: the sum of the outcomes' runs.
     pub runs: u32,
@@ -224,6 +229,25 @@ pub struct Answer {
 }
 
 impl Answer {
+    /// The chip the answer was measured on, where that is not this round's oracle.
+    ///
+    /// Two provenances can say so, and they say it in different fields.
+    /// [`Provenance::Carried`] holds the chip itself. A row Metal did not return from holds none:
+    /// it has no value and so no measurement to attribute, and the machine its probe died on is
+    /// named in [`Answer::device`] alone. Reading only the provenance left every such row out of
+    /// the report's per-chip count -- which is the one thing that count exists to prevent, an
+    /// answer from a machine this round cannot re-record on passing unremarked.
+    pub fn measured_elsewhere(&self) -> Option<&str> {
+        match &self.provenance {
+            Provenance::NeverReturned { .. } => {
+                (self.device != ORACLE_CHIP).then_some(self.device.as_str())
+            }
+            Provenance::Carried { .. } | Provenance::MetalRun => {
+                self.provenance.measured_elsewhere()
+            }
+        }
+    }
+
     /// The one transcript the answer holds, where the case was deterministic.
     pub fn deterministic(&self) -> Option<&Transcript> {
         match self.outcomes.as_slice() {

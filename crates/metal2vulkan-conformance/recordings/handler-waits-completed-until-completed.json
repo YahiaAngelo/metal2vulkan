@@ -16,7 +16,7 @@
           "call": "addCompletedHandler/waitUntilCompleted"
         }
       },
-      "device": "Apple M4",
+      "device": "apple-m4",
       "runs": 1,
       "outcomes": [
         {

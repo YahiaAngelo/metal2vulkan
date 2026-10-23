@@ -47,13 +47,15 @@ use crate::transcript::{Node, Observed, Sites, Transcript};
 const PROBED_IN: &str = "metal2vulkan-validation runtime_lane::handler_waits, \
                          waits_from_a_command_buffer_s_own_handlers_answer_at_once";
 
-/// The device the probe ran on, as Metal names it.
+/// The chip the probe died on, as the suite names it.
 ///
-/// It is not this round's oracle. The probe predates it, and it cannot be re-taken here or
-/// anywhere: making the call is what ends the process. [`crate::recording::Provenance::NeverReturned`]
-/// has no `measured_on` field — a row with no value has no measurement to attribute — so the chip
-/// goes in the one field of the recording a reader sees.
-const PROBED_ON: &str = "Apple M4";
+/// It is not this round's oracle, and it cannot become one: making the call is what ends the
+/// process, so these three rows can no more be re-taken here than there.
+/// [`crate::recording::Provenance::NeverReturned`] holds no chip — a row with no value has no
+/// measurement to attribute — so it goes in [`crate::recording::Answer::device`], which
+/// [`crate::recording::Answer::measured_elsewhere`] reads, and the report counts these rows among
+/// the answers that did not come from this round's oracle.
+const PROBED_ON: &str = crate::recording::APPLE_M4;
 
 /// The runs behind the answer: the probe made the call once and did not come back from it.
 const PROBE_RUNS: u32 = 1;
@@ -217,6 +219,25 @@ mod tests {
                 case.name()
             );
             assert_eq!(answer.validated, Validated::NotRun, "{}", case.name());
+        }
+    }
+
+    /// Each answer is counted among those that did not come from this round's oracle.
+    ///
+    /// `Provenance::measured_elsewhere` reads the provenance's own chip, which a never-returned
+    /// row has none of, so reading it alone left all three out of the report's per-chip count --
+    /// the one thing that count exists to prevent. [`crate::recording::Answer::measured_elsewhere`]
+    /// reads the field these rows do carry.
+    #[test]
+    fn every_answer_is_counted_as_coming_from_another_chip() {
+        for case in all() {
+            let answer = case.stated_answer().unwrap();
+            assert_eq!(
+                answer.measured_elsewhere(),
+                Some(recording::APPLE_M4),
+                "{}: the report would not count it",
+                case.name()
+            );
         }
     }
 
