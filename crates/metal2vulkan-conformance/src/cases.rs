@@ -81,6 +81,7 @@ pub mod simdgroup_lockstep;
 pub mod snorm_tile_store;
 pub mod sparse_heaps;
 pub mod sparse_tiles;
+pub mod srgb_fetch;
 pub mod stage_in_regions;
 pub mod surface_fills;
 pub mod swizzled_storage;
@@ -276,6 +277,11 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(sample_positions::all());
     cases.extend(
         fetch_ordered::all()
+            .into_iter()
+            .map(|case| Box::new(case) as Box<dyn Case>),
+    );
+    cases.extend(
+        srgb_fetch::all()
             .into_iter()
             .map(|case| Box::new(case) as Box<dyn Case>),
     );
