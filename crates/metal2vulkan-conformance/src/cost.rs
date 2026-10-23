@@ -952,6 +952,157 @@ impl CostRecord {
     }
 }
 
+/// What a re-measurement would change about the gate, as against what the record holds.
+///
+/// The cost half's load-bearing fields are the ones the gate reads: a gated bound, and the ceiling
+/// a gated bound rests on. Everything else in a record is measured noise by design — a reported
+/// count's bound, a range that widened, a count the selection decides — and it moves between runs
+/// on any busy machine.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Drift {
+    pub count: String,
+    pub region: Region,
+    pub what: Drifted,
+    /// What the record holds, where it holds anything.
+    pub was: Option<u64>,
+    /// What the fresh measurement read, where it read anything.
+    pub now: Option<u64>,
+}
+
+/// Which load-bearing fact a [`Drift`] is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Drifted {
+    /// A gated bound changed value. The gate's own number moved, which is how a regression gets
+    /// blessed into the bounds by a re-measure nobody read.
+    GatedBound,
+    /// A ceiling changed value, or went missing. The second is the defect this comparison exists
+    /// for: 389 ceilings vanished across 149 cases on one re-measure, with nothing in any output
+    /// saying so, because a ceiling was a raised number rather than a recorded fact.
+    Ceiling,
+    /// A count the record gates is no longer gated. Reach the gate had and now does not.
+    GateLost,
+    /// A count the record does not gate now is. Reach the gate gains, which is not a failure but
+    /// is not silent either.
+    GateGained,
+}
+
+impl Drifted {
+    /// Whether this is a reason to fail a check: the gate's own numbers, and the facts under them.
+    ///
+    /// Reach moving either way is reported and not fatal, because reclassifying a count is
+    /// deliberate work and the person doing it is reading the output. A number moving under a gate
+    /// that still looks the same is the thing nobody reads.
+    pub fn is_load_bearing(&self) -> bool {
+        matches!(self, Drifted::GatedBound | Drifted::Ceiling)
+    }
+
+    /// The words a report prints.
+    pub fn word(&self) -> &'static str {
+        match self {
+            Drifted::GatedBound => "a gated bound moved",
+            Drifted::Ceiling => "a ceiling moved or went missing",
+            Drifted::GateLost => "no longer gated",
+            Drifted::GateGained => "now gated",
+        }
+    }
+}
+
+impl std::fmt::Display for Drift {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let say = |held: Option<u64>| match held {
+            Some(number) => number.to_string(),
+            None => "none".to_owned(),
+        };
+        write!(
+            out,
+            "{} ({}): {}, {} in the record and {} in this measurement",
+            self.count,
+            self.region.word(),
+            self.what.word(),
+            say(self.was),
+            say(self.now)
+        )
+    }
+}
+
+/// What `fresh` would change about `held`'s gate, in name order.
+///
+/// This is the tool the ceiling defect asked for. Re-measuring a case writes a whole record, and
+/// most of a record legitimately differs between two runs of the same binary over the same cases:
+/// a reported count's bound, a range the union widened, a count the selection decides. So a diff
+/// of the files says nothing, and the one time it said something — 389 ceilings gone across 149
+/// cases — the signal sat under a hundred files of noise and was read as something else first.
+///
+/// So the comparison is of the gate's own facts alone: a gated bound's value, a ceiling's value and
+/// its presence, and whether each count is gated at all. Everything else is skipped, named here
+/// rather than filtered silently.
+///
+/// What makes this readable is that the noise it skips is now only the reported classes. While a
+/// queue-depth histogram was still gated, a re-measure moved gated numbers in whichever cases the
+/// GPU happened to be behind, and no comparison of gated facts could have separated that from a
+/// real change. Reporting that class first is what leaves a gated-bound or ceiling movement meaning
+/// something.
+pub fn drift(held: &CostRecord, fresh: &CostRecord) -> Vec<Drift> {
+    let mut drifted = Vec::new();
+    let names: std::collections::BTreeSet<&str> = held
+        .bounds
+        .keys()
+        .chain(fresh.bounds.keys())
+        .chain(held.ceilings.keys())
+        .chain(fresh.ceilings.keys())
+        .map(String::as_str)
+        .collect();
+    for count in names {
+        let (before, after) = (held.bound(count), fresh.bound(count));
+        let one = |what: Drifted, was: Option<u64>, now: Option<u64>| Drift {
+            count: count.to_owned(),
+            region: region_of(count),
+            what,
+            was,
+            now,
+        };
+        // A ceiling is compared by presence as well as by value: losing one is the defect, and it
+        // leaves a bound that still looks like a bound.
+        let (ceiling, fresh_ceiling) = (
+            held.ceilings.get(count).copied(),
+            fresh.ceilings.get(count).copied(),
+        );
+        if ceiling != fresh_ceiling {
+            drifted.push(one(Drifted::Ceiling, ceiling, fresh_ceiling));
+        }
+        match (&before, &after) {
+            (Some(before), Some(after)) => match (before.gated(), after.gated()) {
+                (true, true) if before.most != after.most => {
+                    drifted.push(one(
+                        Drifted::GatedBound,
+                        Some(before.most),
+                        Some(after.most),
+                    ));
+                }
+                (true, false) => {
+                    drifted.push(one(Drifted::GateLost, Some(before.most), Some(after.most)))
+                }
+                (false, true) => drifted.push(one(
+                    Drifted::GateGained,
+                    Some(before.most),
+                    Some(after.most),
+                )),
+                _ => {}
+            },
+            // A bound the record holds and the fresh measurement does not: the count is gated at
+            // zero now, which is reach lost on anything that was gated.
+            (Some(before), None) if before.gated() => {
+                drifted.push(one(Drifted::GateLost, Some(before.most), None));
+            }
+            (None, Some(after)) if after.gated() => {
+                drifted.push(one(Drifted::GateGained, None, Some(after.most)));
+            }
+            _ => {}
+        }
+    }
+    drifted
+}
+
 /// A count a run moved further than its bound.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Overrun {

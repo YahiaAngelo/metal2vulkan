@@ -4439,3 +4439,131 @@ fn reading_a_recording_and_writing_it_back_changes_no_byte() {
     );
     assert!(checked > 0, "no recording was read, so this proved nothing");
 }
+
+/// The diff tool sees the gate's own facts and is blind to the noise around them.
+///
+/// A re-measure rewrites a whole record and most of it legitimately differs between two runs of the
+/// same binary over the same cases: a reported count's bound, a range the union widened, a count
+/// the selection decides. So a diff of the files says nothing. The one time it said something — 389
+/// ceilings gone across 149 cases — the signal sat under a hundred files of noise and was read as
+/// something else first, which is why this comparison exists and why it is of four facts only.
+#[test]
+fn the_diff_tool_reads_the_gate_and_not_the_noise() {
+    use crate::cost::{drift, Drifted};
+    let record = |bounds: &[(&str, u64)],
+                  moving: &[(&str, u64)],
+                  ceilings: &[(&str, u64)]|
+     -> crate::cost::CostRecord {
+        crate::cost::CostRecord {
+            venue: "a venue".to_owned(),
+            runs: 8,
+            measured: "whole set".to_owned(),
+            contrasted: Some("alone".to_owned()),
+            degraded: Vec::new(),
+            bounds: bounds.iter().map(|(n, v)| ((*n).to_owned(), *v)).collect(),
+            moving: moving.iter().map(|(n, v)| ((*n).to_owned(), *v)).collect(),
+            composed: Default::default(),
+            ceilings: ceilings
+                .iter()
+                .map(|(n, v)| ((*n).to_owned(), *v))
+                .collect(),
+        }
+    };
+    let what = |moved: &[crate::cost::Drift]| -> Vec<(String, Drifted)> {
+        moved
+            .iter()
+            .map(|one| (one.count.clone(), one.what))
+            .collect()
+    };
+
+    // Noise the tool must not report: a reported count's bound moving, and a range widening.
+    // `object_churn.buffers_evicted` is reported by the race rule and `render_passes_made` by this
+    // record's own `moving` entry.
+    let held = record(
+        &[
+            ("queue_submissions", 2),
+            ("object_churn.buffers_evicted", 4),
+            ("render_passes_made", 5),
+        ],
+        &[("render_passes_made", 1)],
+        &[],
+    );
+    let noisy = record(
+        &[
+            ("queue_submissions", 2),
+            ("object_churn.buffers_evicted", 40),
+            ("render_passes_made", 9),
+        ],
+        &[("render_passes_made", 0)],
+        &[],
+    );
+    assert!(
+        drift(&held, &noisy).is_empty(),
+        "reported counts and widened ranges are noise: {:?}",
+        what(&drift(&held, &noisy))
+    );
+
+    // A gated bound moving is the gate's own number, in either direction: a re-measure that raises
+    // one blesses a regression into the bounds, and one that lowers it is a reduction nobody saw.
+    for now in [1, 3] {
+        let moved = drift(&held, &record(&[("queue_submissions", now)], &[], &[]));
+        assert!(
+            moved.iter().any(|one| one.count == "queue_submissions"
+                && one.what == Drifted::GatedBound
+                && one.was == Some(2)
+                && one.now == Some(now)),
+            "a gated bound moving to {now} is reported: {:?}",
+            what(&moved)
+        );
+        assert!(moved.iter().any(|one| one.what.is_load_bearing()));
+    }
+
+    // A ceiling going missing: the defect this tool exists for. The bound still looks like a bound,
+    // and the number under it is gone.
+    let held = record(
+        &[("pipeline_layouts_made", 2), ("queue_submissions", 2)],
+        &[],
+        &[("pipeline_layouts_made", 2)],
+    );
+    let lost = record(
+        &[("pipeline_layouts_made", 1), ("queue_submissions", 2)],
+        &[],
+        &[],
+    );
+    let moved = drift(&held, &lost);
+    assert!(
+        moved.iter().any(|one| one.count == "pipeline_layouts_made"
+            && one.what == Drifted::Ceiling
+            && one.was == Some(2)
+            && one.now.is_none()),
+        "a vanished ceiling is reported: {:?}",
+        what(&moved)
+    );
+    assert!(moved.iter().any(|one| one.what.is_load_bearing()));
+
+    // Reach moving either way is reported and never fatal: reclassifying a count is deliberate
+    // work and whoever does it is reading the output, where a number moving under a gate that
+    // still looks the same is what nobody reads.
+    let held = record(&[("render_passes_made", 5)], &[], &[]);
+    let ungated = record(
+        &[("render_passes_made", 5)],
+        &[("render_passes_made", 1)],
+        &[],
+    );
+    let moved = drift(&held, &ungated);
+    assert_eq!(
+        what(&moved),
+        vec![("render_passes_made".to_owned(), Drifted::GateLost)]
+    );
+    assert!(!moved.iter().any(|one| one.what.is_load_bearing()));
+    let moved = drift(&ungated, &held);
+    assert_eq!(
+        what(&moved),
+        vec![("render_passes_made".to_owned(), Drifted::GateGained)]
+    );
+    assert!(!moved.iter().any(|one| one.what.is_load_bearing()));
+
+    // And a record compared with itself drifts in nothing, so the tool cannot cry wolf on a
+    // measurement that read exactly what the record holds.
+    assert!(drift(&held, &held).is_empty());
+}

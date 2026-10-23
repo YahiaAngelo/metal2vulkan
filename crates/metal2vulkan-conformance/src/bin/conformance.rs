@@ -4,7 +4,7 @@
 //! ```text
 //! conformance record [case ...]
 //! conformance replay [--cpu] [--default-policy] [case ...]
-//! conformance cost [--cpu] [--default-policy] [--runs N] [--write] [--show] [--alone] [case ...]
+//! conformance cost [--cpu] [--default-policy] [--runs N] [--write] [--show] [--alone] [--check] [case ...]
 //! conformance times [--cpu] [--default-policy] [--runs N] [--leg metal|ours] [--write] [--show]
 //!                    [--call NAME] [case ...]
 //! conformance cases
@@ -79,6 +79,7 @@ fn command() -> Result<bool, String> {
     let mut write = false;
     let mut show = false;
     let mut alone = false;
+    let mut check = false;
     let mut legs = Legs::Both;
     let mut call = None;
     let mut words = words.peekable();
@@ -91,6 +92,7 @@ fn command() -> Result<bool, String> {
             "--write" => write = true,
             "--show" => show = true,
             "--alone" => alone = true,
+            "--check" => check = true,
             "--call" => {
                 call = Some(words.next().ok_or("--call wants a Side call's name")?);
             }
@@ -122,7 +124,7 @@ fn command() -> Result<bool, String> {
             Ok(true)
         }
         "record" => record(&cases),
-        "cost" => cost(venues, policy, &cases, runs, write, show, alone),
+        "cost" => cost(venues, policy, &cases, runs, write, show, alone, check),
         "times" => times(
             &cases,
             Asked {
@@ -225,6 +227,7 @@ fn cost(
     write: bool,
     show: bool,
     alone: bool,
+    check: bool,
 ) -> Result<bool, String> {
     // **Do not run both shapes in one process.** It reads as the obvious simplification -- one
     // `cost --write` taking the whole set and then each case alone, instead of two commands a
@@ -347,6 +350,54 @@ fn cost(
         "the selection moves {} of the {kept} counts the runtime keeps",
         touched.len()
     );
+    // `--check` asks the one question a diff of the files cannot: would re-measuring change
+    // anything the gate reads? Most of a record legitimately differs between two runs of the same
+    // binary over the same cases, so the signal sits under the noise unless the comparison is of
+    // the gate's own facts alone.
+    if check {
+        let mut drifted = 0;
+        let mut fatal = 0;
+        for one in &measured {
+            if one.stopped.is_some() {
+                continue;
+            }
+            let held = metal2vulkan_conformance::recording::read(&one.case)
+                .map(|recording| recording.costs)
+                .unwrap_or_default();
+            let Some(held) = held.iter().find(|held| held.venue == venue) else {
+                continue;
+            };
+            let fresh = one.record(&venue, words.clone());
+            let fresh = if alone {
+                one.fold_alone_into(held, words.clone())
+            } else {
+                fresh.carrying_the_contrast_of(held)
+            };
+            let moved = metal2vulkan_conformance::cost::drift(held, &fresh);
+            if moved.is_empty() {
+                continue;
+            }
+            println!("\n{}", one.case);
+            for one in &moved {
+                println!("  {one}");
+                drifted += 1;
+                if one.what.is_load_bearing() {
+                    fatal += 1;
+                }
+            }
+        }
+        println!(
+            "\n{drifted} load-bearing or reach difference(s) between the records and this \
+             measurement, {fatal} of them a number the gate reads"
+        );
+        if fatal == 0 {
+            println!(
+                "no gated bound and no ceiling moved: re-measuring would change nothing the gate \
+                 reads"
+            );
+        }
+        return Ok(fatal == 0);
+    }
     if !write {
         println!("nothing written; pass --write to put these bounds in the recordings");
         return Ok(true);
