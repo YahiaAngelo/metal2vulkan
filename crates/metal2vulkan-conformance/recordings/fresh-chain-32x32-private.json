@@ -1,0 +1,156 @@
+{
+  "format": 1,
+  "case": "fresh-chain-32x32-private",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "shape-and-bytes",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "fdbfffcfb1bf5ef06e62d0d66d75a059335c69073c2ee1086372155977a6fa66"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 0
+                            },
+                            "texel": {
+                              "bytes": "paWlpQ=="
+                            },
+                            "texels": {
+                              "uint": 1365
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "fresh",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 0
+                            },
+                            "texel": {
+                              "bytes": "/wD//w=="
+                            },
+                            "texels": {
+                              "uint": 1280
+                            }
+                          }
+                        },
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 1280
+                            },
+                            "texel": {
+                              "bytes": "AAAAAA=="
+                            },
+                            "texels": {
+                              "uint": 85
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "statuses",
+                  "observed": {
+                    "value": {
+                      "lines": [
+                        "Completed",
+                        "Completed",
+                        "Completed"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

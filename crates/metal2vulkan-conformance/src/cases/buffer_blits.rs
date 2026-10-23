@@ -103,7 +103,7 @@ fn fill(work: &mut Work, buffer: usize, offset: u64, length: u64, value: u8) {
 /// instead of its bytes and still compare exactly: a fill's answer is piecewise constant, so the
 /// runs say which range took which byte, and a fill that moved by one byte moves a run's offset
 /// where a reader can see it rather than printing six hundred thousand numbers.
-pub fn runs_of(bytes: &[u8]) -> Value {
+fn runs_of(bytes: &[u8]) -> Value {
     let mut runs = Vec::new();
     let mut at = 0usize;
     while at < bytes.len() {

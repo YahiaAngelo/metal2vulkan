@@ -46,12 +46,17 @@
 //!
 //! # The record shape
 //!
-//! Every answer here is piecewise constant by construction — a level holds one repeated texel, or
-//! zero — so each site records the **runs** of equal bytes rather than the bytes themselves
-//! ([`runs_of`]). That is a lossless encoding and not a digest: the bytes can be rebuilt from it
-//! (`buffer_blits::tests::the_runs_rebuild_the_bytes_they_came_from`), and it sizes a row by how
-//! many times its answer changes instead of by how many bytes it holds, which is what lets the
-//! 16 MiB buffer row record its whole answer in one line.
+//! Every answer here is one texel repeated by construction — a level holds Metal's pattern, or the
+//! old bytes, or zero — so each site records the **runs of equal texels** rather than the bytes
+//! themselves ([`texel_runs`]). That is a lossless encoding and not a digest: the bytes are
+//! rebuilt from it in the guard that keeps it honest
+//! ([`tests::the_runs_rebuild_the_bytes_they_came_from`]), and it sizes a row by how many times its
+//! answer changes instead of by how many bytes it holds, which is what lets the 16 MiB buffer row
+//! record its whole answer in one line.
+//!
+//! Per texel, not per byte, and that was measured rather than assumed: a texel of Metal's pattern
+//! is not one byte repeated — `RGBA8Unorm` reads `ff00ffff` — so runs of equal bytes made 8,193
+//! runs of one 16 KiB level and a 3.5 MB recording for a row whose answer is one sentence.
 //!
 //! # What is not ported, and why
 //!
@@ -73,7 +78,6 @@
 
 use crate::allowance::Allowance;
 use crate::case::{call, Abort, Case, Input, MetalSource, Side};
-use crate::cases::buffer_blits::runs_of;
 use crate::transcript::{Node, Observed, Sites, Value};
 use crate::work::{Done, Resource, Step, Storage, TextureSpec, Work};
 use metal2vulkan_runtime::Degradation;
@@ -96,9 +100,49 @@ const READ_AND_WRITE: u32 = 3;
 /// `MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget`.
 const READ_AND_TARGET: u32 = 5;
 
-/// A site whose bytes are recorded as their runs of equal bytes (the module docs).
-fn runs_site(name: impl Into<String>, bytes: &[u8]) -> Node {
-    Node::leaf(name, Observed::value(runs_of(bytes)))
+/// The runs of equal texels `bytes` holds, `texel` bytes each: the first texel of the run, how
+/// many texels it covers, and the texel's own bytes.
+///
+/// This is a **lossless encoding** of the bytes and not a digest of them
+/// ([`tests::the_runs_rebuild_the_bytes_they_came_from`]), and it is per texel rather than per byte
+/// for a measured reason: every answer in this family is one texel repeated, but a texel of
+/// Metal's pattern is not one byte repeated — `RGBA8Unorm` reads `ff00ffff` — so runs of equal
+/// *bytes* turned a 16 KiB level into 8,193 runs and a 3.5 MB recording, while runs of equal
+/// texels make it one line. A tail shorter than a texel is a run of its own, so nothing is lost
+/// where a length is not a whole number of texels.
+fn texel_runs(bytes: &[u8], texel: usize) -> Value {
+    let width = texel.max(1);
+    let mut runs: Vec<Value> = Vec::new();
+    let mut held: Option<(usize, &[u8], u64)> = None;
+    for (at, chunk) in bytes.chunks(width).enumerate() {
+        match held {
+            Some((_, last, ref mut count)) if last == chunk => *count += 1,
+            _ => {
+                if let Some((first, last, count)) = held {
+                    runs.push(run_value(first, count, last));
+                }
+                held = Some((at, chunk, 1));
+            }
+        }
+    }
+    if let Some((first, last, count)) = held {
+        runs.push(run_value(first, count, last));
+    }
+    Value::List(runs)
+}
+
+/// One run of [`texel_runs`].
+fn run_value(at: usize, texels: u64, texel: &[u8]) -> Value {
+    Value::fields([
+        ("at", Value::Uint(at as u64)),
+        ("texels", Value::Uint(texels)),
+        ("texel", Value::Bytes(texel.to_vec())),
+    ])
+}
+
+/// A site whose bytes are recorded as their runs of equal `texel`-byte texels (the module docs).
+fn runs_site(name: impl Into<String>, bytes: &[u8], texel: usize) -> Node {
+    Node::leaf(name, Observed::value(texel_runs(bytes, texel)))
 }
 
 /// The command buffers' statuses, in commit order.
@@ -106,10 +150,10 @@ fn statuses_site(done: &[String]) -> Node {
     Node::leaf("statuses", Observed::value(Value::Lines(done.to_vec())))
 }
 
-/// The runs a read of `length` bytes of zero holds: what a row reads where the device announced it
-/// cannot write Metal's pattern.
-fn zeroed_runs(length: usize) -> Value {
-    runs_of(&vec![0u8; length])
+/// The runs a read of `length` bytes of zero holds, in `texel`-byte texels: what a row reads where
+/// the device announced it cannot write Metal's pattern.
+fn zeroed_runs(length: usize, texel: usize) -> Value {
+    texel_runs(&vec![0u8; length], texel)
 }
 
 /// The allowance a patterned row needs where the device writes zero for Metal's pattern and
@@ -119,10 +163,10 @@ fn zeroed_runs(length: usize) -> Value {
 /// It is stated as the one value the lane accepts instead, not as `Unchecked`: the lane's
 /// expectation is "Metal's pattern, or zero where the device announced it", and an unchecked field
 /// would stop holding the device to either.
-fn zeroed_allowance(path: impl Into<String>, length: usize) -> Allowance {
+fn zeroed_allowance(path: impl Into<String>, length: usize, texel: usize) -> Allowance {
     Allowance::new(
         path,
-        crate::allowance::Loosening::AnyOf(vec![zeroed_runs(length)]),
+        crate::allowance::Loosening::AnyOf(vec![zeroed_runs(length, texel)]),
         crate::allowance::Justification::notice(Degradation::FreshPatternZeroed),
     )
 }
@@ -214,8 +258,8 @@ impl Case for FreshBuffers {
             })?;
             sites.push(
                 Node::branch(at, Vec::new())
-                    .with(runs_site("written", read(&done, 0)))
-                    .with(runs_site("fresh", read(&done, 1)))
+                    .with(runs_site("written", read(&done, 0), 1))
+                    .with(runs_site("fresh", read(&done, 1), 1))
                     .with(statuses_site(&done.statuses)),
             );
         }
@@ -669,8 +713,9 @@ impl Case for FreshTexture {
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
         let work = texture_program(&self.row.shape, self.row.storage);
         let done = call(sites, "work", side.work(&work), |_| Value::Absent)?;
-        sites.push(runs_site("written", read(&done, 0)));
-        sites.push(runs_site("fresh", read(&done, 1)));
+        let texel = self.row.shape.block.0 as usize;
+        sites.push(runs_site("written", read(&done, 0), texel));
+        sites.push(runs_site("fresh", read(&done, 1), texel));
         sites.push(statuses_site(&done.statuses));
         Ok(())
     }
@@ -688,7 +733,7 @@ fn patterned_allowances(shape: &Shape, storage: Storage) -> Vec<Allowance> {
     }
     vec![
         crate::replay::notice_allowance(Degradation::FreshPatternZeroed.code()),
-        zeroed_allowance("case/fresh", shape.total() as usize),
+        zeroed_allowance("case/fresh", shape.total() as usize, shape.block.0 as usize),
     ]
 }
 
@@ -927,14 +972,18 @@ impl Case for FreshPattern {
     fn allowances(&self) -> Vec<Allowance> {
         vec![
             crate::replay::notice_allowance(Degradation::FreshPatternZeroed.code()),
-            zeroed_allowance("case/fresh", self.row.total() as usize),
+            zeroed_allowance(
+                "case/fresh",
+                self.row.total() as usize,
+                self.row.texel.len(),
+            ),
         ]
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
         let work = self.row.program();
         let done = call(sites, "work", side.work(&work), |_| Value::Absent)?;
-        sites.push(runs_site("fresh", read(&done, 0)));
+        sites.push(runs_site("fresh", read(&done, 0), self.row.texel.len()));
         sites.push(statuses_site(&done.statuses));
         Ok(())
     }
@@ -1033,8 +1082,9 @@ impl Case for FreshOverBuffer {
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
         let work = self.program();
         let done = call(sites, "work", side.work(&work), |_| Value::Absent)?;
-        sites.push(runs_site("written", read(&done, 0)));
-        sites.push(runs_site("fresh", read(&done, 1)));
+        let texel = self.shape().block.0 as usize;
+        sites.push(runs_site("written", read(&done, 0), texel));
+        sites.push(runs_site("fresh", read(&done, 1), texel));
         sites.push(statuses_site(&done.statuses));
         Ok(())
     }
@@ -1084,30 +1134,69 @@ mod tests {
                 .child(name)
                 .unwrap_or_else(|| panic!("{case}: the recording holds no {path}"));
         }
-        rebuild(&node.observed.value, case, path)
+        rebuild(&node.observed.value, &format!("{case}/{path}"))
     }
 
     /// The bytes a runs value encodes.
-    fn rebuild(value: &Value, case: &str, site: &str) -> Vec<u8> {
+    fn rebuild(value: &Value, where_: &str) -> Vec<u8> {
         let Value::List(runs) = value else {
-            panic!("{case}/{site}: the recording holds {}", value.kind());
+            panic!("{where_}: the recording holds {}", value.kind());
         };
         let mut bytes = Vec::new();
+        let mut texels = 0u64;
         for run in runs {
             let Value::Fields(fields) = run else {
-                panic!("{case}/{site}: a run is fields");
+                panic!("{where_}: a run is fields");
             };
             let word = |name: &str| match fields[name] {
                 Value::Uint(word) => word,
-                _ => panic!("{case}/{site}: {name} is a word"),
+                _ => panic!("{where_}: {name} is a word"),
             };
-            assert_eq!(word("at"), bytes.len() as u64, "{case}/{site}");
-            bytes.extend(std::iter::repeat_n(
-                word("byte") as u8,
-                word("length") as usize,
-            ));
+            let Some(Value::Bytes(texel)) = fields.get("texel") else {
+                panic!("{where_}: a run's texel is bytes");
+            };
+            assert_eq!(word("at"), texels, "{where_}");
+            for _ in 0..word("texels") {
+                bytes.extend_from_slice(texel);
+            }
+            texels += word("texels");
         }
         bytes
+    }
+
+    /// The runs are a lossless encoding: bytes rebuilt from them are the bytes they were taken
+    /// from, whatever the texel's width and whether the length is a whole number of texels.
+    ///
+    /// Without this the whole family would be recording a summary nobody had checked, and the one
+    /// projection it uses would be load-bearing on trust.
+    #[test]
+    fn the_runs_rebuild_the_bytes_they_came_from() {
+        let cases: [(Vec<u8>, usize); 6] = [
+            (Vec::new(), 4),
+            (vec![0u8; 64], 1),
+            (vec![0xa5; 1024], 8),
+            (MAGENTA.repeat(4096), 4),
+            // A length that is not a whole number of texels: the tail is its own run.
+            ((0..30u8).collect(), 4),
+            // Content that is not one repeated texel at all, which is the shape a divergence takes.
+            ((0..=255u8).map(|b| b / 7).collect(), 2),
+        ];
+        for (bytes, texel) in cases {
+            let runs = texel_runs(&bytes, texel);
+            assert_eq!(rebuild(&runs, "a run of the guard"), bytes, "{texel} bytes");
+        }
+        // And it really is a run encoding: no two neighbours share a texel.
+        let Value::List(runs) = texel_runs(&(0..=255u8).map(|b| b / 7).collect::<Vec<u8>>(), 2)
+        else {
+            panic!("the runs are a list");
+        };
+        for pair in runs.windows(2) {
+            let texel = |value: &Value| match value {
+                Value::Fields(fields) => fields["texel"].clone(),
+                _ => panic!("a run is fields"),
+            };
+            assert_ne!(texel(&pair[0]), texel(&pair[1]));
+        }
     }
 
     /// Every case names itself once, and no two rows share a name.

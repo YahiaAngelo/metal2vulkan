@@ -1,0 +1,451 @@
+{
+  "format": 1,
+  "case": "fresh-buffer-shared",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "lengths-and-bytes",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4efe333a35feb2ad636776d0cd74d992d191d75f9404ca2fb1686cb794f9dd89"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work/bytes-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "bytes-16",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "written",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "at": {
+                                  "uint": 0
+                                },
+                                "texel": {
+                                  "bytes": "pQ=="
+                                },
+                                "texels": {
+                                  "uint": 16
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "fresh",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "at": {
+                                  "uint": 0
+                                },
+                                "texel": {
+                                  "bytes": "AA=="
+                                },
+                                "texels": {
+                                  "uint": 16
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "statuses",
+                      "observed": {
+                        "value": {
+                          "lines": [
+                            "Completed",
+                            "Completed",
+                            "Completed"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work/bytes-4096",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "bytes-4096",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "written",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "at": {
+                                  "uint": 0
+                                },
+                                "texel": {
+                                  "bytes": "pQ=="
+                                },
+                                "texels": {
+                                  "uint": 4096
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "fresh",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "at": {
+                                  "uint": 0
+                                },
+                                "texel": {
+                                  "bytes": "AA=="
+                                },
+                                "texels": {
+                                  "uint": 4096
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "statuses",
+                      "observed": {
+                        "value": {
+                          "lines": [
+                            "Completed",
+                            "Completed",
+                            "Completed"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work/bytes-65536",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "bytes-65536",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "written",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "at": {
+                                  "uint": 0
+                                },
+                                "texel": {
+                                  "bytes": "pQ=="
+                                },
+                                "texels": {
+                                  "uint": 65536
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "fresh",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "at": {
+                                  "uint": 0
+                                },
+                                "texel": {
+                                  "bytes": "AA=="
+                                },
+                                "texels": {
+                                  "uint": 65536
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "statuses",
+                      "observed": {
+                        "value": {
+                          "lines": [
+                            "Completed",
+                            "Completed",
+                            "Completed"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work/bytes-1048576",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "bytes-1048576",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "written",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "at": {
+                                  "uint": 0
+                                },
+                                "texel": {
+                                  "bytes": "pQ=="
+                                },
+                                "texels": {
+                                  "uint": 1048576
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "fresh",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "at": {
+                                  "uint": 0
+                                },
+                                "texel": {
+                                  "bytes": "AA=="
+                                },
+                                "texels": {
+                                  "uint": 1048576
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "statuses",
+                      "observed": {
+                        "value": {
+                          "lines": [
+                            "Completed",
+                            "Completed",
+                            "Completed"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work/bytes-16777216",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "bytes-16777216",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "written",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "at": {
+                                  "uint": 0
+                                },
+                                "texel": {
+                                  "bytes": "pQ=="
+                                },
+                                "texels": {
+                                  "uint": 16777216
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "fresh",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "at": {
+                                  "uint": 0
+                                },
+                                "texel": {
+                                  "bytes": "AA=="
+                                },
+                                "texels": {
+                                  "uint": 16777216
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "statuses",
+                      "observed": {
+                        "value": {
+                          "lines": [
+                            "Completed",
+                            "Completed",
+                            "Completed"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}
