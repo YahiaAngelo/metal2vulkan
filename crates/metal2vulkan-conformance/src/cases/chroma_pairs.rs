@@ -45,14 +45,15 @@
 
 use crate::allowance::Allowance;
 use crate::case::{
-    made, Abort, Bindings, Case, Failure, Input, MetalSource, Side, TextureRole, TextureSpec,
+    made, Abort, Bindings, Case, Failure, Input, MetalSource, SamplerSpec, Side, TextureRole,
+    TextureSpec,
 };
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
 use crate::replay::notice_allowance;
 use crate::transcript::{ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value};
 use crate::work::{Plane, Rect, Resource, Step, TextureSpec as WorkTexture, Work};
-use metal2vulkan::metal::PixelFormat;
+use metal2vulkan::metal::{PixelFormat, SamplerAddressMode, SamplerMinMagFilter};
 
 /// The textures' side, as the lane makes them.
 const SIDE: u64 = 16;
@@ -67,6 +68,10 @@ const WHOLE: u64 = ROW * SIDE;
 /// buffer of positions, so one kernel reads a texture of any size.
 const READ_FIXTURE: &str = "fpv_swizzled_reads";
 const READ_ENTRY: &str = "fpv_swz_read";
+
+/// The same fixture's sampling kernel: one `float4` a position, from a buffer of `float2`
+/// coordinates, through the sampler state bound at index 0.
+const SAMPLE_ENTRY: &str = "fpv_swz_sample";
 
 /// The threads in a threadgroup of the reading dispatch.
 const GROUP: u32 = 64;
@@ -101,8 +106,13 @@ const READ_NAMES: [&str; 2] = [
     "chroma-pair-texel-reads-gbgr422",
     "chroma-pair-texel-reads-bgrg422",
 ];
+const SAMPLE_NAMES: [&str; 2] = [
+    "chroma-pair-texel-samples-gbgr422",
+    "chroma-pair-texel-samples-bgrg422",
+];
 
-/// Every case of the family: the copy sweep and the texel reads, of each format.
+/// Every case of the family: the copy sweep, the texel reads and the texel samples, of each
+/// format.
 pub fn all() -> Vec<Box<dyn Case>> {
     let mut cases: Vec<Box<dyn Case>> = Vec::new();
     for (at, (format, word)) in FORMATS.into_iter().enumerate() {
@@ -113,13 +123,87 @@ pub fn all() -> Vec<Box<dyn Case>> {
         }));
     }
     for (at, (format, word)) in FORMATS.into_iter().enumerate() {
-        cases.push(Box::new(ChromaTexelReads {
-            name: READ_NAMES[at],
-            format,
-            word,
-        }));
+        for (name, access) in [
+            (READ_NAMES[at], Access::Read),
+            (SAMPLE_NAMES[at], Access::NearestSample),
+        ] {
+            cases.push(Box::new(ChromaTexels {
+                name,
+                format,
+                word,
+                access,
+            }));
+        }
     }
     cases
+}
+
+/// How a case reaches the texture's texels.
+///
+/// Both exist because Metal defines them differently. A chroma-pair texture is a **filterable**
+/// format: `sample` is the operation Metal's own feature tables grant it, and a nearest sample at
+/// a texel's centre is defined to be that texel. `read()` is what the runtime lane uses and what a
+/// decoder does, and whether Metal defines it for these formats is exactly the question a
+/// recording answers rather than assumes — so the two are separate cases, and the sampling one is
+/// the control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Access {
+    /// `t.read(position)` at every texel's integer position.
+    Read,
+    /// `t.sample(s, uv)` at every texel's centre, through a nearest clamp-to-edge sampler of
+    /// normalized coordinates.
+    NearestSample,
+}
+
+impl Access {
+    /// The fixture's entry point this access runs.
+    fn entry(self) -> &'static str {
+        match self {
+            Access::Read => READ_ENTRY,
+            Access::NearestSample => SAMPLE_ENTRY,
+        }
+    }
+
+    /// The word the case's site carries.
+    fn word(self) -> &'static str {
+        match self {
+            Access::Read => "reads",
+            Access::NearestSample => "samples",
+        }
+    }
+
+    /// The positions the kernel reads: integer texel positions, or the texel centres as
+    /// normalized coordinates.
+    fn positions(self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(TEXELS * 8);
+        for y in 0..SIDE as u32 {
+            for x in 0..SIDE as u32 {
+                match self {
+                    Access::Read => {
+                        bytes.extend(x.to_le_bytes());
+                        bytes.extend(y.to_le_bytes());
+                    }
+                    Access::NearestSample => {
+                        let centre = |index: u32| (index as f32 + 0.5) / SIDE as f32;
+                        bytes.extend(centre(x).to_le_bytes());
+                        bytes.extend(centre(y).to_le_bytes());
+                    }
+                }
+            }
+        }
+        bytes
+    }
+
+    /// The sampler state the access binds, where it binds one.
+    fn sampler(self) -> Option<SamplerSpec> {
+        match self {
+            Access::Read => None,
+            Access::NearestSample => Some(
+                SamplerSpec::filtered(SamplerMinMagFilter::Nearest)
+                    .addressed(SamplerAddressMode::ClampToEdge),
+            ),
+        }
+    }
 }
 
 /// One blit of a region of a buffer into a texture, as the lane sweeps them: the texel the region
@@ -544,28 +628,16 @@ impl Case for ChromaCopies {
     }
 }
 
-/// The texel reads of one format.
-pub struct ChromaTexelReads {
+/// Every texel of one format, reached one way ([`Access`]).
+pub struct ChromaTexels {
     name: &'static str,
     format: PixelFormat,
     word: &'static str,
+    access: Access,
 }
 
 /// The texels a [`SIDE`]-square texture holds.
 const TEXELS: usize = (SIDE * SIDE) as usize;
-
-/// The positions the reading kernel reads at: every texel, row by row, as a pair of 32-bit
-/// words, which is what `fpv_swz_read` takes.
-fn positions() -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(TEXELS * 8);
-    for y in 0..SIDE as u32 {
-        for x in 0..SIDE as u32 {
-            bytes.extend(x.to_le_bytes());
-            bytes.extend(y.to_le_bytes());
-        }
-    }
-    bytes
-}
 
 /// The layout a read's `float4`s are compared under: one row a texel of four lanes, so a diff
 /// names the texel and the channel.
@@ -587,7 +659,17 @@ fn texel_layout() -> ByteLayout {
     }
 }
 
-impl Case for ChromaTexelReads {
+impl ChromaTexels {
+    /// The fixture this case runs.
+    fn fixture(&self) -> Fixture {
+        Fixture {
+            name: READ_FIXTURE,
+            entry: self.access.entry(),
+        }
+    }
+}
+
+impl Case for ChromaTexels {
     fn name(&self) -> &'static str {
         self.name
     }
@@ -597,15 +679,12 @@ impl Case for ChromaTexelReads {
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
-        let fixture = Fixture {
-            name: READ_FIXTURE,
-            entry: READ_ENTRY,
-        };
+        let fixture = self.fixture();
         let mut shaders = Vec::new();
         for extension in [RUNTIME_TEXT, METAL_TEXT] {
             shaders.push(ShaderRef {
                 fixture: format!("{READ_FIXTURE}{extension}"),
-                entry: READ_ENTRY.to_owned(),
+                entry: self.access.entry().to_owned(),
                 source_sha256: crate::sha256_hex(fixture.text(extension)?.as_bytes()),
             });
         }
@@ -624,31 +703,30 @@ impl Case for ChromaTexelReads {
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
-        let fixture = Fixture {
-            name: READ_FIXTURE,
-            entry: READ_ENTRY,
-        };
-        Ok(vec![
+        let fixture = self.fixture();
+        let mut inputs = vec![
             Input {
-                name: "air:read".to_owned(),
+                name: "air".to_owned(),
                 digest: Digest::sha256(fixture.text(RUNTIME_TEXT)?.as_bytes()),
             },
             Input {
-                name: "air-typed:read".to_owned(),
+                name: "air-typed".to_owned(),
                 digest: Digest::sha256(fixture.text(METAL_TEXT)?.as_bytes()),
             },
+            Input::bytes("entry", fixture.entry.as_bytes()),
             Input::bytes("format", &self.format.as_raw().to_le_bytes()),
             Input::bytes("texture:bytes", &pattern()),
-            Input::bytes("positions", &positions()),
+            Input::bytes("positions", &self.access.positions()),
             Input::bytes("buffer:blank", &[BLANK]),
-        ])
+        ];
+        if let Some(sampler) = self.access.sampler() {
+            inputs.push(Input::bytes("sampler", &sampler.words()));
+        }
+        Ok(inputs)
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
-        let fixture = Fixture {
-            name: READ_FIXTURE,
-            entry: READ_ENTRY,
-        };
+        let fixture = self.fixture();
         let source = fixture.loaded().map_err(|why| Abort {
             at: "library".to_owned(),
             failure: Failure::named("FixtureNotRead", why),
@@ -657,7 +735,7 @@ impl Case for ChromaTexelReads {
         let pipeline = made(
             sites,
             "pipeline",
-            side.compute_pipeline(library, READ_ENTRY),
+            side.compute_pipeline(library, self.access.entry()),
         )?;
         // The texture is made with its bytes, which is the whole of what the case feeds it: the
         // lane's own fresh-texture row (a new texture reads opaque black) is a separate question
@@ -678,8 +756,12 @@ impl Case for ChromaTexelReads {
                 &pattern(),
             ),
         )?;
-        let positions = made(sites, "positions", side.buffer(&positions()))?;
+        let positions = made(sites, "positions", side.buffer(&self.access.positions()))?;
         let output = made(sites, "output", side.buffer(&vec![BLANK; TEXELS * 16]))?;
+        let mut samplers = Vec::new();
+        if let Some(spec) = self.access.sampler() {
+            samplers.push(made(sites, "sampler", side.sampler(&spec))?);
+        }
         let textures = [texture];
         let buffers = [output, positions];
         let command_buffer = made(
@@ -687,7 +769,7 @@ impl Case for ChromaTexelReads {
             "dispatch",
             side.dispatch_threads(
                 pipeline,
-                &Bindings::new(&textures, &buffers),
+                &Bindings::new(&textures, &buffers).sampled(&samplers),
                 &[],
                 [TEXELS as u32, 1, 1],
                 [GROUP, 1, 1],
@@ -712,7 +794,7 @@ impl Case for ChromaTexelReads {
         }
         let digest = Digest::sha256(&bytes);
         sites.push(Node::leaf(
-            format!("texels/{}", self.word),
+            format!("texels/{}/{}", self.word, self.access.word()),
             Observed::bytes(bytes, texel_layout()).digested(digest),
         ));
         Ok(())
@@ -724,13 +806,13 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    /// Four cases, each of a different question, and each name says which format it is of.
+    /// Six cases, each of a different question, and each name says which format it is of.
     #[test]
     fn the_cases_name_their_format() {
         let cases = all();
-        assert_eq!(cases.len(), 4);
+        assert_eq!(cases.len(), 6);
         let names: BTreeSet<&str> = cases.iter().map(|case| case.name()).collect();
-        assert_eq!(names.len(), 4);
+        assert_eq!(names.len(), 6);
         for name in names {
             assert!(
                 name.ends_with("gbgr422") || name.ends_with("bgrg422"),
@@ -813,25 +895,43 @@ mod tests {
         }
     }
 
-    /// The positions are every texel once, row by row, which is what makes read `i` texel `i`.
+    /// Both accesses walk every texel once, row by row, which is what makes result `i` texel `i`:
+    /// `read()` at the texel's integer position, and the nearest sample at its centre.
     #[test]
-    fn the_positions_are_every_texel_in_order() {
-        let bytes = positions();
-        assert_eq!(bytes.len(), TEXELS * 8);
+    fn both_accesses_walk_every_texel_in_order() {
+        let read = Access::Read.positions();
+        let sampled = Access::NearestSample.positions();
+        assert_eq!(read.len(), TEXELS * 8);
+        assert_eq!(sampled.len(), TEXELS * 8);
+        let word = |bytes: &[u8], at: usize| {
+            u32::from_le_bytes(bytes[at..at + 4].try_into().expect("four bytes"))
+        };
         for texel in 0..TEXELS {
-            let word =
-                |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().expect("four bytes"));
-            assert_eq!(
-                word(texel * 8),
+            let (x, y) = (
                 (texel % SIDE as usize) as u32,
-                "texel {texel} x"
+                (texel / SIDE as usize) as u32,
+            );
+            assert_eq!(word(&read, texel * 8), x, "texel {texel} x");
+            assert_eq!(word(&read, texel * 8 + 4), y, "texel {texel} y");
+            let centre = |index: u32| (index as f32 + 0.5) / SIDE as f32;
+            assert_eq!(
+                f32::from_bits(word(&sampled, texel * 8)),
+                centre(x),
+                "texel {texel} u"
             );
             assert_eq!(
-                word(texel * 8 + 4),
-                (texel / SIDE as usize) as u32,
-                "texel {texel} y"
+                f32::from_bits(word(&sampled, texel * 8 + 4)),
+                centre(y),
+                "texel {texel} v"
             );
         }
+        // The sampling access binds a nearest clamp-to-edge sampler; the reading one binds none,
+        // because `read()` takes no sampler state.
+        assert_eq!(Access::Read.sampler(), None);
+        let spec = Access::NearestSample.sampler().expect("a sampler state");
+        assert_eq!(spec.min_filter, SamplerMinMagFilter::Nearest);
+        assert_eq!(spec.s_address_mode, SamplerAddressMode::ClampToEdge);
+        assert!(spec.normalized_coordinates);
     }
 
     /// The layout covers every texel and names the texel as its row, so a diff over 256 texels
