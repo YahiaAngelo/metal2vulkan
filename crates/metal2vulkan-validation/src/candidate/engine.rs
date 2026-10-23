@@ -371,9 +371,9 @@ pub struct ComputeRun {
 /// The device an attempt refused on, as the engine knows it before the worker has read its clock:
 /// the facts a row on that device would have recorded.
 ///
-/// The worker's reported form ([`OpenedDevice`]) is this plus what the attempt cost, and only
-/// [`run_on_device`] has measured that, so this carries no figure rather than a placeholder for
-/// one. It is to [`OpenedDevice`] what [`ComputeRun`] is to [`DeviceRun`].
+/// The worker's reported form ([`OpenedDevice`]) is this plus what the attempt cost, and only the
+/// worker's own `run_on_device` has measured that, so this carries no figure rather than a
+/// placeholder for one. It is to [`OpenedDevice`] what [`ComputeRun`] is to [`DeviceRun`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RefusedOn {
     pub environment: serde_json::Value,
