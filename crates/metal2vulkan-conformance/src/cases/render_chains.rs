@@ -58,6 +58,26 @@
 //!   filter ran at all (the row differs from the nearest row) and that every channel lies between
 //!   the source texels it is a blend of.
 //!
+//! # What the rows announce, and on which venue
+//!
+//! Every texel of every row compared exactly on both venues measured here, so the only difference
+//! any row has ever shown is a degrade notice of ours, announced where Metal announces nothing.
+//! Measured:
+//!
+//! - MoltenVK on this M3 Max: the two `tgp_composite` rows announce
+//!   `half-output-fast-math-blend`, for the `half` colour output reaching a storing attachment.
+//!   The exact row announces nothing and reads exact.
+//! - lavapipe: every row announces `shader-color-conversion`, for the normalized store our side
+//!   rounds in the shader where the device's own conversion is not Metal's. Beside it, the
+//!   `tgp_composite` rows announce `half-output-fast-math-blend` there as well, and the exact row
+//!   announces `device-arithmetic` for the division `tob_sample` does.
+//!
+//! Each row therefore **declares one** of those codes -- the one it announces on every venue it
+//! announces anything on -- because one is all the comparison can use: an allowance over
+//! `case/notices/*` takes the whole subtree, so a second declaration on one case can never fire.
+//! The codes above that no row declares are recorded here rather than named, which is why this
+//! section exists.
+//!
 //! Nothing here can fault a GPU: two passes, four and one draws, targets of at most 16 by 16, and
 //! no loop in any function either pass runs.
 
@@ -131,7 +151,6 @@ const FILL: Functions = Functions {
     fixture: TOB,
     vertex: "tob_rect",
     fragment: "tob_solid",
-    divides_a_float: false,
     half_output: false,
 };
 
@@ -141,11 +160,6 @@ struct Functions {
     fixture: &'static str,
     vertex: &'static str,
     fragment: &'static str,
-    /// Whether the fragment function divides a `float`: `tob_sample` divides the pixel's position
-    /// by the sampled texture's extent, and nothing else here does.
-    ///
-    /// This is the shape that decides the row's `device-arithmetic` declaration, and nothing else.
-    divides_a_float: bool,
     /// Whether the fragment function returns a `half` colour output rather than a `float` one.
     ///
     /// This is the shape that decides one of the row's notice declarations and nothing else: our
@@ -180,7 +194,6 @@ const SUBJECTS: &[Subject] = &[
             fixture: TOB,
             vertex: "tob_rect",
             fragment: "tob_sample",
-            divides_a_float: true,
             half_output: false,
         },
         filter: SamplerMinMagFilter::Nearest,
@@ -193,7 +206,6 @@ const SUBJECTS: &[Subject] = &[
             fixture: TGP,
             vertex: "tgp_rect",
             fragment: "tgp_layer",
-            divides_a_float: false,
             half_output: true,
         },
         filter: SamplerMinMagFilter::Nearest,
@@ -206,7 +218,6 @@ const SUBJECTS: &[Subject] = &[
             fixture: TGP,
             vertex: "tgp_rect",
             fragment: "tgp_layer",
-            divides_a_float: false,
             half_output: true,
         },
         filter: SamplerMinMagFilter::Linear,
@@ -349,47 +360,37 @@ impl Case for RenderChain {
 
     fn allowances(&self) -> Vec<Allowance> {
         // No texel is loosened: whole codes over 255 in `RGBA8Unorm` are an exact answer on every
-        // device, and a difference in one is what this family exists to report. Both entries are
-        // **notice declarations** on the notices site, which loosen no value; Metal announces
+        // device, and a difference in one is what this family exists to report. The one entry is a
+        // **notice declaration** on the notices site, which loosens no value; Metal announces
         // nothing, so a notice of ours has to be declared or the comparison cannot be made at all.
         //
-        // Each is chosen from the case's own shape and not from any device:
+        // **One declaration, because one is all a case can use.** An allowance that covers
+        // `case/notices/*` loosens the whole subtree, and the notices sites are two nodes (`set`
+        // and `counts`) that carry the announced set as a whole rather than one node a code. So the
+        // first covering allowance whose notice the run announced takes both sites and a second can
+        // never fire, however many codes the row announces. The row therefore names the single code
+        // it was measured announcing **on every venue it announces anything on**, and the rest of
+        // what it announces is in this module's prose where a reader can see it.
         //
-        // - `shader-color-conversion`, because every row's fragment stage stores a normalized
-        //   channel, which our side rounds in the shader on a device whose own conversion is not
-        //   Metal's. It fired on no venue measured here and is declared so the rows stay readable
-        //   on one where it does.
-        // - `half-output-fast-math-blend`, for the two rows whose fragment stage returns a `half`
-        //   colour output ([`Functions::half_output`]). Our side records it where such an output
-        //   reaches an attachment that stores a channel out of a module naming no math mode, which
-        //   `tgp_composite` does. It **fires on MoltenVK on this M3 Max**, and the rows' texels
-        //   still compare exactly, which is the evidence that declaring it loosens nothing: the
-        //   whole difference it covers is the announcement.
-        let mut named = vec![crate::replay::notice_allowance(
-            Degradation::ShaderColorConversion.code(),
-        )];
-        if self.subject.sample.half_output {
-            named.push(crate::replay::notice_allowance(
-                Degradation::HalfOutputFastMathBlend.code(),
-            ));
-        }
-        // `device-arithmetic` is the second declaration, and it is declared by the rows whose
-        // functions do the arithmetic the note covers: our side records it where a float
-        // division, remainder, square root, fused multiply-add or dot product takes Vulkan's
-        // precision bounds rather than correct rounding, which happens on a device whose float
-        // functions are not Metal's own (`metal2vulkan::pipeline::artifact`'s
-        // `PrecisionNote::DeviceArithmetic`). Which device that is, is the device's answer; which
-        // rows can announce it is the case's, and it is the ones that divide a float.
+        // Which code that is follows the row's shape:
         //
-        // Measured: it fires on lavapipe and not on MoltenVK on this M3 Max, and on lavapipe every
-        // value of every row of this family compared **exactly** -- the whole difference was the
-        // announcement, which is what makes declaring it a declaration and not a tolerance.
-        if self.subject.sample.divides_a_float {
-            named.push(crate::replay::notice_allowance(
-                Degradation::DeviceArithmetic.code(),
-            ));
-        }
-        named
+        // - the two rows whose fragment stage returns a `half` colour output
+        //   ([`Functions::half_output`]) name `half-output-fast-math-blend`. Our side records it
+        //   where such an output reaches an attachment that stores a channel out of a module naming
+        //   no math mode, which `tgp_composite` does. Measured announced on both venues.
+        // - the row whose fragment stage returns a `float` names `shader-color-conversion`, for the
+        //   normalized store our side rounds in the shader where the device's own conversion is not
+        //   Metal's. Measured announced on lavapipe; on MoltenVK on this M3 Max that row announces
+        //   nothing at all and reads exact, so there is nothing for a declaration to cover.
+        //
+        // Every value of every row compared **exactly** on both venues, which is the evidence that
+        // the declaration loosens nothing: the whole difference it covers is the announcement.
+        let code = if self.subject.sample.half_output {
+            Degradation::HalfOutputFastMathBlend.code()
+        } else {
+            Degradation::ShaderColorConversion.code()
+        };
+        vec![crate::replay::notice_allowance(code)]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -723,13 +724,16 @@ mod tests {
         assert_eq!(band(BANDS - 1)[2], 1.0);
     }
 
-    /// Every allowance of every row is a notice declaration on the notices site, and the
-    /// `half`-output one is declared by exactly the rows whose fragment stage returns a `half`.
+    /// Every row names exactly one allowance, it is a notice declaration on the notices site, and
+    /// which code it names follows the row's shape.
     ///
-    /// Both halves matter. The first is the family's whole tolerance story: a row that ever
-    /// loosened a texel would fail here, and the texels are the field the family exists to
-    /// compare. The second stops the declaration spreading to a row whose shape does not imply it,
-    /// which would be an allowance standing behind nothing.
+    /// All three halves matter. That it is a notice declaration on the notices site is the
+    /// family's whole tolerance story: a row that ever loosened a texel would fail here, and the
+    /// texels are the field the family exists to compare. That there is one is the mechanism's
+    /// limit, not taste -- a second allowance over the same subtree can never fire, so naming one
+    /// would read as a claim the suite had checked when nothing could check it. And that the code
+    /// follows the shape stops a declaration reaching a row whose shape does not imply it, which
+    /// would be an allowance standing behind nothing.
     #[test]
     fn every_allowance_is_a_notice_declaration_chosen_from_the_rows_shape() {
         use crate::allowance::Justification;
@@ -750,17 +754,18 @@ mod tests {
                     }
                 })
                 .collect();
-            assert!(codes.contains(&Degradation::ShaderColorConversion.code().to_owned()));
+            // Exactly one, and which one follows the row's shape. One, because an allowance over
+            // the notices site takes the whole subtree and a second could never fire; the shape,
+            // because the row that returns a `half` is the row whose notice every venue announces.
+            let wanted = if case.subject.sample.half_output {
+                Degradation::HalfOutputFastMathBlend.code()
+            } else {
+                Degradation::ShaderColorConversion.code()
+            };
             assert_eq!(
-                codes.contains(&Degradation::HalfOutputFastMathBlend.code().to_owned()),
-                case.subject.sample.half_output,
-                "{}: the half-output notice is declared by the wrong row",
-                case.name()
-            );
-            assert_eq!(
-                codes.contains(&Degradation::DeviceArithmetic.code().to_owned()),
-                case.subject.sample.divides_a_float,
-                "{}: the device-arithmetic notice is declared by the wrong row",
+                codes,
+                vec![wanted.to_owned()],
+                "{}: not the one declaration the row's shape asks for",
                 case.name()
             );
         }
