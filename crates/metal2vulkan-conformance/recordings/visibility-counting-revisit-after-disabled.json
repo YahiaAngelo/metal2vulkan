@@ -97,7 +97,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "205fb3628d40c1d001aa12951208fbbfe4c4b7737a91e4b395fa5d21fc633420"
+                          "hex": "4efd16254d4056557f92938c2d42e90de3406e8151f3746d415238739067d3f8"
                         }
                       }
                     },
@@ -280,7 +280,7 @@
       "validated": {
         "stopped": {
           "call": "render",
-          "message": "redundant setting of <AGXG15XFamilyBuffer: 0x74d90cce00>\n    label = <none>\n    length = 8\n    cpuCacheMode = MTLCPUCacheModeDefaultCache\n    storageMode = MTLStorageModeShared\n    hazardTrackingMode = MTLHazardTrackingModeTracked\n    resourceOptions = MTLResourceCPUCacheModeDefaultCache MTLResourceStorageModeShared MTLResourceHazardTrackingModeTracked\n    purgeableState = MTLPurgeableStateNonVolatile\n    label = <none>.\nSet Visibility Result Mode Validation\nusing the same offset (0) in the visibility buffer twice in the same command encoder is not allowed.\nredundant setting of <AGXG15XFamilyBuffer: 0x74d90cce00>\n    label = <none>\n    length = 8\n    cpuCacheMode = MTLCPUCacheModeDefaultCache\n    storageMode = MTLStorageModeShared\n    hazardTrackingMode = MTLHazardTrackingModeTracked\n    resourceOptions = MTLResourceCPUCacheModeDefaultCache MTLResourceStorageModeShared MTLResourceHazardTrackingModeTracked\n    purgeableState = MTLPurgeableStateNonVolatile\n    label = <none>."
+          "message": "redundant setting of <AGXG15XFamilyBuffer: 0x7ce4cd8e00>\n    label = <none>\n    length = 8\n    cpuCacheMode = MTLCPUCacheModeDefaultCache\n    storageMode = MTLStorageModeShared\n    hazardTrackingMode = MTLHazardTrackingModeTracked\n    resourceOptions = MTLResourceCPUCacheModeDefaultCache MTLResourceStorageModeShared MTLResourceHazardTrackingModeTracked\n    purgeableState = MTLPurgeableStateNonVolatile\n    label = <none>.\nSet Visibility Result Mode Validation\nusing the same offset (0) in the visibility buffer twice in the same command encoder is not allowed.\nredundant setting of <AGXG15XFamilyBuffer: 0x7ce4cd8e00>\n    label = <none>\n    length = 8\n    cpuCacheMode = MTLCPUCacheModeDefaultCache\n    storageMode = MTLStorageModeShared\n    hazardTrackingMode = MTLHazardTrackingModeTracked\n    resourceOptions = MTLResourceCPUCacheModeDefaultCache MTLResourceStorageModeShared MTLResourceHazardTrackingModeTracked\n    purgeableState = MTLPurgeableStateNonVolatile\n    label = <none>."
         }
       }
     }
