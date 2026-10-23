@@ -4,11 +4,17 @@
 //! write the object at this slot?* A slot the function cannot store through holds a resource no
 //! draw or dispatch of the state can dirty, so a read-only buffer may sit there.
 //!
-//! It is answered from the entry's AIR metadata ABI alone: each parameter's role and the access
-//! its declaration states (`air.read`, `air.write`, `air.read_write`, `air.sample`, and the
-//! address space of a buffer's pointee), with the slot the parameter binds
-//! (`air.location_index`). The values are the ones [`Binding::access`](super::Binding::access)
-//! answers for the same argument, which is Metal's `MTLBinding.access` (the measurements are
+//! It is answered from the entry's AIR metadata ABI alone: each parameter's role, the access its
+//! declaration states (`air.read`, `air.write`, `air.read_write`, `air.sample`) and the slot it
+//! binds (`air.location_index`). The declared access is the whole of it; the address space beside
+//! it (`air.address_space`) is not read, and needs not be, since Apple's compiler writes
+//! `air.read` for a `constant` or `const device` buffer and `air.read_write` for a `device` one.
+//!
+//! It is the same field the reflection derives [`Binding::access`](super::Binding::access) from,
+//! so the two answers agree by construction, and
+//! `writes_tests::every_fixture_kernel_answers_and_agrees_with_its_reflection` holds them
+//! together over the recorded fixtures. The values are Metal's `MTLBinding.access` (the
+//! measurements are
 //! [`reflection`](super)'s): a `device` buffer is read-write whether the function reads it, writes
 //! it or both; a `constant` or `const device` buffer is read-only; a texture read or sampled is
 //! read-only, one written write-only, one `read_write` read-write; samplers, function tables,
