@@ -52,6 +52,141 @@ const COUNTERS: [&str; 16] = [
     "cleared_bytes",
 ];
 
+/// What each group's call is on the runtime's public API, one entry a group: the group's name,
+/// then the methods it calls, `Type::method`. [`group`] fails for a group that is not named here
+/// (a driver call of `vkfloor.rs`, whose name starts with `vk_`, is no Metal call and is
+/// exempt), and `scripts/api-cost-coverage` reads it to say how much of the public surface the
+/// table times and how much is still untimed.
+pub const TIMED: [(&str, &str); 59] = [
+    ("command_buffer", "CommandQueue::command_buffer"),
+    ("commit_empty", "CommandBuffer::commit"),
+    ("commit_one_dispatch", "CommandBuffer::commit"),
+    ("on_completed", "CommandBuffer::add_completed_handler"),
+    ("status_completed", "CommandBuffer::status"),
+    (
+        "times_completed",
+        "CommandBuffer::kernel_start_time, CommandBuffer::kernel_end_time, \
+         CommandBuffer::gpu_start_time, CommandBuffer::gpu_end_time",
+    ),
+    ("wait_completed", "CommandBuffer::wait_until_completed"),
+    (
+        "render_encoder_pass",
+        "CommandBuffer::render_command_encoder",
+    ),
+    (
+        "render_encoder_clear",
+        "CommandBuffer::render_command_encoder",
+    ),
+    (
+        "render_encoder_load",
+        "CommandBuffer::render_command_encoder",
+    ),
+    ("end_render", "RenderCommandEncoder::end_encoding"),
+    ("compute_encoder", "CommandBuffer::compute_command_encoder"),
+    ("end_compute", "ComputeCommandEncoder::end_encoding"),
+    ("blit_encoder", "CommandBuffer::blit_command_encoder"),
+    ("end_blit", "BlitCommandEncoder::end_encoding"),
+    (
+        "set_render_pipeline",
+        "RenderCommandEncoder::set_render_pipeline_state",
+    ),
+    (
+        "set_vertex_buffer",
+        "RenderCommandEncoder::set_vertex_buffer",
+    ),
+    (
+        "set_vertex_buffers_two",
+        "RenderCommandEncoder::set_vertex_buffers",
+    ),
+    (
+        "set_vertex_bytes_16",
+        "RenderCommandEncoder::set_vertex_bytes",
+    ),
+    (
+        "set_fragment_buffer",
+        "RenderCommandEncoder::set_fragment_buffer",
+    ),
+    (
+        "set_fragment_texture",
+        "RenderCommandEncoder::set_fragment_texture",
+    ),
+    (
+        "set_fragment_sampler",
+        "RenderCommandEncoder::set_fragment_sampler_state",
+    ),
+    ("set_cull_mode", "RenderCommandEncoder::set_cull_mode"),
+    (
+        "set_depth_stencil",
+        "RenderCommandEncoder::set_depth_stencil_state",
+    ),
+    ("draw_strip", "RenderCommandEncoder::draw_primitives"),
+    ("draw_triangles", "RenderCommandEncoder::draw_primitives"),
+    (
+        "draw_indexed",
+        "RenderCommandEncoder::draw_indexed_primitives",
+    ),
+    (
+        "use_resources_read_1_drawn",
+        "RenderCommandEncoder::use_resources",
+    ),
+    (
+        "use_resources_read_256_drawn",
+        "RenderCommandEncoder::use_resources",
+    ),
+    (
+        "set_compute_pipeline",
+        "ComputeCommandEncoder::set_compute_pipeline_state",
+    ),
+    ("set_buffer", "ComputeCommandEncoder::set_buffer"),
+    ("set_texture", "ComputeCommandEncoder::set_texture"),
+    ("dispatch", "ComputeCommandEncoder::dispatch_threadgroups"),
+    (
+        "use_resources_read_1",
+        "ComputeCommandEncoder::use_resources",
+    ),
+    (
+        "use_resources_read_256",
+        "ComputeCommandEncoder::use_resources",
+    ),
+    (
+        "use_resource_read_write",
+        "ComputeCommandEncoder::use_resource",
+    ),
+    ("use_heap", "ComputeCommandEncoder::use_heap"),
+    ("update_fence", "ComputeCommandEncoder::update_fence"),
+    ("wait_for_fence", "ComputeCommandEncoder::wait_for_fence"),
+    (
+        "copy_buffer_1k",
+        "BlitCommandEncoder::copy_from_buffer_to_buffer",
+    ),
+    ("fill_buffer_256", "BlitCommandEncoder::fill_buffer"),
+    (
+        "copy_buffer_to_texture",
+        "BlitCommandEncoder::copy_from_buffer_to_texture",
+    ),
+    (
+        "fill_in_own_encoder",
+        "CommandBuffer::blit_command_encoder, BlitCommandEncoder::fill_buffer, \
+         BlitCommandEncoder::end_encoding",
+    ),
+    ("buffer_4k", "Device::new_buffer"),
+    ("buffer_1m", "Device::new_buffer"),
+    ("buffer_with_bytes_4k", "Device::new_buffer_with_bytes"),
+    ("buffer_no_copy_1m", "Device::new_buffer_with_bytes_no_copy"),
+    ("texture_256_shared", "Device::new_texture"),
+    ("texture_1024_target", "Device::new_texture"),
+    ("heap_texture_256", "Heap::new_texture_at_offset"),
+    ("buffer_texture_256", "Buffer::new_texture"),
+    ("sampler", "Device::new_sampler_state"),
+    ("shared_event", "Device::new_shared_event"),
+    ("fence", "Device::new_fence"),
+    ("event_value", "SharedEvent::signaled_value"),
+    ("set_event_value", "SharedEvent::set_signaled_value"),
+    ("read_buffer_contents_256", "Buffer::contents"),
+    ("get_bytes_256", "Texture::get_bytes"),
+    ("replace_region_256", "Texture::replace_region"),
+];
+
 /// What one window measured: the calls' wall time on the calling thread, that thread's CPU time
 /// and the whole process's while they ran, then the same three of the drain after them.
 #[derive(Clone, Copy, Default)]
@@ -101,6 +236,10 @@ pub fn group<G: Gpu, S>(
     mut drain: impl FnMut(S),
 ) {
     assert!(inner > 0 && windows > 0, "{name}: no calls");
+    assert!(
+        name.starts_with("vk_") || TIMED.iter().any(|(group, _)| *group == name),
+        "{name}: no entry in TIMED, so the timing census would not count its calls"
+    );
     let mut totals = Totals::default();
     let mut before = vec![];
     for window in 0..WARM + windows {
