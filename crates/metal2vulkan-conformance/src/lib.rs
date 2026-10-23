@@ -23,6 +23,11 @@
 //!   and compares, and needs no Metal at all.
 //! - A **report** ([`report`]) over a selection gives the verdict counts and the matrix of case
 //!   against venue.
+//! - A **known-refusals ledger** ([`known_refusals`]) holds the gaps we have written down, so one
+//!   case that keeps an open bug visible does not make every run red. It changes the exit status
+//!   and nothing else: the row still reads `Refused` and still counts. It is an expectation, not
+//!   an allowlist — a refusal it does not list fails the run, and a row it lists that is no longer
+//!   refused fails the run too, so a row cannot outlive the bug it stands for.
 //!
 //! What stays out, because Metal has no counterpart and a host without Metal can have no answer:
 //! internal counters, and which variant or pipeline the implementation chose. Those stay device
@@ -39,6 +44,7 @@ pub mod compare;
 pub mod device;
 pub mod diff;
 pub mod fixture;
+pub mod known_refusals;
 pub mod measured;
 pub mod record;
 pub mod recording;

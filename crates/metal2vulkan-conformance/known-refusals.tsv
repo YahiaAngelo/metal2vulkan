@@ -1,0 +1,34 @@
+# Known refusals: our open gaps, each one an OPEN BUG with a todo behind it.
+#
+# READ THIS BEFORE ADDING A ROW. A row here is not an accepted difference and it is not permission
+# for anything. It is a refusal of something plain Metal does — which, by the owner's standing rule
+# that what Metal allows we must allow, is a bug of ours — written down so the one case that holds
+# it visible does not make every run red and teach everyone to stop reading the report. An accepted
+# difference lives in `docs/API.md` section 10 and is justified; a degradation lives in the degrade
+# catalogue and is announced. This file is neither. Nothing here is resolved by being listed.
+#
+# It is an EXPECTATION, NOT AN ALLOWLIST, and `conformance replay` holds it to that in both
+# directions:
+#
+#   - a refusal that is not listed here fails the run: a new gap appeared;
+#   - a row listed here that is NOT refused any more ALSO fails the run, saying the gap looks
+#     fixed and the row must go.
+#
+# That second direction is the whole point. Closing a gap forces the ledger edit, so a row cannot
+# outlive the bug it stands for and this file cannot rot into a silencer. It also means a row is
+# checked by execution rather than by discipline, which is the standard the rest of the suite is
+# held to.
+#
+# The ledger changes the exit status and nothing else. The report still prints each of these as a
+# `Refused` row, with our error, with Metal's own words where its API validation refuses the call
+# too, and counted in the suite's own `refused` number. Nothing is laundered.
+#
+# A row is held only against the cases a run selected, so replaying one case does not read every
+# other row as fixed.
+#
+# Tab-separated. Blank lines and lines from `#` are ignored.
+#
+# case	site	our error	the gap it is waiting on
+rate-map-zero-screen-width	case/map	Err(Error::Invalid("invalid use of new_rasterization_rate_map: RateMap(ScreenSize { width: 0, height: 64 })"))	The runtime refuses a rasterization-rate map of zero screen width, where plain Metal compiles one and answers queries over it (screen 0x64x1, physicalSizeForLayer:0 of 0x33x1, 24,624 parameter bytes). Metal's own API validation refuses the descriptor, but a validated stop is not Metal refusing the call, so this is ours to fix: metal2vulkan-runtime/src/rate_map.rs, `validate`, RateMapProblem::ScreenSize. On the orchestrator's todo list as runtime work.
+mesh-object-draws-partial-threadgroup-6-by-4	case/object-threads-6-by-4/buffer/calls/2-drawMeshThreads	Err(Error::Bind("the bind state was refused: Unsupported(Unsupported { feature: MeshShading, needs: NotImplemented, location: None, symbol: None })"))	The runtime refuses `drawMeshThreads` where the threads leave a partial object threadgroup, `Unsupported(MeshShading, NotImplemented)` out of the bind state, while Metal draws it and runs the threads left over. Not a device gap: this M3 Max has mesh shading and draws every other row of the same probe. metal2vulkan's mesh bind state, the partial-object-threadgroup path. On the orchestrator's todo list as runtime work.
+mesh-object-draws-partial-threadgroup-5x3-by-4x2	case/object-threads-5x3-by-4x2/buffer/calls/2-drawMeshThreads	Err(Error::Bind("the bind state was refused: Unsupported(Unsupported { feature: MeshShading, needs: NotImplemented, location: None, symbol: None })"))	The runtime refuses `drawMeshThreads` where the threads leave a partial object threadgroup, `Unsupported(MeshShading, NotImplemented)` out of the bind state, while Metal draws it and runs the threads left over. Not a device gap: this M3 Max has mesh shading and draws every other row of the same probe. metal2vulkan's mesh bind state, the partial-object-threadgroup path. On the orchestrator's todo list as runtime work.

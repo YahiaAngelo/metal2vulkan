@@ -1287,3 +1287,137 @@ fn the_committed_recordings_carry_all_three_validated_answers() {
         Validated::NotRun
     );
 }
+
+/// The committed ledger parses, every row names a gap, and each row's case is a real case.
+///
+/// A row whose case has been renamed away would otherwise read as "no longer refused" forever, or
+/// never be held at all, and either way the row would stop meaning anything.
+#[test]
+fn the_known_refusals_ledger_parses_and_names_real_cases() {
+    let ledger = crate::known_refusals::ledger().unwrap();
+    assert!(
+        !ledger.is_empty(),
+        "the ledger is empty; drop the machinery"
+    );
+    for known in &ledger {
+        assert!(
+            crate::cases::named(&known.case).is_some(),
+            "{}: no such case",
+            known.case
+        );
+        assert!(known.site.starts_with("case/"), "{known:?}");
+        assert!(!known.error.is_empty(), "{known:?}");
+        // A row is an open bug, so it says where the fix belongs.
+        assert!(
+            known.waiting_on.len() > 40,
+            "{}: the gap is not described: {}",
+            known.case,
+            known.waiting_on
+        );
+    }
+    // The one row this round added, and what it is waiting on.
+    let screen_width = ledger
+        .iter()
+        .find(|known| known.case == crate::cases::rate_maps::ZERO_SCREEN_WIDTH)
+        .expect("the zero-screen-width refusal");
+    assert_eq!(screen_width.site, "case/map");
+    assert!(
+        screen_width.waiting_on.contains("rate_map.rs"),
+        "{}",
+        screen_width.waiting_on
+    );
+}
+
+/// A malformed ledger is refused rather than read loosely: a row must carry all four fields, and
+/// must name the gap it waits on.
+#[test]
+fn a_ledger_row_without_its_gap_is_refused() {
+    let parse = crate::known_refusals::parse;
+    assert!(parse("# just a comment\n\n").unwrap().is_empty());
+    let row = "a-case\tcase/map\tErr(Error::Invalid)\tthe runtime refuses what Metal does";
+    assert_eq!(parse(row).unwrap().len(), 1);
+    let why = parse("a-case\tcase/map\tErr(Error::Invalid)\t").unwrap_err();
+    assert!(why.contains("names no gap"), "{why}");
+    let why = parse("a-case\tcase/map").unwrap_err();
+    assert!(why.contains("four"), "{why}");
+}
+
+/// The ledger is an expectation held in both directions, and it changes no verdict.
+#[test]
+fn the_ledger_fails_on_a_new_refusal_and_on_one_that_is_gone() {
+    use crate::known_refusals::{against, Expectation, KnownRefusal};
+    let case = WordsCase::new("words", 2);
+    let recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
+    let mut side = StubSide::new(Vec::new()).refusing(
+        "dispatch",
+        Failure::named("Error::Invalid", "the encoder refused the dispatch"),
+    );
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    // The verdict is untouched by any ledger: a refusal stays a refusal and stays non-compliant.
+    assert_eq!(replayed.verdict.word(), "refused");
+    assert!(!replayed.verdict.is_compliant());
+    let rows = vec![replayed];
+
+    // Nothing written down: the refusal is a new gap and fails the run.
+    let found = against(&rows, &[]);
+    assert_eq!(found.len(), 1, "{found:?}");
+    let Expectation::Unlisted {
+        case: named,
+        site,
+        error,
+        ..
+    } = &found[0]
+    else {
+        panic!("{found:?}");
+    };
+    assert_eq!(named, "words");
+    assert_eq!(site, "case/dispatch");
+
+    // Written down exactly: nothing unexpected, so the run may exit 0.
+    let listed = vec![KnownRefusal {
+        case: "words".to_owned(),
+        site: site.clone(),
+        error: error.clone(),
+        waiting_on: "the stub refuses the dispatch, which is the point of the stub".to_owned(),
+    }];
+    assert_eq!(against(&rows, &listed), Vec::new());
+
+    // The direction that keeps the file from rotting: the same ledger against a run that did NOT
+    // refuse fails, and says the row must go.
+    let mut clean = StubSide::new(words(&[1, 2]));
+    let passed = replay_against(&case, &mut clean, &recording).unwrap();
+    assert_eq!(passed.verdict.word(), "exact");
+    let found = against(std::slice::from_ref(&passed), &listed);
+    assert_eq!(found.len(), 1, "{found:?}");
+    let Expectation::NoLongerRefused(known) = &found[0] else {
+        panic!("{found:?}");
+    };
+    assert_eq!(known.case, "words");
+    let printed = found[0].to_string();
+    assert!(printed.contains("looks fixed"), "{printed}");
+    assert!(printed.contains("drop the row"), "{printed}");
+
+    // A row is held only against the cases a run selected, so replaying one case does not read
+    // every other row as fixed.
+    let elsewhere = vec![KnownRefusal {
+        case: "another-case".to_owned(),
+        site: "case/map".to_owned(),
+        error: "Err(Error::Invalid)".to_owned(),
+        waiting_on: "a gap of some other case, which this run did not select".to_owned(),
+    }];
+    assert_eq!(
+        against(&rows, &elsewhere).len(),
+        1,
+        "the unlisted one alone"
+    );
+
+    // A divergence is never a ledger row: only a refusal is ever an expected gap.
+    let mut wrong = StubSide::new(words(&[1, 9]));
+    let diverged = replay_against(&case, &mut wrong, &recording).unwrap();
+    assert_eq!(diverged.verdict.word(), "divergent");
+    let found = against(std::slice::from_ref(&diverged), &[]);
+    assert!(
+        matches!(found.as_slice(), [Expectation::NotLedgerable { .. }]),
+        "{found:?}"
+    );
+}

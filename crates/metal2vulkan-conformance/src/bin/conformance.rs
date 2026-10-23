@@ -16,9 +16,13 @@
 //! fast form of every speed-for-accuracy choice, which is what a consumer runs. Comparing a case
 //! under both is how the suite says whether a difference is the policy's or the implementation's.
 //!
-//! The command's exit status is 0 only where the selection is compliant: no divergence, no refusal,
-//! no unrecorded case and no stale recording. A venue that lacks a feature a case needs does not
-//! spoil it.
+//! The command's exit status is 0 only where the selection holds no surprise: no divergence, no
+//! unrecorded case, no stale recording, and exactly the refusals `known-refusals.tsv` expects — a
+//! refusal it does not list, and a row it lists that is no longer refused, each fail the run. A
+//! venue that lacks a feature a case needs does not spoil it.
+//!
+//! The ledger never changes a verdict. A refusal it expects is still printed as `Refused` and
+//! still counted, because its rows are open bugs rather than accepted differences.
 
 use metal2vulkan_conformance::device::{Policy, Venues};
 use metal2vulkan_conformance::run;
@@ -64,7 +68,30 @@ fn command() -> Result<bool, String> {
         "replay" => {
             let report = run::replay_on_under(venues, policy, &cases)?;
             print!("{}", report.render());
-            Ok(report.is_compliant())
+            // The known-refusals ledger decides the exit status and nothing else: each of its rows
+            // is still printed above as a `Refused` row and still counted there. It is held in
+            // both directions, so a new refusal fails the run and a row that is no longer refused
+            // fails it too.
+            let ledger = metal2vulkan_conformance::known_refusals::ledger()?;
+            let unexpected = report.unexpected(&ledger);
+            if unexpected.is_empty() {
+                let expected = ledger
+                    .iter()
+                    .filter(|known| report.rows().iter().any(|row| row.case == known.case))
+                    .count();
+                if expected > 0 {
+                    println!(
+                        "\nthe {expected} refusal(s) above are exactly the open gaps \
+                         known-refusals.tsv expects, each one a bug with a todo behind it"
+                    );
+                }
+                return Ok(true);
+            }
+            println!();
+            for why in &unexpected {
+                println!("not what known-refusals.tsv expects: {why}");
+            }
+            Ok(false)
         }
         other => Err(format!(
             "unknown command {other}: expected record, replay or cases"

@@ -169,8 +169,11 @@ jobs:
         run: cargo nextest run -p metal2vulkan-validation --all-features
 
       # The conformance suite's replay leg on lavapipe: it reads the committed recordings, runs the
-      # runtime side and compares, with no Metal present. Its exit status is 0 only where the whole
-      # case set is compliant; a venue that lacks a feature a case needs does not spoil it.
+      # runtime side and compares, with no Metal present. Its exit status is 0 only where the run
+      # holds no surprise: no divergence, no unrecorded case, no stale recording, and exactly the
+      # refusals crates/metal2vulkan-conformance/known-refusals.tsv expects. A refusal that ledger
+      # does not list fails here, and so does a row it lists that is no longer refused, so closing
+      # a gap forces the ledger edit. A venue that lacks a feature a case needs does not spoil it.
       - name: Replay the conformance suite on the CPU Vulkan ICD (Linux)
         if: runner.os == 'Linux'
         env:
