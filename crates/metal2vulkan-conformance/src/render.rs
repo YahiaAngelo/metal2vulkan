@@ -160,12 +160,14 @@ impl TargetSpec {
         bytes.push(u8::from(self.shader_read));
         bytes.push(u8::from(self.shader_write));
         bytes.push(u8::from(self.shared));
-        match &self.surface {
-            Some(plane) => {
-                bytes.push(1);
-                bytes.extend(plane.words());
-            }
-            None => bytes.push(0),
+        // Written **only where the target has one**, as a pass writes its optional attachments:
+        // a target of its own memory then fingerprints to exactly the bytes it always has, so
+        // adding this field left every existing render case's recording valid. Writing a 0 here
+        // for `None` did not, and the whole-set replay caught it as 62 cases of other streams'
+        // going unrecorded.
+        if let Some(plane) = &self.surface {
+            bytes.push(1);
+            bytes.extend(plane.words());
         }
         bytes
     }

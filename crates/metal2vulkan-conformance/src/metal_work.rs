@@ -46,7 +46,7 @@
 use crate::case::{Answer, Failure};
 use crate::work::{Done, Plane, Rect, Resource, Step, Storage, TextureKind, TextureSpec, Work};
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject, Sel};
+use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::sel;
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLBlitOption, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder,
@@ -764,11 +764,11 @@ impl Run<'_> {
         }
         let encoder = self.encoder()?;
         let selector = fill_texture_selector();
-        if !encoder.respondsToSelector(selector) {
-            return Err(Failure::unavailable(
-                "fillTexture:level:slice:region:bytes:length:",
-            ));
-        }
+        crate::metal_side::require_selector(
+            &*encoder,
+            selector,
+            "fillTexture:level:slice:region:bytes:length:",
+        )?;
         let target: &AnyObject = encoder.as_ref();
         let bytes = pattern.as_ptr().cast::<std::ffi::c_void>();
         // SAFETY: the selector is there, checked just above, and takes the arguments the committed

@@ -2454,6 +2454,11 @@ impl Side for MetalSide {
                     let device: &ProtocolObject<dyn MTLDevice> = &self.device;
                     let descriptor: &MTLTextureDescriptor = &descriptor;
                     let plane = over.plane as usize;
+                    require_selector(
+                        device,
+                        objc2::sel!(newTextureWithDescriptor:iosurface:plane:),
+                        "MTLDevice newTextureWithDescriptor:iosurface:plane:",
+                    )?;
                     // SAFETY: `newTextureWithDescriptor:iosurface:plane:` of a live surface whose
                     // planes it states, at one of them; the surface is kept below, so it outlives
                     // the texture that reads it.
@@ -2776,15 +2781,13 @@ impl MetalSide {
         let framebuffer_only = objc2::sel!(setFramebufferOnly:);
         let rotation = objc2::sel!(setRotation:);
         for (selector, name) in [
-            (framebuffer_only, "setFramebufferOnly:"),
-            (rotation, "setRotation:"),
+            (
+                framebuffer_only,
+                "MTLTextureDescriptor setFramebufferOnly: (Apple SPI)",
+            ),
+            (rotation, "MTLTextureDescriptor setRotation: (Apple SPI)"),
         ] {
-            if !descriptor.respondsToSelector(selector) {
-                return Err(Failure::named(
-                    "NoSuchSelector",
-                    format!("MTLTextureDescriptor answers no {name} (Apple SPI)"),
-                ));
-            }
+            require_selector(&*descriptor, selector, name)?;
         }
         // SAFETY: both selectors were just checked, and each takes one integral argument and
         // answers nothing, as the private setters do. Verified answered on an Apple M3 Max under
@@ -2830,11 +2833,11 @@ impl MetalSide {
         plane: &crate::surface::PlaneSpec,
     ) -> Answer<Retained<ProtocolObject<dyn MTLTexture>>> {
         let selector = objc2::sel!(newTextureWithDescriptor:iosurface:plane:);
-        if !self.device.respondsToSelector(selector) {
-            return Err(Failure::unavailable(
-                "MTLDevice answers no newTextureWithDescriptor:iosurface:plane:",
-            ));
-        }
+        require_selector(
+            &*self.device,
+            selector,
+            "MTLDevice newTextureWithDescriptor:iosurface:plane:",
+        )?;
         // SAFETY: the selector was just checked; it takes the descriptor, an `IOSurfaceRef` and a
         // plane index, and answers a `+1` texture, which `Retained` takes ownership of. The stride
         // rule the caller checked is what keeps this call from asserting.
@@ -2849,6 +2852,25 @@ impl MetalSide {
         texture.ok_or_else(|| {
             Failure::named("NewTextureWithIoSurface", format!("{plane:?} returned nil"))
         })
+    }
+}
+
+/// Check `object` answers `selector` before anything is sent to it, answering
+/// [`Failure::unavailable`] naming the selector where it does not.
+///
+/// **Every Apple SPI this suite sends goes through here**: the two texture fills
+/// ([`crate::metal_work`]), `MTLTextureDescriptor`'s `setFramebufferOnly:` and `setRotation:`, and
+/// the `IOSurfaceRef` creator. One lookup rather than one per call site, so a release that stops
+/// answering a private selector gives the same typed refusal naming it wherever it is reached,
+/// instead of an unrecognised-selector crash in whichever module happened to forget the check.
+pub(crate) fn require_selector(
+    object: &(impl NSObjectProtocol + objc2::Message),
+    selector: objc2::runtime::Sel,
+    name: &'static str,
+) -> Answer<()> {
+    match object.respondsToSelector(selector) {
+        true => Ok(()),
+        false => Err(Failure::unavailable(name)),
     }
 }
 
