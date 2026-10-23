@@ -1647,6 +1647,65 @@ fn the_committed_recordings_carry_all_three_validated_answers() {
     );
 }
 
+/// **No committed recording holds an address Metal printed.**
+///
+/// A validation complaint names the object it is about by its pointer
+/// (`<AGXG15XFamilyBuffer: 0x7b81438e00>`), which is this run's heap and moves under ASLR, so a
+/// recording that kept one could never be re-recorded byte for byte — and a re-record that changes
+/// nothing is how a fingerprint refresh is told from a re-measurement. `crate::validated::read`
+/// normalises them to `0xADDR`; this is what keeps "contained to six recordings" from quietly
+/// becoming sixty, in this family or any other.
+///
+/// Every answer of every recording is read, not only the newest chip's, so an answer carried from
+/// another chip cannot smuggle one in.
+#[test]
+fn no_recorded_message_holds_an_address() {
+    /// `0x` and this many hexadecimal digits is an address, which is
+    /// `crate::validated::ADDRESS_DIGITS`.
+    const DIGITS: usize = 6;
+    let holds_address = |text: &str| {
+        let bytes = text.as_bytes();
+        (0..bytes.len()).any(|at| {
+            bytes[at] == b'0'
+                && at + 1 < bytes.len()
+                && bytes[at + 1] | 0x20 == b'x'
+                && bytes[at + 2..]
+                    .iter()
+                    .take_while(|byte| byte.is_ascii_hexdigit())
+                    .count()
+                    >= DIGITS
+        })
+    };
+    // The scan itself finds one, so a green run means the recordings are clean and not that the
+    // check cannot fire.
+    assert!(holds_address("<AGXG15XFamilyBuffer: 0x7b81438e00>"));
+    assert!(!holds_address("length = 8, mask = 0xffff"));
+    let mut held: Vec<String> = Vec::new();
+    let mut messages = 0;
+    for case in crate::cases::all() {
+        let recording = crate::recording::read(case.name())
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        for answer in &recording.answers {
+            let Validated::Stopped { call, message } = &answer.validated else {
+                continue;
+            };
+            messages += 1;
+            if holds_address(message) {
+                held.push(format!("{}: {call}: {message}", case.name()));
+            }
+        }
+    }
+    assert!(
+        held.is_empty(),
+        "{} recording(s) keep an address Metal printed, which no re-record can reproduce:\n{}",
+        held.len(),
+        held.join("\n")
+    );
+    // And the walk really read the validated messages there are, so the emptiness above is a
+    // result rather than a selection that found nothing to look at.
+    assert!(messages > 0, "no recording holds a validation complaint");
+}
+
 /// The committed ledger parses, every row names a gap, and each row's case is a real case.
 ///
 /// A row whose case has been renamed away would otherwise read as "no longer held" forever, or
