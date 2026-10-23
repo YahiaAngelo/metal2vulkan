@@ -486,6 +486,15 @@ pub enum Shaders {
     Warm,
     /// A device and a shader cache of its own for every case, so no case is handed another's
     /// compile.
+    ///
+    /// **This setting is one-sided and a reader has to know it.** It turns off *our* reuse and
+    /// leaves Metal's leg exactly as it was: there is no public call that empties Metal's own
+    /// shader cache, and this host's on-disk one is not writable under SIP. So a cold ratio is
+    /// our cold cost against Metal's cost as it comes, and the claim that Metal is recompiling
+    /// too is a measurement and not an assumption -- over the warm and cold runs of one twelve
+    /// case selection Metal's per-call totals moved 3.0%, and its `newLibraryWithData` costs
+    /// about 24.6 ms a call in both, which is a price at which a compile is happening. The
+    /// comparison still has a floor that nobody here controls; say so beside any figure from it.
     Cold,
 }
 

@@ -83,47 +83,57 @@ pub fn band() -> f64 {
     crate::times::MARGIN as f64 / BAND_DIVISOR
 }
 
-/// Which shader-cache mode a row was measured in ([`crate::run::Shaders`]).
+/// **Why a cold measurement is reported and never judged.** `--cold-shaders` gives each case a
+/// device and a shader cache of its own, so it changes two things at once and only on our leg: no
+/// case is handed another's compile, and every per-device first-use cost lands inside whichever
+/// call touches a resource first. The whole-set numbers say how much of the second there is --
+/// warm against cold on this M3 Max, `target` goes 0.9x to 14.3x, `dispatch` 1.0x to 17.7x and
+/// `copy_rate_map_parameters` 0.4x to 26.4x, none of which compiles anything. A cold reading over
+/// the margin therefore does not say which of the two it is, and a gate wants a reading that
+/// localises. Nine calls were over the margin in the cold whole-set run against four warm; seven
+/// of the nine would have been one row each for one mechanism, which is the ledger its own header
+/// warns about.
+pub const WHY_COLD_IS_NOT_JUDGED: &str =
+    "the margin is reported and not judged for a cold measurement: --cold-shaders also gives \
+     every case\na fresh device, so a reading over the margin does not separate our compile \
+     cost from the cost of\nfirst use on a new device -- measured, `target` is 0.9x warm and \
+     14.3x cold without compiling anything.\nRun it without --cold-shaders for the gate.";
+
+/// **The host has to be quiet for the gate to mean anything**, and this is the bound.
 ///
-/// **A row must name its mode or the gate reads a cold row as fixed on a warm run.** Measured on
-/// twelve comparable cases: `compute_pipeline` is 8.2x Metal's warm and **53.0x cold**, because
-/// cold gives every case its own shader cache and warm hands the second case the first's compile.
-/// A single row for both would sit under the band in one mode and over the margin in the other,
-/// and the `NoLongerSlow` direction would fire on a mode change rather than on a fix.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Mode {
-    /// One shader cache for the round, which is what a consumer sees and what the gate runs by
-    /// default.
-    Warm,
-    /// A shader cache per case: the only mode in which the compile rows compare like with like.
-    Cold,
-}
+/// It is deliberately well under the load at which the inflation was measured (see
+/// [`crate::clocks::host_load`]: load average about 11 on this 16-core M3 Max moved our
+/// CPU-bound totals 4.5x while Metal's moved 1.6x). The threshold where it stops mattering was
+/// never localised, so the bound is conservative on purpose: a run on a busy host reports and is
+/// not judged, which is a missing verdict rather than a false red.
+pub const QUIET_ENOUGH: f64 = 4.0;
 
-impl Mode {
-    /// The word the ledger uses.
-    pub fn label(self) -> &'static str {
-        match self {
-            Mode::Warm => "warm",
-            Mode::Cold => "cold",
-        }
+/// Whether the gate judges a measurement taken under `shaders` on a host at `load`.
+///
+/// Warm and quiet, and neither for a reason the caller prints: a cold reading does not separate
+/// our compile cost from first use on a new device ([`WHY_COLD_IS_NOT_JUDGED`]), and a loaded
+/// host moves our leg and not Metal's ([`QUIET_ENOUGH`]). A host that answers no load average is
+/// judged: a missing reading is not evidence of a busy machine.
+pub fn judges(shaders: crate::run::Shaders, load: Option<f64>) -> Result<(), String> {
+    if matches!(shaders, crate::run::Shaders::Cold) {
+        return Err(WHY_COLD_IS_NOT_JUDGED.to_owned());
     }
-
-    /// The mode `run::Shaders` names.
-    pub fn of(shaders: crate::run::Shaders) -> Self {
-        match shaders {
-            crate::run::Shaders::Warm => Mode::Warm,
-            crate::run::Shaders::Cold => Mode::Cold,
-        }
+    match load {
+        Some(load) if load > QUIET_ENOUGH => Err(format!(
+            "the margin is reported and not judged: this host's one-minute load average is \
+             {load:.2} and the gate\nwants it at {QUIET_ENOUGH:.1} or under. Our leg spends its \
+             cost on the calling thread's CPU where Metal's\nlargest calls sit blocked on the \
+             GPU, so load moves our ratios and leaves Metal's -- measured, 4.5x\nagainst 1.6x \
+             on one identical case set. Re-run it on a quiet host for a verdict."
+        )),
+        _ => Ok(()),
     }
 }
-
 /// One call we have written down as costing an order of magnitude more than Metal's.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct KnownSlowCall {
     /// The [`crate::case::Side`] call.
     pub call: String,
-    /// The shader-cache mode the row was measured in, and the only mode it is held in.
-    pub mode: Mode,
     /// The ratio the measurement that justified the row read, as its text: part of the row so a
     /// reader sees what it was when it was written, and so a row cannot be added without one.
     pub measured: String,
@@ -149,23 +159,12 @@ pub fn parse(text: &str) -> Result<Vec<KnownSlowCall>, String> {
         }
         let at = number + 1;
         let fields: Vec<&str> = line.split('\t').collect();
-        let [call, mode, measured, where_it_is, waiting_on] = fields.as_slice() else {
+        let [call, measured, where_it_is, waiting_on] = fields.as_slice() else {
             return Err(format!(
-                "known-slow-calls.tsv line {at}: {} tab-separated fields, and a row has five: the \
-                 call, the shader-cache mode it was measured in, the ratio its measurement read, \
-                 where the cost is, and the gap it waits on",
+                "known-slow-calls.tsv line {at}: {} tab-separated fields, and a row has four: the \
+                 call, the ratio its measurement read, where the cost is, and the gap it waits on",
                 fields.len()
             ));
-        };
-        let mode = match mode.trim() {
-            "warm" => Mode::Warm,
-            "cold" => Mode::Cold,
-            other => {
-                return Err(format!(
-                    "known-slow-calls.tsv line {at}: {call} names the shader-cache mode {other}, \
-                     and a row is measured either warm or cold"
-                ))
-            }
         };
         if measured.trim().is_empty() {
             return Err(format!(
@@ -182,7 +181,6 @@ pub fn parse(text: &str) -> Result<Vec<KnownSlowCall>, String> {
         }
         rows.push(KnownSlowCall {
             call: call.trim().to_owned(),
-            mode,
             measured: measured.trim().to_owned(),
             where_it_is: where_it_is.trim().to_owned(),
             waiting_on: waiting_on.trim().to_owned(),
@@ -247,13 +245,9 @@ impl std::fmt::Display for Expectation {
 /// A row the measurement could not compare at all is left out: its ratio is not a number, and a
 /// call with no Metal figure is a coverage hole rather than a cost result.
 ///
-/// `mode` is the run's own shader-cache mode, and only the ledger's rows of that mode are held
-/// ([`Mode`]).
-pub fn held(
-    rows: &[crate::times::Paired],
-    ledger: &[KnownSlowCall],
-    mode: Mode,
-) -> Vec<Expectation> {
+/// A cold measurement never reaches here: [`judges`] turns the gate off for one, because its
+/// readings do not separate our compile cost from the cost of first use on a new device.
+pub fn held(rows: &[crate::times::Paired], ledger: &[KnownSlowCall]) -> Vec<Expectation> {
     let margin = crate::times::MARGIN as f64;
     let band = band();
     let mut held = Vec::new();
@@ -261,11 +255,7 @@ pub fn held(
         let Some(ratio) = row.ratio() else {
             continue;
         };
-        // Only the rows of this run's own mode: a cold row says nothing about a warm run and
-        // holding it there would read a mode change as a fix.
-        let listed = ledger
-            .iter()
-            .find(|known| known.call == row.call && known.mode == mode);
+        let listed = ledger.iter().find(|known| known.call == row.call);
         let said = format!("{ratio:.1}x");
         held.push(match (listed, ratio) {
             (Some(known), ratio) if ratio > margin => Expectation::Known {
@@ -342,55 +332,53 @@ mod tests {
     #[test]
     fn a_row_without_its_evidence_is_refused() {
         assert!(
-            parse("a\twarm\t\twhere\tgap").is_err(),
+            parse("a\t\twhere\tgap").is_err(),
             "a row with no measurement parsed"
         );
-        assert!(
-            parse("a\twarm\t3x\twhere\t").is_err(),
-            "a row with no gap parsed"
-        );
-        assert!(
-            parse("a\twarm\t3x\twhere").is_err(),
-            "a four-field row parsed"
-        );
-        assert!(
-            parse("a\tlukewarm\t3x\twhere\tgap").is_err(),
-            "a row naming a mode that does not exist parsed"
-        );
+        assert!(parse("a\t3x\twhere\t").is_err(), "a row with no gap parsed");
+        assert!(parse("a\t3x\twhere").is_err(), "a three-field row parsed");
         assert!(parse("# just a comment\n\n").unwrap().is_empty());
     }
 
-    /// **A row is held only in its own mode.** A cold row says nothing about a warm run, and
-    /// holding it there would read a mode change as a fix -- which is exactly what the cold
-    /// measurement would have caused: `compute_pipeline` is 53x cold and 8.2x warm.
+    /// **A cold measurement is reported and never judged**, because `--cold-shaders` also hands
+    /// every case a fresh device and a reading over the margin then does not say which of the two
+    /// it is. Measured on this M3 Max, `target` is 0.9x warm and 14.3x cold without compiling
+    /// anything.
     #[test]
-    fn a_row_is_held_only_in_the_mode_it_was_measured_in() {
-        let cold_row = vec![KnownSlowCall {
-            call: "listed".to_owned(),
-            mode: Mode::Cold,
-            measured: "53.0x".to_owned(),
-            where_it_is: "somewhere".to_owned(),
-            waiting_on: "a gap written down at length somewhere".to_owned(),
-        }];
-        // Warm, the same call back inside the band: the cold row must NOT read as fixed.
-        let warm = held(&[row("listed", 2)], &cold_row, Mode::Warm);
+    fn the_gate_does_not_judge_a_cold_measurement() {
         assert!(
-            warm.is_empty(),
-            "a cold row was held against a warm run: {warm:?}"
+            judges(crate::run::Shaders::Warm, Some(0.5)).is_ok(),
+            "the warm gate is off on a quiet host"
         );
-        // Cold, over the margin: the row covers it.
-        let cold = held(&[row("listed", 53)], &cold_row, Mode::Cold);
-        assert!(matches!(&cold[0], Expectation::Known { .. }), "{cold:?}");
-        assert!(!cold[0].fails());
+        let cold = judges(crate::run::Shaders::Cold, Some(0.5)).expect_err(
+            "a cold measurement was judged, and its readings do not separate the two causes",
+        );
+        assert!(
+            cold.contains("--cold-shaders"),
+            "the reason does not name the switch that causes it: {cold}"
+        );
     }
 
-    /// Both modes are represented in the ledger, so the mode column cannot quietly become
-    /// decoration.
+    /// **A loaded host is reported and never judged.** Our leg is CPU-bound where Metal's largest
+    /// calls are GPU-blocked, so load moves our ratios and leaves Metal's: it does not cancel.
+    /// A host that answers no load average is still judged, because a missing reading is not
+    /// evidence of a busy machine.
     #[test]
-    fn the_ledger_names_both_modes() {
-        let rows = ledger().unwrap();
-        assert!(rows.iter().any(|known| known.mode == Mode::Warm));
-        assert!(rows.iter().any(|known| known.mode == Mode::Cold));
+    fn the_gate_does_not_judge_a_loaded_host() {
+        let busy = judges(crate::run::Shaders::Warm, Some(QUIET_ENOUGH + 0.01))
+            .expect_err("a loaded host was judged, and its ratios are not the two stacks'");
+        assert!(
+            busy.contains("load average"),
+            "the reason does not say what it read: {busy}"
+        );
+        assert!(
+            judges(crate::run::Shaders::Warm, Some(QUIET_ENOUGH)).is_ok(),
+            "the bound itself is refused, so no host can ever meet it"
+        );
+        assert!(
+            judges(crate::run::Shaders::Warm, None).is_ok(),
+            "a host with no load average was refused a verdict for not having one"
+        );
     }
 
     /// **Both directions.** An unlisted call over the margin fails; a listed call back inside the
@@ -399,16 +387,11 @@ mod tests {
     fn the_gate_is_held_in_both_directions() {
         let known = vec![KnownSlowCall {
             call: "listed".to_owned(),
-            mode: Mode::Warm,
             measured: "100.0x".to_owned(),
             where_it_is: "somewhere".to_owned(),
             waiting_on: "a gap written down at length somewhere".to_owned(),
         }];
-        let over = held(
-            &[row("listed", 100), row("unlisted", 50)],
-            &known,
-            Mode::Warm,
-        );
+        let over = held(&[row("listed", 100), row("unlisted", 50)], &known);
         assert!(matches!(&over[0], Expectation::Known { .. }), "{over:?}");
         assert!(matches!(&over[1], Expectation::Unlisted { .. }), "{over:?}");
         assert!(!over[0].fails());
@@ -418,7 +401,7 @@ mod tests {
         );
 
         // The listed call, fixed: now inside the band.
-        let fixed = held(&[row("listed", 2)], &known, Mode::Warm);
+        let fixed = held(&[row("listed", 2)], &known);
         assert!(
             matches!(&fixed[0], Expectation::NoLongerSlow { .. }),
             "{fixed:?}"
@@ -433,7 +416,7 @@ mod tests {
     /// cost, and an unexplained win is not something a gate should bless.
     #[test]
     fn being_faster_than_metal_never_fires_the_gate() {
-        let quick = held(&[row("quick", 0)], &[], Mode::Warm);
+        let quick = held(&[row("quick", 0)], &[]);
         assert!(quick.is_empty(), "{quick:?}");
     }
 
@@ -444,12 +427,11 @@ mod tests {
     fn a_listed_row_in_the_band_is_neither_a_pass_nor_a_failure() {
         let known = vec![KnownSlowCall {
             call: "listed".to_owned(),
-            mode: Mode::Warm,
             measured: "11.0x".to_owned(),
             where_it_is: "somewhere".to_owned(),
             waiting_on: "a gap written down at length somewhere".to_owned(),
         }];
-        let inside = held(&[row("listed", 6)], &known, Mode::Warm);
+        let inside = held(&[row("listed", 6)], &known);
         assert!(
             matches!(&inside[0], Expectation::InTheBand { .. }),
             "{inside:?}"

@@ -70,3 +70,24 @@ fn read(clock: libc::clockid_t) -> Option<u64> {
     let nanos = u64::try_from(when.tv_nsec).ok()?;
     seconds.checked_mul(1_000_000_000)?.checked_add(nanos)
 }
+
+/// The host's one-minute load average, or `None` where the host does not answer it.
+///
+/// **Why a timing report reads this.** The two legs are not loaded alike: ours spends its cost on
+/// the calling thread's CPU where Metal's largest calls sit blocked on the GPU, so host load does
+/// not cancel in a ratio -- it moves ours and leaves Metal's. Measured on this M3 Max over one
+/// identical case set, our `render_pipeline` total went 220 ms to 999 ms (4.5x) between a quiet
+/// run and one taken against four `rustc` and another suite's binary, while Metal's went 8.1 ms
+/// to 13.3 ms (1.6x), and `replace_region`, which is four fifths blocked rather than CPU, moved
+/// the *other* way, 60.9x to 12.1x. A ratio read on a busy host is not a ratio of the two stacks.
+pub fn host_load() -> Option<f64> {
+    let mut averages = [0.0f64; 3];
+    // SAFETY: `getloadavg` writes at most the number of entries it is given into the pointer it
+    // is given, and reads nothing else. It answers -1 where the host keeps no load average, and
+    // the count it answers is how many entries it actually wrote.
+    let written = unsafe { libc::getloadavg(averages.as_mut_ptr(), 3) };
+    if written < 1 {
+        return None;
+    }
+    Some(averages[0])
+}

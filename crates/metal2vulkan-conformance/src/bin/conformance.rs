@@ -617,13 +617,17 @@ fn times(
     }
     // The per-call gate, which is why this command has a meaningful exit status at all. It is held
     // against the paired rows, so it needs both legs; a one-leg run reports and judges nothing.
+    // It also needs a measurement whose readings localise: a warm one rather than a cold one, and
+    // one taken on a quiet host rather than a busy one -- see `slow_calls::judges`.
     let mut green = true;
-    if let (Some(metal), Some(ours)) = (&metal, &ours) {
+    let load = metal2vulkan_conformance::clocks::host_load();
+    if let Err(why) = metal2vulkan_conformance::slow_calls::judges(shaders, load) {
+        println!("\n{why}");
+    } else if let (Some(metal), Some(ours)) = (&metal, &ours) {
         let ledger = metal2vulkan_conformance::slow_calls::ledger()?;
         let held = metal2vulkan_conformance::slow_calls::held(
             &metal2vulkan_conformance::times::paired(metal, ours),
             &ledger,
-            metal2vulkan_conformance::slow_calls::Mode::of(shaders),
         );
         println!();
         for one in &held {

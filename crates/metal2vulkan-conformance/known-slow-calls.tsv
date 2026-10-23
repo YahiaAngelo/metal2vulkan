@@ -19,15 +19,17 @@
 #
 # Fields, tab-separated:
 #   call                the Side call
-#   mode                the shader-cache mode it was measured in: warm or cold. A row is held ONLY
-#                       in its own mode, because `compute_pipeline` is 8.2x Metal's warm and 53.0x
-#                       cold, and one row for both would read a mode change as a fix.
+# A COLD MEASUREMENT IS REPORTED AND NEVER JUDGED, so no row here is measured with
+# `--cold-shaders`. That switch gives every case a fresh device as well as a fresh shader cache,
+# and only on our leg, so a cold reading over the margin does not say whether the cost is our
+# compile or first use on a new device: measured on this M3 Max, `target` is 0.9x warm and 14.3x
+# cold and compiles nothing at all. Nine calls were over the margin cold against four warm, and
+# seven of the nine were one mechanism. src/slow_calls.rs refuses to judge a cold run.
+#
 #   measured            the ratio its measurement read, with an x
 #   where the cost is   the family it is in, and what the figure splits into
 #   waiting on          what Metal does, what we do instead, and where the fix belongs
-replace_region	warm	105.5x	all of it in the 16 xr-two-plane-samples cases: one replaceRegion each, Metal 4 us against our 1210 us, 92% of ours blocked; the other 86 cases that make the call are 1.3x together	Metal's replaceRegion on a two-plane extended-range texture answers in 4 us; ours waits about 1.1 ms, so we stage the upload and wait on it where Metal writes through. The fix is in the runtime's texture upload path for two-plane extended-range formats, not in the suite
-render_pipeline	warm	33.3x	85 calls over the comparable set, Metal 5459 us against our 181742 us, of which 168004 us is our own CPU	Pipeline creation is CPU work we do and Metal does differently; AGENTS.md gives pipeline-creation time its own ceiling rather than the device API's, so this row records the size of the gap and is NOT yet attributed. It is unaudited: the alone-versus-in-set contrast has not been run on it
-render_pipeline_with_reflection	warm	14.7x	one call, Metal 291 us against our 4274 us, 3946 us of it our own CPU	The same pipeline-creation path as render_pipeline plus reflection; listed separately because one call is too thin a measurement to fold into that row
-tile_pipeline	warm	11.9x	three calls, Metal 192 us against our 2292 us, all of it our own CPU	The same pipeline-creation path for tile pipelines. Closest of the four to the band, so a quiet run may read it either side; the band exists for exactly this row
-compute_pipeline	cold	53.0x	twelve comparable cases over eight rounds, Metal 1044 us against our 55335 us, 52854 us of it our own CPU; the same selection warm is 8.2x, so cold costs us 5.9x what warm does	Cold, our compute-pipeline creation is 53x Metal's. Metal front-loads the compile to newLibraryWithData (24 ms a call) and we back-load it to pipeline creation, so our total compile path is still 4.7x cheaper than Metal's cold -- but per call this is where our cost is, and warm hides 5.9x of it behind shader reuse. The fix belongs in the translator and pipeline-creation path, which AGENTS.md gives its own ceiling
-render_pipeline	cold	45.7x	four calls over the same twelve cases, Metal 554 us against our 25301 us, 24168 us of it our own CPU; the same selection warm is 14.0x, so cold costs us 3.3x what warm does	The same pipeline-creation path as compute_pipeline cold. Listed in both modes because the gap is large in both and the two figures are different measurements
+replace_region	105.5x	all of it in the 16 xr-two-plane-samples cases: one replaceRegion each, Metal 4 us against our 1210 us, 92% of ours blocked; the other 86 cases that make the call are 1.3x together	Metal's replaceRegion on a two-plane extended-range texture answers in 4 us; ours waits about 1.1 ms, so we stage the upload and wait on it where Metal writes through. The fix is in the runtime's texture upload path for two-plane extended-range formats, not in the suite
+render_pipeline	33.3x	85 calls over the comparable set, Metal 5459 us against our 181742 us, of which 168004 us is our own CPU	Pipeline creation is CPU work we do and Metal does differently; AGENTS.md gives pipeline-creation time its own ceiling rather than the device API's, so this row records the size of the gap and is NOT yet attributed. It is unaudited: the alone-versus-in-set contrast has not been run on it
+render_pipeline_with_reflection	14.7x	one call, Metal 291 us against our 4274 us, 3946 us of it our own CPU	The same pipeline-creation path as render_pipeline plus reflection; listed separately because one call is too thin a measurement to fold into that row
+tile_pipeline	11.9x	three calls, Metal 192 us against our 2292 us, all of it our own CPU	The same pipeline-creation path for tile pipelines. Closest of the four to the band, so a quiet run may read it either side; the band exists for exactly this row
