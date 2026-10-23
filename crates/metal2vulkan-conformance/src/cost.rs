@@ -273,6 +273,63 @@ const RACY: [(&str, &str); 27] = [
     ),
 ];
 
+/// The counts whose larger reading is the **no-sharing extreme**, so the gate keeps them at that
+/// extreme instead of reporting them.
+///
+/// A count here is one the two shapes read differently for one reason only: a case with nothing
+/// before it makes the object itself where a case in company finds it already made. Its reading
+/// alone is therefore its ceiling, no composition can exceed it, and a bound taken there does not
+/// go stale when a case lands beside this one. Gating it is the one place the contrast gives back
+/// what it takes away.
+///
+/// **Each name is here on its own measurement and never by analogy to another.** Over all 393
+/// cases in both shapes, every one of these read at or above its in-set reading in every case that
+/// moved it — `below` counts the cases where the lone run read *lower*, which is the direction that
+/// would make the bound wrong:
+///
+/// | count | cases | below | the shapes differ | largest alone |
+/// |---|---:|---:|---:|---:|
+/// | `addressable_buffers_made` | 385 | 0 | 384 | 2 |
+/// | `pooled_memory_blocks_made` | 385 | 0 | 384 | 5 |
+/// | `arena_pools_made` | 215 | 0 | 207 | 30 |
+/// | `creation_pipelines_made` | 181 | 0 | 109 | 64 |
+/// | `variant_pipelines_made` | 196 | 0 | 114 | 128 |
+/// | `shader_modules_made` | 199 | 0 | 160 | 34 |
+/// | `pipeline_layouts_made` | 199 | 0 | 174 | 4 |
+///
+/// **`device_memory_allocated` is monotone over the same 393 cases and is deliberately not here.**
+/// It passed the direction test — 385 cases, 0 below — and fails the other test a bound has to
+/// pass: it counts *bytes*, so the two shapes differ by 268,435,456 where the largest of these
+/// object counts differs by 8. A bound of 256 MiB on a case that allocates nothing in company is a
+/// number no regression can reach, and a bound that cannot fail is worse than no bound. It stays
+/// reported, with both readings, where a reader can see it.
+///
+/// A ninth name earns a row here on data: a measurement over the whole case set in both shapes
+/// showing no case where the lone run reads lower, and a gap small enough that the bound still
+/// bites. Never by resembling one of these.
+const MONOTONE: [(&str, &str); 7] = [
+    ("addressable_buffers_made", "2 alone against 0 in company"),
+    ("pooled_memory_blocks_made", "4 alone against 0 in company"),
+    ("arena_pools_made", "30 alone against 22 in company"),
+    ("creation_pipelines_made", "4 alone against 0 in company"),
+    ("variant_pipelines_made", "6 alone against 0 in company"),
+    ("shader_modules_made", "7 alone against 0 in company"),
+    ("pipeline_layouts_made", "4 alone against 0 in company"),
+];
+
+/// Where `name`'s reading with the case alone is its ceiling, and the worst gap the measurement saw
+/// ([`MONOTONE`]).
+///
+/// The claim is about a direction, so the code holds it to one: a measurement that finds the lone
+/// run reading *lower* than the in-set run for such a count reports it like any other count the
+/// selection decides, because the fact its row rests on did not hold there.
+pub fn monotone(name: &str) -> Option<&'static str> {
+    MONOTONE
+        .iter()
+        .find(|(count, _)| *count == name)
+        .map(|(_, worst)| *worst)
+}
+
 /// Why `name` is reported and never gated, where it is.
 pub fn racy(name: &str) -> Option<&'static str> {
     RACY.iter()
@@ -930,7 +987,13 @@ impl CaseCost {
             }
             let apart = self.counts.get(count);
             let inside = held.bounds.get(count).copied().unwrap_or(0);
-            if apart != inside {
+            // A count whose larger reading is the no-sharing extreme keeps its gate there
+            // ([`monotone`]), because no composition can exceed what the case does with nothing
+            // before it. The direction is checked rather than assumed: a lone run reading *lower*
+            // is the one thing that would make such a bound wrong, so it is reported like any
+            // other count the selection decides.
+            let its_ceiling = monotone(count).is_some() && apart > inside;
+            if apart != inside && !its_ceiling {
                 folded.composed.insert(count.to_owned(), apart);
             }
             // The bound stays the largest either shape saw, so the record's own number is honest
@@ -945,7 +1008,9 @@ impl CaseCost {
     /// The counts this measurement reads differently from `held`: the ones the selection decides.
     ///
     /// Each is `(count, the other shape's reading, this one's)`. Counts the [`racy`] rule already
-    /// names are left out, because the rule ungates them whatever either shape read.
+    /// names are left out, because the rule ungates them whatever either shape read, and so is a
+    /// count reading higher alone whose ceiling that is ([`monotone`]): the gate keeps it at the
+    /// larger reading rather than giving it up.
     pub fn apart_from<'a>(&'a self, held: &'a CostRecord) -> Vec<(&'a str, u64, u64)> {
         let names: std::collections::BTreeSet<&str> = self
             .counts
@@ -960,7 +1025,9 @@ impl CaseCost {
                     held.bounds.get(count).copied().unwrap_or(0),
                     self.counts.get(count),
                 );
-                (inside != apart && racy(count).is_none()).then_some((count, inside, apart))
+                let its_ceiling = monotone(count).is_some() && apart > inside;
+                (inside != apart && !its_ceiling && racy(count).is_none())
+                    .then_some((count, inside, apart))
             })
             .collect()
     }
