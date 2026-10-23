@@ -42,7 +42,11 @@
 //! - a map of two layers has one vertical axis, compiled from the larger of the layers' vertical
 //!   functions at each coordinate; each layer's horizontal axis is its own;
 //! - a map of no layers has no horizontal axis (its horizontal tables are zero words) and one
-//!   vertical axis, compiled from no quality function: every coordinate at the least quality.
+//!   vertical axis, compiled from no quality function: every coordinate at the least quality;
+//! - an axis of no screen pixels has one tile of no screen and no physical pixels, whatever its
+//!   quality, so the layer's physical extent on it is 0 and its tables hold Apple's least line
+//!   (`air::canon::rate_map_data`). Metal's API validation stops such a descriptor; plain Metal
+//!   compiles it, measured on an Apple M3 Max under macOS 27.0.1.
 //!
 //! Outside the bounds it is measured in, [`RasterizationRateMap::new`] refuses
 //! ([`RateMapError::Unpinned`], [`UnpinnedCompile`]) rather than guess: a screen extent above
@@ -74,8 +78,9 @@ use crate::metal::Mutability;
 pub const PHYSICAL_GRANULARITY: u32 = format::GRANULARITY;
 
 /// The largest screen width or height a compiled rasterization rate map takes
-/// ([`RasterizationRateMap::new`] refuses a larger one, `RateMapError::ScreenExtent`). Metal's own
-/// API validation stops a descriptor past 32,768, which the runtime holds to.
+/// ([`RasterizationRateMap::new`] refuses a larger one, `RateMapError::ScreenExtent`; an extent of
+/// 0 it compiles, as plain Metal does). Metal's own API validation stops a descriptor past 32,768
+/// and one of 0, of which the runtime holds to the upper bound alone.
 pub const MAX_SCREEN_EXTENT: u32 = 1 << 16;
 
 /// Apple's compile adds 1/256 to every quality sample before it clamps it.
@@ -194,10 +199,7 @@ pub enum RateMapError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UnpinnedCompile {
     /// A screen extent above 16384: Apple's compile crashed on every width from 24576 and a
-    /// height of 32768, and returned a map of a corrupt physical size at a height of 16385. Or
-    /// one of 0, which Metal's API validation stops at a map's creation, and which a reset
-    /// (where it does not look) compiles to no physical extent on that axis, not measured
-    /// further.
+    /// height of 32768, and returned a map of a corrupt physical size at a height of 16385.
     ScreenExtent { extent: u32 },
     /// More than two layers: Apple M3 supports two, and its compile crashes on more.
     LayerCount { count: usize },
@@ -232,9 +234,6 @@ pub enum UnpinnedCompile {
 impl fmt::Display for UnpinnedCompile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UnpinnedCompile::ScreenExtent { extent: 0 } => {
-                f.write_str("a screen extent of 0, whose compile is not measured")
-            }
             UnpinnedCompile::ScreenExtent { extent } => write!(
                 f,
                 "screen extent {extent} is above {MAX_COMPILED_EXTENT}, where Apple's compile \
@@ -279,7 +278,7 @@ impl fmt::Display for RateMapError {
             RateMapError::NoLayers => f.write_str("explicit tiles need a layer"),
             RateMapError::ScreenExtent { extent } => write!(
                 f,
-                "screen extent {extent} is outside 1..={MAX_SCREEN_EXTENT}, or explicit tiles' is \
+                "screen extent {extent} is past {MAX_SCREEN_EXTENT}, or explicit tiles' is \
                  past {MAX_COMPILED_EXTENT}"
             ),
             RateMapError::NoSamples { layer, axis } => {
@@ -507,7 +506,7 @@ impl RasterizationRateMap {
     pub fn new(desc: &RateMapDescriptor) -> Result<RasterizationRateMap, RateMapError> {
         let [width, height] = desc.screen_size;
         for extent in [width, height] {
-            if extent == 0 || extent > MAX_SCREEN_EXTENT {
+            if extent > MAX_SCREEN_EXTENT {
                 return Err(RateMapError::ScreenExtent { extent });
             }
         }
@@ -533,6 +532,12 @@ impl RasterizationRateMap {
             let axes = [(&layer.horizontal, width), (&layer.vertical, height)];
             for (axis, (samples, extent)) in axes.into_iter().enumerate() {
                 if samples.len() < 2 {
+                    continue;
+                }
+                // An axis of no screen pixels has no coordinate the quality function is read at,
+                // so its one tile is the degenerate one whatever the samples: Apple's bytes for a
+                // 0 by 64 map of two horizontal samples are those of its one-sample map, measured.
+                if extent == 0 {
                     continue;
                 }
                 if samples.len() - 1 > extent as usize {

@@ -3272,7 +3272,10 @@ each item named states the rule in full.
 **Rasterization-rate maps**
 
 - **A map of no layers refuses its coordinate maps, and a mutable map not yet reset its
-  physical-to-screen map**, where Metal ends the process.
+  physical-to-screen map**, where Metal ends the process. So does the screen-to-physical map of a
+  map whose screen width or height is 0, which plain Metal compiles and whose physical-to-screen
+  map it answers (an M3 Max under macOS 27.0.1: a SIGSEGV at the first such call on 0 by 64, 64 by
+  0 and 0 by 0 alike).
 - **A screen past 16384 pixels a side is refused**, where Apple's compile crashes or returns a
   corrupt size.
 - **A parameter-data copy Metal makes unsafely is refused**: into a `Private` buffer, or past the
@@ -3293,3 +3296,6 @@ each item named states the rule in full.
   rounded up to 32-pixel tiles and leaves the attachments' other pixels as they were (an M3 Max: a
   16-pixel identity map's pass into a 64-pixel attachment cleared 32 by 32 pixels).
 - **A rate-mapped pass draws region by region, and refuses a cutting scissor.**
+- **A pass over a map of a zero screen extent is refused**, `RegionError::RegionExtent` on that
+  axis: the layer has no physical pixel there, so no attachment of the map's physical size can be
+  made, and what Metal rasterizes in such a pass is not measured.

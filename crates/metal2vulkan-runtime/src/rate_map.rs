@@ -12,8 +12,14 @@
 //!   reset that compiles it) announces the `rasterization-rate-map` degradation.
 //! - **What Metal's API validation stops**, measured by our probes on an M3
 //!   Max and an M4 alike, is refused at creation, `Invalid` with [`RateMapProblem`]: a screen width
-//!   or height of 0 or past 32768, and a layer count past 2, but for a `Mutable` descriptor,
+//!   or height past 32768, and a layer count past 2, but for a `Mutable` descriptor,
 //!   whose map plain Metal makes whatever it holds (below).
+//!   Its two other stops are **not** the runtime's, because plain Metal makes the map. One is a
+//!   screen side of 0, whose map the runtime compiles as Metal does: its physical extent on that
+//!   axis is 0, its parameter data is Metal's, and `mapScreenToPhysicalCoordinates:forLayer:`
+//!   over it ends Metal's process, so the runtime refuses that one call, `Invalid` with
+//!   [`RateMapProblem::EmptyScreen`] (`mapPhysicalToScreenCoordinates:` answers on Metal, and the
+//!   runtime answers with it). The other is a layer count of 0 (below).
 //!   The count is Metal's `layerCount`:
 //!   the layers from index 0 up to the first without samples on an axis, which Metal's descriptor
 //!   holds as nil; the map is made of those, and the layers after are ignored, as Metal ignores
@@ -25,7 +31,9 @@
 //!   side and any samples; the compile layer compiles only where Apple's compile is measured,
 //!   and refuses the rest, `Error::RateMap` with its
 //!   [`UnpinnedCompile`](metal2vulkan::bind::UnpinnedCompile): a screen past 16384 a side (where Apple's
-//!   compile crashes or corrupts the map) and sample densities whose compile is not measured.
+//!   compile crashes or corrupts the map) and sample densities whose compile is not measured,
+//!   among them an axis of no screen pixels carrying more than one quality sample, where the
+//!   compile is measured for one sample alone.
 //! - **Metal's answers.** `screenSize` is the descriptor's, depth 1; `physicalGranularity` 32 by
 //!   32, depth 1; `parameterBufferSizeAndAlign` 24,624 bytes, align 4; the coordinate maps past
 //!   the layers read the last layer (both Macs, probes 7 and 9). `physicalSizeForLayer:` past the
@@ -51,8 +59,8 @@
 //!   compiles the descriptor into the map, which keeps its label and mutability. Metal's API
 //!   validation does not look at the reset's descriptor; a layer count past 2 ends Metal's
 //!   process (refused, `Invalid` with [`RateMapProblem::LayerCount`]), and the compile layer's
-//!   bounds hold (a screen side of 0, which Metal compiles to no physical extent on that axis,
-//!   among them: `Error::RateMap`). Metal writes the new map's tables over the old: every entry the
+//!   bounds hold (`Error::RateMap`); a reset to a screen side of 0 compiles, as a fresh map of one
+//!   does. Metal writes the new map's tables over the old: every entry the
 //!   new map writes (`metal2vulkan::bind::RasterizationRateMap::new_over`), and every other word
 //!   as it was (a map reset to no layers keeps its horizontal tables, and its physical width at
 //!   each layer below 2), so the parameter data is Metal's. A render pass reads the map as the GPU
@@ -85,7 +93,8 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 /// The largest screen width or height Metal's API validation takes ("screenSize.width (0)
-/// must be >0 and <=32768").
+/// must be >0 and <=32768"); of its two bounds the runtime holds to this one alone, plain Metal
+/// compiling a side of 0 (the module docs).
 const MAX_SCREEN_EXTENT: u32 = 32768;
 
 /// What a rasterization-rate map call did wrong (`Problem::RateMap`): what Metal's API validation
@@ -94,7 +103,8 @@ const MAX_SCREEN_EXTENT: u32 = 32768;
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RateMapProblem {
-    /// A screen width or height of 0 or past 32768.
+    /// A screen width or height past 32768. Metal's API validation stops a side of 0 too, and
+    /// plain Metal compiles such a map, which the runtime makes (the module docs).
     ScreenSize {
         /// The screen width given.
         width: u32,
@@ -112,6 +122,15 @@ pub enum RateMapProblem {
     },
     /// A coordinate map of a map of no layers, which ends Metal's process.
     NoLayers,
+    /// `mapScreenToPhysicalCoordinates:forLayer:` of a map with a screen width or height of 0,
+    /// which ends Metal's process (`mapPhysicalToScreenCoordinates:` of such a map answers, and
+    /// the runtime answers with it).
+    EmptyScreen {
+        /// The map's screen width.
+        width: u32,
+        /// The map's screen height.
+        height: u32,
+    },
     /// `mapPhysicalToScreenCoordinates:forLayer:` of a mutable map not yet reset, which ends
     /// Metal's process.
     NotCompiled,
@@ -384,8 +403,7 @@ fn validate(descriptor: &RateMapDescriptor) -> Result<(), Error> {
     const CALL: &str = "new_rasterization_rate_map";
     let refused = |problem| invalid(CALL, Problem::RateMap(problem));
     let [width, height] = descriptor.screen_size;
-    let extent = 1..=MAX_SCREEN_EXTENT;
-    if !extent.contains(&width) || !extent.contains(&height) {
+    if width > MAX_SCREEN_EXTENT || height > MAX_SCREEN_EXTENT {
         return Err(refused(RateMapProblem::ScreenSize { width, height }));
     }
     let count = counted(descriptor);
@@ -406,7 +424,7 @@ pub(super) fn compile(
 
 /// The compile layer's map of `descriptor`, Metal's layers of it, written over `earlier`'s words
 /// where given (`metal2vulkan::bind::RasterizationRateMap::new_over`): `Error::RateMap` where the
-/// compile layer does not compile it, a screen side of 0 or past its bound among them.
+/// compile layer does not compile it, a screen side past its bound among them.
 fn compile_over(
     descriptor: &RateMapDescriptor,
     earlier: Option<&[u32]>,
@@ -514,21 +532,27 @@ impl RasterizationRateMap {
 
     /// `mapScreenToPhysicalCoordinates:forLayer:`: where `screen` lands in the layer's physical
     /// space, as Apple's CPU map answers it, bit for bit; a layer past the map's reads the last.
-    /// (0, 0) before a mutable map's first reset. Refused, `Invalid` with
-    /// [`RateMapProblem::NoLayers`], over a map of no layers, where Metal's ends the process.
+    /// (0, 0) before a mutable map's first reset. Refused where Metal's ends the process,
+    /// `Invalid` with [`RateMapProblem`]: over a map of no layers (`NoLayers`), and over one of a
+    /// screen width or height of 0 (`EmptyScreen`).
     pub fn map_screen_to_physical_coordinates(
         &self,
         screen: Coordinate2D,
         layer: u64,
     ) -> Result<Coordinate2D, Error> {
+        const CALL: &str = "map_screen_to_physical_coordinates";
         let state = self.state();
         let Some(map) = state.compiled() else {
             return Ok(Coordinate2D::new(0.0, 0.0));
         };
         if map.layer_count() == 0 {
+            return Err(invalid(CALL, Problem::RateMap(RateMapProblem::NoLayers)));
+        }
+        let [width, height] = map.screen_size();
+        if width == 0 || height == 0 {
             return Err(invalid(
-                "map_screen_to_physical_coordinates",
-                Problem::RateMap(RateMapProblem::NoLayers),
+                CALL,
+                Problem::RateMap(RateMapProblem::EmptyScreen { width, height }),
             ));
         }
         let [x, y] = map.screen_to_physical([screen.x, screen.y], layer_index(layer));
@@ -599,8 +623,8 @@ impl RasterizationRateMap {
     /// `resetUsingDescriptor:` (Apple's private call, the module docs): `descriptor` compiled
     /// into the map over the tables it holds, its label and mutability kept. Refused where Metal
     /// ends the process, a layer count past 2 (`Invalid` with [`RateMapProblem::LayerCount`]),
-    /// and, `Error::RateMap`, where the compile layer does not compile it (a screen side of 0,
-    /// which Metal's validation does not look at here, among them); the map is then as it was.
+    /// and, `Error::RateMap`, where the compile layer does not compile it (Metal's validation
+    /// does not look at the reset's descriptor); the map is then as it was.
     /// A pass that took the map before the reset and whose command buffer is not yet submitted
     /// draws by the map as reset, as Metal's GPU reads it (`rate_mapped_pass.rs`).
     pub fn reset_using_descriptor(&self, descriptor: &RateMapDescriptor) -> Result<(), Error> {

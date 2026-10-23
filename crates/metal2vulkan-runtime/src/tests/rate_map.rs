@@ -31,37 +31,46 @@ fn refused(problem: RateMapProblem) -> Result<RasterizationRateMap, Error> {
 
 const HALF: (&[f32], &[f32]) = (&[0.5], &[0.5]);
 
-/// A screen of 1 to 32768 pixels a side passes Metal's validation, and 0 or more does not; the
-/// screen's check comes first.
+/// A screen side past 32768, which Metal's validation stops, is refused; the screen's check comes
+/// first. A side of 0, which its validation also stops, is not the runtime's refusal: plain Metal
+/// compiles such a map, so the runtime compiles it too, with no physical extent on that axis.
 #[test]
-fn a_screen_side_is_1_to_32768_pixels() {
-    for (width, height) in [
-        (0, 64),
-        (64, 0),
-        (0, 0),
-        (32769, 1),
-        (1, 32769),
-        (u32::MAX, 64),
-    ] {
+fn a_screen_side_is_at_most_32768_pixels() {
+    for (width, height) in [(32769, 1), (1, 32769), (u32::MAX, 64), (0, 32769)] {
         assert_eq!(
             compile(&descriptor(width, height, &[HALF])),
             refused(RateMapProblem::ScreenSize { width, height }),
             "{width}x{height}"
         );
     }
-    assert_eq!(
-        compile(&descriptor(0, 64, &[])),
-        refused(RateMapProblem::ScreenSize {
-            width: 0,
-            height: 64
-        })
-    );
     for (width, height) in [(1, 1), (64, 16384), (16384, 1)] {
         assert!(
             compile(&descriptor(width, height, &[HALF])).is_ok(),
             "{width}x{height}"
         );
     }
+    // A screen side of 0, measured on this M3 Max under macOS 27.0.1 (plain Metal, one map per
+    // process): the map is made, its screen size is the descriptor's and its physical extent on
+    // that axis is 0.
+    for (screen, physical) in [
+        ([0, 64], [0, 33]),
+        ([64, 0], [33, 0]),
+        ([0, 0], [0, 0]),
+        ([0, 256], [0, 132]),
+    ] {
+        let map = compile(&descriptor(screen[0], screen[1], &[HALF])).expect("the map is made");
+        assert_eq!(map.screen_size(), screen, "{screen:?}");
+        assert_eq!(map.physical_size(0), Some(physical), "{screen:?}");
+        assert_eq!(
+            physical_size(&map, 0),
+            Size::new(u64::from(physical[0]), u64::from(physical[1]), 1),
+            "{screen:?}"
+        );
+    }
+    // A map of no layers over a screen of no width is made as well, as plain Metal makes it.
+    let none = compile(&descriptor(0, 64, &[])).expect("the map is made");
+    assert_eq!(none.layer_count(), 0);
+    assert_eq!(physical_size(&none, 0), Size::new(0, 16, 1));
 }
 
 /// A map takes 0 to 2 layers, counted as Metal counts them: from index 0 up to the first layer
@@ -176,8 +185,8 @@ fn a_mutable_map_is_compiled_at_its_reset() {
 }
 
 /// A reset refuses what ends Metal's process, three layers, and what the compile layer does not
-/// compile, a screen side of 0 among them (Metal's validation does not look at a reset), leaving
-/// nothing changed.
+/// compile (Metal's validation does not look at a reset), leaving nothing changed. A reset to a
+/// screen side of 0 compiles, as plain Metal compiles it.
 #[test]
 fn a_reset_refuses_what_metal_or_the_compile_stops() {
     let map = MapState::made(&descriptor(64, 64, &[HALF]), false).unwrap();
@@ -188,17 +197,20 @@ fn a_reset_refuses_what_metal_or_the_compile_stops() {
             Problem::RateMap(RateMapProblem::LayerCount { count: 3 }),
         )))
     );
-    for (width, height, extent) in [
-        (0, 64, 0),
-        (64, 0, 0),
-        (16385, 64, 16385),
-        (70000, 64, 70000),
-    ] {
+    for (width, height, extent) in [(16385, 64, 16385), (70000, 64, 70000)] {
         assert_eq!(
             map.reset(&descriptor(width, height, &[HALF]), false).err(),
             Some(Error::RateMap(UnpinnedCompile::ScreenExtent { extent })),
             "{width}x{height}"
         );
+    }
+    // A reset to a screen side of 0 compiles, as a fresh map of one does (`apple_tests` holds
+    // Metal's words for the reset both ways).
+    for screen in [[0, 64], [64, 0], [0, 0]] {
+        let reset = map
+            .reset(&descriptor(screen[0], screen[1], &[HALF]), false)
+            .expect("the reset compiles");
+        assert_eq!(reset.screen_size(), screen, "{screen:?}");
     }
 }
 

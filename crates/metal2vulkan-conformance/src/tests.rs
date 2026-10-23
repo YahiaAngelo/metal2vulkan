@@ -1304,29 +1304,33 @@ fn the_rate_map_cases_name_what_justifies_them() {
             inputs.iter().any(|input| input.name == "descriptor"),
             "{inputs:?}"
         );
-        // Every allowance names something that exists.
+        // Every allowance names something that exists: the rate-map degradation, over the
+        // notices site alone, so every answer of the map itself still compares exactly.
         for allowance in case.allowances() {
             match &allowance.justified_by {
-                Justification::MetalValidation { says } => {
-                    assert_eq!(says, crate::cases::rate_maps::ZERO_WIDTH_SAYS);
-                    // Loosened at the refused call alone, so every other answer still compares.
-                    assert_eq!(allowance.path, "case/map");
+                Justification::Degradation(code) => {
+                    assert_eq!(code, Degradation::RasterizationRateMap.code());
+                    assert_eq!(allowance.path, "case/notices/*");
                 }
                 other => panic!("an unexpected tolerance: {other:?}"),
             }
         }
     }
-    // Only the refusal case names the validated oracle.
-    let resting = |case: &crate::cases::rate_maps::RateMapCase| {
-        case.allowances().iter().any(|allowance| {
-            matches!(
+    // The map of the identity announces nothing and carries no allowance; the one that is not the
+    // identity announces its degradation when it is made. Neither rests on the validated oracle
+    // any more: the zero-screen-width refusal that did is closed.
+    assert!(cases[0].allowances().is_empty());
+    assert_eq!(cases[1].allowances().len(), 1);
+    for case in &cases {
+        assert!(
+            !case.allowances().iter().any(|allowance| matches!(
                 allowance.justified_by,
                 Justification::MetalValidation { .. }
-            )
-        })
-    };
-    assert!(!resting(&cases[0]));
-    assert!(resting(&cases[1]));
+            )),
+            "{}",
+            case.name()
+        );
+    }
 }
 
 /// The announcing side forwards **every** `Side` call, and this is what keeps it from rotting.
@@ -1481,16 +1485,32 @@ fn the_known_refusals_ledger_parses_and_names_real_cases() {
             known.waiting_on
         );
     }
-    // The one row this round added, and what it is waiting on.
-    let screen_width = ledger
+    // The rows this round left open, and what they are waiting on: `drawMeshThreads` whose
+    // threads leave a partial object threadgroup, which Metal runs with the threads left over.
+    let partial: Vec<&crate::known_refusals::KnownRefusal> = ledger
         .iter()
-        .find(|known| known.case == crate::cases::rate_maps::ZERO_SCREEN_WIDTH)
-        .expect("the zero-screen-width refusal");
-    assert_eq!(screen_width.site, "case/map");
+        .filter(|known| {
+            known
+                .case
+                .starts_with("mesh-object-draws-partial-threadgroup-")
+        })
+        .collect();
+    assert_eq!(partial.len(), 2, "{ledger:?}");
+    for known in partial {
+        assert!(known.site.ends_with("drawMeshThreads"), "{known:?}");
+        assert!(
+            known.waiting_on.contains("partial object threadgroup"),
+            "{}",
+            known.waiting_on
+        );
+    }
+    // The zero-screen-width refusal is closed, so no row may name that case: the ledger holds
+    // rows in both directions and a stale row would fail the run it is selected in.
     assert!(
-        screen_width.waiting_on.contains("rate_map.rs"),
-        "{}",
-        screen_width.waiting_on
+        !ledger
+            .iter()
+            .any(|known| known.case == crate::cases::rate_maps::ZERO_SCREEN_WIDTH),
+        "the zero-screen-width gap is closed; its row must be gone"
     );
 }
 

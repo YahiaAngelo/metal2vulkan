@@ -9,25 +9,20 @@
 //! | 256 by 256 with no layer | a map of no layers | `layerCount (0) must be >0 and <=2.` |
 //! | 0 by 64, one half-quality layer | a map of one layer | `screenSize.width (0) must be >0 and <=32768.` |
 //!
-//! The two cases are there for the two answers the ruling gives:
+//! Both are behavioural cases: plain Metal makes each map, so the runtime must make it too, and
+//! every answer compares — the label, the screen size, the granularity, the layer count,
+//! `physicalSizeForLayer:` of layer 0, the parameter buffer's size and alignment, and all 24,624
+//! bytes of the parameter data word by word. The validated fact sits beside each and changes
+//! nothing, which is the ruling: plain Metal is the oracle because that is how the runtime is
+//! used.
 //!
-//! - **[`NO_LAYERS`] is the behavioural case.** Plain Metal makes the map, so the runtime must
-//!   make it too, and every answer compares: the label, the screen size, the granularity, the
-//!   layer count, `physicalSizeForLayer:` of layer 0, the parameter buffer's size and alignment,
-//!   and all 24,624 bytes of the parameter data word by word. The validated fact sits beside it
-//!   and changes nothing, which is the ruling: plain Metal is the oracle because that is how the
-//!   runtime is used.
-//! - **[`ZERO_SCREEN_WIDTH`] is the refusal case, and it is meant to fail.** Plain Metal makes that
-//!   map and answers queries over it; the runtime refuses the call, `Invalid` with
-//!   `RateMapProblem::ScreenSize`. Metal's API validation refuses it too, and the case names
-//!   [`Justification::MetalValidation`] with the words it used — but that **documents** the
-//!   refusal, it does not excuse it. A validated stop is not Metal refusing the call, so the row
-//!   is [`Verdict::Refused`](crate::verdict::Verdict::Refused) and is **not compliant**: by the
-//!   owner's standing rule, what plain Metal allows we must allow, so this is a gap of ours and
-//!   the runtime's refusal is on the todo list as runtime work. The case's job is to hold that
-//!   gap visible with Metal's own words beside it, and the justification is still held to its
-//!   evidence, so if the validated leg is ever not taken or Apple's check moves, the claim fails
-//!   too.
+//! [`ZERO_SCREEN_WIDTH`] was the suite's one refusal when it was written: the runtime answered
+//! `Invalid` with `RateMapProblem::ScreenSize` where plain Metal compiled the map. That was a gap
+//! of ours, by the owner's standing rule that what plain Metal allows we must allow, and it is
+//! closed: the runtime now compiles a zero screen extent into an axis of one tile of no screen and
+//! no physical pixels, Apple's, so the case compares like any other and its ledger row is gone.
+//! Over such a map only `mapScreenToPhysicalCoordinates:forLayer:` stays refused, because that one
+//! call ends Metal's own process; neither case makes it.
 //!
 //! # Why this family is safe
 //!
@@ -36,14 +31,19 @@
 //! made and no pass is opened. So neither case can fault the device, hang it or trip its watchdog,
 //! and the validation complaint both provoke is a CPU-side check.
 //!
-//! Two shapes of this family are deliberately **not** cases, because they are not safe: a
+//! Three shapes of this family are deliberately **not** cases, because they are not safe: a
 //! descriptor of three layers ends plain Metal's process (verified: SIGSEGV with no validation
-//! layer at all), and the coordinate maps of a map of no layers end it too, which is why the
-//! runtime refuses those. A pass over a mutable map is out of this round by the user's rule.
+//! layer at all), the coordinate maps of a map of no layers end it too, and so does
+//! `mapScreenToPhysicalCoordinates:forLayer:` over a map of a zero screen extent (verified: a
+//! SIGSEGV at the first such call on 0 by 64, 64 by 0 and 0 by 0 alike, where the
+//! physical-to-screen map of the same map answers) — which is why the runtime refuses all three.
+//! A pass over a mutable map is out of this round by the user's rule.
 
 use crate::allowance::{Allowance, Justification, Loosening};
 use crate::case::{made, Abort, Case, Input, MetalSource, RateMapLayer, RateMapRequest, Side};
+use crate::replay::NOTICES_SITE;
 use crate::transcript::{ByteLayout, Element, Gaps, Node, Observed, Region, Sites};
+use metal2vulkan_runtime::Degradation;
 
 /// The case of a descriptor Metal counts as having no layers.
 pub const NO_LAYERS: &str = "rate-map-no-layers";
@@ -85,9 +85,10 @@ pub struct RateMapCase {
     layers: Vec<RateMapLayer>,
     /// The descriptor's label, which the map keeps.
     label: &'static str,
-    /// What justifies a difference this case expects, beside the notice allowance every
-    /// non-identity map needs.
-    refusal: Option<Justification>,
+    /// Whether the compiled map is the identity inside its screen. A map that is not announces
+    /// the `rasterization-rate-map` degradation when it is made, because a pass over it would be
+    /// drawn region by region, so such a case keeps one notice allowance; Metal announces nothing.
+    identity: bool,
 }
 
 /// Every case of the family.
@@ -101,16 +102,17 @@ pub fn all() -> Vec<RateMapCase> {
             screen: [256, 256],
             layers: Vec::new(),
             label: "conformance-no-layers",
-            refusal: None,
+            identity: true,
         },
-        // A descriptor of no screen width: its validation refuses it, plain Metal compiles a map
-        // of one layer, and the runtime refuses the call.
+        // A descriptor of no screen width: its validation refuses it, and plain Metal compiles a
+        // map of one layer, which the runtime compiles too. Its vertical axis is not the
+        // identity, so making it announces the rate-map degradation.
         RateMapCase {
             name: ZERO_SCREEN_WIDTH,
             screen: [0, 64],
             layers: vec![RateMapLayer::uniform(0.5, 0.5)],
             label: "conformance-zero-width",
-            refusal: Some(Justification::metal_validation(ZERO_WIDTH_SAYS)),
+            identity: false,
         },
     ]
 }
@@ -158,21 +160,23 @@ impl Case for RateMapCase {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Exact is the default and these cases keep it. Neither venue announced anything over
-        // these maps (verified on MoltenVK and on lavapipe), so neither case carries a notice
-        // allowance: a tolerance that never fires is one nobody is checking, and a device that
-        // does announce something here should fail the case until somebody names why.
-        let Some(refusal) = &self.refusal else {
+        // Exact is the default and every answer of these cases keeps it. A map of the identity
+        // announces nothing, on either venue (verified on MoltenVK and on lavapipe), so its case
+        // carries no allowance at all: a tolerance that never fires is one nobody is checking, and
+        // a device that does announce something there should fail the case until somebody names
+        // why.
+        if self.identity {
             return Vec::new();
-        };
-        // What documents the family's one refusal, and the only claim in the suite that rests on
-        // the recording's second oracle. It does not excuse the refusal: the row stays `Refused`
-        // and stays non-compliant, because plain Metal answered the call. It names Metal's own
-        // words so the report says which kind of refusal it is, and it is held to them.
+        }
+        // A map that is not the identity announces the rate-map degradation when it is made, a
+        // near-equivalent the runtime declares (`docs/API.md`'s degrade catalogue): a pass over
+        // such a map is drawn region by region, on this crate's tile lines. Metal announces
+        // nothing, so the notices set is the one field that may differ, and the allowance is held
+        // to its evidence — the notice must actually have been announced on the run compared.
         vec![Allowance::new(
-            format!("case/{}", site::MAP),
+            format!("case/{NOTICES_SITE}/*"),
             Loosening::Unchecked,
-            refusal.clone(),
+            Justification::notice(Degradation::RasterizationRateMap),
         )]
     }
 

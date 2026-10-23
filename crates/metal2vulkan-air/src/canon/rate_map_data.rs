@@ -55,6 +55,13 @@
 //! - A layer the map lacks (a map of one layer's layer 1, every horizontal table of a map of no
 //!   layers) is zero words. A map of no layers has a vertical axis all the same: the axis of no
 //!   quality function, every sample at the least quality.
+//! - An axis of no screen pixels has one tile of no screen and no physical pixels, whose line
+//!   Apple writes as the least step the fixed point holds ([`LEAST_SCALE_STEPS`]): a scale of
+//!   `2^-24`, a reciprocal of `2^24` and an offset of 0, in two entries of each table, whatever
+//!   the axis's quality (measured on an Apple M3 Max under macOS 27.0.1: every word of maps of
+//!   0 by 64 at qualities 1, 0.5 and 0.01, of 64 by 0, of 0 by 0, of 0 by 256, and of 0 by 64
+//!   over two layers, where layer 1's horizontal tables hold the same). A map of no layers keeps
+//!   no horizontal table at all, so a zero screen width leaves those words zero.
 //!
 //! **Decoding** (per axis):
 //!
@@ -123,6 +130,10 @@ pub const OFFSET_SHIFT: u32 = 8;
 pub const OFFSET_UNIT: f32 = 1.0 / 256.0;
 /// The fixed-point bits of a scale: a tile's scale is `K / 2^24`.
 pub const SCALE_BITS: u32 = 24;
+/// The `K` of the one tile of an axis of no screen pixels: the least step the fixed point holds,
+/// so the scale is `2^-24` and its reciprocal `2^24`. Apple's, measured on an Apple M3 Max under
+/// macOS 27.0.1 (the module docs).
+pub const LEAST_SCALE_STEPS: u32 = 1;
 /// The largest value the map's index converts (`2^24`): an `f32` at most this converts to an
 /// integer exactly.
 pub const INDEX_CAP: f32 = 16_777_216.0;
@@ -175,8 +186,10 @@ pub fn offset_tie(
 }
 
 /// The line of a tile from screen `screen_start` and physical `physical_start`, of
-/// `screen_extent` screen pixels and `physical_extent` physical ones (both positive). An offset
-/// tie ([`offset_tie`], never Apple's) rounds to the even step.
+/// `screen_extent` screen pixels and `physical_extent` physical ones. An offset
+/// tie ([`offset_tie`], never Apple's) rounds to the even step. A tile of no physical pixels —
+/// only the one tile of an axis of no screen pixels ([`LEAST_SCALE_STEPS`]) — has the least
+/// scale the fixed point holds, Apple's.
 pub fn tile_line(
     screen_start: u32,
     physical_start: u32,
@@ -186,6 +199,9 @@ pub fn tile_line(
     let se = i64::from(screen_extent.max(1));
     // `round(p · 2^24 / s)`: the quotient's half is never a whole number, as `s < 2^25`.
     let k = ((i64::from(physical_extent) << (SCALE_BITS + 1)) + se) / (2 * se);
+    // `K` is 0 only where the tile has no physical pixel, which only an axis of no screen pixels
+    // has; Apple writes the least step there, measured (the module docs).
+    let k = k.max(i64::from(LEAST_SCALE_STEPS));
     // `K` is at most `2^24` for a tile of quality at most 1, so the scale is exact.
     let scale = k as f32 / (1u64 << SCALE_BITS) as f32;
     let num = offset_numerator(screen_start, physical_start, screen_extent, physical_extent);
@@ -221,8 +237,11 @@ pub fn encode_axis(tiles: &[(u32, u32)], to_screen: &mut [u32], to_physical: &mu
             slot.copy_from_slice(&words);
         }
     };
-    let (screen, physical) = (s, p);
-    for k in 0..(physical.div_ceil(GRANULARITY) + 1).min(ENTRIES) {
+    let screen = s;
+    // One entry per tile and one more, the last tile's line repeated. Every tile but the last is
+    // a whole granule, so the tiles are `⌈P / 32⌉` but on an axis of no screen pixels, whose one
+    // tile has no physical pixel and whose table Apple writes two entries of all the same.
+    for k in 0..(tiles.len() as u32 + 1).min(ENTRIES) {
         let line = starts.get(k as usize).map_or(last, |&(_, line)| line);
         let offset = line.offset as f32 * OFFSET_UNIT;
         put(to_screen, k, [line.reciprocal.to_bits(), offset.to_bits()]);
@@ -281,9 +300,10 @@ pub fn last_screen_entry(extent: u32) -> u32 {
 }
 
 /// The last entry the encoder writes in a physical-to-screen table of physical extent `extent`
-/// (the map's index is clamped to it).
+/// (the map's index is clamped to it): one per tile, the tiles being `⌈P / 32⌉`, or the one tile
+/// of an axis of no screen pixels, whose table holds two entries of all the same.
 pub fn last_physical_entry(extent: u32) -> u32 {
-    extent.div_ceil(GRANULARITY).min(LAST_ENTRY)
+    extent.div_ceil(GRANULARITY).clamp(1, LAST_ENTRY)
 }
 
 /// The first word of the table of `axis` (0 horizontal, 1 vertical) in `direction` for layer
