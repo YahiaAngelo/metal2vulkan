@@ -77,7 +77,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "c305889f613dcf5a561e83d2f16408a7c1ea2ddf114c1da13f76b80e499c03fe"
+                          "hex": "5e27db5a430591770ae4012560b5eea64fca35044ea5436cd309898b8e05b4fe"
                         }
                       }
                     },
