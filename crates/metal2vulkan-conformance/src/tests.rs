@@ -1772,6 +1772,23 @@ fn the_known_gaps_ledger_parses_and_names_real_cases() {
             known.waiting_on
         );
     }
+    // The divergence rows this round left open: the fragment quad's placement on llvmpipe, which
+    // MoltenVK answers exactly, so the rows are venue-scoped rather than global.
+    let quads: Vec<&crate::known_gaps::KnownGap> = ledger
+        .iter()
+        .filter(|known| known.case == "discard-quad-sum-placement")
+        .collect();
+    assert_eq!(quads.len(), 3, "{ledger:?}");
+    for known in quads {
+        assert_eq!(known.expects, crate::known_gaps::Expects::Divergent);
+        assert_eq!(known.venue, "llvmpipe");
+        // A divergence row carries both answers, because the leaf fact that moved names them.
+        assert!(known.answer.contains("Metal 1"), "{known:?}");
+        assert!(known.answer.contains("ours 0"), "{known:?}");
+        // And it is honest about what is not established, which is the whole cause.
+        assert!(known.waiting_on.contains("NOT established"), "{known:?}");
+    }
+
     // The zero-screen-width refusal is closed, so no row may name that case: the ledger holds
     // rows in both directions and a stale row would fail the run it is selected in.
     assert!(
