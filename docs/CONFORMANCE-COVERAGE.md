@@ -32,7 +32,7 @@ Its limits, measured rather than asserted:
 | case modules | 98 |
 | committed recordings | 784 |
 | distinct SDK items the Metal leg calls | 514 |
-| ledger rows (a case whose gap is recorded) | 21 |
+| ledger rows (a case whose gap is recorded) | 19 |
 
 A tolerance names a **site of a transcript**, not an item, so the last two rows are read as written: a case that loosens one site of its own transcript may compare every other field of it exactly, and this derivation cannot tell which of a case's fields came from which Metal call. Where the distinction matters, read the case.
 
@@ -1848,6 +1848,4 @@ A case whose difference from Metal is recorded rather than compared away. The le
 | `sparse-tails-wide-and-short` | Metal's `tailSizeInBytes` exceeds our sparse model's on extreme aspect ratios: a 2D texture whose shorter axis is a handful of texels while the longer is a thou… |
 | `sparse-tails-wide-and-short` | Metal's `tailSizeInBytes` exceeds our sparse model's on extreme aspect ratios: a 2D texture whose shorter axis is a handful of texels while the longer is a thou… |
 | `argb8-targets-destination-alpha` | Plain Metal on this M3 Max makes and runs a render pipeline whose ARGB8Unorm colour attachment blends with DestinationAlpha and OneMinusDestinationAlpha in the … |
-| `buffer-depth-samples-d16-54-4` | Plain Metal on this M3 Max copies a buffer into the 16-bit depth aspect of a 54 x 54 multisample texture and copies it back, and both halves are exact: recorded… |
-| `buffer-depth-samples-d16-54-2` | Plain Metal on this M3 Max copies a buffer into the 16-bit depth aspect of a 54 x 54 multisample texture and copies it back, and both halves are exact: recorded… |
 

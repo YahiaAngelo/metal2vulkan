@@ -413,12 +413,30 @@ impl Device {
             render_pass: vk::RenderPass::null(),
             pipeline: vk::Pipeline::null(),
         };
-        let colour = matches!(
-            copy,
+        // Which draws write a colour attachment rather than a depth one. Stated as a match over
+        // every variant, not a `matches!` that falls through to false: a new bits draw left out
+        // of a fallthrough list builds a depth render pass over its colour image, which is how
+        // `Depth16Bits` first shipped broken.
+        let colour = match copy {
             DepthStencilCopy::DepthBits
-                | DepthStencilCopy::StencilBits
-                | DepthStencilCopy::MagnitudeBits
-        );
+            | DepthStencilCopy::StencilBits
+            | DepthStencilCopy::MagnitudeBits
+            | DepthStencilCopy::Depth16Bits => true,
+            DepthStencilCopy::Depth
+            | DepthStencilCopy::DepthMagnitude
+            | DepthStencilCopy::Depth16Code
+            | DepthStencilCopy::StencilPlane { .. }
+            | DepthStencilCopy::StencilExport { .. }
+            | DepthStencilCopy::DepthFromStandIn { .. } => false,
+            // `DepthStencilCopy` is `#[non_exhaustive]`, so a variant added in the translator
+            // crate reaches here. A bits draw must say so above; defaulting to a depth pass is
+            // the failure this match exists to stop, so refuse rather than guess.
+            _ => {
+                return Err(internal(
+                    "a depth/stencil copy draw whose attachment kind this runtime does not state",
+                ))
+            }
+        };
         let result = (|| {
             made.render_pass = match colour {
                 true => bits_pass(raw, format, samples)?,
