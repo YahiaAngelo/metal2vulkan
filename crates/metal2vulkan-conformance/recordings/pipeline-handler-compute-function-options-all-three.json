@@ -1,0 +1,376 @@
+{
+  "format": 1,
+  "case": "pipeline-handler-compute-function-options-all-three",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "a27_ob1_threadgroup.ll",
+      "entry": "ob1_threadgroup",
+      "source_sha256": "0c98a096e60fd50b4a119ac1539c8907a7ca14df5c4c0ea9163bae96240c1235"
+    },
+    {
+      "fixture": "a27_ob1_threadgroup.air.ll",
+      "entry": "ob1_threadgroup",
+      "source_sha256": "6e2d8bc010bac734195035dcb2466f5947642236e3ec187537ef47b6ff23815e"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "0c98a096e60fd50b4a119ac1539c8907a7ca14df5c4c0ea9163bae96240c1235"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6e2d8bc010bac734195035dcb2466f5947642236e3ec187537ef47b6ff23815e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "entry",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a42c4eb5d83dd0303ce05318114985e750ae0adc64778504160be62a196e30b8"
+                        }
+                      }
+                    },
+                    {
+                      "name": "form",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "51f2ed1d53f24783c5c7283f3af53a96e168f007a007fe42900fcd363dc7c6d6"
+                        }
+                      }
+                    },
+                    {
+                      "name": "imageblock",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b0853f6af25f29697838d03f243c9bf1bf6e861fdcb1ec7eb2c51e3446fe4e3f"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipelines",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "through-the-handler",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "arrival",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "Answered",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivery",
+                          "observed": {
+                            "value": "absent"
+                          },
+                          "children": [
+                            {
+                              "name": "delivered-a-state",
+                              "observed": {
+                                "value": {
+                                  "bool": true
+                                }
+                              }
+                            },
+                            {
+                              "name": "delivered-an-error",
+                              "observed": {
+                                "value": {
+                                  "bool": false
+                                }
+                              }
+                            },
+                            {
+                              "name": "delivered-a-reflection",
+                              "observed": {
+                                "value": {
+                                  "bool": true
+                                }
+                              }
+                            },
+                            {
+                              "name": "facts",
+                              "observed": {
+                                "value": "absent"
+                              },
+                              "children": [
+                                {
+                                  "name": "label",
+                                  "observed": {
+                                    "value": {
+                                      "variant": {
+                                        "name": "None",
+                                        "payload": "absent"
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "device",
+                                  "observed": {
+                                    "value": {
+                                      "bool": true
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "static_threadgroup_memory_length",
+                                  "observed": {
+                                    "value": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "support_indirect_command_buffers",
+                                  "observed": {
+                                    "value": {
+                                      "bool": false
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "imageblock_memory_length",
+                                  "observed": {
+                                    "value": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "required_threads_per_threadgroup",
+                                  "observed": {
+                                    "value": {
+                                      "fields": {
+                                        "depth": {
+                                          "uint": 0
+                                        },
+                                        "height": {
+                                          "uint": 0
+                                        },
+                                        "width": {
+                                          "uint": 0
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "synchronously",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "delivered-a-state",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivered-an-error",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivered-a-reflection",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "facts",
+                          "observed": {
+                            "value": "absent"
+                          },
+                          "children": [
+                            {
+                              "name": "label",
+                              "observed": {
+                                "value": {
+                                  "variant": {
+                                    "name": "None",
+                                    "payload": "absent"
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "name": "device",
+                              "observed": {
+                                "value": {
+                                  "bool": true
+                                }
+                              }
+                            },
+                            {
+                              "name": "static_threadgroup_memory_length",
+                              "observed": {
+                                "value": {
+                                  "uint": 0
+                                }
+                              }
+                            },
+                            {
+                              "name": "support_indirect_command_buffers",
+                              "observed": {
+                                "value": {
+                                  "bool": false
+                                }
+                              }
+                            },
+                            {
+                              "name": "imageblock_memory_length",
+                              "observed": {
+                                "value": {
+                                  "uint": 0
+                                }
+                              }
+                            },
+                            {
+                              "name": "required_threads_per_threadgroup",
+                              "observed": {
+                                "value": {
+                                  "fields": {
+                                    "depth": {
+                                      "uint": 0
+                                    },
+                                    "height": {
+                                      "uint": 0
+                                    },
+                                    "width": {
+                                      "uint": 0
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "the-two-paths-agree",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

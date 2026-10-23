@@ -1,0 +1,266 @@
+{
+  "format": 1,
+  "case": "pipeline-handler-render-refused",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "dsx_int_attributes.ll",
+      "entry": "int_attribute_to_float4",
+      "source_sha256": "0c9ccc924f3218455abf738c01f52dae3ba38c3add963b0b170f8e35a986d88c"
+    },
+    {
+      "fixture": "dsx_int_attributes.air.ll",
+      "entry": "int_attribute_to_float4",
+      "source_sha256": "2e7e1ea56f5f17c062894a4b802e975802e86dcc4c565fdc1eaa504d6a535ce5"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "0c9ccc924f3218455abf738c01f52dae3ba38c3add963b0b170f8e35a986d88c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "2e7e1ea56f5f17c062894a4b802e975802e86dcc4c565fdc1eaa504d6a535ce5"
+                        }
+                      }
+                    },
+                    {
+                      "name": "entry",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6ea389041aa5f836d88477bf0601ebb75484067284e513c8b41f5fdd7483276b"
+                        }
+                      }
+                    },
+                    {
+                      "name": "form",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4e723b6059a1280f382362c35974d031806f98e6dd7574e07f18075f1495eee8"
+                        }
+                      }
+                    },
+                    {
+                      "name": "imageblock",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b0853f6af25f29697838d03f243c9bf1bf6e861fdcb1ec7eb2c51e3446fe4e3f"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipelines",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "through-the-handler",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "arrival",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "Answered",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivery",
+                          "observed": {
+                            "value": "absent"
+                          },
+                          "children": [
+                            {
+                              "name": "delivered-a-state",
+                              "observed": {
+                                "value": {
+                                  "bool": false
+                                }
+                              }
+                            },
+                            {
+                              "name": "delivered-an-error",
+                              "observed": {
+                                "value": {
+                                  "bool": true
+                                }
+                              }
+                            },
+                            {
+                              "name": "delivered-a-reflection",
+                              "observed": {
+                                "value": {
+                                  "variant": {
+                                    "name": "TheCallTakesNoOptions",
+                                    "payload": "absent"
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "name": "facts",
+                              "observed": {
+                                "value": {
+                                  "variant": {
+                                    "name": "NoState",
+                                    "payload": "absent"
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "synchronously",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "delivered-a-state",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivered-an-error",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivered-a-reflection",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "TheCallTakesNoOptions",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "facts",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "NoState",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "the-two-paths-agree",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

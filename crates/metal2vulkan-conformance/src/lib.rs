@@ -72,6 +72,8 @@ pub mod measured;
 pub mod mesh_descriptors;
 pub mod pass_descriptors;
 pub mod pipeline_facts;
+pub mod pipeline_handlers;
+pub mod pipeline_options;
 pub mod queue_slots;
 pub mod rate_map_space;
 pub mod record;

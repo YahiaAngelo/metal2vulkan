@@ -1,0 +1,260 @@
+{
+  "format": 1,
+  "case": "pipeline-handler-compute-descriptor-options-refused",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_resolves.ll",
+      "entry": "rt6_resolve_full",
+      "source_sha256": "826f30ea88e648ce64e04e26abdfaa51c2c81fdd933f41e0a5b621eb7c9d18e9"
+    },
+    {
+      "fixture": "rt6_resolves.air.ll",
+      "entry": "rt6_resolve_full",
+      "source_sha256": "deacd509ddf64f7fe146057f3097edfb6582b0033fd623a9d2ec49db7596aec9"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "826f30ea88e648ce64e04e26abdfaa51c2c81fdd933f41e0a5b621eb7c9d18e9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "deacd509ddf64f7fe146057f3097edfb6582b0033fd623a9d2ec49db7596aec9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "entry",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "2f95ba120953e8e58166d3ef848f9096363dfe22cbfe17836689e64a1a79b50e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "form",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9b62710e77362bfb9f8e48fe0e26d3643477aa8030b6d1d1c2c2ec9d3a24d13d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "imageblock",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b0853f6af25f29697838d03f243c9bf1bf6e861fdcb1ec7eb2c51e3446fe4e3f"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipelines",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "through-the-handler",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "arrival",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "Answered",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivery",
+                          "observed": {
+                            "value": "absent"
+                          },
+                          "children": [
+                            {
+                              "name": "delivered-a-state",
+                              "observed": {
+                                "value": {
+                                  "bool": false
+                                }
+                              }
+                            },
+                            {
+                              "name": "delivered-an-error",
+                              "observed": {
+                                "value": {
+                                  "bool": true
+                                }
+                              }
+                            },
+                            {
+                              "name": "delivered-a-reflection",
+                              "observed": {
+                                "value": {
+                                  "bool": false
+                                }
+                              }
+                            },
+                            {
+                              "name": "facts",
+                              "observed": {
+                                "value": {
+                                  "variant": {
+                                    "name": "NoState",
+                                    "payload": "absent"
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "synchronously",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "delivered-a-state",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivered-an-error",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivered-a-reflection",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "facts",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "NoState",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "the-two-paths-agree",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

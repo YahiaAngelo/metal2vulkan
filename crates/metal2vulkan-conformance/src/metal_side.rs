@@ -50,6 +50,11 @@ use crate::pass_descriptors::{
     ASSIGNED_COLOR, DEPTH_AT, MUTATED_AFTER, READ_COLORS as PASS_COLORS, STENCIL_AT, SWEPT_COLOR,
 };
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
+use crate::pipeline_handlers::{
+    BothPaths, Delivered, Form as PipelineForm, Handled, StateFacts,
+    IMAGEBLOCK as HANDLER_IMAGEBLOCK, WAIT as HANDLER_WAIT,
+};
+use crate::pipeline_options::UnderOptions;
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, StepResource,
@@ -83,7 +88,9 @@ use metal2vulkan_runtime::{PurgeableState, SparsePageSize};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{AnyThread, ClassType};
-use objc2_foundation::{NSArray, NSDictionary, NSObjectProtocol, NSRange, NSString, NSURL};
+use objc2_foundation::{
+    NSArray, NSDictionary, NSError, NSObjectProtocol, NSRange, NSString, NSURL,
+};
 use objc2_metal::{
     MTLArgumentDescriptor, MTLArgumentEncoder, MTLArrayType, MTLAttribute, MTLAttributeFormat,
     MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType, MTLBlendFactor,
@@ -2967,31 +2974,58 @@ impl Side for MetalSide {
         Ok(found)
     }
 
+    fn compute_pipeline_reflection_under(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        options: u64,
+    ) -> Answer<UnderOptions> {
+        let function = self.function_of(library, entry)?;
+        let mut reflection = None;
+        // SAFETY: the function is of this device's library, and `reflection` is this call's own
+        // out-parameter. The options are bits Apple's header names
+        // ([`crate::pipeline_options::MASKS`]), so nothing undefined reaches Metal here.
+        let made = unsafe {
+            self.device
+                .newComputePipelineStateWithFunction_options_reflection_error(
+                    &function,
+                    MTLPipelineOption(options as usize),
+                    Some(&mut reflection),
+                )
+        };
+        let Ok(state) = made else {
+            return Ok(UnderOptions::refused());
+        };
+        // Declared, not inferred: the coverage derivation types a receiver from what bound it, and
+        // an `Option` the creation filled in through an out-parameter names no type at all.
+        let found = match reflection {
+            Some(reflection) => {
+                let reflection: Retained<MTLComputePipelineReflection> = reflection;
+                // Bound to a local rather than called in the `for` header, for the reason
+                // [`Side::compute_pipeline_bindings`] states.
+                let bindings = reflection.bindings();
+                let mut held = Vec::new();
+                for binding in &bindings {
+                    held.push(metal_binding(&binding)?);
+                }
+                Some(held)
+            }
+            None => None,
+        };
+        // The state is kept so it outlives the reflection its creation answered.
+        keep(&mut self.pipelines, state);
+        Ok(UnderOptions {
+            refused: false,
+            bindings: found,
+        })
+    }
+
     fn compute_pipeline_with_descriptor(
         &mut self,
         library: Handle,
         spec: &ComputeStateSpec<'_>,
     ) -> Answer<Handle> {
-        let library = self
-            .libraries
-            .get(library.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
-        let function = library
-            .newFunctionWithName(&NSString::from_str(spec.entry))
-            .ok_or_else(|| Failure::named("NoSuchFunction", spec.entry.to_owned()))?;
-        let descriptor = MTLComputePipelineDescriptor::new();
-        descriptor.setComputeFunction(Some(&function));
-        // Set only where the case states one. `setLabel:nil` on a pipeline descriptor fails an
-        // assertion inside Metal and ends the process ("label must not be nil", measured on this
-        // M3 Max while recording this family), and Metal's own default is already nil, so a case
-        // that means a nil label is a case that makes this call not at all.
-        if let Some(label) = spec.label {
-            descriptor.setLabel(Some(&NSString::from_str(label)));
-        }
-        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
-        if let Some(threads) = spec.required_threads_per_threadgroup {
-            descriptor.setRequiredThreadsPerThreadgroup(size(threads));
-        }
+        let descriptor = self.compute_descriptor_from(library, spec)?;
         let state = self
             .device
             .newComputePipelineStateWithDescriptor_options_reflection_error(
@@ -3020,24 +3054,7 @@ impl Side for MetalSide {
             .pipelines
             .get(state.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?;
-        let required = state.requiredThreadsPerThreadgroup();
-        Ok(ComputeStateFacts {
-            label: state.label().map(|label| label.to_string()),
-            // The registry ID is each host's own number, so only the **comparison** is portable.
-            device_is_the_cases: state.device().registryID() == registry,
-            static_threadgroup_memory_length: state.staticThreadgroupMemoryLength() as u64,
-            support_indirect_command_buffers: state.supportIndirectCommandBuffers(),
-            // SAFETY: the dimensions are the case's own three positive extents, which the call
-            // multiplies by the kernel's imageblock cell size and nothing else.
-            imageblock_memory_length: unsafe {
-                state.imageblockMemoryLengthForDimensions(size(imageblock))
-            } as u64,
-            required_threads_per_threadgroup: [
-                required.width as u64,
-                required.height as u64,
-                required.depth as u64,
-            ],
-        })
+        Ok(compute_state_facts(state, registry, imageblock))
     }
 
     fn render_pipeline_facts(
@@ -3051,23 +3068,7 @@ impl Side for MetalSide {
             .get(state.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?
             .state;
-        let required = state.requiredThreadsPerTileThreadgroup();
-        Ok(RenderStateFacts {
-            label: state.label().map(|label| label.to_string()),
-            device_is_the_cases: state.device().registryID() == registry,
-            max_total_threads_per_threadgroup: state.maxTotalThreadsPerThreadgroup() as u64,
-            threadgroup_size_matches_tile_size: state.threadgroupSizeMatchesTileSize(),
-            imageblock_sample_length: Some(state.imageblockSampleLength() as u64),
-            imageblock_memory_length: Some(
-                state.imageblockMemoryLengthForDimensions(size(imageblock)) as u64,
-            ),
-            support_indirect_command_buffers: state.supportIndirectCommandBuffers(),
-            required_threads_per_tile_threadgroup: [
-                required.width as u64,
-                required.height as u64,
-                required.depth as u64,
-            ],
-        })
+        Ok(render_state_facts(state, registry, imageblock))
     }
 
     fn render_descriptor_facts(
@@ -4305,29 +4306,7 @@ impl Side for MetalSide {
     }
 
     fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
-        let library = self
-            .libraries
-            .get(library.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
-        let function = library
-            .newFunctionWithName(&NSString::from_str(spec.entry))
-            .ok_or_else(|| Failure::named("NoSuchFunction", spec.entry.to_owned()))?;
-        let descriptor = MTLTileRenderPipelineDescriptor::new();
-        // SAFETY: the function is of this library, and the descriptor is this call's own.
-        unsafe { descriptor.setTileFunction(&function) };
-        for (at, format) in spec.attachments.iter().enumerate() {
-            // SAFETY: `at` is below the eight attachments the descriptor's array holds.
-            unsafe {
-                descriptor
-                    .colorAttachments()
-                    .objectAtIndexedSubscript(at)
-                    .setPixelFormat(MTLPixelFormat(format.as_raw() as usize));
-            }
-        }
-        if let Some(limit) = spec.max_total_threads_per_threadgroup {
-            descriptor.setMaxTotalThreadsPerThreadgroup(limit as usize);
-        }
-        descriptor.setThreadgroupSizeMatchesTileSize(spec.threadgroup_size_matches_tile_size);
+        let descriptor = self.tile_descriptor_from(library, spec)?;
         let state = self
             .device
             .newRenderPipelineStateWithTileDescriptor_options_reflection_error(
@@ -4342,6 +4321,14 @@ impl Side for MetalSide {
         ))
     }
 
+    fn pipeline_both_paths(
+        &mut self,
+        library: Handle,
+        form: &PipelineForm<'_>,
+    ) -> Answer<BothPaths> {
+        self.both_paths(library, form)
+    }
+
     fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
         // Declared, so the coverage derivation types the receiver: the pool's element is this
         // side's own struct, which names no Metal type the walk can read off a field, and these
@@ -4351,11 +4338,7 @@ impl Side for MetalSide {
             .get(state.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0)))?
             .state;
-        Ok(TileFacts {
-            max_total_threads_per_threadgroup: state.maxTotalThreadsPerThreadgroup() as u64,
-            threadgroup_size_matches_tile_size: state.threadgroupSizeMatchesTileSize(),
-            imageblock_sample_length: Some(state.imageblockSampleLength() as u64),
-        })
+        Ok(tile_state_facts(state))
     }
 
     fn tile_pass(
@@ -4486,61 +4469,7 @@ impl Side for MetalSide {
         library: Handle,
         spec: &RenderPipelineSpec<'_>,
     ) -> Answer<Handle> {
-        let function = |stage: &StageFunction<'_>| {
-            let named = stage.library.unwrap_or(library);
-            let held = self
-                .libraries
-                .get(named.0 as usize)
-                .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", named.0)))?;
-            held.newFunctionWithName(&NSString::from_str(stage.entry))
-                .ok_or_else(|| Failure::named("NoSuchFunction", stage.entry.to_owned()))
-        };
-        let descriptor = MTLRenderPipelineDescriptor::new();
-        descriptor.setVertexFunction(Some(&*function(&spec.vertex)?));
-        if let Some(fragment) = &spec.fragment {
-            descriptor.setFragmentFunction(Some(&*function(fragment)?));
-        }
-        // Set only where the case states one: `setLabel:nil` ends Metal's process, as the
-        // compute descriptor's does.
-        if let Some(label) = spec.label {
-            descriptor.setLabel(Some(&NSString::from_str(label)));
-        }
-        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
-        descriptor.setRasterSampleCount(spec.samples as usize);
-        descriptor.setRasterizationEnabled(spec.rasterization);
-        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
-        if let Some(layout) = &spec.vertex_layout {
-            descriptor.setVertexDescriptor(Some(&vertex_descriptor(layout)));
-        }
-        if let Some(format) = spec.depth_format {
-            descriptor.setDepthAttachmentPixelFormat(MTLPixelFormat(format.as_raw() as usize));
-        }
-        if let Some(format) = spec.stencil_format {
-            descriptor.setStencilAttachmentPixelFormat(MTLPixelFormat(format.as_raw() as usize));
-        }
-        for (at, color) in spec.colors.iter().enumerate() {
-            let Some(color) = color else { continue };
-            // SAFETY: `at` is below the eight color attachments every Metal pipeline holds, which
-            // the case's own guard keeps it to.
-            let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(at) };
-            attachment.setPixelFormat(MTLPixelFormat(color.format.as_raw() as usize));
-            attachment.setWriteMask(MTLColorWriteMask(color.write_mask.as_raw() as usize));
-            if let Some(blend) = &color.blend {
-                let factor = |factor: metal2vulkan::metal::BlendFactor| {
-                    MTLBlendFactor(factor.as_raw() as usize)
-                };
-                let operation = |operation: metal2vulkan::metal::BlendOperation| {
-                    MTLBlendOperation(operation.as_raw() as usize)
-                };
-                attachment.setBlendingEnabled(true);
-                attachment.setSourceRGBBlendFactor(factor(blend.source_rgb));
-                attachment.setDestinationRGBBlendFactor(factor(blend.destination_rgb));
-                attachment.setRgbBlendOperation(operation(blend.rgb));
-                attachment.setSourceAlphaBlendFactor(factor(blend.source_alpha));
-                attachment.setDestinationAlphaBlendFactor(factor(blend.destination_alpha));
-                attachment.setAlphaBlendOperation(operation(blend.alpha));
-            }
-        }
+        let descriptor = self.render_descriptor_from(library, spec)?;
         let state = self
             .device
             .newRenderPipelineStateWithDescriptor_error(&descriptor)
@@ -6561,6 +6490,484 @@ const TARGET_PIXEL_FORMAT: MTLPixelFormat = MTLPixelFormat::RGBA32Uint;
 
 impl MetalSide {
     /// The descriptor of a mesh render pipeline of `library`'s `functions`.
+    /// One pipeline descriptor through Metal's `completionHandler:` form and through that form's
+    /// synchronous sibling ([`crate::pipeline_handlers`]).
+    ///
+    /// The descriptor is built **once** and handed to both calls, which is what makes the two
+    /// answers comparable. The handler path is waited for on its own channel with a bound
+    /// ([`HANDLER_WAIT`]) and a bound that runs out is recorded, never retried: no call here is
+    /// `waitUntilCompleted`, which Metal has no bounded form of.
+    fn both_paths(&mut self, library: Handle, form: &PipelineForm<'_>) -> Answer<BothPaths> {
+        let registry = self.device.registryID();
+        let (handled, synchronous) = match form {
+            PipelineForm::Render {
+                spec,
+                options: None,
+            } => {
+                let descriptor = self.render_descriptor_from(library, spec)?;
+                let (sender, answered) = std::sync::mpsc::channel();
+                let handler = block2::RcBlock::new(
+                    move |state: *mut ProtocolObject<dyn MTLRenderPipelineState>,
+                          error: *mut NSError| {
+                        let _ = sender.send(render_delivery(
+                            state,
+                            None,
+                            error,
+                            registry,
+                            RenderKind::Drawing,
+                        ));
+                    },
+                );
+                // SAFETY: the block is a valid heap block held in `handler` until the wait below
+                // has ended, and the descriptor is this call's own.
+                unsafe {
+                    self.device
+                        .newRenderPipelineStateWithDescriptor_completionHandler(
+                            &descriptor,
+                            block2::RcBlock::as_ptr(&handler),
+                        );
+                }
+                let handled = handler_answer(&answered);
+                let synchronous = match self
+                    .device
+                    .newRenderPipelineStateWithDescriptor_error(&descriptor)
+                {
+                    Ok(state) => Delivered::made(StateFacts::Render(render_state_facts(
+                        &state,
+                        registry,
+                        HANDLER_IMAGEBLOCK,
+                    ))),
+                    Err(_) => Delivered::refused(false),
+                };
+                (handled, synchronous)
+            }
+            PipelineForm::Render {
+                spec,
+                options: Some(bits),
+            } => {
+                let descriptor = self.render_descriptor_from(library, spec)?;
+                let options = MTLPipelineOption(*bits as usize);
+                let (sender, answered) = std::sync::mpsc::channel();
+                let handler = block2::RcBlock::new(
+                    move |state: *mut ProtocolObject<dyn MTLRenderPipelineState>,
+                          reflection: *mut MTLRenderPipelineReflection,
+                          error: *mut NSError| {
+                        let _ = sender.send(render_delivery(
+                            state,
+                            Some(!reflection.is_null()),
+                            error,
+                            registry,
+                            RenderKind::Drawing,
+                        ));
+                    },
+                );
+                // SAFETY: as the option-less form's.
+                unsafe {
+                    self.device
+                        .newRenderPipelineStateWithDescriptor_options_completionHandler(
+                            &descriptor,
+                            options,
+                            block2::RcBlock::as_ptr(&handler),
+                        );
+                }
+                let handled = handler_answer(&answered);
+                let mut reflection = None;
+                let synchronous = match self
+                    .device
+                    .newRenderPipelineStateWithDescriptor_options_reflection_error(
+                        &descriptor,
+                        options,
+                        Some(&mut reflection),
+                    ) {
+                    Ok(state) => Delivered::reflected(
+                        StateFacts::Render(render_state_facts(
+                            &state,
+                            registry,
+                            HANDLER_IMAGEBLOCK,
+                        )),
+                        reflection.is_some(),
+                    ),
+                    Err(_) => Delivered::refused(true),
+                };
+                (handled, synchronous)
+            }
+            PipelineForm::ComputeFunction {
+                entry,
+                options: None,
+            } => {
+                let function = self.function_of(library, entry)?;
+                let (sender, answered) = std::sync::mpsc::channel();
+                let handler = block2::RcBlock::new(
+                    move |state: *mut ProtocolObject<dyn MTLComputePipelineState>,
+                          error: *mut NSError| {
+                        let _ = sender.send(compute_delivery(state, None, error, registry));
+                    },
+                );
+                // SAFETY: the function is of this device's library and the block is held until the
+                // wait below has ended.
+                unsafe {
+                    self.device
+                        .newComputePipelineStateWithFunction_completionHandler(
+                            &function,
+                            block2::RcBlock::as_ptr(&handler),
+                        );
+                }
+                let handled = handler_answer(&answered);
+                let synchronous = match self
+                    .device
+                    .newComputePipelineStateWithFunction_error(&function)
+                {
+                    Ok(state) => Delivered::made(StateFacts::Compute(compute_state_facts(
+                        &state,
+                        registry,
+                        HANDLER_IMAGEBLOCK,
+                    ))),
+                    Err(_) => Delivered::refused(false),
+                };
+                (handled, synchronous)
+            }
+            PipelineForm::ComputeFunction {
+                entry,
+                options: Some(bits),
+            } => {
+                let function = self.function_of(library, entry)?;
+                let options = MTLPipelineOption(*bits as usize);
+                let (sender, answered) = std::sync::mpsc::channel();
+                let handler = block2::RcBlock::new(
+                    move |state: *mut ProtocolObject<dyn MTLComputePipelineState>,
+                          reflection: *mut MTLComputePipelineReflection,
+                          error: *mut NSError| {
+                        let _ = sender.send(compute_delivery(
+                            state,
+                            Some(!reflection.is_null()),
+                            error,
+                            registry,
+                        ));
+                    },
+                );
+                // SAFETY: as the option-less form's.
+                unsafe {
+                    self.device
+                        .newComputePipelineStateWithFunction_options_completionHandler(
+                            &function,
+                            options,
+                            block2::RcBlock::as_ptr(&handler),
+                        );
+                }
+                let handled = handler_answer(&answered);
+                let mut reflection = None;
+                // SAFETY: the function is of this device's library and `reflection` is this
+                // call's own out-parameter.
+                let made = unsafe {
+                    self.device
+                        .newComputePipelineStateWithFunction_options_reflection_error(
+                            &function,
+                            options,
+                            Some(&mut reflection),
+                        )
+                };
+                let synchronous = match made {
+                    Ok(state) => Delivered::reflected(
+                        StateFacts::Compute(compute_state_facts(
+                            &state,
+                            registry,
+                            HANDLER_IMAGEBLOCK,
+                        )),
+                        reflection.is_some(),
+                    ),
+                    Err(_) => Delivered::refused(true),
+                };
+                (handled, synchronous)
+            }
+            PipelineForm::ComputeDescriptor { spec, options } => {
+                let descriptor = self.compute_descriptor_from(library, spec)?;
+                let options = MTLPipelineOption(*options as usize);
+                let (sender, answered) = std::sync::mpsc::channel();
+                let handler = block2::RcBlock::new(
+                    move |state: *mut ProtocolObject<dyn MTLComputePipelineState>,
+                          reflection: *mut MTLComputePipelineReflection,
+                          error: *mut NSError| {
+                        let _ = sender.send(compute_delivery(
+                            state,
+                            Some(!reflection.is_null()),
+                            error,
+                            registry,
+                        ));
+                    },
+                );
+                // SAFETY: as the function forms'.
+                unsafe {
+                    self.device
+                        .newComputePipelineStateWithDescriptor_options_completionHandler(
+                            &descriptor,
+                            options,
+                            block2::RcBlock::as_ptr(&handler),
+                        );
+                }
+                let handled = handler_answer(&answered);
+                let mut reflection = None;
+                let synchronous = match self
+                    .device
+                    .newComputePipelineStateWithDescriptor_options_reflection_error(
+                        &descriptor,
+                        options,
+                        Some(&mut reflection),
+                    ) {
+                    Ok(state) => Delivered::reflected(
+                        StateFacts::Compute(compute_state_facts(
+                            &state,
+                            registry,
+                            HANDLER_IMAGEBLOCK,
+                        )),
+                        reflection.is_some(),
+                    ),
+                    Err(_) => Delivered::refused(true),
+                };
+                (handled, synchronous)
+            }
+            PipelineForm::Tile { spec, options } => {
+                let descriptor = self.tile_descriptor_from(library, spec)?;
+                let options = MTLPipelineOption(*options as usize);
+                let (sender, answered) = std::sync::mpsc::channel();
+                let handler = block2::RcBlock::new(
+                    move |state: *mut ProtocolObject<dyn MTLRenderPipelineState>,
+                          reflection: *mut MTLRenderPipelineReflection,
+                          error: *mut NSError| {
+                        let _ = sender.send(render_delivery(
+                            state,
+                            Some(!reflection.is_null()),
+                            error,
+                            registry,
+                            RenderKind::Tile,
+                        ));
+                    },
+                );
+                // SAFETY: as the drawing forms'.
+                unsafe {
+                    self.device
+                        .newRenderPipelineStateWithTileDescriptor_options_completionHandler(
+                            &descriptor,
+                            options,
+                            block2::RcBlock::as_ptr(&handler),
+                        );
+                }
+                let handled = handler_answer(&answered);
+                let mut reflection = None;
+                let synchronous = match self
+                    .device
+                    .newRenderPipelineStateWithTileDescriptor_options_reflection_error(
+                        &descriptor,
+                        options,
+                        Some(&mut reflection),
+                    ) {
+                    Ok(state) => Delivered::reflected(
+                        StateFacts::Tile(tile_state_facts(&state)),
+                        reflection.is_some(),
+                    ),
+                    Err(_) => Delivered::refused(true),
+                };
+                (handled, synchronous)
+            }
+            PipelineForm::Mesh { functions, options } => {
+                let descriptor = self.mesh_descriptor(library, functions)?;
+                let options = MTLPipelineOption(*options as usize);
+                let (sender, answered) = std::sync::mpsc::channel();
+                let handler = block2::RcBlock::new(
+                    move |state: *mut ProtocolObject<dyn MTLRenderPipelineState>,
+                          reflection: *mut MTLRenderPipelineReflection,
+                          error: *mut NSError| {
+                        let _ = sender.send(render_delivery(
+                            state,
+                            Some(!reflection.is_null()),
+                            error,
+                            registry,
+                            RenderKind::Drawing,
+                        ));
+                    },
+                );
+                // SAFETY: as the drawing forms'.
+                unsafe {
+                    self.device
+                        .newRenderPipelineStateWithMeshDescriptor_options_completionHandler(
+                            &descriptor,
+                            options,
+                            block2::RcBlock::as_ptr(&handler),
+                        );
+                }
+                let handled = handler_answer(&answered);
+                let mut reflection = None;
+                let synchronous = match self
+                    .device
+                    .newRenderPipelineStateWithMeshDescriptor_options_reflection_error(
+                        &descriptor,
+                        options,
+                        Some(&mut reflection),
+                    ) {
+                    Ok(state) => Delivered::reflected(
+                        StateFacts::Render(render_state_facts(
+                            &state,
+                            registry,
+                            HANDLER_IMAGEBLOCK,
+                        )),
+                        reflection.is_some(),
+                    ),
+                    Err(_) => Delivered::refused(true),
+                };
+                (handled, synchronous)
+            }
+        };
+        Ok(BothPaths::new(handled, synchronous))
+    }
+
+    /// `newFunctionWithName:` of `entry` in the library `library` names.
+    fn function_of(
+        &self,
+        library: Handle,
+        entry: &str,
+    ) -> Answer<Retained<ProtocolObject<dyn MTLFunction>>> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        library
+            .newFunctionWithName(&NSString::from_str(entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", entry.to_owned()))
+    }
+
+    /// The `MTLComputePipelineDescriptor` `spec` describes, of `library`'s kernel.
+    ///
+    /// Its own method rather than part of a creation, because the same descriptor is handed to
+    /// two creations: a case of [`crate::pipeline_handlers`] takes one descriptor through the
+    /// `completionHandler:` call and through its synchronous sibling, and the two paths are only
+    /// comparable where the value they are given is the same.
+    fn compute_descriptor_from(
+        &self,
+        library: Handle,
+        spec: &ComputeStateSpec<'_>,
+    ) -> Answer<Retained<MTLComputePipelineDescriptor>> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .newFunctionWithName(&NSString::from_str(spec.entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", spec.entry.to_owned()))?;
+        let descriptor = MTLComputePipelineDescriptor::new();
+        descriptor.setComputeFunction(Some(&function));
+        // Set only where the case states one. `setLabel:nil` on a pipeline descriptor fails an
+        // assertion inside Metal and ends the process ("label must not be nil", measured on this
+        // M3 Max while recording this family), and Metal's own default is already nil, so a case
+        // that means a nil label is a case that makes this call not at all.
+        if let Some(label) = spec.label {
+            descriptor.setLabel(Some(&NSString::from_str(label)));
+        }
+        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
+        if let Some(threads) = spec.required_threads_per_threadgroup {
+            descriptor.setRequiredThreadsPerThreadgroup(size(threads));
+        }
+        Ok(descriptor)
+    }
+
+    /// The `MTLRenderPipelineDescriptor` `spec` describes, of `library`'s stage functions.
+    ///
+    /// Its own method for the reason [`MetalSide::compute_descriptor_from`]'s is.
+    fn render_descriptor_from(
+        &self,
+        library: Handle,
+        spec: &RenderPipelineSpec<'_>,
+    ) -> Answer<Retained<MTLRenderPipelineDescriptor>> {
+        let function = |stage: &StageFunction<'_>| {
+            let named = stage.library.unwrap_or(library);
+            let held = self
+                .libraries
+                .get(named.0 as usize)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", named.0)))?;
+            held.newFunctionWithName(&NSString::from_str(stage.entry))
+                .ok_or_else(|| Failure::named("NoSuchFunction", stage.entry.to_owned()))
+        };
+        let descriptor = MTLRenderPipelineDescriptor::new();
+        descriptor.setVertexFunction(Some(&*function(&spec.vertex)?));
+        if let Some(fragment) = &spec.fragment {
+            descriptor.setFragmentFunction(Some(&*function(fragment)?));
+        }
+        // Set only where the case states one: `setLabel:nil` ends Metal's process, as the
+        // compute descriptor's does.
+        if let Some(label) = spec.label {
+            descriptor.setLabel(Some(&NSString::from_str(label)));
+        }
+        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
+        descriptor.setRasterSampleCount(spec.samples as usize);
+        descriptor.setRasterizationEnabled(spec.rasterization);
+        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
+        if let Some(layout) = &spec.vertex_layout {
+            descriptor.setVertexDescriptor(Some(&vertex_descriptor(layout)));
+        }
+        if let Some(format) = spec.depth_format {
+            descriptor.setDepthAttachmentPixelFormat(MTLPixelFormat(format.as_raw() as usize));
+        }
+        if let Some(format) = spec.stencil_format {
+            descriptor.setStencilAttachmentPixelFormat(MTLPixelFormat(format.as_raw() as usize));
+        }
+        for (at, color) in spec.colors.iter().enumerate() {
+            let Some(color) = color else { continue };
+            // SAFETY: `at` is below the eight color attachments every Metal pipeline holds, which
+            // the case's own guard keeps it to.
+            let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(at) };
+            attachment.setPixelFormat(MTLPixelFormat(color.format.as_raw() as usize));
+            attachment.setWriteMask(MTLColorWriteMask(color.write_mask.as_raw() as usize));
+            if let Some(blend) = &color.blend {
+                let factor = |factor: metal2vulkan::metal::BlendFactor| {
+                    MTLBlendFactor(factor.as_raw() as usize)
+                };
+                let operation = |operation: metal2vulkan::metal::BlendOperation| {
+                    MTLBlendOperation(operation.as_raw() as usize)
+                };
+                attachment.setBlendingEnabled(true);
+                attachment.setSourceRGBBlendFactor(factor(blend.source_rgb));
+                attachment.setDestinationRGBBlendFactor(factor(blend.destination_rgb));
+                attachment.setRgbBlendOperation(operation(blend.rgb));
+                attachment.setSourceAlphaBlendFactor(factor(blend.source_alpha));
+                attachment.setDestinationAlphaBlendFactor(factor(blend.destination_alpha));
+                attachment.setAlphaBlendOperation(operation(blend.alpha));
+            }
+        }
+        Ok(descriptor)
+    }
+
+    /// The `MTLTileRenderPipelineDescriptor` `spec` describes, of `library`'s tile function.
+    ///
+    /// Its own method for the reason [`MetalSide::compute_descriptor_from`]'s is.
+    fn tile_descriptor_from(
+        &self,
+        library: Handle,
+        spec: &TilePipelineSpec<'_>,
+    ) -> Answer<Retained<MTLTileRenderPipelineDescriptor>> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .newFunctionWithName(&NSString::from_str(spec.entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", spec.entry.to_owned()))?;
+        let descriptor = MTLTileRenderPipelineDescriptor::new();
+        // SAFETY: the function is of this library, and the descriptor is this call's own.
+        unsafe { descriptor.setTileFunction(&function) };
+        for (at, format) in spec.attachments.iter().enumerate() {
+            // SAFETY: `at` is below the eight attachments the descriptor's array holds.
+            unsafe {
+                descriptor
+                    .colorAttachments()
+                    .objectAtIndexedSubscript(at)
+                    .setPixelFormat(MTLPixelFormat(format.as_raw() as usize));
+            }
+        }
+        if let Some(limit) = spec.max_total_threads_per_threadgroup {
+            descriptor.setMaxTotalThreadsPerThreadgroup(limit as usize);
+        }
+        descriptor.setThreadgroupSizeMatchesTileSize(spec.threadgroup_size_matches_tile_size);
+        Ok(descriptor)
+    }
+
     fn mesh_descriptor(
         &self,
         library: Handle,
@@ -8844,4 +9251,160 @@ fn layer_descriptor(layer: &RateMapLayer) -> Answer<Retained<MTLRasterizationRat
                 .ok_or_else(|| Failure::named("NoSamples", "a layer axis of none"))?,
         )
     })
+}
+
+/// What a compute pipeline state answers of itself, read off the state rather than off a handle.
+///
+/// A free function because a creation handler reads these getters **inside the block**, on
+/// Metal's own thread, from a raw pointer it was given: there is no handle there and nothing to
+/// look up. [`Side::compute_pipeline_facts`] is the same reading through the case's pool, so the
+/// two can never drift.
+fn compute_state_facts(
+    state: &ProtocolObject<dyn MTLComputePipelineState>,
+    registry: u64,
+    imageblock: [u32; 3],
+) -> ComputeStateFacts {
+    let required = state.requiredThreadsPerThreadgroup();
+    ComputeStateFacts {
+        label: state.label().map(|label| label.to_string()),
+        // The registry ID is each host's own number, so only the **comparison** is portable.
+        device_is_the_cases: state.device().registryID() == registry,
+        static_threadgroup_memory_length: state.staticThreadgroupMemoryLength() as u64,
+        support_indirect_command_buffers: state.supportIndirectCommandBuffers(),
+        // SAFETY: the dimensions are the case's own three positive extents, which the call
+        // multiplies by the kernel's imageblock cell size and nothing else.
+        imageblock_memory_length: unsafe {
+            state.imageblockMemoryLengthForDimensions(size(imageblock))
+        } as u64,
+        required_threads_per_threadgroup: [
+            required.width as u64,
+            required.height as u64,
+            required.depth as u64,
+        ],
+    }
+}
+
+/// What a drawing render pipeline state answers of itself, read off the state.
+///
+/// A free function for the reason [`compute_state_facts`] gives.
+fn render_state_facts(
+    state: &ProtocolObject<dyn MTLRenderPipelineState>,
+    registry: u64,
+    imageblock: [u32; 3],
+) -> RenderStateFacts {
+    let required = state.requiredThreadsPerTileThreadgroup();
+    RenderStateFacts {
+        label: state.label().map(|label| label.to_string()),
+        device_is_the_cases: state.device().registryID() == registry,
+        max_total_threads_per_threadgroup: state.maxTotalThreadsPerThreadgroup() as u64,
+        threadgroup_size_matches_tile_size: state.threadgroupSizeMatchesTileSize(),
+        imageblock_sample_length: Some(state.imageblockSampleLength() as u64),
+        imageblock_memory_length: Some(
+            state.imageblockMemoryLengthForDimensions(size(imageblock)) as u64
+        ),
+        support_indirect_command_buffers: state.supportIndirectCommandBuffers(),
+        required_threads_per_tile_threadgroup: [
+            required.width as u64,
+            required.height as u64,
+            required.depth as u64,
+        ],
+    }
+}
+
+/// The three getters a **tile** state answers, read off the state.
+///
+/// A free function for the reason [`compute_state_facts`] gives.
+fn tile_state_facts(state: &ProtocolObject<dyn MTLRenderPipelineState>) -> TileFacts {
+    TileFacts {
+        max_total_threads_per_threadgroup: state.maxTotalThreadsPerThreadgroup() as u64,
+        threadgroup_size_matches_tile_size: state.threadgroupSizeMatchesTileSize(),
+        imageblock_sample_length: Some(state.imageblockSampleLength() as u64),
+    }
+}
+
+/// Which kind of state a `MTLRenderPipelineState` handler was given, which is what decides the
+/// getters its facts are read from.
+///
+/// A tile state and a drawing state are one Metal object made from two descriptors, and
+/// [`crate::pipeline_facts`] states which getters each answers, so the handler has to be told
+/// which descriptor it came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RenderKind {
+    Drawing,
+    Tile,
+}
+
+/// What a render-state creation handler was given, as the vocabulary records it.
+///
+/// `reflected` is `Some(whether a reflection came)` for a form with an options parameter and
+/// `None` for one without, which is the distinction
+/// [`Delivered::reflection`](crate::pipeline_handlers::Delivered::reflection) holds.
+fn render_delivery(
+    state: *mut ProtocolObject<dyn MTLRenderPipelineState>,
+    reflected: Option<bool>,
+    error: *mut NSError,
+    registry: u64,
+    kind: RenderKind,
+) -> Delivered {
+    // SAFETY: the pointer is the one Metal handed this handler. Metal's contract for these blocks
+    // is that it is either null or a state that is valid for the call, and nothing here keeps a
+    // reference past the facts it reads.
+    match unsafe { state.as_ref() } {
+        Some(state) => {
+            let facts = match kind {
+                RenderKind::Drawing => {
+                    StateFacts::Render(render_state_facts(state, registry, HANDLER_IMAGEBLOCK))
+                }
+                RenderKind::Tile => StateFacts::Tile(tile_state_facts(state)),
+            };
+            match reflected {
+                Some(held) => Delivered::reflected(facts, held),
+                None => Delivered::made(facts),
+            }
+        }
+        None => Delivered {
+            state: false,
+            error: !error.is_null(),
+            reflection: reflected,
+            facts: None,
+        },
+    }
+}
+
+/// What a compute-state creation handler was given, as the vocabulary records it.
+fn compute_delivery(
+    state: *mut ProtocolObject<dyn MTLComputePipelineState>,
+    reflected: Option<bool>,
+    error: *mut NSError,
+    registry: u64,
+) -> Delivered {
+    // SAFETY: as [`render_delivery`]'s.
+    match unsafe { state.as_ref() } {
+        Some(state) => {
+            let facts =
+                StateFacts::Compute(compute_state_facts(state, registry, HANDLER_IMAGEBLOCK));
+            match reflected {
+                Some(held) => Delivered::reflected(facts, held),
+                None => Delivered::made(facts),
+            }
+        }
+        None => Delivered {
+            state: false,
+            error: !error.is_null(),
+            reflection: reflected,
+            facts: None,
+        },
+    }
+}
+
+/// The handler's answer, waited for on its **own channel** with a bound.
+///
+/// A timeout is recorded as
+/// [`Arrival::NeverArrived`](crate::pipeline_handlers::Arrival::NeverArrived) and never waited for
+/// again: this is the one place the family could hang, and it cannot.
+fn handler_answer(answered: &std::sync::mpsc::Receiver<Delivered>) -> Handled {
+    match answered.recv_timeout(HANDLER_WAIT) {
+        Ok(delivered) => Handled::answered(delivered),
+        Err(_) => Handled::never_arrived(),
+    }
 }

@@ -1,0 +1,312 @@
+{
+  "format": 1,
+  "case": "pipeline-handler-tile-options-none",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "k10ts_tile_order.ll",
+      "entry": "k10ts_tile_order",
+      "source_sha256": "79263146113cf8253e6407c59a97f9b6386f4b735d67c2cdf5f05d6908d626b9"
+    },
+    {
+      "fixture": "k10ts_tile_order.air.ll",
+      "entry": "k10ts_tile_order",
+      "source_sha256": "f78d54ea1a28510e239ac7b5f810d9d44a079304cf3fbc0c7b0208118e97230b"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "79263146113cf8253e6407c59a97f9b6386f4b735d67c2cdf5f05d6908d626b9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f78d54ea1a28510e239ac7b5f810d9d44a079304cf3fbc0c7b0208118e97230b"
+                        }
+                      }
+                    },
+                    {
+                      "name": "entry",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "7d043cc61e8da8d9c0fa6a2b5513f701c9e9f4eba0ba98a346a2da10b8eecb1b"
+                        }
+                      }
+                    },
+                    {
+                      "name": "form",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4e2c5763db8717aa27022669d349a6df18523aba92d629405fe702264ac9f60d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "imageblock",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b0853f6af25f29697838d03f243c9bf1bf6e861fdcb1ec7eb2c51e3446fe4e3f"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipelines",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "through-the-handler",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "arrival",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "Answered",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivery",
+                          "observed": {
+                            "value": "absent"
+                          },
+                          "children": [
+                            {
+                              "name": "delivered-a-state",
+                              "observed": {
+                                "value": {
+                                  "bool": true
+                                }
+                              }
+                            },
+                            {
+                              "name": "delivered-an-error",
+                              "observed": {
+                                "value": {
+                                  "bool": false
+                                }
+                              }
+                            },
+                            {
+                              "name": "delivered-a-reflection",
+                              "observed": {
+                                "value": {
+                                  "bool": false
+                                }
+                              }
+                            },
+                            {
+                              "name": "facts",
+                              "observed": {
+                                "value": "absent"
+                              },
+                              "children": [
+                                {
+                                  "name": "max_total_threads_per_threadgroup",
+                                  "observed": {
+                                    "value": {
+                                      "uint": 512
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "threadgroup_size_matches_tile_size",
+                                  "observed": {
+                                    "value": {
+                                      "bool": false
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "imageblock_sample_length",
+                                  "observed": {
+                                    "value": {
+                                      "variant": {
+                                        "name": "Some",
+                                        "payload": {
+                                          "uint": 4
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "synchronously",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "delivered-a-state",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivered-an-error",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "delivered-a-reflection",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "facts",
+                          "observed": {
+                            "value": "absent"
+                          },
+                          "children": [
+                            {
+                              "name": "max_total_threads_per_threadgroup",
+                              "observed": {
+                                "value": {
+                                  "uint": 512
+                                }
+                              }
+                            },
+                            {
+                              "name": "threadgroup_size_matches_tile_size",
+                              "observed": {
+                                "value": {
+                                  "bool": false
+                                }
+                              }
+                            },
+                            {
+                              "name": "imageblock_sample_length",
+                              "observed": {
+                                "value": {
+                                  "variant": {
+                                    "name": "Some",
+                                    "payload": {
+                                      "uint": 4
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "the-two-paths-agree",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

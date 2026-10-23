@@ -4513,15 +4513,23 @@ fn a_count_only_one_shape_moved_is_reported_as_well() {
 /// mention is not a correct use, so this is deliberately the weaker kind of guard — but it is
 /// mechanical, it needs no device, and a field the Metal side never names is a field it runs
 /// Metal's default for while a case states a value.
+///
+/// It reads `render_descriptor_from`, which is where the Metal side builds the descriptor:
+/// `render_pipeline` makes the state from it, and so does
+/// [`Side::pipeline_both_paths`](crate::case::Side::pipeline_both_paths), which hands one
+/// descriptor to a `completionHandler:` call and to its synchronous sibling. The guard follows
+/// the building rather than the creation, because that is where a field is set or forgotten.
 #[test]
 fn the_metal_side_mentions_every_pipeline_field() {
     let source = include_str!("metal_side.rs");
     let from = source
-        .find("fn render_pipeline(")
-        .expect("no render_pipeline in metal_side.rs");
+        .find("fn render_descriptor_from(")
+        .expect("no render_descriptor_from in metal_side.rs");
     let rest = &source[from..];
     // The method ends at the first `}` at one level of indentation, which closes it.
-    let to = rest.find("\n    }\n").expect("no end of render_pipeline");
+    let to = rest
+        .find("\n    }\n")
+        .expect("no end of render_descriptor_from");
     let body = &rest[..to];
     for field in [
         "depth_format",
@@ -4535,8 +4543,8 @@ fn the_metal_side_mentions_every_pipeline_field() {
     ] {
         assert!(
             body.contains(field),
-            "metal_side.rs's render_pipeline never mentions `{field}`, so it runs Metal's default \
-             where the case states a value"
+            "metal_side.rs's render_descriptor_from never mentions `{field}`, so it runs \
+             Metal's default where the case states a value"
         );
     }
 }
@@ -5650,4 +5658,187 @@ fn the_counts_a_re_measure_moved_are_summed_over_cases_once_each() {
     // Nothing moved, nothing summed: the summary cannot invent a row.
     assert!(counts_that_moved(&[]).is_empty());
     assert!(counts_that_moved(&[vec![], vec![]]).is_empty());
+}
+
+/// A side for the creation-handler family: the real case body, with the handler's delivery stated
+/// by the test rather than taken from a device.
+///
+/// It exists for one reason — to **falsify** the family's arrival site. An asynchronous case can
+/// pass by never running its handler at all, so the one check that must be shown to fail is
+/// "the handler did not arrive", and there is no way to make a real Metal handler not run.
+struct HandlerStub {
+    /// Whether the creation handler ran. `false` is the suppressed callback.
+    arrives: bool,
+}
+
+/// The facts the stub's delivered compute state answers, whatever asked.
+fn stub_compute_facts() -> crate::pipeline_facts::ComputeStateFacts {
+    crate::pipeline_facts::ComputeStateFacts {
+        label: None,
+        device_is_the_cases: true,
+        static_threadgroup_memory_length: 0,
+        support_indirect_command_buffers: false,
+        imageblock_memory_length: 0,
+        required_threads_per_threadgroup: [0, 0, 0],
+    }
+}
+
+impl Side for HandlerStub {
+    fn venue(&self) -> Venue {
+        venue_named("the stub")
+    }
+
+    fn library(&mut self, _source: &ShaderSource<'_>) -> Answer<Handle> {
+        Ok(Handle(0))
+    }
+
+    fn compute_pipeline(&mut self, _library: Handle, _entry: &str) -> Answer<Handle> {
+        Err(Failure::unavailable("compute_pipeline"))
+    }
+
+    fn buffer(&mut self, _bytes: &[u8]) -> Answer<Handle> {
+        Err(Failure::unavailable("buffer"))
+    }
+
+    fn zeroed_buffer(&mut self, _length: usize) -> Answer<Handle> {
+        Err(Failure::unavailable("zeroed_buffer"))
+    }
+
+    fn texture_2d(
+        &mut self,
+        _format: metal2vulkan::metal::PixelFormat,
+        _size: [u32; 2],
+        _row_pitch: u32,
+        _bytes: &[u8],
+    ) -> Answer<Handle> {
+        Err(Failure::unavailable("texture_2d"))
+    }
+
+    fn read_texture(
+        &mut self,
+        _texture: Handle,
+        _size: [u32; 2],
+        _row_pitch: u32,
+    ) -> Answer<Vec<u8>> {
+        Err(Failure::unavailable("read_texture"))
+    }
+
+    fn dispatch(
+        &mut self,
+        _pipeline: Handle,
+        _bindings: &crate::case::Bindings<'_>,
+        _groups: [u32; 3],
+        _threads: [u32; 3],
+    ) -> Answer<Handle> {
+        Err(Failure::unavailable("dispatch"))
+    }
+
+    fn compute_pipeline_with_stage_input(
+        &mut self,
+        _library: Handle,
+        _entry: &str,
+        _stage_input: &crate::case::StageInput,
+    ) -> Answer<Handle> {
+        Err(Failure::unavailable("compute_pipeline_with_stage_input"))
+    }
+
+    fn dispatch_threads(
+        &mut self,
+        _pipeline: Handle,
+        _bindings: &crate::case::Bindings<'_>,
+        _stage_in: &[crate::case::StageInRegion],
+        _grid: [u32; 3],
+        _threads: [u32; 3],
+    ) -> Answer<Handle> {
+        Err(Failure::unavailable("dispatch_threads"))
+    }
+
+    fn wait(&mut self, _command_buffer: Handle) -> Answer<Value> {
+        Err(Failure::unavailable("wait"))
+    }
+
+    fn read_buffer(&mut self, _buffer: Handle, _offset: u64, _length: usize) -> Answer<Vec<u8>> {
+        Err(Failure::unavailable("read_buffer"))
+    }
+
+    fn announced(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn pipeline_both_paths(
+        &mut self,
+        _library: Handle,
+        _form: &crate::pipeline_handlers::Form<'_>,
+    ) -> Answer<crate::pipeline_handlers::BothPaths> {
+        use crate::pipeline_handlers::{BothPaths, Delivered, Handled, StateFacts};
+        let delivered = Delivered::made(StateFacts::Compute(stub_compute_facts()));
+        let handler = match self.arrives {
+            true => Handled::answered(delivered.clone()),
+            false => Handled::never_arrived(),
+        };
+        Ok(BothPaths::new(handler, delivered))
+    }
+}
+
+/// The transcript `case` leaves when it runs on `side`, as a replay builds one.
+fn transcript_of(case: &dyn Case, side: &mut dyn Side) -> Transcript {
+    let mut sites = Sites::new();
+    let _ = case.run(side, &mut sites);
+    sites.notices::<&str>(NOTICES_SITE, &[]);
+    sites.finish()
+}
+
+/// **A creation handler that never ran is a divergence, not a pass.**
+///
+/// This is the falsification the asynchronous family needs. A case that waits on a handler with a
+/// bound can "pass" by timing out every time — the state it compares is simply never read — so the
+/// arrival site has to be one the comparison reads, and a timeout has to be visible as a timeout.
+///
+/// The test runs the **real case body** twice: once against a side whose handler arrives, which
+/// stands in for the recorded Metal answer, and once against a side whose handler is suppressed.
+/// The comparison must report a divergence, and it must name the arrival site: a diff that said
+/// only "the facts are missing" would leave a reader unable to tell a timeout from a creation that
+/// failed.
+#[test]
+fn a_creation_handler_that_never_ran_is_divergent_not_a_pass() {
+    let case = crate::cases::named("pipeline-handler-compute-function")
+        .expect("the compute-function handler case");
+    let metal = transcript_of(case.as_ref(), &mut HandlerStub { arrives: true });
+    // The control: the same body, the same side, the handler arriving. Without this the test
+    // could pass because the case never compares anything at all.
+    let arrived = transcript_of(case.as_ref(), &mut HandlerStub { arrives: true });
+    let same = compare(
+        &metal,
+        &arrived,
+        &case.allowances(),
+        Offered::new(&[], &Validated::Ran),
+    );
+    assert!(same.is_exact(), "the arriving run is not exact: {same:?}");
+
+    let timed_out = transcript_of(case.as_ref(), &mut HandlerStub { arrives: false });
+    let found = compare(
+        &metal,
+        &timed_out,
+        &case.allowances(),
+        Offered::new(&[], &Validated::Ran),
+    );
+    assert!(
+        !found.divergences.is_empty(),
+        "a suppressed creation handler compared exact: {found:?}"
+    );
+    let paths: Vec<&str> = found
+        .divergences
+        .iter()
+        .map(|divergence| divergence.path.as_str())
+        .collect();
+    assert!(
+        paths.iter().any(|path| path.ends_with("/arrival")),
+        "no divergence names the arrival site: {paths:?}"
+    );
+    assert!(
+        paths
+            .iter()
+            .any(|path| path.ends_with("/the-two-paths-agree")),
+        "no divergence names the two paths disagreeing: {paths:?}"
+    );
 }

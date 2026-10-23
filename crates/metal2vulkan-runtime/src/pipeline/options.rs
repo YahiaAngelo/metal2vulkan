@@ -56,11 +56,29 @@ impl PipelineOption {
         self.0 & other.0 == other.0
     }
 
-    /// Whether the options ask for reflection: `BINDING_INFO`, `BUFFER_TYPE_INFO`, or both.
+    /// Whether the options ask for reflection: **any** of the three bits Apple's header names.
+    ///
+    /// Not `BINDING_INFO | BUFFER_TYPE_INFO` alone, which is what Apple's documentation for the
+    /// third bit would suggest. Measured on an M3 Max under macOS 27.0.1 over all eight
+    /// combinations of the three bits (the conformance suite's `pipeline_options` family):
+    /// `newComputePipelineStateWithFunction:options:reflection:error:` fills its `reflection`
+    /// out-parameter for every non-zero value and leaves it nil only for
+    /// `MTLPipelineOptionNone` — `MTLPipelineOptionFailOnBinaryArchiveMiss` **alone** included.
+    /// A creation that answered nil there would refuse a consumer the reflection Metal hands it.
+    ///
+    /// An undefined bit on its own is not measured and does not reflect: `from_raw` keeps every
+    /// bit Metal accepts, and what Metal does with a value its header gives no meaning to is not
+    /// something this answers for.
     pub(crate) const fn reflects(self) -> bool {
-        self.0 & (PipelineOption::BINDING_INFO.0 | PipelineOption::BUFFER_TYPE_INFO.0) != 0
+        self.0 & NAMED_BITS != 0
     }
 }
+
+/// The three bits `MTLPipelineOption` names in Apple's header, which is the set
+/// [`PipelineOption::reflects`] reads.
+const NAMED_BITS: u64 = PipelineOption::BINDING_INFO.0
+    | PipelineOption::BUFFER_TYPE_INFO.0
+    | PipelineOption::FAIL_ON_BINARY_ARCHIVE_MISS.0;
 
 impl std::ops::BitOr for PipelineOption {
     type Output = PipelineOption;

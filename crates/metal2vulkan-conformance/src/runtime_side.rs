@@ -45,6 +45,11 @@ use crate::pass_descriptors::{
     ASSIGNED_COLOR, DEPTH_AT, MUTATED_AFTER, READ_COLORS as PASS_COLORS, STENCIL_AT, SWEPT_COLOR,
 };
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
+use crate::pipeline_handlers::{
+    BothPaths, Delivered, Form as PipelineForm, Handled, StateFacts,
+    IMAGEBLOCK as HANDLER_IMAGEBLOCK,
+};
+use crate::pipeline_options::UnderOptions;
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     ColorState, LodClamp, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction,
@@ -2281,27 +2286,40 @@ impl Side for RuntimeSide<'_> {
         Ok(reflection.bindings().iter().map(our_binding).collect())
     }
 
+    fn compute_pipeline_reflection_under(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        options: u64,
+    ) -> Answer<UnderOptions> {
+        let function = self.our_function(library, entry)?;
+        let mut built = PipelineOptions::default();
+        built.options = PipelineOption::from_raw(options);
+        let made = self
+            .device
+            .new_compute_pipeline_state_with_function_and_reflection(&function, &built);
+        let Ok((state, reflection)) = made else {
+            return Ok(UnderOptions::refused());
+        };
+        let found = reflection.map(|reflection| {
+            let bindings = reflection.bindings();
+            bindings.iter().map(our_binding).collect()
+        });
+        // The state is kept so it outlives the reflection its creation answered, as the Metal
+        // side's is.
+        keep(&mut self.pipelines, state);
+        Ok(UnderOptions {
+            refused: false,
+            bindings: found,
+        })
+    }
+
     fn compute_pipeline_with_descriptor(
         &mut self,
         library: Handle,
         spec: &ComputeStateSpec<'_>,
     ) -> Answer<Handle> {
-        let library = self
-            .libraries
-            .get(library.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
-        let function = library
-            .new_function_with_name(spec.entry)
-            .map_err(|error| Failure::of(&error))?;
-        let mut descriptor = metal2vulkan::pipeline::ComputePipelineDescriptor::new(
-            StageSource::Function(function.function_descriptor()),
-        );
-        descriptor.support_indirect_command_buffers = spec.support_indirect_command_buffers;
-        descriptor.required_threads_per_threadgroup = spec.required_threads_per_threadgroup;
-        // The label is the creation's option rather than the descriptor's field, which is where
-        // the runtime takes `MTLComputePipelineDescriptor.label` from.
-        let mut options = PipelineOptions::default();
-        options.label = spec.label.map(str::to_owned);
+        let (descriptor, options) = self.our_compute_descriptor(library, spec)?;
         let state = self
             .device
             .new_compute_pipeline_state(&descriptor, &options)
@@ -2319,17 +2337,7 @@ impl Side for RuntimeSide<'_> {
             .pipelines
             .get(state.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?;
-        let required = state.required_threads_per_threadgroup();
-        Ok(ComputeStateFacts {
-            label: state.label().map(str::to_owned),
-            // The registry ID is each host's own number, so only the **comparison** is portable.
-            device_is_the_cases: state.device().registry_id() == registry,
-            static_threadgroup_memory_length: u64::from(state.static_threadgroup_memory_length()),
-            support_indirect_command_buffers: state.support_indirect_command_buffers(),
-            imageblock_memory_length: state
-                .imageblock_memory_length_for_dimensions(size(imageblock)),
-            required_threads_per_threadgroup: [required.width, required.height, required.depth],
-        })
+        Ok(our_compute_state_facts(state, registry, imageblock))
     }
 
     fn render_pipeline_facts(
@@ -2342,23 +2350,7 @@ impl Side for RuntimeSide<'_> {
             .render_pipelines
             .get(state.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?;
-        let required = state.required_threads_per_tile_threadgroup();
-        Ok(RenderStateFacts {
-            label: state.label().map(str::to_owned),
-            device_is_the_cases: state.device().registry_id() == registry,
-            max_total_threads_per_threadgroup: u64::from(state.max_total_threads_per_threadgroup()),
-            threadgroup_size_matches_tile_size: state.threadgroup_size_matches_tile_size(),
-            imageblock_sample_length: state.imageblock_sample_length().ok(),
-            imageblock_memory_length: state
-                .imageblock_memory_length_for_dimensions(size(imageblock))
-                .ok(),
-            support_indirect_command_buffers: state.support_indirect_command_buffers(),
-            required_threads_per_tile_threadgroup: [
-                required.width,
-                required.height,
-                required.depth,
-            ],
-        })
+        Ok(our_render_state_facts(state, registry, imageblock))
     }
 
     fn render_descriptor_facts(
@@ -3619,25 +3611,7 @@ impl Side for RuntimeSide<'_> {
     }
 
     fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
-        let library = self
-            .libraries
-            .get(library.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
-        let function = library
-            .new_function_with_name(spec.entry)
-            .map_err(Failure::from_error)?;
-        let mut descriptor = TileRenderPipelineDescriptor::new(StageSource::Function(
-            function.function_descriptor(),
-        ));
-        for (slot, format) in descriptor
-            .color_attachment_formats
-            .iter_mut()
-            .zip(spec.attachments)
-        {
-            *slot = Some(*format);
-        }
-        descriptor.max_total_threads_per_threadgroup = spec.max_total_threads_per_threadgroup;
-        descriptor.threadgroup_size_matches_tile_size = spec.threadgroup_size_matches_tile_size;
+        let descriptor = self.our_tile_descriptor(library, spec)?;
         let state = self
             .device
             .new_tile_render_pipeline_state(&descriptor, &PipelineOptions::default())
@@ -3686,32 +3660,7 @@ impl Side for RuntimeSide<'_> {
         library: Handle,
         spec: &RenderPipelineSpec<'_>,
     ) -> Answer<Handle> {
-        let stage = |stage: &StageFunction<'_>| -> Answer<StageSource> {
-            let named = stage.library.unwrap_or(library);
-            let held = self
-                .libraries
-                .get(named.0 as usize)
-                .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", named.0)))?;
-            Ok(StageSource::Function(
-                held.new_function_with_name(stage.entry)
-                    .map_err(Failure::from_error)?
-                    .function_descriptor(),
-            ))
-        };
-        let mut descriptor = RenderPipelineDescriptor::new(stage(&spec.vertex)?);
-        descriptor.fragment = spec.fragment.as_ref().map(&stage).transpose()?;
-        let apart = pipeline_fields(spec)?;
-        descriptor.color_attachments = apart.color_attachments;
-        descriptor.depth_format = apart.depth_format;
-        descriptor.stencil_format = apart.stencil_format;
-        descriptor.raster_sample_count = apart.raster_sample_count;
-        descriptor.rasterization_enabled = apart.rasterization_enabled;
-        descriptor.vertex_descriptor = apart.vertex_descriptor;
-        descriptor.support_indirect_command_buffers = apart.support_indirect_command_buffers;
-        // The label is the creation's option rather than the descriptor's field, which is where
-        // the runtime takes `MTLRenderPipelineDescriptor.label` from.
-        let mut options = PipelineOptions::default();
-        options.label = apart.label;
+        let (descriptor, options) = self.our_render_descriptor(library, spec)?;
         let state = self
             .device
             .new_render_pipeline_state(&descriptor, &options)
@@ -3719,16 +3668,20 @@ impl Side for RuntimeSide<'_> {
         Ok(keep(&mut self.render_pipelines, state))
     }
 
+    fn pipeline_both_paths(
+        &mut self,
+        library: Handle,
+        form: &PipelineForm<'_>,
+    ) -> Answer<BothPaths> {
+        self.our_both_paths(library, form)
+    }
+
     fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
         let state = self
             .render_pipelines
             .get(state.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0)))?;
-        Ok(TileFacts {
-            max_total_threads_per_threadgroup: u64::from(state.max_total_threads_per_threadgroup()),
-            threadgroup_size_matches_tile_size: state.threadgroup_size_matches_tile_size(),
-            imageblock_sample_length: state.imageblock_sample_length().ok(),
-        })
+        Ok(our_tile_state_facts(state))
     }
 
     fn tile_pass(
@@ -5683,6 +5636,272 @@ pub fn resource_options(storage: Storage) -> ResourceOptions {
 
 /// Encode one render pass of a program into `command_buffer`, answering the first refusal it met.
 impl RuntimeSide<'_> {
+    /// The `RenderPipelineDescriptor` and the creation options `spec` describes.
+    ///
+    /// Its own method rather than part of a creation, because the same descriptor is handed to two
+    /// creations: a case of [`crate::pipeline_handlers`] takes one descriptor through the
+    /// counterpart of Metal's `completionHandler:` call and through its synchronous sibling, and
+    /// the two are only comparable where the value they are given is the same. The label travels
+    /// in the options because that is where the runtime takes
+    /// `MTLRenderPipelineDescriptor.label` from.
+    fn our_render_descriptor(
+        &self,
+        library: Handle,
+        spec: &RenderPipelineSpec<'_>,
+    ) -> Answer<(RenderPipelineDescriptor, PipelineOptions)> {
+        let stage = |stage: &StageFunction<'_>| -> Answer<StageSource> {
+            let named = stage.library.unwrap_or(library);
+            let held = self
+                .libraries
+                .get(named.0 as usize)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", named.0)))?;
+            Ok(StageSource::Function(
+                held.new_function_with_name(stage.entry)
+                    .map_err(Failure::from_error)?
+                    .function_descriptor(),
+            ))
+        };
+        let mut descriptor = RenderPipelineDescriptor::new(stage(&spec.vertex)?);
+        descriptor.fragment = spec.fragment.as_ref().map(&stage).transpose()?;
+        let apart = pipeline_fields(spec)?;
+        descriptor.color_attachments = apart.color_attachments;
+        descriptor.depth_format = apart.depth_format;
+        descriptor.stencil_format = apart.stencil_format;
+        descriptor.raster_sample_count = apart.raster_sample_count;
+        descriptor.rasterization_enabled = apart.rasterization_enabled;
+        descriptor.vertex_descriptor = apart.vertex_descriptor;
+        descriptor.support_indirect_command_buffers = apart.support_indirect_command_buffers;
+        let mut options = PipelineOptions::default();
+        options.label = apart.label;
+        Ok((descriptor, options))
+    }
+
+    /// The `ComputePipelineDescriptor` and the creation options `spec` describes.
+    ///
+    /// Its own method for the reason [`RuntimeSide::our_render_descriptor`]'s is.
+    fn our_compute_descriptor(
+        &self,
+        library: Handle,
+        spec: &ComputeStateSpec<'_>,
+    ) -> Answer<(
+        metal2vulkan::pipeline::ComputePipelineDescriptor,
+        PipelineOptions,
+    )> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .new_function_with_name(spec.entry)
+            .map_err(|error| Failure::of(&error))?;
+        let mut descriptor = metal2vulkan::pipeline::ComputePipelineDescriptor::new(
+            StageSource::Function(function.function_descriptor()),
+        );
+        descriptor.support_indirect_command_buffers = spec.support_indirect_command_buffers;
+        descriptor.required_threads_per_threadgroup = spec.required_threads_per_threadgroup;
+        let mut options = PipelineOptions::default();
+        options.label = spec.label.map(str::to_owned);
+        Ok((descriptor, options))
+    }
+
+    /// The `TileRenderPipelineDescriptor` `spec` describes.
+    ///
+    /// Its own method for the reason [`RuntimeSide::our_render_descriptor`]'s is. A tile
+    /// descriptor carries no label, so there are no options to build beside it.
+    fn our_tile_descriptor(
+        &self,
+        library: Handle,
+        spec: &TilePipelineSpec<'_>,
+    ) -> Answer<TileRenderPipelineDescriptor> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .new_function_with_name(spec.entry)
+            .map_err(Failure::from_error)?;
+        let mut descriptor = TileRenderPipelineDescriptor::new(StageSource::Function(
+            function.function_descriptor(),
+        ));
+        for (slot, format) in descriptor
+            .color_attachment_formats
+            .iter_mut()
+            .zip(spec.attachments)
+        {
+            *slot = Some(*format);
+        }
+        descriptor.max_total_threads_per_threadgroup = spec.max_total_threads_per_threadgroup;
+        descriptor.threadgroup_size_matches_tile_size = spec.threadgroup_size_matches_tile_size;
+        Ok(descriptor)
+    }
+
+    /// One pipeline descriptor through the counterpart of Metal's `completionHandler:` form and
+    /// through that form's synchronous sibling ([`crate::pipeline_handlers`]).
+    ///
+    /// **The runtime has no asynchronous creation form.** The coverage map names each handler
+    /// form's counterpart as the synchronous call "the handler receives what the call returns", so
+    /// this side takes that call for both paths and answers
+    /// [`Arrival::Answered`](crate::pipeline_handlers::Arrival::Answered): a call that returned is
+    /// a delivery. The module's prose says so outright, and the absence of an asynchronous form is
+    /// a reported gap rather than a comparison. Nothing here waits on anything.
+    fn our_both_paths(&mut self, library: Handle, form: &PipelineForm<'_>) -> Answer<BothPaths> {
+        let registry = self.device.registry_id();
+        // Both paths are the one call, taken twice over the one descriptor. Written as a closure
+        // the two calls below share, so neither path can drift from the other inside this side.
+        let delivered = match form {
+            PipelineForm::Render {
+                spec,
+                options: None,
+            } => {
+                let (descriptor, options) = self.our_render_descriptor(library, spec)?;
+                let made = || match self.device.new_render_pipeline_state(&descriptor, &options) {
+                    Ok(state) => Delivered::made(StateFacts::Render(our_render_state_facts(
+                        &state,
+                        registry,
+                        HANDLER_IMAGEBLOCK,
+                    ))),
+                    Err(_) => Delivered::refused(false),
+                };
+                (made(), made())
+            }
+            PipelineForm::Render {
+                spec,
+                options: Some(bits),
+            } => {
+                let (descriptor, mut options) = self.our_render_descriptor(library, spec)?;
+                options.options = PipelineOption::from_raw(*bits);
+                let made = || match self
+                    .device
+                    .new_render_pipeline_state_with_reflection(&descriptor, &options)
+                {
+                    Ok((state, reflection)) => Delivered::reflected(
+                        StateFacts::Render(our_render_state_facts(
+                            &state,
+                            registry,
+                            HANDLER_IMAGEBLOCK,
+                        )),
+                        reflection.is_some(),
+                    ),
+                    Err(_) => Delivered::refused(true),
+                };
+                (made(), made())
+            }
+            PipelineForm::ComputeFunction {
+                entry,
+                options: None,
+            } => {
+                let function = self.our_function(library, entry)?;
+                let options = PipelineOptions::default();
+                let made = || match self
+                    .device
+                    .new_compute_pipeline_state_with_function(&function, &options)
+                {
+                    Ok(state) => Delivered::made(StateFacts::Compute(our_compute_state_facts(
+                        &state,
+                        registry,
+                        HANDLER_IMAGEBLOCK,
+                    ))),
+                    Err(_) => Delivered::refused(false),
+                };
+                (made(), made())
+            }
+            PipelineForm::ComputeFunction {
+                entry,
+                options: Some(bits),
+            } => {
+                let function = self.our_function(library, entry)?;
+                let mut options = PipelineOptions::default();
+                options.options = PipelineOption::from_raw(*bits);
+                let made = || match self
+                    .device
+                    .new_compute_pipeline_state_with_function_and_reflection(&function, &options)
+                {
+                    Ok((state, reflection)) => Delivered::reflected(
+                        StateFacts::Compute(our_compute_state_facts(
+                            &state,
+                            registry,
+                            HANDLER_IMAGEBLOCK,
+                        )),
+                        reflection.is_some(),
+                    ),
+                    Err(_) => Delivered::refused(true),
+                };
+                (made(), made())
+            }
+            PipelineForm::ComputeDescriptor { spec, options } => {
+                let (descriptor, mut built) = self.our_compute_descriptor(library, spec)?;
+                built.options = PipelineOption::from_raw(*options);
+                let made = || match self
+                    .device
+                    .new_compute_pipeline_state_with_reflection(&descriptor, &built)
+                {
+                    Ok((state, reflection)) => Delivered::reflected(
+                        StateFacts::Compute(our_compute_state_facts(
+                            &state,
+                            registry,
+                            HANDLER_IMAGEBLOCK,
+                        )),
+                        reflection.is_some(),
+                    ),
+                    Err(_) => Delivered::refused(true),
+                };
+                (made(), made())
+            }
+            PipelineForm::Tile { spec, options } => {
+                let descriptor = self.our_tile_descriptor(library, spec)?;
+                let mut built = PipelineOptions::default();
+                built.options = PipelineOption::from_raw(*options);
+                let made = || match self
+                    .device
+                    .new_tile_render_pipeline_state_with_reflection(&descriptor, &built)
+                {
+                    Ok((state, reflection)) => Delivered::reflected(
+                        StateFacts::Tile(our_tile_state_facts(&state)),
+                        reflection.is_some(),
+                    ),
+                    Err(_) => Delivered::refused(true),
+                };
+                (made(), made())
+            }
+            PipelineForm::Mesh { functions, options } => {
+                let descriptor = self.mesh_descriptor(library, functions)?;
+                let mut built = PipelineOptions::default();
+                built.options = PipelineOption::from_raw(*options);
+                let made = || match self
+                    .device
+                    .new_mesh_render_pipeline_state_with_reflection(&descriptor, &built)
+                {
+                    Ok((state, reflection)) => Delivered::reflected(
+                        StateFacts::Render(our_render_state_facts(
+                            &state,
+                            registry,
+                            HANDLER_IMAGEBLOCK,
+                        )),
+                        reflection.is_some(),
+                    ),
+                    Err(_) => Delivered::refused(true),
+                };
+                (made(), made())
+            }
+        };
+        let (through_the_counterpart, synchronous) = delivered;
+        Ok(BothPaths::new(
+            Handled::answered(through_the_counterpart),
+            synchronous,
+        ))
+    }
+
+    /// `newFunctionWithName:` of `entry` in the library `library` names.
+    fn our_function(&self, library: Handle, entry: &str) -> Answer<metal2vulkan_runtime::Function> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        library
+            .new_function_with_name(entry)
+            .map_err(Failure::from_error)
+    }
+
     /// The buffer standing for the surface behind the texture `target`.
     fn held_plane(&self, target: Handle) -> Answer<&Buffer> {
         self.planes
@@ -6687,4 +6906,61 @@ fn read_pass_descriptor(descriptor: &RenderPassDescriptor, reads: Reads) -> Pass
         );
     }
     facts
+}
+
+/// What a compute pipeline state answers of itself, read off the state rather than off a handle.
+///
+/// A free function because [`crate::pipeline_handlers`]' case reads these getters off a state it
+/// makes and spends inside one call, with no handle to look up.
+/// [`Side::compute_pipeline_facts`] is the same reading through the case's pool, so the two can
+/// never drift.
+fn our_compute_state_facts(
+    state: &ComputePipelineState,
+    registry: u64,
+    imageblock: [u32; 3],
+) -> ComputeStateFacts {
+    let required = state.required_threads_per_threadgroup();
+    ComputeStateFacts {
+        label: state.label().map(str::to_owned),
+        // The registry ID is each host's own number, so only the **comparison** is portable.
+        device_is_the_cases: state.device().registry_id() == registry,
+        static_threadgroup_memory_length: u64::from(state.static_threadgroup_memory_length()),
+        support_indirect_command_buffers: state.support_indirect_command_buffers(),
+        imageblock_memory_length: state.imageblock_memory_length_for_dimensions(size(imageblock)),
+        required_threads_per_threadgroup: [required.width, required.height, required.depth],
+    }
+}
+
+/// What a drawing render pipeline state answers of itself, read off the state.
+///
+/// A free function for the reason [`our_compute_state_facts`] gives.
+fn our_render_state_facts(
+    state: &RenderPipelineState,
+    registry: u64,
+    imageblock: [u32; 3],
+) -> RenderStateFacts {
+    let required = state.required_threads_per_tile_threadgroup();
+    RenderStateFacts {
+        label: state.label().map(str::to_owned),
+        device_is_the_cases: state.device().registry_id() == registry,
+        max_total_threads_per_threadgroup: u64::from(state.max_total_threads_per_threadgroup()),
+        threadgroup_size_matches_tile_size: state.threadgroup_size_matches_tile_size(),
+        imageblock_sample_length: state.imageblock_sample_length().ok(),
+        imageblock_memory_length: state
+            .imageblock_memory_length_for_dimensions(size(imageblock))
+            .ok(),
+        support_indirect_command_buffers: state.support_indirect_command_buffers(),
+        required_threads_per_tile_threadgroup: [required.width, required.height, required.depth],
+    }
+}
+
+/// The three getters a **tile** state answers, read off the state.
+///
+/// A free function for the reason [`our_compute_state_facts`] gives.
+fn our_tile_state_facts(state: &RenderPipelineState) -> TileFacts {
+    TileFacts {
+        max_total_threads_per_threadgroup: u64::from(state.max_total_threads_per_threadgroup()),
+        threadgroup_size_matches_tile_size: state.threadgroup_size_matches_tile_size(),
+        imageblock_sample_length: state.imageblock_sample_length().ok(),
+    }
 }

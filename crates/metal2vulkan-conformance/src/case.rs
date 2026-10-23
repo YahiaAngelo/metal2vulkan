@@ -1295,6 +1295,56 @@ pub trait Side {
         Err(Failure::unavailable("tile_facts"))
     }
 
+    /// `newComputePipelineStateWithFunction:options:reflection:error:` of the library's `entry`
+    /// under the raw `MTLPipelineOption` bits `options`, and the whole reflection it answered
+    /// ([`crate::pipeline_options`]).
+    ///
+    /// One call for the creation and the reading, because Metal answers a reflection **only** at
+    /// the creation: there is no getter to ask the state for one afterwards. The options are the
+    /// raw bits so the case states Metal's own value rather than a vocabulary of modes, which is
+    /// the choice [`crate::device_queries`]' heap query already makes for `MTLResourceOptions`.
+    ///
+    /// A refused creation is an `Ok` whose answer says it was refused
+    /// ([`UnderOptions::refused`](crate::pipeline_options::UnderOptions::refused)), not an `Err`:
+    /// the case is asking what each options value does, and "this value is refused" is one of the
+    /// answers it compares rather than a call the side could not make.
+    fn compute_pipeline_reflection_under(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        options: u64,
+    ) -> Answer<crate::pipeline_options::UnderOptions> {
+        let _ = (library, entry, options);
+        Err(Failure::unavailable("compute_pipeline_reflection_under"))
+    }
+
+    /// One pipeline descriptor made **twice**: once through Metal's `completionHandler:` form of
+    /// the creation `form` names, once through that form's synchronous sibling
+    /// ([`crate::pipeline_handlers`]).
+    ///
+    /// One call for the pair, because what the case means is a comparison **between** the two
+    /// paths of one side over one descriptor, which a case cannot state as two independent calls:
+    /// the descriptor is built inside the call so that both paths are given the same value, and
+    /// [`BothPaths::agree`](crate::pipeline_handlers::BothPaths::agree) is derived from the two
+    /// deliveries rather than asserted by the side.
+    ///
+    /// Neither state is kept by handle. Every fact the case reads is read inside the call, no case
+    /// holds either state afterwards, and nothing compares a pipeline's identity — so the two
+    /// sides need no handle space for an object the family makes and spends.
+    ///
+    /// The handler is waited for on **its own channel with a bound**
+    /// ([`WAIT`](crate::pipeline_handlers::WAIT)); a bound that runs out is recorded as
+    /// [`Arrival::NeverArrived`](crate::pipeline_handlers::Arrival::NeverArrived) and never
+    /// retried.
+    fn pipeline_both_paths(
+        &mut self,
+        library: Handle,
+        form: &crate::pipeline_handlers::Form<'_>,
+    ) -> Answer<crate::pipeline_handlers::BothPaths> {
+        let _ = (library, form);
+        Err(Failure::unavailable("pipeline_both_paths"))
+    }
+
     /// One command buffer with one render pass over `targets` in `tile`-sized tiles, each
     /// attachment **loaded and stored**, whose commands are `steps` in order, then `endEncoding`,
     /// `commit` and a bounded wait.

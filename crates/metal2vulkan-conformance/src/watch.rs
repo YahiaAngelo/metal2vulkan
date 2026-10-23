@@ -581,6 +581,26 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.tile_facts(state)
     }
 
+    fn pipeline_both_paths(
+        &mut self,
+        library: Handle,
+        form: &crate::pipeline_handlers::Form<'_>,
+    ) -> Answer<crate::pipeline_handlers::BothPaths> {
+        let _span = self.watch("pipeline_both_paths");
+        self.inner.pipeline_both_paths(library, form)
+    }
+
+    fn compute_pipeline_reflection_under(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        options: u64,
+    ) -> Answer<crate::pipeline_options::UnderOptions> {
+        let _span = self.watch("compute_pipeline_reflection_under");
+        self.inner
+            .compute_pipeline_reflection_under(library, entry, options)
+    }
+
     fn tile_pass(
         &mut self,
         targets: &[Handle],
