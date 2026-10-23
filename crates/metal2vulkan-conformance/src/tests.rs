@@ -32,8 +32,11 @@ struct StubSide {
     status: &'static str,
     /// The notice codes `announced` hands over, once.
     notices: Vec<String>,
-    /// A call that fails, by its name, with the failure it gives.
-    refuse: Option<(&'static str, Failure)>,
+    /// The calls that fail, each by its name, with the failure it gives. A list rather than one,
+    /// because a case may record a refusal at a site it carries on past **and** stop at a later
+    /// call the venue cannot make, and the two together are a shape the verdicts have to get
+    /// right.
+    refuse: Vec<(&'static str, Failure)>,
     /// The device name the side's venue answers, so a test can hold a venue-scoped ledger row
     /// against one venue and not another.
     device: &'static str,
@@ -46,7 +49,7 @@ impl StubSide {
             output,
             status: "Completed",
             notices: Vec::new(),
-            refuse: None,
+            refuse: Vec::new(),
             device: "stub",
             made: 0,
         }
@@ -64,15 +67,15 @@ impl StubSide {
     }
 
     fn refusing(mut self, call: &'static str, failure: Failure) -> Self {
-        self.refuse = Some((call, failure));
+        self.refuse.push((call, failure));
         self
     }
 
     /// The failure the side was told to give at `call`, if any.
     fn refusal(&self, call: &str) -> Option<Failure> {
         self.refuse
-            .as_ref()
-            .filter(|(named, _)| *named == call)
+            .iter()
+            .find(|(named, _)| *named == call)
             .map(|(_, failure)| failure.clone())
     }
 
@@ -1339,6 +1342,201 @@ fn a_venue_that_lacks_the_feature_is_its_own_outcome() {
     assert_eq!(replayed.verdict.word(), "lacks-feature");
 }
 
+/// A case that records a refusal at a site it **carries on past**, and then stops at a call the
+/// venue honestly cannot make.
+///
+/// This shape had no case in the tree, which is why the hole below went unreached: the only user
+/// of [`crate::case::probe`] makes no abortable call after it, and every site that records a
+/// failure by hand either runs to the end or aborts at once. So the shape is written here, where
+/// it costs no device and cannot be refactored away by a case author.
+///
+/// `hand_built` chooses how the case says it stopped: through [`made`], which records the venue's
+/// gap as it emits the site, or through an `Abort` the case builds itself, which 122 sites in the
+/// suite do and which records no such thing. Both have to reach the same verdict.
+struct StoppedCase {
+    name: &'static str,
+    hand_built: bool,
+}
+
+impl StoppedCase {
+    fn new(name: &'static str, hand_built: bool) -> Self {
+        Self { name, hand_built }
+    }
+
+    /// The transcript a side that answered everything emits: Metal's answer for this case.
+    ///
+    /// It holds a site **after** the one that stops our run, so a green verdict here also says
+    /// the comparison was told the run stopped: without that, the site Metal alone reached would
+    /// be a divergence and no verdict of this case could ever be `lacks-feature`.
+    fn metal(&self) -> Transcript {
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&self.inputs().unwrap()));
+        sites.value(SWEPT, Value::ok(Value::Uint(11)));
+        sites.value("library", Value::ok(Value::Absent));
+        sites.value(STOPS, Value::ok(Value::Absent));
+        sites.value("after", Value::Uint(13));
+        sites.notices(NOTICES_SITE, &[] as &[&str]);
+        sites.finish()
+    }
+}
+
+/// The site the case sweeps over and carries on past.
+const SWEPT: &str = "swept";
+
+/// The site the case stops at.
+const STOPS: &str = "stops";
+
+impl Case for StoppedCase {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::Run
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        Ok(vec![Input::bytes("calls", b"one sweep and one stop")])
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        // A sweep: one refused entry compares as a refusal at its own site and the run goes on.
+        crate::case::probe(
+            sites,
+            SWEPT,
+            side.texture_2d(
+                metal2vulkan::metal::PixelFormat::RGBA8Unorm,
+                [1, 1],
+                4,
+                &[0u8; 4],
+            ),
+            |_| Value::Uint(11),
+        );
+        let source = ShaderSource {
+            bitcode: &[],
+            air_text: "",
+            entry: "stop",
+        };
+        let library = made(sites, "library", side.library(&source))?;
+        if !self.hand_built {
+            made(sites, STOPS, side.compute_pipeline(library, "stop"))?;
+        } else {
+            match side.compute_pipeline(library, "stop") {
+                Ok(_) => sites.value(STOPS, Value::ok(Value::Absent)),
+                Err(failure) => {
+                    sites.push(Node::leaf(STOPS, Observed::value(failure.recorded())));
+                    return Err(Abort {
+                        at: STOPS.to_owned(),
+                        failure,
+                    });
+                }
+            }
+        }
+        sites.value("after", Value::Uint(13));
+        Ok(())
+    }
+}
+
+/// A refusal of **ours** at a site the run carried on past outranks the venue's own gap at the
+/// site that stopped it, and the ledger can name it.
+///
+/// The hole this closes, which was the most severe form of a refusal going missing found in this
+/// round: `replay` answered `LacksFeature` straight off the abort, **before** comparing anything,
+/// so a refusal already recorded at an earlier site vanished behind a verdict that
+/// [`Verdict::is_compliant`] answers true for. The run stayed green. `verdict.rs` states the
+/// invariant it broke in as many words — "a divergence or a refusal anywhere else in the same case
+/// still fails, which is what makes this safe to be compliant" — so this is also the test that
+/// catches that claim being false.
+///
+/// Both ways a case can say it stopped are exercised, because they record different things: the
+/// hand-built `Abort` records the typed error and not the fact that the venue is what lacks it,
+/// and without `replay` recording that fact at the one place it reads the abort, this case's
+/// stopping site would itself read as a refusal of ours.
+#[test]
+fn a_refusal_before_the_venues_own_gap_outranks_it() {
+    use crate::known_gaps::{against, Expectation, Expects, KnownGap, EVERY_VENUE};
+    let lacking = || {
+        let mut failure = Failure::named("Error::Unsupported", "no pipeline of that shape");
+        failure.lacks = Some("the device enables no such capability".to_owned());
+        failure
+    };
+    for hand_built in [false, true] {
+        let case = StoppedCase::new("stopped-after-a-refusal", hand_built);
+        let recording = recording_of(&case, case.metal(), 3);
+
+        // Only the venue's gap: the case is its own outcome, as it was before, and the allowances
+        // it never reached are not reported as a blind spot.
+        let mut lacks = StubSide::new(Vec::new()).refusing("pipeline", lacking());
+        let only_lacking = replay_against(&case, &mut lacks, &recording).unwrap();
+        assert_eq!(
+            only_lacking.verdict.word(),
+            "lacks-feature",
+            "hand_built {hand_built}: {}",
+            only_lacking.verdict
+        );
+        assert!(only_lacking.verdict.is_compliant());
+        assert!(
+            only_lacking
+                .verdict
+                .to_string()
+                .contains("no such capability"),
+            "{}",
+            only_lacking.verdict
+        );
+        assert_eq!(only_lacking.allowances.unfired, Vec::new());
+
+        // And with a refusal of ours at the site the run carried on past, that refusal is the
+        // verdict: non-compliant, named at its own site, and the venue's gap still reported.
+        let mut both = StubSide::new(Vec::new())
+            .refusing(
+                "texture",
+                Failure::named("Error::Invalid", "the runtime refuses this texture"),
+            )
+            .refusing("pipeline", lacking());
+        let replayed = replay_against(&case, &mut both, &recording).unwrap();
+        assert_eq!(
+            replayed.verdict.word(),
+            "refused",
+            "hand_built {hand_built}: {}",
+            replayed.verdict
+        );
+        assert!(!replayed.verdict.is_compliant());
+        let Verdict::Refused { at, .. } = &replayed.verdict else {
+            panic!("{}", replayed.verdict);
+        };
+        let [printed] = at.as_slice() else {
+            panic!("the swept site alone, not the stopping one: {at:?}");
+        };
+        let (site, answer) = printed.split_once(": ").expect("a site and an answer");
+        let (site, answer) = (site.to_owned(), answer.to_owned());
+        assert_eq!(site, "case/swept");
+        assert!(answer.contains("Error::Invalid"), "{answer}");
+
+        // The ledger can name it, in both directions, which is what being `Refused` buys.
+        let rows = vec![replayed];
+        let found = against(&rows, &[]);
+        let [Expectation::Unlisted { expects, .. }] = found.as_slice() else {
+            panic!("{found:?}");
+        };
+        assert_eq!(*expects, Expects::Refused);
+        let listed = vec![KnownGap {
+            case: "stopped-after-a-refusal".to_owned(),
+            venue: EVERY_VENUE.to_owned(),
+            expects: Expects::Refused,
+            site: site.clone(),
+            answer: answer.clone(),
+            waiting_on: "the stub refuses the swept texture, which is the point of the stub"
+                .to_owned(),
+        }];
+        assert_eq!(against(&rows, &listed), Vec::new());
+        let found = against(std::slice::from_ref(&only_lacking), &listed);
+        let [gone @ Expectation::NoLongerHeld { .. }] = found.as_slice() else {
+            panic!("{found:?}");
+        };
+        assert!(gone.to_string().contains("drop the row"), "{gone}");
+    }
+}
+
 #[test]
 fn inputs_that_are_not_the_recordings_are_unrecorded_never_a_pass() {
     let recorded = WordsCase::new("words", 2);
@@ -1442,6 +1640,75 @@ fn record_mode_refuses_a_case_that_must_not_be_re_recorded() {
         }
     );
     assert!(format!("{error}").contains("must not be re-recorded"));
+}
+
+/// Record mode refuses a case whose **Metal** run stopped, rather than writing a recording of part
+/// of it -- and still records the refusal a sweep carries past, which is Metal's answer.
+///
+/// `crate::case::call` aborts the whole case, so the sites after it are never emitted. Writing that
+/// down would be the suite blessing a recording nobody took: on replay, every site past the stop
+/// reads as one only our side observed, a divergence the case never asked about, and a recorded
+/// Metal `Err` our side happens to match compares **exact** -- the case reporting as passing where
+/// neither side did the work. Nothing of that is reachable today, because zero of the committed
+/// recordings hold any `Err` at all, which is also why it had to be closed before a case reached
+/// it rather than after.
+///
+/// `LedgerCase` carries both shapes, which is why it is the case here: it makes its library with
+/// `made`, which stops the run, and its texture with a `call` whose refusal it carries past. So the
+/// two directions are one case with one site moved, not two cases that could drift apart.
+#[test]
+fn record_mode_refuses_a_case_whose_metal_run_stopped() {
+    let case = LedgerCase::new("ledger-record-stopped");
+    let refusal = Failure::named("Error::Nil", "newLibraryWithData returned nil");
+    // Off macOS there is no Metal to record from, and that check comes first: both legs say so,
+    // so the test is honest about what it checked rather than appearing to check more.
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut stops = StubSide::new(words(&[7])).refusing("library", refusal.clone());
+        assert_eq!(
+            record(&case, &mut stops, 1, MetalLevel::NEWEST, Validated::Ran).unwrap_err(),
+            RecordError::NoMetal
+        );
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // A refusal at the site the case makes with `made`: the run stops, and no recording is
+        // written. The site is named, and the refusal in the words a ledger row uses.
+        let mut stops = StubSide::new(words(&[7])).refusing("library", refusal.clone());
+        let error = record(&case, &mut stops, 1, MetalLevel::NEWEST, Validated::Ran).unwrap_err();
+        let RecordError::Refused {
+            case: named,
+            at,
+            refusal: said,
+        } = &error
+        else {
+            panic!("a stopped Metal run must refuse the recording, not write one: {error:?}");
+        };
+        assert_eq!(named, case.name());
+        assert_eq!(at, "library");
+        assert!(said.contains("Error::Nil"), "{said}");
+        assert!(
+            format!("{error}").contains("would hold part of the case"),
+            "{error}"
+        );
+
+        // The other direction, so this cannot become a blanket ban on recording a refusal: the
+        // same case, the same refusal, at the site it carries past. The transcript is the whole
+        // case with one query Metal answered nil for, which is Metal's answer, so it records.
+        let mut carries = StubSide::new(words(&[7])).refusing("texture", refusal);
+        let answer = record(&case, &mut carries, 1, MetalLevel::NEWEST, Validated::Ran)
+            .expect("a refusal a sweep carries past is Metal's answer, not a truncated run");
+        assert_eq!(answer.provenance, Provenance::MetalRun);
+        let printed = format!("{:?}", answer.outcomes[0].transcript);
+        assert!(
+            printed.contains("Error::Nil"),
+            "the recording holds the refusal at its own site: {printed}"
+        );
+        assert!(
+            printed.contains("output"),
+            "and every site after it, which is what makes it the case's answer: {printed}"
+        );
+    }
 }
 
 #[test]
@@ -4519,6 +4786,70 @@ fn a_multisampled_sparse_texture_without_the_sample_count_is_the_devices_gap() {
         Unsupported::device_capability(Feature::Format, "sparseResidency4Samples").needs,
         Needs::DeviceCapability("sparseResidency4Samples")
     ));
+}
+
+/// A device's gap is the device's gap in **every** variant that carries a typed refusal, and our
+/// unbuilt work stays ours in every one of them.
+///
+/// Which `Error` variant wraps an `Unsupported` says *where the refusal was decided*, never *whose
+/// gap it is*: the plain form decides it as the call is made, `Error::Bind` as a dispatch or draw
+/// is planned, and `Error::Compile` as a kernel the runtime dispatches for itself is built. Only
+/// [`Unsupported::needs`] says whose gap it is, so the same `needs` must read the same way through
+/// all three, and the carrier must not change the answer.
+///
+/// `Error::Compile` was the one [`crate::verdict::device_gap`] did not read, and it is reachable:
+/// an extended-range attachment's shadow load is built on demand through `owned_kernel`, whose 43
+/// builds wrap the compile layer's refusal in `Error::Compile`, and `extended_shadow_module`
+/// refuses `Unsupported::needs(FramebufferFetch, c)` -- a `Needs::AnyOf`, the device's own gap --
+/// where the device's profile lacks a capability its module needs.
+/// `render/extended_shadow.rs`'s pre-instance load hands that refusal to the caller with `?`, so
+/// before this a device without the capability had its gap scored as a refusal of ours.
+///
+/// Both halves over the same three carriers, because one direction alone is vacuous here: a test
+/// that only checked the gaps would pass a `device_gap` that answered `Some` for everything.
+#[test]
+fn a_device_gap_reads_the_same_through_every_variant_that_carries_a_refusal() {
+    use metal2vulkan::device::VkFeature;
+    use metal2vulkan::error::{BindError, Capability, Error as CompileError, Feature, Unsupported};
+    use metal2vulkan_runtime::Error;
+    // One `Unsupported` that is the device's gap, and one that is ours, each put through every
+    // carrier unchanged. Built once so the two directions cannot drift apart.
+    let theirs = Unsupported::needs(
+        Feature::FramebufferFetch,
+        Capability::Feature(VkFeature::ShaderInt8),
+    );
+    let ours = Unsupported::not_implemented(Feature::FramebufferFetch);
+    /// One variant that carries a typed refusal: what to call it, and how it wraps one.
+    type Carrier = (&'static str, fn(Unsupported) -> Error);
+    let carriers: [Carrier; 3] = [
+        ("Error::Unsupported", Error::Unsupported),
+        ("Error::Bind", |u| Error::Bind(BindError::Unsupported(u))),
+        ("Error::Compile", |u| {
+            Error::Compile(CompileError::Unsupported(u))
+        }),
+    ];
+    for (carrier, wrap) in carriers {
+        let gap = wrap(theirs.clone());
+        assert!(
+            crate::verdict::device_gap(&gap).is_some(),
+            "{carrier} carries the same typed refusal, so a device's gap in it is the device's gap"
+        );
+        // And through the one call every refusal of the suite passes: `Failure::of` is where
+        // `lacks` is set, so a carrier it does not read loses the fact for the whole run.
+        assert!(
+            Failure::of(&gap).lacks.is_some(),
+            "{carrier}: a refusal the venue cannot answer must reach the run as the venue's gap"
+        );
+        let mine = wrap(ours.clone());
+        assert!(
+            crate::verdict::device_gap(&mine).is_none(),
+            "{carrier}: what we have not built stays ours to answer for"
+        );
+        assert!(
+            Failure::of(&mine).lacks.is_none(),
+            "{carrier}: our own unbuilt work must not be excused as the venue's gap"
+        );
+    }
 }
 
 /// Every field of a [`crate::texture::TextureRequest`] reaches **both** sides' texture

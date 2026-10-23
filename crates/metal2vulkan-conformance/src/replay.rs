@@ -146,6 +146,20 @@ pub fn replay_against_known(
     let mut sites = Sites::new();
     sites.push(inputs_node(&inputs));
     let abort = case.run(side, &mut sites).err();
+    // The venue's own gap at the site that **stopped** the case, recorded for the comparison
+    // whichever way the case said it.
+    //
+    // [`crate::case::call`] records it as it emits the site, but 122 sites build their own
+    // `Abort` — every site whose answer is a tree of facts has to, since `call` hands back a
+    // value and not a node — and those record the typed error without the fact that it is the
+    // device's. A forgotten one reads as a refusal of ours, which is the one thing the
+    // `lacks-feature` verdict exists to prevent. One place reads the abort, so this is the one
+    // place that cannot forget; it is idempotent, so `call` having recorded it already is fine.
+    if let Some(stopped) = &abort {
+        if let Some(needs) = &stopped.failure.lacks {
+            sites.device_gap(&stopped.at, needs.clone());
+        }
+    }
     let mut announced = side.announced();
     sites.notices(NOTICES_SITE, &announced);
     let ours = sites.finish();
@@ -174,25 +188,34 @@ pub fn replay_against_known(
         }
     };
 
-    // A run that stopped because the venue honestly lacks what the case needs is its own outcome:
-    // never a pass, never a failure, and never counted as coverage.
-    if let Some(lacks) = abort.as_ref().and_then(|abort| abort.failure.lacks.clone()) {
-        return Ok(Replayed {
-            case: name.to_owned(),
-            venue,
-            verdict: Verdict::LacksFeature { needs: lacks },
-            allowances: Allowances::default(),
-            measured_on: answer.measured_elsewhere().map(str::to_owned),
-            ours,
-        });
-    }
-
+    // A run the venue stopped is still its own outcome — never a pass, never a failure, never
+    // counted as coverage — and that outcome is now the **comparison's** answer rather than a
+    // short circuit ahead of it.
+    //
+    // Why it moved: returning `LacksFeature` straight off the abort skipped the comparison
+    // entirely, so a refusal our side had already recorded at a site the run **did** reach
+    // vanished behind a *compliant* verdict — the worst form of a refusal going missing, since
+    // the run stayed green. `verdict.rs` already states the invariant this broke ("a divergence
+    // or a refusal anywhere else in the same case still fails, which is what makes this safe to
+    // be compliant"). It also hid a moved input fingerprint the same way, because
+    // [`inputs_differ`] is checked inside [`verdict_over`].
+    //
+    // Letting [`Verdict::of`] decide holds the invariant by construction: the site that stopped
+    // the case records the venue's gap (above), the sites the run never reached are not
+    // divergences because the comparison is told the run stopped, and the device gaps are read
+    // **after** the divergences and the refusals, so anything worse outranks them.
     let (verdict, allowances) = verdict_over(case, answer, &ours, &announced, abort.is_some());
     Ok(Replayed {
         case: name.to_owned(),
         venue,
+        // A venue that lacks the feature compared almost nothing, so the allowances its case
+        // named went unused for a reason that is not the suite's blind spot. Saying they never
+        // fired would be noise, which is what [`Replayed::allowances`] is empty for.
+        allowances: match &verdict {
+            Verdict::LacksFeature { .. } => Allowances::default(),
+            _ => allowances,
+        },
         verdict,
-        allowances,
         measured_on: answer.measured_elsewhere().map(str::to_owned),
         ours,
     })
