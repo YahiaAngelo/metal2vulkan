@@ -35,6 +35,7 @@ use super::degrade_notices::{assert_made_once, made_once, on_device as on_device
 use super::host_memory::{gpu_read, host_page, no_copy, not_importable, on_device, recording};
 use super::host_memory::{Mapping, Seen};
 use super::no_copy_heaps::{no_copy_heap, shared, HEAP};
+use super::predication::kernel;
 use super::rebinds::{rebind, rebind_heap};
 use super::resource_ids::DELAYED_DEALLOCATORS;
 use super::shared_kinds;
@@ -53,8 +54,8 @@ use metal2vulkan_runtime::{
     Buffer, BufferContents, BufferDescriptor, ClearColor, CommandBuffer, CommandBufferError,
     CommandBufferStatus, CommandQueue, CommitFailure, Deallocator, Degradation, Device, EventRef,
     FailedEncoders, Heap, HeapType, HostMemory, KeepAlive, LoadAction, PipelineOptions, Region,
-    RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState, ResourceOptions, StoreAction,
-    Submission, SubmissionCheck, TextureDescriptor,
+    RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState, ResourceOptions, Size,
+    StoreAction, Submission, SubmissionCheck, TextureDescriptor,
 };
 use std::collections::BTreeMap;
 use std::num::NonZeroU64;
@@ -1667,8 +1668,7 @@ fn a_buffer_released_after_a_rebind_before_the_first_submission_goes_at_once() {
         let Some((member, _)) = member_over(device, A) else {
             return;
         };
-        // Its pipelines made, so the commit records the walker's encoder for good: one a later
-        // step records holds its buffers' pages, which refuses a rebind, until it completes.
+        // Its pipelines made, so the commit records the walker's encoder, its dispatch at once.
         let plain = buffer_with(device, &node(A)).unwrap();
         walk(
             device,
@@ -1745,5 +1745,120 @@ fn a_buffer_released_after_a_rebind_before_the_first_submission_goes_at_once() {
         command_buffer.wait_until_completed_for(WAIT).unwrap();
         assert_eq!(command_buffer.error(), None);
         assert_made_once(messages, &DELAYED_DEALLOCATORS, &shared_kinds(device));
+    });
+}
+
+/// The cases of [`a_dispatch_counts_into_the_pages_its_buffer_lies_in_at_the_first_submission`]:
+/// a dispatch plain, or inside an If whose condition holds.
+const REBOUND_DISPATCHES: [bool; 1] = [false];
+
+/// A compute dispatch counting into a buffer over host pages, in a command buffer committed behind
+/// an event wait, its encoder ended, then the buffer rebound to other pages before the wait's
+/// signal: the dispatch counts into the new pages and the command buffer completes, as Metal's
+/// does (the consumer's `rebound_dispatch`, the M3 Max under macOS 27.0.1: status 4, no error,
+/// the old pages' word 0, the new pages' 1). Each case with the dispatch's pipeline still being
+/// made at its encoding (a state's first dispatch hands its making to the device's pool:
+/// `WorkCounts::dispatch_pipelines_pooled`), and made. The rebind encodes the encoder again
+/// (`WorkCounts::encoders_reencoded`) and refuses nothing.
+#[test]
+fn a_dispatch_counts_into_the_pages_its_buffer_lies_in_at_the_first_submission() {
+    on_device(|device| {
+        for predicated in REBOUND_DISPATCHES {
+            let state = kernel(device, "prd_mark", false);
+            for cold in [true, false] {
+                let what = format!("predicated {predicated}, pipeline being made {cold}");
+                let old = pages(buffer_len(), 0, &[0; 4]);
+                let seen = Arc::new(Seen::default());
+                // SAFETY: the test holds the mapping past the buffer's last use of it.
+                let made = unsafe {
+                    no_copy(
+                        device,
+                        old.pointer(),
+                        buffer_len(),
+                        ResourceOptions::default(),
+                        Some(recording(&seen, ())),
+                    )
+                };
+                let buffer = match made {
+                    Ok(buffer) => buffer,
+                    Err(error) if not_importable(&error) => {
+                        eprintln!("REBIND-REACH: the device imports no host memory: {error:?}");
+                        return;
+                    }
+                    Err(error) => panic!("new_buffer_with_bytes_no_copy: {error:?}"),
+                };
+                let condition = buffer_with(device, &1u32.to_le_bytes()).unwrap();
+                let queue = device.new_command_queue().unwrap();
+                let gate = device.new_shared_event().unwrap();
+                let command_buffer = queue.command_buffer().unwrap();
+                command_buffer
+                    .encode_wait_for_event(EventRef::from(&gate), 1)
+                    .unwrap();
+                let before = device.work_counts();
+                let mut encoder = command_buffer.compute_command_encoder().unwrap();
+                encoder.set_compute_pipeline_state(&state).unwrap();
+                encoder.set_bytes(&0u32.to_le_bytes(), 0).unwrap();
+                encoder.set_buffer(Some(&buffer), 0, 1).unwrap();
+                if predicated {
+                    encoder.encode_start_if(Some(&condition), 0, 0, 1).unwrap();
+                }
+                let one = Size::new(1, 1, 1);
+                encoder.dispatch_threads(one, one).unwrap();
+                if predicated {
+                    assert!(encoder.encode_end_if().unwrap(), "{what}");
+                }
+                encoder.end_encoding().unwrap();
+                command_buffer.commit().unwrap();
+                let pooled = device.work_counts().dispatch_pipelines_pooled
+                    - before.dispatch_pipelines_pooled;
+                assert_eq!(
+                    pooled,
+                    u64::from(cold),
+                    "{what}: its making handed to the pool"
+                );
+                let new = pages(buffer_len(), 0, &[0; 4]);
+                let new_seen = Arc::new(Seen::default());
+                let rebound = {
+                    let pointer = new.pointer();
+                    // SAFETY: the test holds the mapping past the buffer's last use of it.
+                    unsafe {
+                        buffer.rebind_bytes_no_copy(
+                            HostMemory::new(pointer),
+                            Some(recording(&new_seen, ())),
+                            None,
+                        )
+                    }
+                };
+                assert_eq!(rebound, Ok(()), "{what}: the rebind");
+                gate.set_signaled_value(1);
+                command_buffer.wait_until_completed_for(WAIT).unwrap();
+                let after = device.work_counts();
+                let word =
+                    |mapping: &Mapping| u32::from_le_bytes(mapping.read(0..4).try_into().unwrap());
+                let seen_now = (
+                    command_buffer.status(),
+                    command_buffer.error(),
+                    word(&old),
+                    word(&new),
+                    after.encoders_reencoded - before.encoders_reencoded,
+                    after.reencodes_refused - before.reencodes_refused,
+                );
+                assert_eq!(
+                    seen_now,
+                    (CommandBufferStatus::Completed, None, 0, 1, 1, 0),
+                    "{what}: (status, error, the old pages' word, the new pages', encoders encoded \
+                     again, refused)"
+                );
+                // Both mappings outlive their deallocators, which read them.
+                drop(buffer);
+                deallocated(&seen);
+                deallocated(&new_seen);
+            }
+        }
+        eprintln!(
+            "REBOUND-DISPATCH {}: dispatches rebound before the first submission counted into \
+             the new pages, their pipelines being made or made",
+            device.name()
+        );
     });
 }

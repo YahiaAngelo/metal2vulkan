@@ -2563,9 +2563,16 @@ impl CommandBuffer {
                 *host && !prepared.for_good && !matches!(work, Deferred::Loop(_))
             })
             .map(|((work, _), _)| work.clone());
-        // A host step may record commands after the commit (a segment not recorded for good):
-        // until the command buffer completes, the buffers they use keep their pages.
+        // A host step may record commands after the commit (a segment not recorded for good).
         let stepped = prepared.iter().any(|prepared| !prepared.for_good);
+        // Until the command buffer completes, the buffers its host steps' commands use keep their
+        // pages, where a step resolves what it records as it records it. A dispatch whose
+        // pipelines were being made records what its encoding resolved (`pending_dispatch.rs`),
+        // and an encoder encoded again at a rebind records it at once (`replay.rs`): it holds
+        // nothing past the commit.
+        let steps_hold = (segments.iter().zip(&prepared)).any(|((work, _), prepared)| {
+            !prepared.for_good && !matches!(work, Deferred::Pending(_))
+        });
         // The segments a host step records once the pipelines they record are made.
         let made_later: Vec<Deferred> = segments
             .iter()
@@ -2662,9 +2669,9 @@ impl CommandBuffer {
                 None => state.wait_for_submission(listing, &mut Vec::new()),
             }
             // Committed, its commands recorded for good: a rebind of what they used takes
-            // effect after them (`rebind.rs`); one a host step records holds until completion.
-            // Only once its replays hold the pages, so a rebind finds them held.
-            if stepped {
+            // effect after them (`rebind.rs`); one a host step records holds until completion
+            // (`steps_hold`). Only once its replays hold the pages, so a rebind finds them held.
+            if steps_hold {
                 let held = &mut *state;
                 let kept = held
                     .holds

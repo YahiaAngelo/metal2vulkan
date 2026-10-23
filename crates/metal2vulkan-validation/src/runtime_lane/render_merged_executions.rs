@@ -541,9 +541,7 @@ fn rebound_run(
     let writer = writer(device, &library, "points");
     let state = state(device, &library);
     let icb = icb(device, &inheriting(), 8);
-    // Run once first, so the writer's pipeline is made: a dispatch whose pipeline is still being
-    // made leaves its recording to a host step, and its command buffer holds what it used until it
-    // completes, refusing a rebind meanwhile (`RebindProblem::EncodedUses`).
+    // Run once first, so the writer's pipeline is made: the commit records its dispatch at once.
     scene.run(
         device,
         (Some(&writer), &state),
