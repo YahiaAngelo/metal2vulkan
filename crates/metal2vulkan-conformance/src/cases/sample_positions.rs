@@ -20,14 +20,20 @@
 //! This is the family where the input a case states reaches the rasterizer's own sample grid, so
 //! the separation is the first thing about it.
 //!
-//! **Asked (`MetalSource::Run`)** — every row of the `COVERAGE` table. Each states as many positions as the
-//! pass has samples, every coordinate inside `[0, 1)`, at a count Metal takes custom positions at,
-//! or states none at all. These are the descriptors the lane's probe ran on Metal **with and
-//! without** its API validation layer, and they are what Metal documents as valid. One 1x1 target
-//! and three vertices a pass: nothing loops and nothing is large.
+//! **Asked (`MetalSource::Run`)** — every row of the `COVERAGE` table. Each states as many
+//! positions as the pass has samples, every coordinate inside `[0, 1)`, at a count Metal takes
+//! custom positions at, or states none at all. These are the descriptors the lane's probe ran on
+//! Metal **with and without** its API validation layer, and they are what Metal documents as
+//! valid. One 1x1 target and three vertices a pass: nothing loops and nothing is large.
 //!
-//! **Carried, and never re-recorded** — the `FEWER` table. Fewer positions than the pass has samples is a
-//! count Metal's API validation stops, and the probe measured what plain Metal does with it: the
+//! The last two of them also name `MTLStoreActionOptionCustomSamplePositions` on the colour
+//! attachment. Metal's API validation stops that option under `MultisampleResolve`, and plain
+//! Metal keeps the resolve as it would without it — so those rows are where the recording's
+//! **second oracle** earns its place: the plain leg says what Metal did, and the validated leg's
+//! own complaint is recorded beside it, never compared with us.
+//!
+//! **Carried, and never re-recorded** — the `FEWER` table. Fewer positions than the pass's samples
+//! is a count Metal's API validation stops, and the probe measured what plain Metal does with it: the
 //! samples past the positions rasterize at the pixel's corner. The answer is written down, so the
 //! row compares; the row is not re-recorded because the neighbouring shape, **one position past**
 //! the pass's samples, is measured to end Metal's process
@@ -55,7 +61,7 @@ use crate::render::{
 use crate::replay::NOTICES_SITE;
 use crate::transcript::{ByteLayout, Digest, Element, Node, Observed, Sites, Transcript, Value};
 use metal2vulkan::metal::PixelFormat;
-use metal2vulkan_runtime::{Degradation, SamplePosition};
+use metal2vulkan_runtime::{Degradation, SamplePosition, StoreAction, StoreActionOptions};
 
 /// The owned fixture the probe drew with: each vertex where buffer 0 holds it, and alpha 1.
 const FIXTURE: &str = "rt6_restart";
@@ -84,6 +90,44 @@ struct Shape {
     edge: f32,
     /// The samples Metal covered, as the lane's table holds it.
     covered: u64,
+    /// The attachment's `storeAction`. The lane's own is `MultisampleResolve`, which keeps the
+    /// resolve and nothing of the multisampled texture; two rows ask the other resolving action.
+    store: StoreAction,
+    /// The attachment's `storeActionOptions`.
+    options: StoreActionOptions,
+}
+
+impl Shape {
+    /// A row at the lane's own store action and Metal's default options.
+    const fn new(
+        name: &'static str,
+        samples: u32,
+        positions: &'static [SamplePosition],
+        edge: f32,
+        covered: u64,
+    ) -> Shape {
+        Shape {
+            name,
+            samples,
+            positions,
+            edge,
+            covered,
+            store: StoreAction::MultisampleResolve,
+            options: StoreActionOptions::NONE,
+        }
+    }
+
+    /// The row whose attachment keeps the multisampled texture as well as the resolve.
+    const fn stored_too(mut self) -> Shape {
+        self.store = StoreAction::StoreAndMultisampleResolve;
+        self
+    }
+
+    /// The row whose attachment names `MTLStoreActionOptionCustomSamplePositions`.
+    const fn with_custom_option(mut self) -> Shape {
+        self.options = StoreActionOptions::CUSTOM_SAMPLE_POSITIONS;
+        self
+    }
 }
 
 /// Four positions at `(x, 0.5)`: the shape every row of the lane's table but the mixed one states.
@@ -100,130 +144,85 @@ macro_rules! four {
 /// tie up, at most 15/16, which is why 0.53 and 0.51 cover against an edge at 0.52 while 0.55,
 /// 0.53125, 0.5625 and 0.5624 do not, and why 0.97 and 0.99 both cover against an edge at 0.95.
 const COVERAGE: &[Shape] = &[
-    Shape {
-        name: "sample-positions-default-4x",
-        samples: 4,
-        positions: &[],
-        edge: 0.0,
-        covered: 2,
-    },
-    Shape {
-        name: "sample-positions-custom-left",
-        samples: 4,
-        positions: four!(0.25),
-        edge: 0.0,
-        covered: 4,
-    },
-    Shape {
-        name: "sample-positions-custom-right",
-        samples: 4,
-        positions: four!(0.75),
-        edge: 0.0,
-        covered: 0,
-    },
-    Shape {
-        name: "sample-positions-custom-mixed",
-        samples: 4,
-        positions: &[at(0.25, 0.5), at(0.75, 0.5), at(0.75, 0.5), at(0.75, 0.5)],
-        edge: 0.0,
-        covered: 1,
-    },
-    Shape {
-        name: "sample-positions-off-grid",
-        samples: 4,
-        positions: four!(0.53),
-        edge: 0.04,
-        covered: 4,
-    },
-    Shape {
-        name: "sample-positions-off-grid-low",
-        samples: 4,
-        positions: four!(0.51),
-        edge: 0.04,
-        covered: 4,
-    },
-    Shape {
-        name: "sample-positions-high",
-        samples: 4,
-        positions: four!(0.97),
-        edge: 0.9,
-        covered: 4,
-    },
-    Shape {
-        name: "sample-positions-rounded-0-55",
-        samples: 4,
-        positions: four!(0.55),
-        edge: 0.04,
-        covered: 0,
-    },
-    Shape {
-        name: "sample-positions-rounded-0-53125",
-        samples: 4,
-        positions: four!(0.53125),
-        edge: 0.04,
-        covered: 0,
-    },
-    Shape {
-        name: "sample-positions-rounded-0-5625",
-        samples: 4,
-        positions: four!(0.5625),
-        edge: 0.04,
-        covered: 0,
-    },
-    Shape {
-        name: "sample-positions-rounded-0-5624",
-        samples: 4,
-        positions: four!(0.5624),
-        edge: 0.04,
-        covered: 0,
-    },
-    Shape {
-        name: "sample-positions-rounded-0-99",
-        samples: 4,
-        positions: four!(0.99),
-        edge: 0.9,
-        covered: 4,
-    },
-    Shape {
-        name: "sample-positions-custom-2x",
-        samples: 2,
-        positions: &[at(0.25, 0.5), at(0.25, 0.5)],
-        edge: 0.0,
-        covered: 2,
-    },
-    Shape {
-        name: "sample-positions-default-2x",
-        samples: 2,
-        positions: &[],
-        edge: 0.0,
-        covered: 1,
-    },
+    Shape::new("sample-positions-default-4x", 4, &[], 0.0, 2),
+    Shape::new("sample-positions-custom-left", 4, four!(0.25), 0.0, 4),
+    Shape::new("sample-positions-custom-right", 4, four!(0.75), 0.0, 0),
+    Shape::new(
+        "sample-positions-custom-mixed",
+        4,
+        &[at(0.25, 0.5), at(0.75, 0.5), at(0.75, 0.5), at(0.75, 0.5)],
+        0.0,
+        1,
+    ),
+    Shape::new("sample-positions-off-grid", 4, four!(0.53), 0.04, 4),
+    Shape::new("sample-positions-off-grid-low", 4, four!(0.51), 0.04, 4),
+    Shape::new("sample-positions-high", 4, four!(0.97), 0.9, 4),
+    Shape::new("sample-positions-rounded-0-55", 4, four!(0.55), 0.04, 0),
+    Shape::new(
+        "sample-positions-rounded-0-53125",
+        4,
+        four!(0.53125),
+        0.04,
+        0,
+    ),
+    Shape::new("sample-positions-rounded-0-5625", 4, four!(0.5625), 0.04, 0),
+    Shape::new("sample-positions-rounded-0-5624", 4, four!(0.5624), 0.04, 0),
+    Shape::new("sample-positions-rounded-0-99", 4, four!(0.99), 0.9, 4),
+    Shape::new(
+        "sample-positions-custom-2x",
+        2,
+        &[at(0.25, 0.5), at(0.25, 0.5)],
+        0.0,
+        2,
+    ),
+    Shape::new("sample-positions-default-2x", 2, &[], 0.0, 1),
+    // `sp_custom_storeopt`: the option under `MultisampleResolve`, which Metal's API
+    // validation stops and plain Metal runs, keeping the resolve as it would without it.
+    Shape::new(
+        "sample-positions-option-under-resolve",
+        4,
+        four!(0.25),
+        0.0,
+        4,
+    )
+    .with_custom_option(),
+    // `opt_store_resolve`: the option under `StoreAndMultisampleResolve`, which Metal takes in
+    // both modes, since that action does keep the samples the option names.
+    Shape::new(
+        "sample-positions-option-under-store-and-resolve",
+        4,
+        four!(0.25),
+        0.0,
+        4,
+    )
+    .stored_too()
+    .with_custom_option(),
 ];
 
 /// The rows whose Metal answer is carried: two positions in a pass of four samples, which Metal's
 /// API validation stops and plain Metal runs, putting samples 2 and 3 at the pixel's corner.
 const FEWER: &[Shape] = &[
-    Shape {
-        name: "sample-positions-fewer-right-of-a-far-edge",
-        samples: 4,
-        positions: &[at(0.75, 0.5), at(0.75, 0.5)],
-        edge: -0.8,
-        covered: 2,
-    },
-    Shape {
-        name: "sample-positions-fewer-right-of-the-middle",
-        samples: 4,
-        positions: &[at(0.75, 0.5), at(0.75, 0.5)],
-        edge: 0.0,
-        covered: 2,
-    },
-    Shape {
-        name: "sample-positions-fewer-left-of-the-middle",
-        samples: 4,
-        positions: &[at(0.25, 0.5), at(0.25, 0.5)],
-        edge: 0.0,
-        covered: 4,
-    },
+    Shape::new(
+        "sample-positions-fewer-right-of-a-far-edge",
+        4,
+        &[at(0.75, 0.5), at(0.75, 0.5)],
+        -0.8,
+        2,
+    ),
+    Shape::new(
+        "sample-positions-fewer-right-of-the-middle",
+        4,
+        &[at(0.75, 0.5), at(0.75, 0.5)],
+        0.0,
+        2,
+    ),
+    Shape::new(
+        "sample-positions-fewer-left-of-the-middle",
+        4,
+        &[at(0.25, 0.5), at(0.25, 0.5)],
+        0.0,
+        4,
+    ),
 ];
 
 /// Where the carried rows' Metal answer was measured, and why record mode must not replace it.
@@ -382,9 +381,10 @@ impl Handles {
 /// The probe's pass: the multisampled target cleared to zero and resolved, the triangle drawn, and
 /// the shape's positions where it states any.
 fn pass(shape: &Shape, handles: Handles) -> RenderPass {
-    RenderPass::clearing(vec![
-        PassColor::cleared(handles.target, [0.0; 4]).resolving(handles.resolve)
-    ])
+    RenderPass::clearing(vec![PassColor::cleared(handles.target, [0.0; 4])
+        .resolving(handles.resolve)
+        .stored(shape.store)
+        .with_options(shape.options)])
     .drawing(vec![
         RenderStep::Pipeline(handles.pipeline),
         RenderStep::vertex_buffer(handles.vertices, 0),
