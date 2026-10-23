@@ -58,6 +58,7 @@ pub mod pixel_samplers;
 pub mod rate_maps;
 pub mod rgb10a2_srgb;
 pub mod sample_fills;
+pub mod sample_positions;
 pub mod scheduled_handlers;
 pub mod shared_events;
 pub mod simdgroup_lockstep;
@@ -222,6 +223,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.extend(fresh_contents::all());
+    cases.extend(sample_positions::all());
     cases
 }
 
