@@ -507,3 +507,284 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.scheduled_handler_order()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::case::Failure;
+
+    /// A shader source no side reads: the stub answers without looking at it.
+    fn stub_source() -> ShaderSource<'static> {
+        ShaderSource {
+            bitcode: &[],
+            air_text: "",
+            entry: "main",
+        }
+    }
+
+    /// A side that answers nothing and records which calls it was asked for: enough to prove the
+    /// wrapper forwards a call, opens exactly one span for it, and changes neither the answer nor
+    /// the order.
+    #[derive(Default)]
+    struct Stub {
+        asked: Vec<&'static str>,
+    }
+
+    impl Side for Stub {
+        fn venue(&self) -> Venue {
+            Venue {
+                device: "stub".to_owned(),
+                driver: "stub".to_owned(),
+                api: "stub".to_owned(),
+                metal_level: "stub".to_owned(),
+            }
+        }
+
+        fn library(&mut self, _source: &ShaderSource<'_>) -> Answer<Handle> {
+            self.asked.push("library");
+            Ok(Handle(7))
+        }
+
+        fn compute_pipeline(&mut self, _library: Handle, _entry: &str) -> Answer<Handle> {
+            self.asked.push("compute_pipeline");
+            Err(Failure::named("Stub", "nothing here".to_owned()))
+        }
+
+        fn compute_pipeline_with_stage_input(
+            &mut self,
+            _library: Handle,
+            _entry: &str,
+            _stage_input: &StageInput,
+        ) -> Answer<Handle> {
+            self.asked.push("compute_pipeline_with_stage_input");
+            Ok(Handle(0))
+        }
+
+        fn buffer(&mut self, _bytes: &[u8]) -> Answer<Handle> {
+            self.asked.push("buffer");
+            Ok(Handle(1))
+        }
+
+        fn zeroed_buffer(&mut self, _length: usize) -> Answer<Handle> {
+            self.asked.push("zeroed_buffer");
+            Ok(Handle(2))
+        }
+
+        fn texture_2d(
+            &mut self,
+            _format: PixelFormat,
+            _size: [u32; 2],
+            _row_pitch: u32,
+            _bytes: &[u8],
+        ) -> Answer<Handle> {
+            self.asked.push("texture_2d");
+            Ok(Handle(3))
+        }
+
+        fn read_texture(
+            &mut self,
+            _texture: Handle,
+            _size: [u32; 2],
+            _row_pitch: u32,
+        ) -> Answer<Vec<u8>> {
+            self.asked.push("read_texture");
+            Ok(Vec::new())
+        }
+
+        fn dispatch(
+            &mut self,
+            _pipeline: Handle,
+            _bindings: &Bindings<'_>,
+            _threadgroups: [u32; 3],
+            _threads: [u32; 3],
+        ) -> Answer<Handle> {
+            self.asked.push("dispatch");
+            Ok(Handle(4))
+        }
+
+        fn dispatch_threads(
+            &mut self,
+            _pipeline: Handle,
+            _bindings: &Bindings<'_>,
+            _stage_in: &[StageInRegion],
+            _grid: [u32; 3],
+            _threads: [u32; 3],
+        ) -> Answer<Handle> {
+            self.asked.push("dispatch_threads");
+            Ok(Handle(5))
+        }
+
+        fn wait(&mut self, _command_buffer: Handle) -> Answer<Value> {
+            self.asked.push("wait");
+            Ok(Value::Uint(0))
+        }
+
+        fn read_buffer(
+            &mut self,
+            _buffer: Handle,
+            _offset: u64,
+            _length: usize,
+        ) -> Answer<Vec<u8>> {
+            self.asked.push("read_buffer");
+            Ok(Vec::new())
+        }
+
+        fn announced(&mut self) -> Vec<String> {
+            self.asked.push("announced");
+            Vec::new()
+        }
+    }
+
+    /// One span per call, named for the call, in the order the calls were made — and the answers
+    /// are the wrapped side's own, including a typed error.
+    ///
+    /// The last part is what makes the wrapper safe to put under a measurement: a wrapper that
+    /// swallowed an error would turn a refusal into a cheap call and the cost table would read it
+    /// as good news.
+    #[test]
+    fn a_span_is_opened_for_each_call_and_the_answer_is_the_sides_own() {
+        let timer = crate::times::Timer::new();
+        let mut side = Watching::with(Stub::default(), timer.clone());
+        assert_eq!(side.library(&stub_source()), Ok(Handle(7)));
+        assert!(side.compute_pipeline(Handle(7), "main").is_err());
+        assert_eq!(side.buffer(&[1, 2, 3]), Ok(Handle(1)));
+        assert_eq!(side.wait(Handle(0)), Ok(Value::Uint(0)));
+        let observed = timer.take();
+        let names: Vec<&str> = observed.iter().map(|one| one.call).collect();
+        assert_eq!(names, ["library", "compute_pipeline", "buffer", "wait"]);
+        // The refused call is measured like any other: a refusal has a cost and hiding it would
+        // make a gap look free.
+        assert_eq!(observed.len(), 4);
+    }
+
+    /// `venue` and `announced` are forwarded with **no** span, because neither is a call to the
+    /// implementation under test. Timing them would put the harness's own bookkeeping in the
+    /// table, and `announced` has no Metal counterpart at all.
+    #[test]
+    fn the_two_calls_that_are_not_the_implementations_open_no_span() {
+        let timer = crate::times::Timer::new();
+        let mut side = Watching::with(Stub::default(), timer.clone());
+        let _ = side.venue();
+        let _ = side.announced();
+        assert!(
+            timer.is_empty(),
+            "venue or announced opened a span: {:?}",
+            timer.take()
+        );
+    }
+
+    /// The span closes when the call returns, not before: a call that takes a known time is
+    /// measured as at least that long.
+    ///
+    /// Without this the wrapper could record a zero for every call and every table would read as
+    /// free — the one failure of a timing layer that looks like success.
+    #[test]
+    fn a_span_covers_the_call_rather_than_closing_early() {
+        /// A side whose one call sleeps, so the span has something to measure.
+        struct Slow(std::time::Duration);
+        impl Side for Slow {
+            fn venue(&self) -> Venue {
+                Venue {
+                    device: "slow".to_owned(),
+                    driver: "slow".to_owned(),
+                    api: "slow".to_owned(),
+                    metal_level: "slow".to_owned(),
+                }
+            }
+            fn library(&mut self, _source: &ShaderSource<'_>) -> Answer<Handle> {
+                std::thread::sleep(self.0);
+                Ok(Handle(0))
+            }
+            fn compute_pipeline(&mut self, _library: Handle, _entry: &str) -> Answer<Handle> {
+                Err(Failure::unavailable("compute_pipeline"))
+            }
+            fn compute_pipeline_with_stage_input(
+                &mut self,
+                _library: Handle,
+                _entry: &str,
+                _stage_input: &StageInput,
+            ) -> Answer<Handle> {
+                Err(Failure::unavailable("compute_pipeline_with_stage_input"))
+            }
+            fn buffer(&mut self, _bytes: &[u8]) -> Answer<Handle> {
+                Err(Failure::unavailable("buffer"))
+            }
+            fn zeroed_buffer(&mut self, _length: usize) -> Answer<Handle> {
+                Err(Failure::unavailable("zeroed_buffer"))
+            }
+            fn texture_2d(
+                &mut self,
+                _format: PixelFormat,
+                _size: [u32; 2],
+                _row_pitch: u32,
+                _bytes: &[u8],
+            ) -> Answer<Handle> {
+                Err(Failure::unavailable("texture_2d"))
+            }
+            fn read_texture(
+                &mut self,
+                _texture: Handle,
+                _size: [u32; 2],
+                _row_pitch: u32,
+            ) -> Answer<Vec<u8>> {
+                Err(Failure::unavailable("read_texture"))
+            }
+            fn dispatch(
+                &mut self,
+                _pipeline: Handle,
+                _bindings: &Bindings<'_>,
+                _threadgroups: [u32; 3],
+                _threads: [u32; 3],
+            ) -> Answer<Handle> {
+                Err(Failure::unavailable("dispatch"))
+            }
+            fn dispatch_threads(
+                &mut self,
+                _pipeline: Handle,
+                _bindings: &Bindings<'_>,
+                _stage_in: &[StageInRegion],
+                _grid: [u32; 3],
+                _threads: [u32; 3],
+            ) -> Answer<Handle> {
+                Err(Failure::unavailable("dispatch_threads"))
+            }
+            fn wait(&mut self, _command_buffer: Handle) -> Answer<Value> {
+                Err(Failure::unavailable("wait"))
+            }
+            fn read_buffer(
+                &mut self,
+                _buffer: Handle,
+                _offset: u64,
+                _length: usize,
+            ) -> Answer<Vec<u8>> {
+                Err(Failure::unavailable("read_buffer"))
+            }
+            fn announced(&mut self) -> Vec<String> {
+                Vec::new()
+            }
+        }
+        let slept = std::time::Duration::from_millis(20);
+        let timer = crate::times::Timer::new();
+        let mut side = Watching::with(Slow(slept), timer.clone());
+        let _ = side.library(&stub_source());
+        let observed = timer.take();
+        let [one] = observed.as_slice() else {
+            panic!("one call, one observation: {observed:?}");
+        };
+        let slept = u64::try_from(slept.as_nanos()).unwrap();
+        assert!(
+            one.wall >= slept,
+            "the span read {} ns for a call that slept {slept} ns, so it closed before the call \
+             returned",
+            one.wall
+        );
+        // Asleep is not on the CPU, so nearly all of it must land in `blocked` rather than in the
+        // caller's own CPU time. That is the attribution the whole design turns on.
+        assert!(
+            one.blocked() > one.on_cpu,
+            "a sleeping call read {} ns on cpu and {} ns blocked",
+            one.on_cpu,
+            one.blocked()
+        );
+    }
+}

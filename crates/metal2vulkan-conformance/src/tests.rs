@@ -1475,10 +1475,11 @@ fn the_rate_map_cases_name_what_justifies_them() {
     }
 }
 
-/// The announcing side forwards **every** `Side` call, and this is what keeps it from rotting.
+/// The one forwarding wrapper forwards **every** `Side` call, and this is what keeps it from
+/// rotting.
 ///
 /// `Side` gives most of its calls a default that answers `Failure::unavailable`, so a method the
-/// announcing wrapper forgets to forward makes `Announcing<MetalSide>` answer "no such call" where
+/// wrapper forgets to forward makes `Announcing<MetalSide>` answer "no such call" where
 /// `MetalSide` answers perfectly well — and the compiler says nothing, because the default is
 /// there to be inherited. The trait grows with every ported batch, so the guard must be mechanical
 /// rather than a list somebody remembers to extend.
@@ -1510,21 +1511,25 @@ fn the_announcing_side_forwards_every_call() {
             .collect()
     }
     let declared = methods(include_str!("case.rs"), "\npub trait Side {");
+    // One forwarding impl serves every call-boundary watcher — the announcing one and the timing
+    // one — so this guard covers both. Two hand-written wrappers would have been two places to
+    // forget a method, and in the cost table a forgotten method reads as a *free* call.
     let forwarded = methods(
-        include_str!("validated.rs"),
-        "\nimpl<S: Side> Side for Announcing<S> {",
+        include_str!("watch.rs"),
+        "\nimpl<S: Side, W: Watcher> Side for Watching<S, W> {",
     );
     assert!(declared.len() > 10, "the trait was not found: {declared:?}");
     let missing: Vec<&String> = declared.difference(&forwarded).collect();
     assert!(
         missing.is_empty(),
-        "validated::Announcing does not forward {missing:?}, so it answers Unavailable where the \
-         side it wraps answers. Forward each of them."
+        "watch::Watching does not forward {missing:?}, so it answers Unavailable where the \
+         side it wraps answers, and a cost table would read each as a free call. Forward each of \
+         them."
     );
     let extra: Vec<&String> = forwarded.difference(&declared).collect();
     assert!(
         extra.is_empty(),
-        "Announcing forwards {extra:?}, which Side no longer declares"
+        "watch::Watching forwards {extra:?}, which Side no longer declares"
     );
 }
 

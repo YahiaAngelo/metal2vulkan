@@ -469,3 +469,261 @@ pub fn validated_leg(case: &dyn Case) -> Result<(), String> {
     let _ = case.run(&mut side, &mut sites);
     Ok(())
 }
+
+/// Measure what `cases` cost **on our stack** on the venue `venues` names, over `rounds` rounds.
+///
+/// The measurement's shape is the cost half's, for the same reasons measured there: the whole
+/// selection in its own order, because the runtime pools command pools, memory blocks and
+/// descriptor sets across cases, and **a fresh device each round**, because a warm recycler is not
+/// what a first run meets.
+///
+/// This leg and [`metal_times`] are run as two phases rather than case by case, and the reason is
+/// a measurement hazard rather than tidiness: the `elsewhere` attribution reads the **whole
+/// process's** CPU, so interleaving the legs would put Metal's own threads inside our cases'
+/// readings and ours inside Metal's. Phases confine that to the first case or two of a phase. The
+/// per-call elapsed and calling-thread figures — the table a reader acts on — are of the calling
+/// thread alone and are not affected either way. `--leg` runs one leg in a process of its own,
+/// which is the only way to read `elsewhere` with nothing of the other leg in it.
+pub fn times_on_under(
+    venues: Venues,
+    policy: Policy,
+    cases: &[Box<dyn Case>],
+    rounds: u32,
+) -> Result<crate::times::Measurement, String> {
+    let instrument = crate::times::instrument_nanos();
+    let mut venue = String::new();
+    let mut taken: Vec<Vec<crate::times::CaseRound>> = Vec::new();
+    for _ in 0..rounds.max(1) {
+        let notices = Notices::default();
+        let cache = ScratchCache::new().map_err(|error| error.to_string())?;
+        let device = device::open_under(venues, policy, &notices, &cache)?;
+        // The notices the device announced as it was made are the venue's, not any case's.
+        notices.take();
+        venue = device.name().to_owned();
+        let mut round = Vec::with_capacity(cases.len());
+        for case in cases {
+            let taker = notices.clone();
+            let side = RuntimeSide::new(&device, move || taker.take());
+            round.push(timed(case.as_ref(), side)?);
+        }
+        taken.push(round);
+    }
+    Ok(crate::times::fold(
+        crate::times::Leg::Ours,
+        venue,
+        rounds.max(1),
+        instrument,
+        cases,
+        &taken,
+    ))
+}
+
+/// Measure what `cases` cost **on native Metal** on this Mac, over `rounds` rounds.
+///
+/// A case record mode must not run on Metal is not run here either, and for the same reason: the
+/// safety rule is about what the suite asks Metal to do, not about which command asks it. A case
+/// whose Metal leg would end the process or fault the device is left with no Metal figures, which
+/// reads as an unmeasured row rather than as a fast one.
+#[cfg(target_os = "macos")]
+pub fn metal_times(
+    cases: &[Box<dyn Case>],
+    rounds: u32,
+) -> Result<crate::times::Measurement, String> {
+    let instrument = crate::times::instrument_nanos();
+    let mut venue = String::new();
+    let mut taken: Vec<Vec<crate::times::CaseRound>> = Vec::new();
+    for _ in 0..rounds.max(1) {
+        let mut round = Vec::with_capacity(cases.len());
+        for case in cases {
+            if let Some(why) = metal_leg_refused(case.as_ref()) {
+                round.push(crate::times::CaseRound {
+                    stopped: Some(why),
+                    ..Default::default()
+                });
+                continue;
+            }
+            // Every Metal call that answers an object answers an **autoreleased** one, and this
+            // process drains no pool of its own, so a case's objects would live to the end of the
+            // command and a few hundred cases of them would hold every queue slot Metal has. The
+            // pool is drained after the case's window is read, so its own cost is outside the
+            // measurement.
+            let (side, measured) = objc2::rc::autoreleasepool(|_| {
+                let side = crate::metal_side::MetalSide::new();
+                match side {
+                    Ok(side) => {
+                        let taken = timed(case.as_ref(), side);
+                        (Ok(()), taken)
+                    }
+                    Err(why) => (Err(why), Ok(crate::times::CaseRound::default())),
+                }
+            });
+            match side {
+                Ok(()) => round.push(measured?),
+                Err(why) => {
+                    return Err(format!("{}: no Metal side: {why}", case.name()));
+                }
+            }
+        }
+        venue = "native Metal".to_owned();
+        taken.push(round);
+    }
+    Ok(crate::times::fold(
+        crate::times::Leg::Metal,
+        venue,
+        rounds.max(1),
+        instrument,
+        cases,
+        &taken,
+    ))
+}
+
+/// Why the Metal leg must not run `case`, where it must not.
+///
+/// The two sources the suite already holds for this: a row Metal never returned from, and a
+/// carried answer whose case says re-recording it on Metal is not safe.
+#[cfg(target_os = "macos")]
+fn metal_leg_refused(case: &dyn Case) -> Option<String> {
+    match case.metal_source() {
+        crate::case::MetalSource::Run => None,
+        crate::case::MetalSource::Carried { re_record, .. } => match re_record {
+            crate::case::ReRecord::Allowed => None,
+            crate::case::ReRecord::Forbidden { reason } => Some(format!(
+                "the case forbids running its Metal leg here: {reason}"
+            )),
+        },
+        crate::case::MetalSource::DidNotReturn { call, says, .. } => {
+            Some(format!("Metal does not return from {call}: {says}"))
+        }
+    }
+}
+
+/// Run one case on `side`, measuring every call it makes.
+///
+/// The span is the [`crate::watch`] wrapper's, so both legs are measured at one boundary: around
+/// the Metal or Vulkan call and the side's own handle bookkeeping, and outside the transcript, the
+/// fixtures and the input fingerprint. A cost comparison of two legs measured in different places
+/// would not be a comparison, and one wrapper is how that cannot happen.
+///
+/// The case's window is closed **before** the side is dropped, so tearing a device down is not
+/// charged to the case's calls on either leg.
+fn timed<S: Side>(case: &dyn Case, side: S) -> Result<crate::times::CaseRound, String> {
+    use crate::times::Timer;
+    let timer = Timer::new();
+    let mut side = crate::watch::Watching::with(side, timer.clone());
+    let mut sites = crate::transcript::Sites::new();
+    let inputs = case
+        .inputs()
+        .map_err(|why| format!("{}: {why}", case.name()))?;
+    sites.push(crate::case::inputs_node(&inputs));
+    let process_cpu_before = crate::clocks::process_cpu_nanos();
+    let on_cpu_before = crate::clocks::thread_cpu_nanos();
+    let started = std::time::Instant::now();
+    let abort = case.run(&mut side, &mut sites).err();
+    let window_wall = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+    let on_cpu_after = crate::clocks::thread_cpu_nanos();
+    let process_cpu_after = crate::clocks::process_cpu_nanos();
+    let observed = timer.take();
+    let mut degraded = side.announced();
+    degraded.extend(sites.finish().announced_notices().into_keys());
+    degraded.sort();
+    degraded.dedup();
+    let stopped = abort.map(|abort| {
+        let what = abort
+            .failure
+            .lacks
+            .as_deref()
+            .unwrap_or("a call did not answer");
+        format!("{what}, at {}", abort.at)
+    });
+    Ok(crate::times::CaseRound {
+        observed,
+        window_wall,
+        window_on_cpu: span(on_cpu_before, on_cpu_after),
+        window_process_cpu: span(process_cpu_before, process_cpu_after),
+        stopped,
+        degraded,
+    })
+}
+
+/// The nanoseconds between two readings of one clock, or zero where the host answered neither.
+fn span(before: Option<u64>, after: Option<u64>) -> u64 {
+    match (before, after) {
+        (Some(before), Some(after)) => after.saturating_sub(before),
+        _ => 0,
+    }
+}
+
+/// Write what `metal` and `ours` measured into the cases' own recordings, answering where each
+/// went or why it could not be written.
+///
+/// A leg whose round **stopped** before the case finished is not written: its calls are a part of
+/// the case. A leg that announced a degrade notice **is** written, with the codes beside the
+/// figures, because the figures are a true measurement of what that device did — it is the
+/// *comparison* that the notices rule out, and [`crate::times::judge`] is where that happens.
+pub fn record_times(
+    metal: Option<&crate::times::Measurement>,
+    ours: Option<&crate::times::Measurement>,
+    words: &str,
+) -> Vec<(String, Result<std::path::PathBuf, String>)> {
+    let mut names: Vec<&str> = Vec::new();
+    for measured in [metal, ours].into_iter().flatten() {
+        for case in &measured.cases {
+            if !names.contains(&case.case.as_str()) {
+                names.push(&case.case);
+            }
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| (name.to_owned(), record_one_time(name, metal, ours, words)))
+        .collect()
+}
+
+/// Put one case's time records in its recording, replacing this machine's records for the legs
+/// measured and keeping every other machine's.
+fn record_one_time(
+    case: &str,
+    metal: Option<&crate::times::Measurement>,
+    ours: Option<&crate::times::Measurement>,
+    words: &str,
+) -> Result<std::path::PathBuf, String> {
+    use crate::times::TimeRecord;
+    let mut recording = crate::recording::read(case)?;
+    let mut written = 0;
+    for measured in [metal, ours].into_iter().flatten() {
+        let Some(times) = measured.case(case) else {
+            continue;
+        };
+        // A leg that did not finish the case keeps nothing, and that is not an error for the
+        // case: the other leg may still have figures worth keeping, and a case whose Metal leg
+        // the safety rule refuses is exactly that shape.
+        if times.stopped.is_some() {
+            continue;
+        }
+        let record = TimeRecord {
+            leg: measured.leg,
+            venue: measured.venue.clone(),
+            chip: crate::recording::ORACLE_CHIP.to_owned(),
+            os_build: crate::recording::ORACLE_OS_BUILD.to_owned(),
+            rounds: measured.rounds,
+            measured: words.to_owned(),
+            instrument: measured.instrument,
+            times: times.clone(),
+        };
+        recording.times.retain(|held| {
+            held.leg != record.leg
+                || held.venue != record.venue
+                || held.chip != record.chip
+                || held.os_build != record.os_build
+        });
+        recording.times.push(record);
+        written += 1;
+    }
+    if written == 0 {
+        return Err("neither leg finished the case, so there is nothing to keep".to_owned());
+    }
+    recording
+        .times
+        .sort_by(|one, two| (one.leg, &one.venue).cmp(&(two.leg, &two.venue)));
+    crate::recording::write(&recording)
+}

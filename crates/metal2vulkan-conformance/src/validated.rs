@@ -58,7 +58,7 @@
 //!
 //! # How a complaint is attributed to a call
 //!
-//! The child announces each [`Side`] call it is about to make on its standard
+//! The child announces each [`Side`](crate::case::Side) call it is about to make on its standard
 //! error ([`MARKER`]), so Metal's own output and our markers interleave in one stream in the order
 //! they happened. Everything between two markers is the complaint of the call the first marker
 //! names. Nothing is matched against Apple's wording, so a new check in a release the suite has
