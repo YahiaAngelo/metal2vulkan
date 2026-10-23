@@ -1010,6 +1010,26 @@ pub trait Side {
     /// refused ([`PassOutcome::refused`], one entry per piece of `work`).
     ///
     /// [`RenderWork`]: crate::render::RenderWork
+    /// The host's write of every byte of the plane a target lies over
+    /// ([`crate::surface::PlaneSpec`]): `IOSurfaceLock`, a copy of `bytes`, `IOSurfaceUnlock` on
+    /// the Metal side, and the stand-in buffer's own bytes on the runtime's.
+    ///
+    /// It is its own call rather than [`replace_region`](Side::replace_region) because the plane is
+    /// addressed as **the surface's bytes**, stride and padding included, not as the texture's
+    /// texels: a case asserts that the bytes between the rows stayed as they were, which a region
+    /// write cannot say.
+    fn write_plane(&mut self, target: Handle, bytes: &[u8]) -> Answer<()> {
+        let _ = (target, bytes);
+        Err(Failure::unavailable("write_plane"))
+    }
+
+    /// Every byte of the plane a target lies over, read back by the host after the GPU is done
+    /// with it: the whole stride of every row, so the bytes between the rows are observed too.
+    fn read_plane(&mut self, target: Handle) -> Answer<Vec<u8>> {
+        let _ = target;
+        Err(Failure::unavailable("read_plane"))
+    }
+
     fn render(&mut self, work: &[crate::render::RenderWork]) -> Answer<PassOutcome> {
         let _ = work;
         Err(Failure::unavailable("render"))

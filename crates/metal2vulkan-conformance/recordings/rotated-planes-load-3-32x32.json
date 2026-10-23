@@ -1,0 +1,339 @@
+{
+  "format": 1,
+  "case": "rotated-planes-load-3-32x32",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "tob_renders.ll",
+      "entry": "tob_rect",
+      "source_sha256": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+    },
+    {
+      "fixture": "tob_renders.air.ll",
+      "entry": "tob_rect",
+      "source_sha256": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+    },
+    {
+      "fixture": "tob_renders.ll",
+      "entry": "tob_read",
+      "source_sha256": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+    },
+    {
+      "fixture": "tob_renders.air.ll",
+      "entry": "tob_read",
+      "source_sha256": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "renders:air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+                        }
+                      }
+                    },
+                    {
+                      "name": "renders:air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "rotation",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9d9f290527a6be626a8f5985b26e19b237b44872b03631811df4416fc1713178"
+                        }
+                      }
+                    },
+                    {
+                      "name": "frame",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "60b97a9d7717a5daff06a10f98accc2f972908017fa908490f1279b60f90e26d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "plane",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "60c4a1707066aa54de0539342fa0697a6fc18684168f9349a1bdbaa09c893ec7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b31cf1bbf1dd69ba8ebf5b9d101427463b543e0e046812645d78a2a12c96ba0f"
+                        }
+                      }
+                    },
+                    {
+                      "name": "pipeline",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ce7cc2bbf6a1f57ced2b1acd85440b1c5b1324b780c5be91992bf1d5830d83f3"
+                        }
+                      }
+                    },
+                    {
+                      "name": "load-action",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "7c9fa136d4413fa6173637e883b6998d32e1d675f88cddff9dcbcf331820f4b8"
+                        }
+                      }
+                    },
+                    {
+                      "name": "corners",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "df02ea55ed4d9d5e03b2c620a13b25f02e8153e5fb2b995398f0c5cbd09e08a2"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:naming",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "cb5bb0578da1acf02229c4b865b1650fae89a9ddacfbe831e814bb02dc8a3709"
+                        }
+                      }
+                    },
+                    {
+                      "name": "plane:before",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "35ffadb36450818a7f426f3823a7efef9d595d965ab9808dfa1f963acf0a217a"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library/renders",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture/naming",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/corners",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "write-plane",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-plane",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plane",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows-0",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAzdwEAM3cCADN3AwAzdwQAM3cFADN3BgAzdwcAM3cIADN3CQAzdwoAM3cLADN3DAAzdw0AM3cOADN3DwAzdxAAM3cRADN3EgAzdxMAM3cUADN3FQAzdxYAM3cXADN3GAAzdxkAM3caADN3GwAzdxwAM3cdADN3HgAzdx8AM3erq6urq6urq6urq6urq6urAAEzdwEBM3cCATN3AwEzdwQBM3cFATN3BgEzdwcBM3cIATN3CQEzdwoBM3cLATN3DAEzdw0BM3cOATN3DwEzdxABM3cRATN3EgEzdxMBM3cUATN3FQEzdxYBM3cXATN3GAEzdxkBM3caATN3GwEzdxwBM3cdATN3HgEzdx8BM3erq6urq6urq6urq6urq6urAAIzdwECM3cCAjN3AwIzdwQCM3cFAjN3BgIzdwcCM3cIAjN3CQIzdwoCM3cLAjN3DAIzdw0CM3cOAjN3DwIzdxACM3cRAjN3EgIzdxMCM3cUAjN3FQIzdxYCM3cXAjN3GAIzdxkCM3caAjN3GwIzdxwCM3cdAjN3HgIzdx8CM3erq6urq6urq6urq6urq6urAAMzdwEDM3cCAzN3AwMzdwQDM3cFAzN3BgMzdwcDM3cIAzN3CQMzdwoDM3cLAzN3DAMzdw0DM3cOAzN3DwMzdxADM3cRAzN3EgMzdxMDM3cUAzN3FQMzdxYDM3cXAzN3GAMzdxkDM3caAzN3GwMzdxwDM3cdAzN3HgMzdx8DM3erq6urq6urq6urq6urq6urAAQzdwEEM3cCBDN3AwQzdwQEM3cFBDN3BgQzdwcEM3cIBDN3CQQzdwoEM3cLBDN3DAQzdw0EM3cOBDN3DwQzdxAEM3cRBDN3EgQzdxMEM3cUBDN3FQQzdxYEM3cXBDN3GAQzdxkEM3caBDN3GwQzdxwEM3cdBDN3HgQzdx8EM3erq6urq6urq6urq6urq6urAAUzdwEFM3cCBTN3AwUzdwQFM3cFBTN3BgUzdwcFM3cIBTN3CQUzdwoFM3cLBTN3DAUzdw0FM3cOBTN3DwUzdxAFM3cRBTN3EgUzdxMFM3cUBTN3FQUzdxYFM3cXBTN3GAUzdxkFM3caBTN3GwUzdxwFM3cdBTN3HgUzdx8FM3erq6urq6urq6urq6urq6urAAYzdwEGM3cCBjN3AwYzdwQGM3cFBjN3BgYzdwcGM3cIBjN3CQYzdwoGM3cLBjN3DAYzdw0GM3cOBjN3DwYzdxAGM3cRBjN3EgYzdxMGM3cUBjN3FQYzdxYGM3cXBjN3GAYzdxkGM3caBjN3GwYzdxwGM3cdBjN3HgYzdx8GM3erq6urq6urq6urq6urq6urAAczdwEHM3cCBzN3AwczdwQHM3cFBzN3BgczdwcHM3cIBzN3CQczdwoHM3cLBzN3DAczdw0HM3cOBzN3DwczdxAHM3cRBzN3EgczdxMHM3cUBzN3FQczdxYHM3cXBzN3GAczdxkHM3caBzN3GwczdxwHM3cdBzN3Hgczdx8HM3erq6urq6urq6urq6urq6urAAgzdwEIM3cCCDN3AwgzdwQIM3cFCDN3BggzdwcIM3cICDN3CQgzdwoIM3cLCDN3DAgzdw0IM3cOCDN3DwgzdxAIM3cRCDN3EggzdxMIM3cUCDN3FQgzdxYIM3cXCDN3GAgzdxkIM3caCDN3GwgzdxwIM3cdCDN3Hggzdx8IM3erq6urq6urq6urq6urq6urAAkzdwEJM3cCCTN3AwkzdwQJM3cFCTN3BgkzdwcJM3cICTN3CQkzdwoJM3cLCTN3DAkzdw0JM3cOCTN3DwkzdxAJM3cRCTN3EgkzdxMJM3cUCTN3FQkzdxYJM3cXCTN3GAkzdxkJM3caCTN3GwkzdxwJM3cdCTN3Hgkzdx8JM3erq6urq6urq6urq6urq6urAAozdwEKM3cCCjN3AwozdwQKM3cFCjN3BgozdwcKM3cICjN3CQozdwoKM3cLCjN3DAozdw0KM3cOCjN3DwozdxAKM3cRCjN3EgozdxMKM3cUCjN3FQozdxYKM3cXCjN3GAozdxkKM3caCjN3GwozdxwKM3cdCjN3Hgozdx8KM3erq6urq6urq6urq6urq6urAAszdwELM3cCCzN3AwszdwQLM3cFCzN3BgszdwcLM3cICzN3CQszdwoLM3cLCzN3DAszdw0LM3cOCzN3DwszdxALM3cRCzN3EgszdxMLM3cUCzN3FQszdxYLM3cXCzN3GAszdxkLM3caCzN3GwszdxwLM3cdCzN3Hgszdx8LM3erq6urq6urq6urq6urq6urAAwzdwEMM3cCDDN3AwwzdwQMM3cFDDN3BgwzdwcMM3cIDDN3CQwzdwoMM3cLDDN3DAwzdw0MM3cODDN3DwwzdxAMM3cRDDN3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"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 4608
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 128,
+                            "row_pitch": 144,
+                            "rows": 32,
+                            "image_pitch": 4608,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

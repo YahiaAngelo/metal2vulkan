@@ -34,7 +34,7 @@ use metal2vulkan_runtime::SparsePageSize;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::AnyThread;
-use objc2_foundation::{NSString, NSURL};
+use objc2_foundation::{NSObjectProtocol, NSString, NSURL};
 use objc2_metal::{
     MTLAttributeFormat, MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType,
     MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor,
@@ -95,12 +95,41 @@ pub struct MetalSide {
     /// another name for one of the pools above, and not another name for the depth and stencil
     /// states either.
     heaps: Vec<Retained<ProtocolObject<dyn MTLHeap>>>,
-    /// The IOSurfaces the case's plane textures lie over. Not a pool a handle names: a surface is
-    /// not a case's object at all — the case states a buffer, and this side turns it into the
-    /// surface Metal needs. They are kept so a surface outlives the texture that reads it.
+    /// **Every IOSurface this side made, and the only thing that owns one.** Not a pool a handle
+    /// names: a surface is not a case's object at all — the case states a buffer, or a plane's
+    /// rotation and stride, and this side turns it into the surface Metal needs. They are kept so
+    /// a surface outlives the texture that reads it.
+    ///
+    /// The two families that need a surface — a two-plane YCbCr plane texture and a rotated
+    /// framebuffer-only target — are **one mechanism here**, which is why there is one pool. What
+    /// differs between them is the layout asked for and the geometry it comes from, and that lives
+    /// in [`crate::metal_surface`]'s two constructors, not in a second owner.
     surfaces: Vec<crate::metal_surface::Surface>,
+    /// Which surface a texture handle's plane reads and writes, and how long that plane is.
+    ///
+    /// **A lookup, not a pool**: it owns nothing and releases nothing, and the surface it names
+    /// lives in `surfaces` above. It exists because a rotated target's case writes the plane
+    /// before its pass and reads it after, so that side has to find the surface again from the
+    /// texture handle — which a plane texture's case never does, since its bytes go in before the
+    /// surface is handed to Metal and come back out through the texture.
+    planes: Vec<PlaneAt>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
+}
+
+/// Where one texture handle's plane lies: which surface in [`MetalSide::surfaces`] holds it, and
+/// how many bytes of that surface the plane is.
+///
+/// The index is into that vector, which only ever grows while a side lives, so an index stays the
+/// surface it named. The length is the **case's** — its stride times its rows — and not
+/// `IOSurfaceGetAllocSize`, which is routinely larger: measured here a 16x64 plane asked for a
+/// 272-byte stride came back in 32,768 bytes, 15,360 more than the plane holds. Comparing the
+/// allocation would compare bytes no case ever stated.
+#[derive(Clone, Copy)]
+struct PlaneAt {
+    handle: Handle,
+    at: usize,
+    length: usize,
 }
 
 /// One render pipeline state of the case's, with the reflection its creation answered.
@@ -150,6 +179,7 @@ impl MetalSide {
             depth_stencil_states: Vec::new(),
             heaps: Vec::new(),
             surfaces: Vec::new(),
+            planes: Vec::new(),
             scratch: Scratch::new()?,
         })
     }
@@ -1670,6 +1700,9 @@ impl Side for MetalSide {
     }
 
     fn target(&mut self, spec: &TargetSpec) -> Answer<Handle> {
+        if let Some(plane) = &spec.surface {
+            return self.surface_target(spec, plane);
+        }
         // SAFETY: the descriptor constructor reads only the format and the size it is given.
         let descriptor = unsafe {
             MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
@@ -1786,6 +1819,29 @@ impl Side for MetalSide {
             .newDepthStencilStateWithDescriptor(&descriptor)
             .ok_or_else(|| Failure::named("NewDepthStencilState", "returned nil".to_owned()))?;
         Ok(keep(&mut self.depth_stencil_states, state))
+    }
+
+    fn write_plane(&mut self, target: Handle, bytes: &[u8]) -> Answer<()> {
+        let (surface, length) = self.held_plane(target)?;
+        if bytes.len() != length {
+            return Err(Failure::named(
+                "PlaneLength",
+                format!("{} bytes for a plane of {length}", bytes.len()),
+            ));
+        }
+        // No command buffer is in flight: a case writes the plane before it opens its pass and
+        // reads it after the wait.
+        surface
+            .fill(bytes)
+            .map_err(|why| Failure::named("WritePlane", why))
+    }
+
+    fn read_plane(&mut self, target: Handle) -> Answer<Vec<u8>> {
+        let (surface, length) = self.held_plane(target)?;
+        // The caller waited for the command buffer that wrote the plane before asking for it.
+        surface
+            .read(length)
+            .map_err(|why| Failure::named("ReadPlane", why))
     }
 
     fn render(&mut self, work: &[RenderWork]) -> Answer<PassOutcome> {
@@ -2398,6 +2454,11 @@ impl Side for MetalSide {
                     let device: &ProtocolObject<dyn MTLDevice> = &self.device;
                     let descriptor: &MTLTextureDescriptor = &descriptor;
                     let plane = over.plane as usize;
+                    require_selector(
+                        device,
+                        objc2::sel!(newTextureWithDescriptor:iosurface:plane:),
+                        "MTLDevice newTextureWithDescriptor:iosurface:plane:",
+                    )?;
                     // SAFETY: `newTextureWithDescriptor:iosurface:plane:` of a live surface whose
                     // planes it states, at one of them; the surface is kept below, so it outlives
                     // the texture that reads it.
@@ -2649,6 +2710,169 @@ pub struct Made(pub Retained<ProtocolObject<dyn MTLCommandBuffer>>);
 // SAFETY: as the type's documentation states: the probe never encodes into a held command buffer,
 // and the only operation that crosses threads is the release.
 unsafe impl Send for Made {}
+
+impl MetalSide {
+    /// The plane behind the texture `target`.
+    fn held_plane(&self, target: Handle) -> Answer<(&crate::metal_surface::Surface, usize)> {
+        self.planes
+            .iter()
+            .find(|plane| plane.handle == target)
+            .map(|plane| (&self.surfaces[plane.at], plane.length))
+            .ok_or_else(|| {
+                Failure::named(
+                    "NotOverASurface",
+                    format!("texture {} lies over no IOSurface", target.0),
+                )
+            })
+    }
+
+    /// A framebuffer-only texture of `spec`'s format and extent over one plane of an IOSurface this
+    /// side makes for it, at `plane`'s rotation and stride.
+    ///
+    /// Three things here are not ordinary Metal, and each is guarded:
+    ///
+    /// - **The stride rule is a safety rule.** Metal asserts, *ending the process*, on an IOSurface
+    ///   texture whose `bytesPerRow` is below the texture's own row
+    ///   ([`crate::surface`]), so the plane is refused here before any descriptor reaches Metal.
+    /// - **`setFramebufferOnly:` and `setRotation:` are Apple SPI.** Both are reached by selector
+    ///   and only after `respondsToSelector:`, so a release that stops answering them gives a typed
+    ///   refusal naming the selector instead of an unrecognised-selector crash.
+    /// - **`newTextureWithDescriptor:iosurface:plane:` is public**, but its `IOSurfaceRef`
+    ///   argument belongs to a framework this crate does not depend on, so it is sent by selector
+    ///   with the raw pointer.
+    ///
+    /// Metal answering nil is a refusal, which is safe and is what the suite reads a venue's gap
+    /// out of.
+    fn surface_target(
+        &mut self,
+        spec: &TargetSpec,
+        plane: &crate::surface::PlaneSpec,
+    ) -> Answer<Handle> {
+        if plane.unsafe_stride(spec.size) {
+            return Err(Failure::named(
+                "WouldEndMetalsProcess",
+                format!(
+                    "a plane of {} bytes a row behind a {} texel row: Metal's descriptor \
+                     validation asserts (\"IOSurface texture: bytesPerRow must be greater or equal \
+                     to\"), which ends the process",
+                    plane.row_pitch,
+                    spec.size[0] * plane.texel
+                ),
+            ));
+        }
+        // SAFETY: the descriptor constructor reads only the format and the size it is given.
+        let descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                MTLPixelFormat(spec.format.as_raw() as usize),
+                spec.size[0] as usize,
+                spec.size[1] as usize,
+                false,
+            )
+        };
+        let mut usage = MTLTextureUsage::RenderTarget;
+        if spec.shader_read {
+            usage |= MTLTextureUsage::ShaderRead;
+        }
+        if spec.shader_write {
+            usage |= MTLTextureUsage::ShaderWrite;
+        }
+        descriptor.setUsage(usage);
+        descriptor.setStorageMode(MTLStorageMode::Shared);
+        let framebuffer_only = objc2::sel!(setFramebufferOnly:);
+        let rotation = objc2::sel!(setRotation:);
+        for (selector, name) in [
+            (
+                framebuffer_only,
+                "MTLTextureDescriptor setFramebufferOnly: (Apple SPI)",
+            ),
+            (rotation, "MTLTextureDescriptor setRotation: (Apple SPI)"),
+        ] {
+            require_selector(&*descriptor, selector, name)?;
+        }
+        // SAFETY: both selectors were just checked, and each takes one integral argument and
+        // answers nothing, as the private setters do. Verified answered on an Apple M3 Max under
+        // macOS 27.0.1, where the descriptor also reads the rotation back.
+        unsafe {
+            let _: () = objc2::msg_send![&*descriptor, setFramebufferOnly: true];
+            let _: () = objc2::msg_send![&*descriptor, setRotation: plane.rotation as objc2_foundation::NSUInteger];
+        }
+        let surface = crate::metal_surface::Surface::single_plane(
+            plane.plane,
+            plane.texel,
+            plane.row_pitch,
+            plane.pad,
+        )
+        .map_err(|why| Failure::named("IOSurfaceCreate", why))?;
+        // The layout was a request, not an instruction, so it is read back before a texture lies
+        // over it: a surface whose rows are not where the case says they are would make every
+        // recorded byte a comparison at the wrong offset.
+        surface
+            .is_as_asked(plane.plane, plane.row_pitch)
+            .map_err(|why| Failure::named("SurfaceNotAsAsked", why))?;
+        let texture = self.texture_over_surface(&descriptor, &surface, plane)?;
+        let handle = keep(&mut self.textures, texture);
+        let at = self.surfaces.len();
+        self.surfaces.push(surface);
+        self.planes.push(PlaneAt {
+            handle,
+            at,
+            length: plane.length(),
+        });
+        Ok(handle)
+    }
+
+    /// `newTextureWithDescriptor:iosurface:plane:` of plane 0, by selector.
+    ///
+    /// The plane's bytes are already the pad byte: [`crate::metal_surface::Surface::single_plane`]
+    /// sets them, so there is no window in which Metal could read a surface this side had not
+    /// written.
+    fn texture_over_surface(
+        &self,
+        descriptor: &MTLTextureDescriptor,
+        surface: &crate::metal_surface::Surface,
+        plane: &crate::surface::PlaneSpec,
+    ) -> Answer<Retained<ProtocolObject<dyn MTLTexture>>> {
+        let selector = objc2::sel!(newTextureWithDescriptor:iosurface:plane:);
+        require_selector(
+            &*self.device,
+            selector,
+            "MTLDevice newTextureWithDescriptor:iosurface:plane:",
+        )?;
+        // SAFETY: the selector was just checked; it takes the descriptor, an `IOSurfaceRef` and a
+        // plane index, and answers a `+1` texture, which `Retained` takes ownership of. The stride
+        // rule the caller checked is what keeps this call from asserting.
+        let texture: Option<Retained<ProtocolObject<dyn MTLTexture>>> = unsafe {
+            objc2::msg_send![
+                &*self.device,
+                newTextureWithDescriptor: descriptor,
+                iosurface: surface.as_ptr(),
+                plane: 0usize,
+            ]
+        };
+        texture.ok_or_else(|| {
+            Failure::named("NewTextureWithIoSurface", format!("{plane:?} returned nil"))
+        })
+    }
+}
+
+/// Check `object` answers `selector` before anything is sent to it, answering
+/// [`Failure::unavailable`] naming the selector where it does not.
+///
+/// **Every Apple SPI this suite sends goes through here**: the two texture fills
+/// ([`crate::metal_work`]), `MTLTextureDescriptor`'s `setFramebufferOnly:` and `setRotation:`, and
+/// the `IOSurfaceRef` creator. One lookup rather than one per call site, so a release that stops
+/// answering a private selector gives the same typed refusal naming it wherever it is reached,
+/// instead of an unrecognised-selector crash in whichever module happened to forget the check.
+pub(crate) fn require_selector(
+    object: &(impl NSObjectProtocol + objc2::Message),
+    selector: objc2::runtime::Sel,
+    name: &'static str,
+) -> Answer<()> {
+    match object.respondsToSelector(selector) {
+        true => Ok(()),
+        false => Err(Failure::unavailable(name)),
+    }
+}
 
 /// Metal's descriptor for a queried one: every field the case names, by its raw ordinal, so a
 /// private format and a private usage bit reach Metal as readily as a public one.
@@ -3289,6 +3513,10 @@ impl MetalSide {
                 znear: rect.depth[0],
                 zfar: rect.depth[1],
             }),
+            RenderStep::BlendColor(channels) => {
+                let [red, green, blue, alpha] = channels.0;
+                encoder.setBlendColorRed_green_blue_alpha(red, green, blue, alpha);
+            }
             RenderStep::VisibilityResultMode { mode, offset } => {
                 encoder.setVisibilityResultMode_offset(
                     MTLVisibilityResultMode(mode.raw() as usize),

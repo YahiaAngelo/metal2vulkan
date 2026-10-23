@@ -89,6 +89,8 @@ pub mod pvrtc_cpu_order;
 pub mod pvrtc_rows;
 pub mod rate_maps;
 pub mod rgb10a2_srgb;
+pub mod rotated_planes;
+pub mod rotated_targets;
 pub mod sample_fills;
 pub mod sample_positions;
 pub mod scheduled_handlers;
@@ -319,6 +321,8 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in swizzled_storage::all() {
         cases.push(Box::new(case));
     }
+    cases.extend(rotated_targets::all());
+    cases.extend(rotated_planes::all());
     cases
 }
 
