@@ -1151,6 +1151,11 @@ pub enum Feature {
     StencilExport,
     /// Per-sample shading.
     SampleRateShading,
+    /// A render pass's custom sample positions (`setSamplePositions:count:`) on a device that
+    /// takes no custom sample locations at the pass's sample count, which is the count the grid
+    /// is programmed at (`VkProperty::SampleLocationSampleCount`, named by the refusal). Only the
+    /// runtime refuses so; the device's own lack, not the caller's error and not a gap.
+    SamplePositions,
     /// The pixel's coverage (`[[sample_mask]]` read) in a fragment function that runs once per
     /// sample: Metal hands every invocation the whole pixel's coverage, while a Vulkan invocation
     /// under sample shading sees only the bits of the samples it shades, and nothing gathers a

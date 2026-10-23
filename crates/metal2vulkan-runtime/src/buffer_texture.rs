@@ -342,7 +342,12 @@ impl Buffer {
     ///   runtime, over a buffer the CPU reaches; Metal's validation stops it;
     /// - a plane of a planar surface takes any offset and any `bytes_per_row` that covers its
     ///   row; a surface without planes, a `bytes_per_row` that is a multiple of 16, at an offset
-    ///   that is one too (Metal asserts on another pitch);
+    ///   that is one too (Metal asserts on another pitch). The row the pitch covers is the
+    ///   **texture's** own, whatever the plane holds and whatever the rotation: a rotated
+    ///   texture's plane holds the turned frame, and Metal still holds the pitch to the texture's
+    ///   unturned row (measured on the M3 Max, plain Metal with no validation layer: a 4x8 plane
+    ///   at its tight stride of 16 behind an 8x4 texture ends the process, "bytesPerRow (16) must
+    ///   be greater or equal to (32) bytes");
     /// - `get_bytes` and `replace_region` read and write the plane where the surface lays it out:
     ///   from its offset, rows `bytes_per_row` apart;
     /// - the GPU's commands read and write it as Metal's GPU does: from the offset rounded down to
@@ -634,7 +639,7 @@ impl Buffer {
         }
         let rotation = match u8::try_from(descriptor.rotation) {
             Ok(0) => None,
-            Ok(rotation) => Some(self.turned_plane(call, &texture, rotation, &buffer)?),
+            Ok(rotation) => Some(turned_plane(call, &texture, rotation, &buffer)?),
             Err(_) => return Err(internal("a rotation past the descriptor's check")),
         };
         if let Some((rotation, stored)) = rotation {
@@ -704,39 +709,67 @@ impl Buffer {
     }
 }
 
-impl Buffer {
-    /// The plane of a texture of `rotation` made as `texture` (of a rotated descriptor, over an
-    /// IOSurface plane): `rotation` and where the turned texels lie, checked as Metal checks
-    /// them, as a 2D texture of the extent it stores (`rotated::stored_extent`) at the plane's
-    /// offset and rows. Refused as that texture is, and (`NotImplemented(RotatedTexture)`) for a
-    /// plane whose offset or `bytesPerRow` is off 16 bytes, or a format of a texel size other
-    /// than 1, 2, 4, 8 or 16 bytes (a 4:2:2 one among them), whose rotation is not measured.
-    fn turned_plane(
-        &self,
-        call: &'static str,
-        texture: &BufferTexture,
-        rotation: u8,
-        buffer: &BufferFacts,
-    ) -> Result<(u8, Placed), Error> {
-        let measured = texture.offset.is_multiple_of(LINEAR_ALIGNMENT)
-            && texture.bytes_per_row.is_multiple_of(LINEAR_ALIGNMENT)
-            && [1, 2, 4, 8, 16].contains(&texture.texel_bytes)
-            && !chroma_pairs::is_four_two_two(texture.layout.pixel_format);
-        if !measured {
-            return Err(Error::NotImplemented(RuntimeGap::RotatedTexture));
-        }
-        let [width, height, depth] = texture.layout.extent;
-        let [width, height] = rotated::stored_extent(rotation, [width, height]);
-        let stored = BufferTexture {
-            layout: TextureLayout {
-                extent: [width, height, depth],
-                ..texture.layout
-            },
-            ..*texture
-        };
-        let placed =
-            plan_buffer_texture(&stored, buffer).map_err(|refusal| refusal_error(call, refusal))?;
-        Ok((rotation, placed))
+/// The plane of a texture of `rotation` made as `texture` (of a rotated descriptor, over an
+/// IOSurface plane): `rotation` and where the turned texels lie, checked as Metal checks them, as
+/// a 2D texture of the extent it stores (`rotated::stored_extent`) at the plane's offset and
+/// rows, with the pitch held to the texture's own row ([`covers_its_row`]), which the stored
+/// extent's plan does not hold it to. Refused as that texture is, and
+/// (`NotImplemented(RotatedTexture)`) for a plane whose offset or `bytesPerRow` is off 16 bytes,
+/// or a format of a texel size other than 1, 2, 4, 8 or 16 bytes (a 4:2:2 one among them), whose
+/// rotation is not measured.
+///
+/// It reads nothing of the buffer but its length, so a test reaches every refusal from the
+/// input's own shape with no device — which the pitch rule needs, the texture it refuses being
+/// one that ends Metal's process.
+pub(super) fn turned_plane(
+    call: &'static str,
+    texture: &BufferTexture,
+    rotation: u8,
+    buffer: &BufferFacts,
+) -> Result<(u8, Placed), Error> {
+    let measured = texture.offset.is_multiple_of(LINEAR_ALIGNMENT)
+        && texture.bytes_per_row.is_multiple_of(LINEAR_ALIGNMENT)
+        && [1, 2, 4, 8, 16].contains(&texture.texel_bytes)
+        && !chroma_pairs::is_four_two_two(texture.layout.pixel_format);
+    if !measured {
+        return Err(Error::NotImplemented(RuntimeGap::RotatedTexture));
+    }
+    covers_its_row(texture).map_err(|problem| refusal_error(call, problem.into()))?;
+    let [width, height, depth] = texture.layout.extent;
+    let [width, height] = rotated::stored_extent(rotation, [width, height]);
+    let stored = BufferTexture {
+        layout: TextureLayout {
+            extent: [width, height, depth],
+            ..texture.layout
+        },
+        ..*texture
+    };
+    let placed =
+        plan_buffer_texture(&stored, buffer).map_err(|refusal| refusal_error(call, refusal))?;
+    Ok((rotation, placed))
+}
+
+/// Whether `texture`'s `bytesPerRow` covers the **texture's** own packed row, which is Metal's
+/// rule for a texture over an IOSurface plane whatever the plane holds and whatever the rotation.
+///
+/// Measured on the M3 Max under plain Metal with no validation layer: a 4x8 surface at its own
+/// tight stride of 16 behind an 8x4 texture ends the process,
+/// `_mtlValidateStrideTextureParameters:1938: failed assertion 'Texture Descriptor Validation
+/// IOSurface texture: bytesPerRow (16) must be greater or equal to (32) bytes'` — 32 being the
+/// texture's row, 8 texels of 4 bytes, not the plane's 16. A rotated texture's plane holds the
+/// turned frame, so a quarter turn's plane row is the shorter of the two and
+/// [`plan_buffer_texture`]'s own row check, which runs against the stored extent
+/// (`Buffer::turned_plane`), passes a pitch Metal asserts on. This rule is the texture's extent
+/// alone, so a test reaches it from the input's own shape with no device — which is the only way
+/// it can be tested: building the texture Metal asserts on would end the test process.
+fn covers_its_row(texture: &BufferTexture) -> Result<(), BufferTextureProblem> {
+    let row_bytes = u64::from(texture.layout.extent[0]).saturating_mul(texture.texel_bytes);
+    match texture.bytes_per_row >= row_bytes {
+        true => Ok(()),
+        false => Err(BufferTextureProblem::RowPitch {
+            bytes_per_row: texture.bytes_per_row,
+            row_bytes,
+        }),
     }
 }
 

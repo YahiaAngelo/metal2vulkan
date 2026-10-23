@@ -304,6 +304,16 @@ fn plane_extent(rotation: u64, (w, h): (u64, u64)) -> (u64, u64) {
     }
 }
 
+/// The least `bytesPerRow` Metal takes for a plane of a `w x h` texture of `rotation` whose
+/// texels are `texel` bytes: it covers the stored frame's row, which the plane holds, **and** the
+/// texture's own, which Metal holds the pitch to whatever the rotation (its descriptor validation
+/// asserts below it, plain too). Under a quarter turn the two differ, and the texture's is the
+/// longer where it is wider than tall.
+fn tight_row(rotation: u64, (w, h): (u64, u64), texel: u64) -> u64 {
+    let (sw, _) = plane_extent(rotation, (w, h));
+    sw.max(w) * texel
+}
+
 /// A plane of a `w x h` texture of `rotation`: its rows `bpr` bytes apart, every byte `PAD`.
 fn plane(lane: &Lane, rotation: u64, (w, h): (u64, u64), bpr: u64) -> Buffer {
     let (_, rows) = plane_extent(rotation, (w, h));
@@ -402,7 +412,10 @@ fn passes_store_load_and_resolve_rotated_textures_as_metal_turns_them() {
         let source = lane.naming(w, h);
         for rotation in 0..=4u64 {
             let (sw, _) = plane_extent(rotation, (w, h));
-            for bpr in [sw * TEXEL, (w.max(h) * TEXEL).next_multiple_of(16) + 16] {
+            for bpr in [
+                tight_row(rotation, (w, h), TEXEL),
+                (w.max(h) * TEXEL).next_multiple_of(16) + 16,
+            ] {
                 let what = format!("rotation {rotation}, {w}x{h}, rows {bpr} bytes apart");
                 let plane = plane(&lane, rotation, (w, h), bpr);
                 let texture = rotated(&plane, rotation, (w, h), bpr).unwrap();
@@ -670,7 +683,7 @@ fn unused_bits_of_rotated_textures_are_metals() {
             for rotation in 0..=4u64 {
                 let what = format!("{pf:?}, rotation {rotation}, {w}x{h}");
                 let (sw, sh) = plane_extent(rotation, (w, h));
-                let bpr = (sw * case.texel).next_multiple_of(64) + 64;
+                let bpr = tight_row(rotation, (w, h), case.texel).next_multiple_of(64) + 64;
                 let plane = plane(&lane, rotation, (w, h), bpr);
                 let texture =
                     rotated_in(&plane, (pf, TextureUsage::empty()), rotation, (w, h), bpr)
@@ -964,7 +977,7 @@ fn views_of_rotated_textures_act_as_their_texture_does() {
     for texture_format in VIEWED {
         for rotation in 0..=4u64 {
             let (sw, sh) = plane_extent(rotation, (w, h));
-            let bpr = sw * TEXEL + 64;
+            let bpr = tight_row(rotation, (w, h), TEXEL) + 64;
             for more in [TextureUsage::empty(), TextureUsage::PIXEL_FORMAT_VIEW] {
                 for view_format in VIEWED {
                     let what = format!(
@@ -1174,8 +1187,7 @@ fn rotated_surface_frame_costs() {
     let (w, h) = (1920u64, 1080u64);
     let source = lane.naming(w, h);
     for rotation in [0u64, 1, 2] {
-        let (sw, _) = plane_extent(rotation, (w, h));
-        let bpr = sw * TEXEL;
+        let bpr = tight_row(rotation, (w, h), TEXEL);
         let plane = plane(&lane, rotation, (w, h), bpr);
         let texture = rotated(&plane, rotation, (w, h), bpr).unwrap();
         for load in [LoadAction::Clear, LoadAction::Load] {

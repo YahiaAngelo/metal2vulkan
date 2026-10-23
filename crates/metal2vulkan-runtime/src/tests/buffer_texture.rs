@@ -1,12 +1,18 @@
 //! Texture buffers' texel buffer views (`buffer_texture`): the usage a view takes beside its
-//! buffer's, by the kinds of texel buffer its format serves on the device; and a staged shadow's
-//! regions back into its buffer.
+//! buffer's, by the kinds of texel buffer its format serves on the device; a staged shadow's
+//! regions back into its buffer; and Metal's `bytesPerRow` rule for a texture over an IOSurface
+//! plane, which no test may build the texture for.
 
-use super::super::buffer_texture::{staged_rows_back, view_usage, ViewUsage};
-use super::super::error::{Error, RuntimeGap};
-use super::super::linear_plan::BufferLayout;
+use super::super::buffer_texture::{staged_rows_back, turned_plane, view_usage, ViewUsage};
+use super::super::error::{Error, Invalid, Problem, RuntimeGap};
+use super::super::linear_plan::{
+    BufferFacts, BufferLayout, BufferTexture, BufferTextureCall, BufferTextureProblem,
+};
+use super::super::texture_descriptor::TextureLayout;
+use super::super::values::StorageMode;
 use ash::vk;
 use metal2vulkan::device::FormatUsage;
+use metal2vulkan::metal::{PixelFormat, TextureType};
 
 /// Whether `result` is the typed gap of a view the runtime does not make.
 fn not_made(result: Result<ViewUsage, Error>) -> bool {
@@ -77,4 +83,96 @@ fn packed_rows_go_back_as_one_region() {
             (2 * 7744, 2 * 7744 + 5, 7680)
         ]
     );
+}
+
+/// A `width x height` texture of 4-byte texels over an IOSurface plane whose rows are
+/// `bytes_per_row` bytes apart.
+fn over_a_plane(width: u32, height: u32, bytes_per_row: u64) -> BufferTexture {
+    BufferTexture {
+        layout: TextureLayout {
+            texture_type: TextureType::Type2D,
+            pixel_format: PixelFormat::BGRA8Unorm,
+            extent: [width, height, 1],
+            levels: 1,
+            layers: 1,
+            samples: 1,
+        },
+        texel_bytes: 4,
+        storage: StorageMode::Shared,
+        offset: 0,
+        bytes_per_row,
+        call: BufferTextureCall::IoSurfacePlane { planar: false },
+    }
+}
+
+/// `turned_plane`'s answer for a `width x height` texture of `rotation` over a plane whose rows
+/// are `bytes_per_row` apart, in a buffer long enough for either way round.
+fn turned(
+    rotation: u8,
+    width: u32,
+    height: u32,
+    bytes_per_row: u64,
+) -> Result<(), BufferTextureProblem> {
+    let texture = over_a_plane(width, height, bytes_per_row);
+    let length = bytes_per_row * u64::from(width.max(height)) + 1024;
+    match turned_plane("t", &texture, rotation, &BufferFacts { length }) {
+        Ok(_) => Ok(()),
+        Err(Error::Invalid(Invalid {
+            problem: Problem::BufferTexture(problem),
+            ..
+        })) => Err(problem),
+        Err(other) => panic!("rotation {rotation}, {width}x{height} at {bytes_per_row}: {other}"),
+    }
+}
+
+/// Metal holds an IOSurface texture's `bytesPerRow` to the **texture's** own row, whatever the
+/// plane holds and whatever the rotation: measured on the M3 Max under plain Metal with no
+/// validation layer, a 4x8 plane at its tight stride of 16 behind an 8x4 texture ends the
+/// process, `_mtlValidateStrideTextureParameters:1938: failed assertion 'Texture Descriptor
+/// Validation IOSurface texture: bytesPerRow (16) must be greater or equal to (32) bytes'`.
+///
+/// A quarter turn (1, 3 and 4) stores the frame turned, so its plane's own tight row is the
+/// shorter of the two and the stored extent's plan takes a pitch Metal asserts on; a half turn
+/// (2) and no turn store it as it is, and were always held to the texture's row. The refusal is
+/// reached through the plan from the input's own shape with no device, because the texture it
+/// stands for ends Metal's process and no test may build it.
+#[test]
+fn an_iosurface_pitch_below_the_textures_own_row_is_refused_at_every_rotation() {
+    let below = |bytes_per_row, row_bytes| {
+        Err(BufferTextureProblem::RowPitch {
+            bytes_per_row,
+            row_bytes,
+        })
+    };
+    for rotation in 1..=4u8 {
+        // The measured shape: an 8x4 texture whose plane is 4x8 at the plane's tight 16.
+        assert_eq!(
+            turned(rotation, 8, 4, 16),
+            below(16, 32),
+            "rotation {rotation}"
+        );
+        // The texture's own row, and a padded one, are taken.
+        assert_eq!(turned(rotation, 8, 4, 32), Ok(()), "rotation {rotation}");
+        assert_eq!(turned(rotation, 8, 4, 48), Ok(()), "rotation {rotation}");
+        // The rotated lane's own shape: a 64x16 texture whose quarter-turned plane is 16 blocks
+        // wide, so the plane's tight row is 64 while the texture's own is 256.
+        assert_eq!(
+            turned(rotation, 64, 16, 64),
+            below(64, 256),
+            "rotation {rotation}"
+        );
+        assert_eq!(turned(rotation, 64, 16, 256), Ok(()), "rotation {rotation}");
+        // A texture taller than wide, at a pitch covering both rows.
+        assert_eq!(turned(rotation, 16, 64, 256), Ok(()), "rotation {rotation}");
+    }
+    // A half turn stores the frame as it is, so the plane's row and the texture's are the same
+    // one and this rule adds nothing: the stored extent's plan already held the pitch to it.
+    // That is why the bug was a quarter turn's alone.
+    assert_eq!(turned(2, 16, 64, 64), Ok(()));
+    assert_eq!(turned(2, 16, 64, 48), below(48, 64));
+    // A quarter turn of the same texture stores it 64 texels wide, so its plane needs 256 bytes
+    // a row for the stored frame -- which the stored extent's plan has always required. The rule
+    // added here is the other direction, the one no plan held: the texture's own row where the
+    // plane's is shorter, which is the 64x16 pair above.
+    assert_eq!(turned(1, 16, 64, 64), below(64, 256));
 }

@@ -52,9 +52,14 @@
 //!   know which of the textures it reaches the function reads: the handle's element is the neutral
 //!   texture, nothing is refused, and the command announces it once
 //!   ([`Degradation::UnreadableHandleTexture`], `degrade_unreadable`).
-//! - **Not yet:** the CPU's copies of a region other than a whole level, and of a whole level at
-//!   another `bytesPerRow` than 0 and its row (`NotImplemented(PvrtcBlockOrder)`). A blit's at a
-//!   `bytesPerRow` of 0 of a region off its blocks copies the blocks it is rounded to.
+//! - **The CPU's whole level** takes any `bytesPerRow` of 0 or of the level's row of blocks and
+//!   above: plain Metal moves the level's bytes contiguously there and ignores the pitch, so a
+//!   padded one moves its padding bytes as block data (measured on an M3 Max, `texture.rs`).
+//! - **Not yet:** the CPU's copies of a region other than a whole level, which plain Metal does
+//!   not place by the region, and of a whole level at a nonzero `bytesPerRow` below its row,
+//!   where the driver asserts and the call moves nothing (`NotImplemented(PvrtcBlockOrder)`). A
+//!   blit's at a `bytesPerRow` of 0 of a region off its blocks copies the blocks it is rounded
+//!   to.
 
 use super::blit_plan::{block_order_position, BufferImageRegion};
 use super::copy_plan::{block_extent, ImageRegion};

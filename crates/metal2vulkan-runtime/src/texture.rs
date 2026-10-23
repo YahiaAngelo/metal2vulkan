@@ -5273,10 +5273,13 @@ impl Texture {
     /// the layout reads).
     ///
     /// A PVRTC texture's whole level takes its blocks in plain Metal's CPU order, Z order with
-    /// the y bit lowest, with a `bytes_per_row` of 0 or of the level's row of blocks
+    /// the y bit lowest, at a `bytes_per_row` of 0 or of the level's row of blocks and above,
+    /// where plain Metal moves the level's bytes contiguously and ignores the pitch
     /// (`pvrtc::cpu_order_position`). Refused `NotImplemented(PvrtcBlockOrder)`: a region other
-    /// than a whole level, which Metal's validation stops and whose blocks plain Metal places by no
-    /// rule the runtime has found, and another `bytes_per_row`, unmeasured.
+    /// than a whole level, whose blocks plain Metal does not place by the region at all (it
+    /// ignores the origin, reads blocks outside the region, and writes past the bytes the region
+    /// accounts for), and a nonzero `bytes_per_row` below the level's row, where the driver
+    /// asserts and the call moves nothing.
     ///
     /// 32-bit float depth is copied as Metal holds it, any `float`, on every device: without
     /// `VK_EXT_depth_range_unrestricted` Vulkan leaves a copied value outside `[0, 1]` undefined
@@ -5838,14 +5841,31 @@ impl Texture {
             return Ok(None);
         };
         if cpu_order.is_some() {
-            // Metal's order of a region other than a whole level, which its validation stops,
-            // follows no rule the runtime has found, and another pitch than 0
-            // and the level's row is not measured. A whole block of a level smaller than one is
-            // the whole level (plain Metal's bytes on an Apple M3 Max under macOS 26.7, a probe;
-            // its validation stops it).
+            // A whole block of a level smaller than one is the whole level (plain Metal's bytes
+            // on an Apple M3 Max under macOS 26.7, a probe; its validation stops it).
             let reaches = region.size.iter().zip(&extent).all(|(s, e)| s >= e);
             let whole = region.origin == [0; 3] && reaches;
-            if !whole || ![0, pitch].contains(&bytes_per_row) {
+            // A whole level takes any `bytesPerRow` of 0 or of the level's row of blocks and
+            // above: plain Metal moves the level's bytes contiguously there, the pitch ignored.
+            // Measured on this M3 Max (macOS 27.0.1, plain Metal, no validation layer, a 32x32
+            // texture of both 4- and 2-bit formats, `replaceRegion` and `getBytes` alike, two
+            // runs byte-identical): at the level's row, row + 8, twice the row, twice + 8 and
+            // seven times it, every byte is the byte a pitch of 0 moves, so a padded pitch reads
+            // and writes the padding bytes as block data. `pitch` above already substitutes the
+            // level's own row for the caller's value, so the copy planned below moves exactly
+            // those bytes. Below the level's row and nonzero the AGX driver logs
+            // "Texture read/write assertion failed: bytes_per_row >= used_bytes_per_row" and the
+            // call moves nothing, which stays refused rather than emulated.
+            //
+            // A region other than a whole level stays refused: plain Metal does not copy the
+            // region's blocks at all. Measured in the same probe, the origin is ignored (a 2x2
+            // block region at block (2,1) and at the origin answer identically), the block set
+            // follows the region's extent and takes blocks outside the region (a left-half
+            // request answered with the top half's blocks), and for an 8x7-block region
+            // `getBytes` wrote 224 bytes past the 448 the region accounts for. There is no rule
+            // mapping the call to its result that a consumer could use, and matching Metal would
+            // mean writing past the caller's buffer.
+            if !whole || (bytes_per_row != 0 && bytes_per_row < pitch) {
                 return Err(Error::NotImplemented(RuntimeGap::PvrtcBlockOrder));
             }
         }

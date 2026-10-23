@@ -21,10 +21,15 @@
 //! - A copy at a `bytesPerRow` of 0 of a region off its blocks copies the blocks it is rounded
 //!   to, its origin down and its size up, in their own Morton order.
 //! - `replaceRegion` and `getBytes` of a whole level take its blocks in plain Metal's CPU order,
-//!   Z order with the y bit lowest, at a `bytesPerRow` of 0 and of the level's row.
+//!   Z order with the y bit lowest, at a `bytesPerRow` of 0, of the level's row, and of any value
+//!   above it: plain Metal moves the level's bytes contiguously and ignores the pitch (measured on
+//!   this M3 Max under macOS 27.0.1, plain Metal with no validation layer, both bit depths, two
+//!   runs byte-identical; `runtime/src/texture.rs` states the rule).
 //! - The runtime's gap, `NotImplemented(PvrtcBlockOrder)`: `replaceRegion` and `getBytes` of a
-//!   region other than a whole level, which plain Metal places by no rule the runtime has found,
-//!   and of a whole level at another `bytesPerRow`, unmeasured.
+//!   region other than a whole level, which plain Metal does not place by the region at all -- it
+//!   ignores the origin, reads blocks outside the region, and for an 8x7-block region wrote 224
+//!   bytes past the 448 the region accounts for -- and of a whole level at a nonzero `bytesPerRow`
+//!   below its row, where the AGX driver asserts and the call moves nothing.
 //! - Where the device has no format for it, its reads go through a decoded twin of its codes,
 //!   announced `carried-decoded-twin` once: every format's texels read exactly as Metal's
 //!   (`metal2vulkan::bind::PvrtcDecode`, matched against an Apple M3 Max by its own tests), and so
@@ -995,9 +1000,11 @@ fn gap<T: std::fmt::Debug>(result: Result<T, Error>, what: &str) {
 }
 
 /// The runtime's block-order gap is refused `NotImplemented(PvrtcBlockOrder)`, recording
-/// nothing: `replaceRegion` and `getBytes` of a region other than a whole level (plain Metal places
-/// its blocks by no rule the runtime has found) and of a whole level at a padded `bytesPerRow`
-/// (unmeasured).
+/// nothing: `replaceRegion` and `getBytes` of a region other than a whole level, which plain
+/// Metal does not place by the region at all (the module docs), and of a whole level at a nonzero
+/// `bytesPerRow` below the level's row, where the driver asserts and the call moves nothing. A
+/// whole level at a padded pitch is taken, and
+/// [`a_padded_whole_level_moves_the_bytes_a_tight_one_moves`] holds it to the tight answer.
 #[test]
 fn pvrtc_block_order_is_refused_typed() {
     on_device(|lane| {
@@ -1009,7 +1016,9 @@ fn pvrtc_block_order_is_refused_typed() {
             for (region, pitch) in [
                 (Region::new_2d(8, 4, 16, 8), 0),
                 (Region::new_2d(0, 0, 16, 32), 0),
-                (Region::new_2d(0, 0, 32, 32), 2 * row),
+                // A whole level at a nonzero pitch below its row: the driver asserts there and
+                // the call moves nothing, so the runtime refuses it rather than emulate that.
+                (Region::new_2d(0, 0, 32, 32), row / 2),
             ] {
                 let what = format!("{pf:?} {region:?} at a pitch of {pitch}");
                 gap(
@@ -1017,6 +1026,57 @@ fn pvrtc_block_order_is_refused_typed() {
                     &what,
                 );
                 gap(texture.get_bytes(&mut out, pitch, 0, region, 0, 0), &what);
+            }
+        }
+    });
+}
+
+/// A whole level at a `bytesPerRow` at or above the level's row moves exactly the bytes a pitch
+/// of 0 moves: plain Metal ignores the pitch there and moves the level's bytes contiguously, so a
+/// padded pitch reads and writes its padding bytes as block data.
+///
+/// Measured on this M3 Max (macOS 27.0.1, plain Metal with no validation layer, a 32x32 texture
+/// of both bit depths, two runs byte-identical): at the level's row, row + 8, twice the row,
+/// twice + 8 and seven times it, every byte `getBytes` wrote and every byte `replaceRegion`
+/// consumed was the byte a pitch of 0 moves. Below the level's row and nonzero the AGX driver
+/// logs `bytes_per_row >= used_bytes_per_row` and the call moves nothing, which
+/// [`pvrtc_block_order_is_refused_typed`] holds refused.
+///
+/// This is the whole of the check: a padded pitch must not merely be accepted, it must move the
+/// tight answer's bytes. The runtime already did -- `host_copy` substitutes the level's own row
+/// for the caller's value before planning a PVRTC copy -- so only the guard was wrong.
+#[test]
+fn a_padded_whole_level_moves_the_bytes_a_tight_one_moves() {
+    on_device(|lane| {
+        for pf in FOUR_BIT.into_iter().chain(TWO_BIT) {
+            let row = if TWO_BIT.contains(&pf) { 32 } else { 64 };
+            // Both bit depths have blocks 4 texels tall, so a 32x32 level is 8 rows of
+            // blocks: 512 bytes of a 4-bit level, 256 of a 2-bit one.
+            let level = row * 8;
+            let whole = Region::new_2d(0, 0, 32, 32);
+            let source = seeded(0x9e37_79b9, level as usize);
+            // The tight answer: written and read back at a pitch of 0.
+            let tight = lane.texture(pf, 32, 1, StorageMode::Shared);
+            tight
+                .replace_region(whole, 0, 0, &source, 0, 0)
+                .unwrap_or_else(|e| panic!("{pf:?} tight write: {e}"));
+            let mut want = vec![0xcd; level as usize];
+            tight
+                .get_bytes(&mut want, 0, 0, whole, 0, 0)
+                .unwrap_or_else(|e| panic!("{pf:?} tight read: {e}"));
+            for pitch in [row, row + 8, 2 * row, 2 * row + 8, 7 * row] {
+                let what = format!("{pf:?} whole level at a pitch of {pitch} (row {row})");
+                let texture = lane.texture(pf, 32, 1, StorageMode::Shared);
+                // The padded write consumes the level's bytes contiguously, padding and all, so
+                // the same source bytes must leave the level holding the tight answer.
+                texture
+                    .replace_region(whole, 0, 0, &source, pitch, 0)
+                    .unwrap_or_else(|e| panic!("{what}: write {e}"));
+                let mut got = vec![0xcd; level as usize];
+                texture
+                    .get_bytes(&mut got, pitch, 0, whole, 0, 0)
+                    .unwrap_or_else(|e| panic!("{what}: read {e}"));
+                assert_eq!(got, want, "{what}: the bytes a tight copy moves");
             }
         }
     });
