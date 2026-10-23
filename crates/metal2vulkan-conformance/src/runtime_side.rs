@@ -29,6 +29,7 @@ use crate::function_bindings::{
 use crate::function_facts::{
     AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
 };
+use crate::heap_query::{HeapBufferSpec, HeapOwnFacts, HeapSpec, QueriedResource, ResourceFacts};
 use crate::indirect_commands::{
     CommandsMade, ComputeCommandStep, EncodedCommand, IcbDescriptor, RenderCommandStep,
 };
@@ -57,6 +58,7 @@ use crate::sparse_query::{
     TileSize,
 };
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
+use crate::texture_views::{SharedHandleFacts, ViewCall, ViewFacts, ViewRequest};
 use crate::tile_descriptors::{
     DescriptorSpec as TileDescriptorSpec, SuppliedLists as TileSuppliedLists, TileDescriptorFacts,
     AWAY as TILE_AWAY,
@@ -82,7 +84,7 @@ use metal2vulkan_runtime::{
     HeapDescriptor, HeapType, HostMemory, IndirectCommand, IndirectCommandBuffer,
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
     LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, Origin,
-    PipelineOption, PipelineOptions, RasterizationRateMap, Region,
+    PipelineOption, PipelineOptions, PurgeableState, RasterizationRateMap, Region,
     RenderPassColorAttachmentDescriptor, RenderPassDepthAttachmentDescriptor, RenderPassDescriptor,
     RenderPassStencilAttachmentDescriptor, RenderPipelineState, ResourceOptions, ResourceRef,
     SamplePosition, SamplerState, SamplerStateOptions, ScissorRect, Size,
@@ -4752,6 +4754,256 @@ impl Side for RuntimeSide<'_> {
             first_mipmap_in_tail: texture.first_mipmap_in_tail().unwrap_or(0),
             tail_size_in_bytes: texture.tail_size_in_bytes().unwrap_or(0),
         })
+    }
+
+    fn heap(&mut self, spec: &HeapSpec) -> Answer<Handle> {
+        if let Some(why) = spec.is_well_formed() {
+            return Err(Failure::named("WouldEndMetalsProcess", why));
+        }
+        let descriptor = HeapDescriptor::new(
+            spec.heap_type,
+            spec.size,
+            ResourceOptions::new(storage_mode_of(spec.storage), spec.cache, spec.hazard),
+        );
+        let heap = self
+            .device
+            .new_heap(&descriptor)
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.heaps, heap))
+    }
+
+    fn heap_own_facts(&mut self, heap: Handle) -> Answer<HeapOwnFacts> {
+        let registry = self.device.registry_id();
+        let heap = self.held_heap(heap)?;
+        Ok(HeapOwnFacts {
+            heap_type: heap.heap_type().raw(),
+            size: heap.size(),
+            used_size: heap.used_size(),
+            current_allocated_size: heap.current_allocated_size(),
+            storage_mode: heap.storage_mode().raw(),
+            cpu_cache_mode: heap.cpu_cache_mode().raw(),
+            hazard_tracking_mode: heap.hazard_tracking_mode().raw(),
+            resource_options: heap.resource_options().raw(),
+            label: heap.label(),
+            own_device: heap.device().registry_id() == registry,
+        })
+    }
+
+    fn heap_max_available_size(&mut self, heap: Handle, alignment: u64) -> Answer<u64> {
+        self.held_heap(heap)?
+            .max_available_size(alignment)
+            .map_err(Failure::from_error)
+    }
+
+    fn set_heap_label(&mut self, heap: Handle, label: &str) -> Answer<()> {
+        self.held_heap(heap)?.set_label(label);
+        Ok(())
+    }
+
+    fn heap_purgeable_state(&mut self, heap: Handle, state: PurgeableState) -> Answer<u64> {
+        self.held_heap(heap)?
+            .set_purgeable_state(state)
+            .map(|was| was.raw())
+            .map_err(Failure::from_error)
+    }
+
+    fn heap_buffer(&mut self, heap: Handle, spec: &HeapBufferSpec) -> Answer<Handle> {
+        let held = self.held_heap(heap)?;
+        // The options are the heap's own, which both APIs require: a buffer placed with any other
+        // is refused `Invalid`, which is this tree's reading of "Metal's validation stops it".
+        let options = held.resource_options();
+        let buffer = match spec.offset {
+            None => held.new_buffer(spec.length, options),
+            Some(offset) => held.new_buffer_at_offset(spec.length, options, offset),
+        }
+        .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.buffers, buffer))
+    }
+
+    fn resource_facts(
+        &mut self,
+        of: QueriedResource,
+        heap: Option<Handle>,
+    ) -> Answer<ResourceFacts> {
+        let registry = self.device.registry_id();
+        // The heap the case placed the resource in, resolved before the resource is borrowed: the
+        // comparison is a relation between two objects the case named, not an address.
+        //
+        // By `object_id` and not by pointer. The runtime's `Heap` is a handle each resource keeps a
+        // clone of, so a pointer comparison answers `false` for a buffer that did answer the heap
+        // it was placed in -- which is what the first run of this family recorded. `object_id` is
+        // the runtime's own identity for exactly this question; the Metal side compares its two
+        // objects as Metal makes them, one object per heap.
+        let placed_in: Option<metal2vulkan_runtime::ObjectId> = match heap {
+            None => None,
+            Some(heap) => Some(self.held_heap(heap)?.object_id()),
+        };
+        // Each of the four modes is read through **its own getter**, never derived from
+        // `resourceOptions`: they are four Metal properties, and the suite's business is what each
+        // one answers. Deriving three of them from the fourth was this family's own first bug --
+        // it read the runtime's unresolved option word where Metal's leg read the resolved
+        // `hazardTrackingMode`, and reported a product difference at a site where there was none.
+        match of {
+            QueriedResource::Buffer(handle) => {
+                let buffer = self.held(handle)?;
+                let answered = buffer.heap().map(Heap::object_id);
+                Ok(ResourceFacts {
+                    label: buffer.label(),
+                    own_device: buffer.device().registry_id() == registry,
+                    storage_mode: buffer.storage_mode().raw(),
+                    cpu_cache_mode: buffer.cpu_cache_mode().raw(),
+                    hazard_tracking_mode: buffer.hazard_tracking_mode().raw(),
+                    resource_options: buffer.resource_options().raw(),
+                    in_a_heap: answered.is_some(),
+                    expected_heap: answered.is_some() && answered == placed_in,
+                    heap_offset: buffer.heap_offset(),
+                    aliasable: buffer.is_aliasable(),
+                })
+            }
+            QueriedResource::Texture(handle) => {
+                let texture = self.held_texture(handle)?;
+                let answered = texture.heap().map(Heap::object_id);
+                Ok(ResourceFacts {
+                    label: texture.label(),
+                    own_device: texture.device().registry_id() == registry,
+                    storage_mode: texture.storage_mode().raw(),
+                    cpu_cache_mode: texture.cpu_cache_mode().raw(),
+                    hazard_tracking_mode: texture.hazard_tracking_mode().raw(),
+                    resource_options: texture.resource_options().raw(),
+                    in_a_heap: answered.is_some(),
+                    expected_heap: answered.is_some() && answered == placed_in,
+                    heap_offset: texture.heap_offset(),
+                    aliasable: texture.is_aliasable(),
+                })
+            }
+        }
+    }
+
+    fn set_resource_label(&mut self, of: QueriedResource, label: &str) -> Answer<()> {
+        match of {
+            QueriedResource::Buffer(handle) => self.held(handle)?.set_label(label),
+            QueriedResource::Texture(handle) => self.held_texture(handle)?.set_label(label),
+        }
+        Ok(())
+    }
+
+    fn make_resource_aliasable(&mut self, of: QueriedResource) -> Answer<()> {
+        match of {
+            QueriedResource::Buffer(handle) => self.held(handle)?.make_aliasable(),
+            QueriedResource::Texture(handle) => self.held_texture(handle)?.make_aliasable(),
+        }
+        .map_err(Failure::from_error)
+    }
+
+    fn resource_purgeable_state(
+        &mut self,
+        of: QueriedResource,
+        state: PurgeableState,
+    ) -> Answer<u64> {
+        match of {
+            QueriedResource::Buffer(handle) => self.held(handle)?.set_purgeable_state(state),
+            QueriedResource::Texture(handle) => {
+                self.held_texture(handle)?.set_purgeable_state(state)
+            }
+        }
+        .map(|was| was.raw())
+        .map_err(Failure::from_error)
+    }
+
+    fn texture_view(&mut self, of: Handle, request: &ViewRequest) -> Answer<Handle> {
+        let texture = self.held_texture(of)?;
+        let levels = request.first_level..request.first_level + request.level_count;
+        let slices = request.first_slice..request.first_slice + request.slice_count;
+        let view = match request.call {
+            ViewCall::PixelFormat => texture.new_texture_view(request.format),
+            ViewCall::LevelsSlices => texture.new_texture_view_with_levels_slices(
+                request.format,
+                request.texture_type,
+                levels,
+                slices,
+            ),
+            // The runtime has one call for the two Metal selectors that state a swizzle: an
+            // `MTLTextureViewDescriptor` holds exactly the five values the five-argument selector
+            // takes, so the runtime's leg answers the same for both and the Metal leg is where the
+            // two selectors part.
+            ViewCall::Swizzled | ViewCall::Descriptor => texture.new_texture_view_with_swizzle(
+                request.format,
+                request.texture_type,
+                levels,
+                slices,
+                request.swizzle,
+            ),
+        }
+        .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.textures, view))
+    }
+
+    fn texture_view_facts(&mut self, texture: Handle, parent: Option<Handle>) -> Answer<ViewFacts> {
+        // By `object_id` and not by pointer, for the reason [`Side::resource_facts`]'s heap
+        // comparison gives: the runtime's `Texture` is a handle a view keeps a clone of.
+        let of_parent: Option<metal2vulkan_runtime::ObjectId> = match parent {
+            None => None,
+            Some(parent) => Some(self.held_texture(parent)?.object_id()),
+        };
+        let texture = self.held_texture(texture)?;
+        let answered = texture.parent_texture().map(Texture::object_id);
+        Ok(ViewFacts {
+            has_parent: answered.is_some(),
+            expected_parent: answered.is_some() && answered == of_parent,
+            parent_relative_level: texture.parent_relative_level(),
+            parent_relative_slice: texture.parent_relative_slice(),
+            swizzle: crate::texture_views::swizzle_raw(texture.swizzle()),
+            shareable: texture.is_shareable(),
+            texture_type: u64::from(texture.texture_type().as_raw()),
+            pixel_format: u64::from(texture.pixel_format().as_raw()),
+            mipmap_level_count: texture.mipmap_level_count(),
+            array_length: texture.array_length(),
+        })
+    }
+
+    fn shared_texture(&mut self, query: &HeapTextureQuery) -> Answer<Handle> {
+        let texture = self
+            .device
+            .new_shared_texture(&queried_descriptor(query))
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn shared_texture_handle(&mut self, texture: Handle) -> Answer<SharedHandleFacts> {
+        let device = self.device;
+        let registry = device.registry_id();
+        let handle = self
+            .held_texture(texture)?
+            .new_shared_texture_handle()
+            .map_err(Failure::from_error)?;
+        let own_device = handle.device().registry_id() == registry;
+        let opened = device
+            .new_shared_texture_with_handle(&handle, metal2vulkan_runtime::IdPlacement::Any)
+            .map_err(Failure::from_error)?;
+        let facts = SharedHandleFacts {
+            own_device,
+            opens: true,
+            opened_shareable: opened.is_shareable(),
+            opened_width: opened.width(),
+            opened_height: opened.height(),
+            opened_levels: opened.mipmap_level_count(),
+        };
+        // Kept as the Metal side keeps it: a texture opened from a handle and dropped here would
+        // be a texture over memory a later row could still be asked about.
+        keep(&mut self.textures, opened);
+        Ok(facts)
+    }
+}
+
+/// The storage mode a [`Storage`] names, as the runtime's own enumeration spells it.
+///
+/// [`resource_options`] already maps the three to whole option words; a heap states its cache and
+/// hazard modes too, so it needs the storage field alone.
+fn storage_mode_of(storage: Storage) -> metal2vulkan_runtime::StorageMode {
+    match storage {
+        Storage::Shared => metal2vulkan_runtime::StorageMode::Shared,
+        Storage::Managed => metal2vulkan_runtime::StorageMode::Managed,
+        Storage::Private => metal2vulkan_runtime::StorageMode::Private,
     }
 }
 

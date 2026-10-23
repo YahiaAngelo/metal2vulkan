@@ -86,6 +86,7 @@ pub mod half_storage_writes;
 pub mod half_texel_nans;
 pub mod half_write_nans;
 pub mod handler_waits;
+pub mod heap_facts;
 pub mod heap_metal_sizes;
 pub mod host_detach;
 pub mod host_page_writes;
@@ -115,6 +116,7 @@ pub mod render_draw_forms;
 pub mod render_pass_descriptors;
 pub mod render_residency;
 pub mod render_state;
+pub mod resource_facts;
 pub mod rgb10a2_srgb;
 pub mod rotated_planes;
 pub mod rotated_targets;
@@ -136,6 +138,7 @@ pub mod texel_swizzles;
 pub mod texture_accesses;
 pub mod texture_buffer_fills;
 pub mod texture_fills;
+pub mod texture_views;
 pub mod textures;
 pub mod tile_pipeline_descriptors;
 pub mod tile_threadgroups;
@@ -309,6 +312,15 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in heap_metal_sizes::all() {
+        cases.push(Box::new(case));
+    }
+    for case in heap_facts::all() {
+        cases.push(Box::new(case));
+    }
+    for case in resource_facts::all() {
+        cases.push(Box::new(case));
+    }
+    for case in texture_views::all() {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(command_queues::queue_slots()));

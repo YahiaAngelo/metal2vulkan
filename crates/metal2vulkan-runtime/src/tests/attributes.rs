@@ -55,6 +55,25 @@ fn the_purgeable_state_answers_as_metal_s_did() {
 }
 
 #[test]
+fn an_empty_resource_does_not_become_volatile_again() {
+    // Metal's own rule, measured over every ordered pair of the three settable states on an
+    // `MTLHeap` and on an `MTLTexture` (the conformance suite's `heap-purgeable-states` and
+    // `resource-purgeable-states`): from `Empty`, `Volatile` leaves the object `Empty` while
+    // `NonVolatile` brings it back. Both calls still answer the state before them.
+    use PurgeableState::*;
+    let (answer, next) = set_purgeable(Empty, Volatile);
+    assert_eq!(
+        (answer, next),
+        (Empty, Empty),
+        "a volatile request took on an object whose contents are already discarded"
+    );
+    assert_eq!(set_purgeable(Empty, NonVolatile), (Empty, NonVolatile));
+    assert_eq!(set_purgeable(Empty, Empty), (Empty, Empty));
+    assert_eq!(set_purgeable(Volatile, Empty), (Volatile, Empty));
+    assert_eq!(set_purgeable(Empty, KeepCurrent), (Empty, Empty));
+}
+
+#[test]
 fn a_volatile_resource_is_never_purged() {
     // Metal may purge a volatile resource (its state then answers Empty) and need not: the
     // runtime never does, so a query keeps answering Volatile.

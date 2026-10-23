@@ -1699,6 +1699,176 @@ pub trait Side {
     ) -> Answer<crate::scheduled_handlers::ScheduledHandlerOrder> {
         Err(Failure::unavailable("scheduled_handler_order"))
     }
+
+    /// `newHeapWithDescriptor:` of the automatic or placement heap `spec` names
+    /// ([`crate::heap_query::HeapSpec`]).
+    ///
+    /// A plain allocation: nothing is encoded, dispatched or committed, and the heap's memory is
+    /// the `spec`'s own size. A sparse heap is [`Side::sparse_heap`]'s, whose descriptor has other
+    /// rules.
+    fn heap(&mut self, spec: &crate::heap_query::HeapSpec) -> Answer<Handle> {
+        let _ = spec;
+        Err(Failure::unavailable("heap"))
+    }
+
+    /// Every property `MTLHeap` declares about itself, read of the heap `heap` names
+    /// ([`crate::heap_query::HeapOwnFacts`]).
+    ///
+    /// Pure getters: one call because a difference should name the property, not the object, and
+    /// because reading them apart would be ten sites that could each name a different heap.
+    fn heap_own_facts(&mut self, heap: Handle) -> Answer<crate::heap_query::HeapOwnFacts> {
+        let _ = heap;
+        Err(Failure::unavailable("heap_own_facts"))
+    }
+
+    /// `maxAvailableSizeWithAlignment:` of `alignment` on the heap `heap` names.
+    ///
+    /// A pure getter over Metal's own suballocator. A case asks only powers of two: an alignment
+    /// of 0 is a shape nothing in this tree says Metal takes, and any other non-power-of-two is one
+    /// the runtime refuses `Invalid` ([`crate::heap_query`]).
+    fn heap_max_available_size(&mut self, heap: Handle, alignment: u64) -> Answer<u64> {
+        let _ = (heap, alignment);
+        Err(Failure::unavailable("heap_max_available_size"))
+    }
+
+    /// `setLabel:` of `label` on the heap `heap` names.
+    ///
+    /// It answers nothing: what the label became is read back through [`Side::heap_own_facts`], so
+    /// a case states the set and the read as two steps and a recording holds both.
+    fn set_heap_label(&mut self, heap: Handle, label: &str) -> Answer<()> {
+        let _ = (heap, label);
+        Err(Failure::unavailable("set_heap_label"))
+    }
+
+    /// `setPurgeableState:` of `state` on the heap `heap` names, as the raw `MTLPurgeableState`
+    /// it answered — the state the heap was in **before** the call.
+    ///
+    /// A case asks this last of whatever it asks it of: `Empty` lets Metal discard the heap's
+    /// bytes, and nothing is read through the heap afterwards but these answers.
+    fn heap_purgeable_state(
+        &mut self,
+        heap: Handle,
+        state: metal2vulkan_runtime::PurgeableState,
+    ) -> Answer<u64> {
+        let _ = (heap, state);
+        Err(Failure::unavailable("heap_purgeable_state"))
+    }
+
+    /// `newBufferWithLength:options:` of an automatic heap, or
+    /// `newBufferWithLength:options:offset:` of a placement one, as `spec` names
+    /// ([`crate::heap_query::HeapBufferSpec`]), on the heap `heap` names.
+    ///
+    /// The options are the heap's own, which both APIs require: the runtime refuses any other
+    /// `Invalid`, and a case that stated one would be a case about a descriptor Metal's validation
+    /// stops.
+    fn heap_buffer(
+        &mut self,
+        heap: Handle,
+        spec: &crate::heap_query::HeapBufferSpec,
+    ) -> Answer<Handle> {
+        let _ = (heap, spec);
+        Err(Failure::unavailable("heap_buffer"))
+    }
+
+    /// Every property `MTLResource` declares, read of the buffer, texture or view `of` names,
+    /// where `heap` is the heap the case placed it in ([`crate::heap_query::ResourceFacts`]).
+    ///
+    /// `heap` is what makes `heap` and `heapOffset` readable: the facts say whether the resource
+    /// answered **that** heap, which is the relation Metal settles, rather than an address.
+    fn resource_facts(
+        &mut self,
+        of: crate::heap_query::QueriedResource,
+        heap: Option<Handle>,
+    ) -> Answer<crate::heap_query::ResourceFacts> {
+        let _ = (of, heap);
+        Err(Failure::unavailable("resource_facts"))
+    }
+
+    /// `setLabel:` of `label` on the resource `of` names, as [`Side::set_heap_label`] is for a
+    /// heap.
+    fn set_resource_label(
+        &mut self,
+        of: crate::heap_query::QueriedResource,
+        label: &str,
+    ) -> Answer<()> {
+        let _ = (of, label);
+        Err(Failure::unavailable("set_resource_label"))
+    }
+
+    /// `makeAliasable` on the resource `of` names. What it changed is read back through
+    /// [`Side::resource_facts`] and the heap's own `usedSize`.
+    fn make_resource_aliasable(&mut self, of: crate::heap_query::QueriedResource) -> Answer<()> {
+        let _ = of;
+        Err(Failure::unavailable("make_resource_aliasable"))
+    }
+
+    /// `setPurgeableState:` of `state` on the resource `of` names, as the raw `MTLPurgeableState`
+    /// it answered, with the ordering [`Side::heap_purgeable_state`] states.
+    fn resource_purgeable_state(
+        &mut self,
+        of: crate::heap_query::QueriedResource,
+        state: metal2vulkan_runtime::PurgeableState,
+    ) -> Answer<u64> {
+        let _ = (of, state);
+        Err(Failure::unavailable("resource_purgeable_state"))
+    }
+
+    /// One of `MTLTexture`'s four view creators, as `request` names
+    /// ([`crate::texture_views::ViewRequest`]), on the texture `of` names.
+    ///
+    /// A view holds no memory of its own, so the call allocates no texels and reaches no queue. A
+    /// request whose ranges or format Metal's validation stops is refused by the request's own
+    /// guard before the call is made.
+    fn texture_view(
+        &mut self,
+        of: Handle,
+        request: &crate::texture_views::ViewRequest,
+    ) -> Answer<Handle> {
+        let _ = (of, request);
+        Err(Failure::unavailable("texture_view"))
+    }
+
+    /// What the texture `texture` names answers about its place in a view chain and about sharing
+    /// ([`crate::texture_views::ViewFacts`]), where `parent` is the texture the case made it a
+    /// view of.
+    ///
+    /// `parent` is what makes `parentTexture` readable as a relation rather than an address: the
+    /// facts say whether the texture answered **that** parent. `None` is "the case made this of no
+    /// texture", where `parentTexture` answering anything at all is the difference.
+    fn texture_view_facts(
+        &mut self,
+        texture: Handle,
+        parent: Option<Handle>,
+    ) -> Answer<crate::texture_views::ViewFacts> {
+        let _ = (texture, parent);
+        Err(Failure::unavailable("texture_view_facts"))
+    }
+
+    /// `newSharedTextureWithDescriptor:` of the descriptor `query` names, which is the only way
+    /// `shareable` is ever true and the only receiver `newSharedTextureHandle` answers for.
+    fn shared_texture(&mut self, query: &crate::texture_query::HeapTextureQuery) -> Answer<Handle> {
+        let _ = query;
+        Err(Failure::unavailable("shared_texture"))
+    }
+
+    /// `newSharedTextureHandle` of the texture `texture` names, what the handle answers of itself,
+    /// and the texture `newSharedTextureWithHandle:` opens from it
+    /// ([`crate::texture_views::SharedHandleFacts`]).
+    ///
+    /// One call, because a handle is observable only through what it opens: a case cannot hold one
+    /// as a resource and ask it questions later, since neither API gives it a shape the suite's
+    /// vocabulary names.
+    ///
+    /// A case asks this only of a **shareable** texture. What Metal does for one that is not is
+    /// unmeasured here: the runtime models nil, and a case that asked and was wrong would end
+    /// Metal's process.
+    fn shared_texture_handle(
+        &mut self,
+        texture: Handle,
+    ) -> Answer<crate::texture_views::SharedHandleFacts> {
+        let _ = texture;
+        Err(Failure::unavailable("shared_texture_handle"))
+    }
 }
 
 /// A tile render pipeline a case makes: `MTLTileRenderPipelineDescriptor`'s facts the cases state.

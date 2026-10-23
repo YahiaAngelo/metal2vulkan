@@ -758,6 +758,107 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         let _span = self.watch("scheduled_handler_order");
         self.inner.scheduled_handler_order()
     }
+
+    fn heap(&mut self, spec: &crate::heap_query::HeapSpec) -> Answer<Handle> {
+        let _span = self.watch("heap");
+        self.inner.heap(spec)
+    }
+
+    fn heap_own_facts(&mut self, heap: Handle) -> Answer<crate::heap_query::HeapOwnFacts> {
+        let _span = self.watch("heap_own_facts");
+        self.inner.heap_own_facts(heap)
+    }
+
+    fn heap_max_available_size(&mut self, heap: Handle, alignment: u64) -> Answer<u64> {
+        let _span = self.watch("heap_max_available_size");
+        self.inner.heap_max_available_size(heap, alignment)
+    }
+
+    fn set_heap_label(&mut self, heap: Handle, label: &str) -> Answer<()> {
+        let _span = self.watch("set_heap_label");
+        self.inner.set_heap_label(heap, label)
+    }
+
+    fn heap_purgeable_state(
+        &mut self,
+        heap: Handle,
+        state: metal2vulkan_runtime::PurgeableState,
+    ) -> Answer<u64> {
+        let _span = self.watch("heap_purgeable_state");
+        self.inner.heap_purgeable_state(heap, state)
+    }
+
+    fn heap_buffer(
+        &mut self,
+        heap: Handle,
+        spec: &crate::heap_query::HeapBufferSpec,
+    ) -> Answer<Handle> {
+        let _span = self.watch("heap_buffer");
+        self.inner.heap_buffer(heap, spec)
+    }
+
+    fn resource_facts(
+        &mut self,
+        of: crate::heap_query::QueriedResource,
+        heap: Option<Handle>,
+    ) -> Answer<crate::heap_query::ResourceFacts> {
+        let _span = self.watch("resource_facts");
+        self.inner.resource_facts(of, heap)
+    }
+
+    fn set_resource_label(
+        &mut self,
+        of: crate::heap_query::QueriedResource,
+        label: &str,
+    ) -> Answer<()> {
+        let _span = self.watch("set_resource_label");
+        self.inner.set_resource_label(of, label)
+    }
+
+    fn make_resource_aliasable(&mut self, of: crate::heap_query::QueriedResource) -> Answer<()> {
+        let _span = self.watch("make_resource_aliasable");
+        self.inner.make_resource_aliasable(of)
+    }
+
+    fn resource_purgeable_state(
+        &mut self,
+        of: crate::heap_query::QueriedResource,
+        state: metal2vulkan_runtime::PurgeableState,
+    ) -> Answer<u64> {
+        let _span = self.watch("resource_purgeable_state");
+        self.inner.resource_purgeable_state(of, state)
+    }
+
+    fn texture_view(
+        &mut self,
+        of: Handle,
+        request: &crate::texture_views::ViewRequest,
+    ) -> Answer<Handle> {
+        let _span = self.watch("texture_view");
+        self.inner.texture_view(of, request)
+    }
+
+    fn texture_view_facts(
+        &mut self,
+        texture: Handle,
+        parent: Option<Handle>,
+    ) -> Answer<crate::texture_views::ViewFacts> {
+        let _span = self.watch("texture_view_facts");
+        self.inner.texture_view_facts(texture, parent)
+    }
+
+    fn shared_texture(&mut self, query: &crate::texture_query::HeapTextureQuery) -> Answer<Handle> {
+        let _span = self.watch("shared_texture");
+        self.inner.shared_texture(query)
+    }
+
+    fn shared_texture_handle(
+        &mut self,
+        texture: Handle,
+    ) -> Answer<crate::texture_views::SharedHandleFacts> {
+        let _span = self.watch("shared_texture_handle");
+        self.inner.shared_texture_handle(texture)
+    }
 }
 
 #[cfg(test)]

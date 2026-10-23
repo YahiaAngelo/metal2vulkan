@@ -164,3 +164,82 @@ pub fn open_under(
 pub fn open(venues: Venues, notices: &Notices, cache: &ScratchCache) -> Result<Device, String> {
     open_under(venues, Policy::Exact, notices, cache)
 }
+
+/// The guard a family of **pure-query cases** rests on: run every case of a selection on the
+/// runtime, and name every site whose answer is the runtime's `Error::Invalid`.
+///
+/// `Error::Invalid` is this tree's one reading of "Metal's own validation stops this call, which
+/// ends Metal's process" — [`crate::cases::heap_metal_sizes`] and [`crate::cases::sparse_heaps`]
+/// state the distinction and each hold their own tables to it by hand. This is the same guard,
+/// generalized to the whole transcript: a family whose cases carry on past a refusal records it at
+/// a site instead of aborting, so the thing to scan is the tree rather than the return value.
+///
+/// It is also the **order of work** those two modules describe: a table is replayed on the runtime
+/// first, where an `Invalid` is a recorded value and nothing else, and only a table that answers no
+/// `Invalid` anywhere is ever handed to Metal.
+///
+/// `Err` is the reason no verdict could be taken at all — no device here — which a caller reports
+/// rather than passing over. Every other refusal (ours, or Metal's own nil) is a legitimate
+/// recorded value and is not named.
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+pub fn sites_the_runtime_calls_invalid(
+    cases: &[Box<dyn crate::case::Case>],
+) -> Result<Vec<String>, String> {
+    use crate::transcript::{Node, Value};
+
+    /// Whether a recorded value is the runtime's `Error::Invalid`. `Failure` keeps the error as the
+    /// variant path a transcript holds, not as the typed error, so the kind is read from there.
+    fn is_invalid(value: &Value) -> bool {
+        let Value::Variant { name, payload } = value else {
+            return false;
+        };
+        if name != "Err" {
+            return false;
+        }
+        matches!(&**payload, Value::Variant { name, .. } if name == "Error::Invalid")
+    }
+
+    /// Every site under `node` whose answer is `Invalid`, by its path.
+    fn walk(path: &str, node: &Node, found: &mut Vec<String>) {
+        let here = match path.is_empty() {
+            true => node.name.to_string(),
+            false => format!("{path}/{}", node.name),
+        };
+        if is_invalid(&node.observed.value) {
+            found.push(here.clone());
+        }
+        for child in &node.children {
+            walk(&here, child, found);
+        }
+    }
+
+    let notices = Notices::default();
+    let cache = ScratchCache::new().map_err(|why| format!("no scratch cache: {why}"))?;
+    let venue = if cfg!(m2v_gpu) {
+        Venues::Gpu
+    } else {
+        Venues::Cpu
+    };
+    let runtime = open(venue, &notices, &cache)?;
+    let mut found = Vec::new();
+    for case in cases {
+        let taker = notices.clone();
+        let mut side = crate::runtime_side::RuntimeSide::new(&runtime, move || taker.take());
+        let mut sites = crate::transcript::Sites::new();
+        // An abort is the case's own refusal of a call it cannot carry on without, which is a
+        // recorded verdict and not a validation stop; what it leaves emitted is still scanned.
+        let aborted = case.run(&mut side, &mut sites).err();
+        // `finish` consumes the sites, which is why the abort is kept first.
+        let mut here = Vec::new();
+        walk("", &sites.finish().root, &mut here);
+        for site in here {
+            found.push(format!("{}: {site}", case.name()));
+        }
+        if let Some(abort) = aborted {
+            if is_invalid(&abort.failure.recorded()) {
+                found.push(format!("{}: the call that aborted the case", case.name()));
+            }
+        }
+    }
+    Ok(found)
+}

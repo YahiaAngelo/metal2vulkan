@@ -1,0 +1,1070 @@
+{
+  "format": 1,
+  "case": "texture-view-selectors",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "views",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "24ddd2ea05bb46a6cf2ffb86e367eca46ad9e28171495ff6d668d734f7fe9305"
+                        }
+                      }
+                    },
+                    {
+                      "name": "asks",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "parent-texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "parent",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "has_parent",
+                      "observed": {
+                        "value": {
+                          "bool": false
+                        }
+                      }
+                    },
+                    {
+                      "name": "expected_parent",
+                      "observed": {
+                        "value": {
+                          "bool": false
+                        }
+                      }
+                    },
+                    {
+                      "name": "parent_relative_level",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "parent_relative_slice",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "swizzle",
+                      "observed": {
+                        "value": {
+                          "fields": {
+                            "alpha": {
+                              "uint": 1
+                            },
+                            "blue": {
+                              "uint": 2
+                            },
+                            "green": {
+                              "uint": 3
+                            },
+                            "red": {
+                              "uint": 4
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "shareable",
+                      "observed": {
+                        "value": {
+                          "bool": false
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 70
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 4
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "format-only/MTLPixelFormatRGBA8Unorm/Type2D/levels-0+4/slices-0+1/swizzle-2345",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "view",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "has_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "expected_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_level",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_slice",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "swizzle",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "alpha": {
+                                  "uint": 1
+                                },
+                                "blue": {
+                                  "uint": 2
+                                },
+                                "green": {
+                                  "uint": 3
+                                },
+                                "red": {
+                                  "uint": 4
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "shareable",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "texture_type",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "pixel_format",
+                          "observed": {
+                            "value": {
+                              "uint": 70
+                            }
+                          }
+                        },
+                        {
+                          "name": "mipmap_level_count",
+                          "observed": {
+                            "value": {
+                              "uint": 4
+                            }
+                          }
+                        },
+                        {
+                          "name": "array_length",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "levels-slices/MTLPixelFormatRGBA8Unorm/Type2D/levels-0+4/slices-0+1/swizzle-2345",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "view",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "has_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "expected_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_level",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_slice",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "swizzle",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "alpha": {
+                                  "uint": 1
+                                },
+                                "blue": {
+                                  "uint": 2
+                                },
+                                "green": {
+                                  "uint": 3
+                                },
+                                "red": {
+                                  "uint": 4
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "shareable",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "texture_type",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "pixel_format",
+                          "observed": {
+                            "value": {
+                              "uint": 70
+                            }
+                          }
+                        },
+                        {
+                          "name": "mipmap_level_count",
+                          "observed": {
+                            "value": {
+                              "uint": 4
+                            }
+                          }
+                        },
+                        {
+                          "name": "array_length",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "swizzled/MTLPixelFormatRGBA8Unorm/Type2D/levels-0+4/slices-0+1/swizzle-5032",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "view",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "has_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "expected_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_level",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_slice",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "swizzle",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "alpha": {
+                                  "uint": 2
+                                },
+                                "blue": {
+                                  "uint": 3
+                                },
+                                "green": {
+                                  "uint": 0
+                                },
+                                "red": {
+                                  "uint": 5
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "shareable",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "texture_type",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "pixel_format",
+                          "observed": {
+                            "value": {
+                              "uint": 70
+                            }
+                          }
+                        },
+                        {
+                          "name": "mipmap_level_count",
+                          "observed": {
+                            "value": {
+                              "uint": 4
+                            }
+                          }
+                        },
+                        {
+                          "name": "array_length",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "descriptor/MTLPixelFormatRGBA8Unorm/Type2D/levels-0+4/slices-0+1/swizzle-5032",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "view",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "has_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "expected_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_level",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_slice",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "swizzle",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "alpha": {
+                                  "uint": 2
+                                },
+                                "blue": {
+                                  "uint": 3
+                                },
+                                "green": {
+                                  "uint": 0
+                                },
+                                "red": {
+                                  "uint": 5
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "shareable",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "texture_type",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "pixel_format",
+                          "observed": {
+                            "value": {
+                              "uint": 70
+                            }
+                          }
+                        },
+                        {
+                          "name": "mipmap_level_count",
+                          "observed": {
+                            "value": {
+                              "uint": 4
+                            }
+                          }
+                        },
+                        {
+                          "name": "array_length",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "levels-slices/MTLPixelFormatRGBA8Unorm/Type2D/levels-1+2/slices-0+1/swizzle-2345",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "view",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "has_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "expected_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_level",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_slice",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "swizzle",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "alpha": {
+                                  "uint": 1
+                                },
+                                "blue": {
+                                  "uint": 2
+                                },
+                                "green": {
+                                  "uint": 3
+                                },
+                                "red": {
+                                  "uint": 4
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "shareable",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "texture_type",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "pixel_format",
+                          "observed": {
+                            "value": {
+                              "uint": 70
+                            }
+                          }
+                        },
+                        {
+                          "name": "mipmap_level_count",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "array_length",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "swizzled/MTLPixelFormatRGBA8Unorm/Type2D/levels-1+2/slices-0+1/swizzle-5032",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "view",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "has_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "expected_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_level",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_slice",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "swizzle",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "alpha": {
+                                  "uint": 2
+                                },
+                                "blue": {
+                                  "uint": 3
+                                },
+                                "green": {
+                                  "uint": 0
+                                },
+                                "red": {
+                                  "uint": 5
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "shareable",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "texture_type",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "pixel_format",
+                          "observed": {
+                            "value": {
+                              "uint": 70
+                            }
+                          }
+                        },
+                        {
+                          "name": "mipmap_level_count",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "array_length",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "descriptor/MTLPixelFormatRGBA8Unorm/Type2D/levels-1+2/slices-0+1/swizzle-5032",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "view",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "has_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "expected_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_level",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_slice",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "swizzle",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "alpha": {
+                                  "uint": 2
+                                },
+                                "blue": {
+                                  "uint": 3
+                                },
+                                "green": {
+                                  "uint": 0
+                                },
+                                "red": {
+                                  "uint": 5
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "shareable",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "texture_type",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "pixel_format",
+                          "observed": {
+                            "value": {
+                              "uint": 70
+                            }
+                          }
+                        },
+                        {
+                          "name": "mipmap_level_count",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "array_length",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "swizzled/MTLPixelFormatRGBA8Unorm/Type2D/levels-1+2/slices-0+1/swizzle-2345",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "view",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "has_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "expected_parent",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_level",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        },
+                        {
+                          "name": "parent_relative_slice",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "swizzle",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "alpha": {
+                                  "uint": 5
+                                },
+                                "blue": {
+                                  "uint": 4
+                                },
+                                "green": {
+                                  "uint": 3
+                                },
+                                "red": {
+                                  "uint": 2
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "shareable",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        },
+                        {
+                          "name": "texture_type",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "pixel_format",
+                          "observed": {
+                            "value": {
+                              "uint": 70
+                            }
+                          }
+                        },
+                        {
+                          "name": "mipmap_level_count",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "array_length",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

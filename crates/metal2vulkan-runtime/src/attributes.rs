@@ -103,13 +103,24 @@ impl PurgeableState {
 /// The purgeable state of a resource that is never purged: `set` of `requested` while the state
 /// is `current`, as `(the answer, the new state)`. A query answers the state and keeps it; any
 /// other request answers the state before it and becomes the state.
+///
+/// One request does not take: `Volatile` asked of an object that is already `Empty` leaves it
+/// `Empty`. Metal's own rule, measured over every ordered pair of the three states on an
+/// `MTLHeap` and on an `MTLTexture` on an Apple M3 Max under Metal 27.0.1 — `Empty` then
+/// `Volatile` reads back `Empty`, where `Empty` then `NonVolatile` reads back `NonVolatile` and
+/// `Volatile` then `Empty` reads back `Empty`. Contents that have been discarded cannot be made
+/// discardable again; only `NonVolatile` brings the object back. The answer is still the state
+/// before the call, so a caller sees the refusal in the read-back and not in the return.
 pub(super) fn set_purgeable(
     current: PurgeableState,
     requested: PurgeableState,
 ) -> (PurgeableState, PurgeableState) {
-    match requested {
-        PurgeableState::KeepCurrent => (current, current),
-        requested => (current, requested),
+    match (current, requested) {
+        (current, PurgeableState::KeepCurrent) => (current, current),
+        (PurgeableState::Empty, PurgeableState::Volatile) => {
+            (PurgeableState::Empty, PurgeableState::Empty)
+        }
+        (current, requested) => (current, requested),
     }
 }
 

@@ -34,6 +34,7 @@ use crate::function_bindings::{
 use crate::function_facts::{
     AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
 };
+use crate::heap_query::{HeapBufferSpec, HeapOwnFacts, HeapSpec, QueriedResource, ResourceFacts};
 use crate::indirect_commands::{
     CommandsMade, ComputeCommandStep, EncodedCommand, IcbDescriptor, RenderCommandStep,
 };
@@ -62,6 +63,7 @@ use crate::sparse_query::{
     TileSize,
 };
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
+use crate::texture_views::{SharedHandleFacts, ViewCall, ViewFacts, ViewRequest};
 use crate::tile_descriptors::{
     DescriptorSpec as TileDescriptorSpec, SuppliedLists as TileSuppliedLists, TileDescriptorFacts,
     AWAY as TILE_AWAY,
@@ -72,7 +74,7 @@ use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
 use metal2vulkan::metal::{
     BindingAccess, BindingType, FunctionOptions, FunctionType, PatchType, PixelFormat, RenderStages,
 };
-use metal2vulkan_runtime::SparsePageSize;
+use metal2vulkan_runtime::{PurgeableState, SparsePageSize};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::AnyThread;
@@ -80,21 +82,22 @@ use objc2_foundation::{NSArray, NSDictionary, NSObjectProtocol, NSRange, NSStrin
 use objc2_metal::{
     MTLArgumentDescriptor, MTLArgumentEncoder, MTLArrayType, MTLAttribute, MTLAttributeFormat,
     MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType, MTLBlendFactor,
-    MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLBufferBinding, MTLClearColor,
-    MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus,
-    MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder,
-    MTLComputePipelineDescriptor, MTLComputePipelineReflection, MTLComputePipelineState,
-    MTLCreateSystemDefaultDevice, MTLCullMode, MTLDataType, MTLDepthClipMode,
-    MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDispatchType, MTLDynamicLibrary,
-    MTLEvent, MTLFunction, MTLFunctionConstant, MTLFunctionConstantValues, MTLFunctionDescriptor,
-    MTLFunctionOptions, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType,
-    MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
-    MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary, MTLLinkedFunctions,
-    MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
-    MTLMultisampleStencilResolveFilter, MTLMutability, MTLOrigin, MTLPipelineBufferDescriptor,
-    MTLPipelineBufferDescriptorArray, MTLPipelineOption, MTLPixelFormat, MTLPointerType,
-    MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor,
-    MTLRasterizationRateMap, MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder,
+    MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLBufferBinding, MTLCPUCacheMode,
+    MTLClearColor, MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferHandler,
+    MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction,
+    MTLComputeCommandEncoder, MTLComputePipelineDescriptor, MTLComputePipelineReflection,
+    MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLCullMode, MTLDataType,
+    MTLDepthClipMode, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDispatchType,
+    MTLDynamicLibrary, MTLEvent, MTLFunction, MTLFunctionConstant, MTLFunctionConstantValues,
+    MTLFunctionDescriptor, MTLFunctionOptions, MTLHazardTrackingMode, MTLHeap, MTLHeapDescriptor,
+    MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
+    MTLIndirectCommandType, MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary,
+    MTLLinkedFunctions, MTLLoadAction, MTLMeshRenderPipelineDescriptor,
+    MTLMultisampleDepthResolveFilter, MTLMultisampleStencilResolveFilter, MTLMutability, MTLOrigin,
+    MTLPipelineBufferDescriptor, MTLPipelineBufferDescriptorArray, MTLPipelineOption,
+    MTLPixelFormat, MTLPointerType, MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLPurgeableState,
+    MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
+    MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder,
     MTLRenderPassAttachmentDescriptor, MTLRenderPassColorAttachmentDescriptor,
     MTLRenderPassColorAttachmentDescriptorArray, MTLRenderPassDepthAttachmentDescriptor,
     MTLRenderPassDescriptor, MTLRenderPassStencilAttachmentDescriptor,
@@ -109,7 +112,8 @@ use objc2_metal::{
     MTLTessellationFactorFormat, MTLTessellationFactorStepFunction, MTLTessellationPartitionMode,
     MTLTexture, MTLTextureBinding, MTLTextureDescriptor, MTLTextureReferenceType,
     MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage,
-    MTLThreadgroupBinding, MTLTileRenderPipelineColorAttachmentDescriptor,
+    MTLTextureViewDescriptor, MTLThreadgroupBinding,
+    MTLTileRenderPipelineColorAttachmentDescriptor,
     MTLTileRenderPipelineColorAttachmentDescriptorArray, MTLTileRenderPipelineDescriptor,
     MTLTriangleFillMode, MTLVertexAttribute, MTLVertexAttributeDescriptor,
     MTLVertexAttributeDescriptorArray, MTLVertexBufferLayoutDescriptor,
@@ -5175,6 +5179,345 @@ impl Side for MetalSide {
             tail_size_in_bytes: texture.tailSizeInBytes() as u64,
         })
     }
+
+    fn heap(&mut self, spec: &HeapSpec) -> Answer<Handle> {
+        // The guard first, and before any object is made: the shapes it names are ones Metal's own
+        // validation stops, which ends this process. A case of such a shape is refused by its own
+        // table's guard before record mode runs; this is the second line, for a row somebody adds
+        // to a recorded table by mistake.
+        if let Some(why) = spec.is_well_formed() {
+            return Err(Failure::named("WouldEndMetalsProcess", why));
+        }
+        let descriptor = MTLHeapDescriptor::new();
+        descriptor.setType(metal_heap_type(spec.heap_type));
+        descriptor.setSize(spec.size as usize);
+        descriptor.setStorageMode(storage_mode(spec.storage).0);
+        descriptor.setCpuCacheMode(MTLCPUCacheMode(spec.cache.raw() as usize));
+        descriptor.setHazardTrackingMode(MTLHazardTrackingMode(spec.hazard.raw() as usize));
+        let heap = self
+            .device
+            .newHeapWithDescriptor(&descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewHeapWithDescriptor",
+                    format!("{} returned nil", spec.site()),
+                )
+            })?;
+        self.heaps.push(heap);
+        Ok(Handle(self.heaps.len() as u32 - 1))
+    }
+
+    fn heap_own_facts(&mut self, heap: Handle) -> Answer<HeapOwnFacts> {
+        let registry = self.device.registryID();
+        let heap = self.held_heap(heap)?;
+        Ok(HeapOwnFacts {
+            heap_type: heap.r#type().0 as u64,
+            size: heap.size() as u64,
+            used_size: heap.usedSize() as u64,
+            current_allocated_size: heap.currentAllocatedSize() as u64,
+            storage_mode: heap.storageMode().0 as u64,
+            cpu_cache_mode: heap.cpuCacheMode().0 as u64,
+            hazard_tracking_mode: heap.hazardTrackingMode().0 as u64,
+            resource_options: heap.resourceOptions().0 as u64,
+            label: heap.label().map(|label| label.to_string()),
+            // The relation, not the pointer: a recorded message holds no address, and what Metal
+            // settles is whether a heap answers the device that made it. The registry ID is the
+            // spelling, because object identity is not a question both APIs can be asked
+            // (`HeapOwnFacts::own_device`).
+            own_device: heap.device().registryID() == registry,
+        })
+    }
+
+    fn heap_max_available_size(&mut self, heap: Handle, alignment: u64) -> Answer<u64> {
+        Ok(self
+            .held_heap(heap)?
+            .maxAvailableSizeWithAlignment(alignment as usize) as u64)
+    }
+
+    fn set_heap_label(&mut self, heap: Handle, label: &str) -> Answer<()> {
+        self.held_heap(heap)?
+            .setLabel(Some(&NSString::from_str(label)));
+        Ok(())
+    }
+
+    fn heap_purgeable_state(&mut self, heap: Handle, state: PurgeableState) -> Answer<u64> {
+        Ok(self
+            .held_heap(heap)?
+            .setPurgeableState(metal_purgeable(state))
+            .0 as u64)
+    }
+
+    fn heap_buffer(&mut self, heap: Handle, spec: &HeapBufferSpec) -> Answer<Handle> {
+        let held = self.held_heap(heap)?;
+        // The options are the heap's own, which Metal requires of a placed resource: any other is
+        // a call its validation stops.
+        let options = held.resourceOptions();
+        let buffer = match spec.offset {
+            None => held.newBufferWithLength_options(spec.length as usize, options),
+            // SAFETY: the length and the offset are the case's own, the offset is a multiple of
+            // Metal's 256-byte placement grain and the bytes lie inside the heap — which the
+            // case's own guard decides from the row's shape before record mode runs.
+            Some(offset) => unsafe {
+                held.newBufferWithLength_options_offset(
+                    spec.length as usize,
+                    options,
+                    offset as usize,
+                )
+            },
+        }
+        .ok_or_else(|| {
+            // Metal's own nil: it places no buffer of this length at this offset, and the process
+            // goes on. The runtime answers `Error::Nil` for the same shape.
+            Failure::named("Nil", format!("{} returned nil", spec.call()))
+        })?;
+        Ok(keep(&mut self.buffers, buffer))
+    }
+
+    fn resource_facts(
+        &mut self,
+        of: QueriedResource,
+        heap: Option<Handle>,
+    ) -> Answer<ResourceFacts> {
+        let registry = self.device.registryID();
+        let placed_in: Option<*const ProtocolObject<dyn MTLHeap>> = match heap {
+            None => None,
+            Some(heap) => Some(self.held_heap(heap)? as *const _),
+        };
+        let resource: &ProtocolObject<dyn MTLResource> = match of {
+            QueriedResource::Buffer(handle) => ProtocolObject::from_ref(self.held(handle)?),
+            QueriedResource::Texture(handle) => {
+                ProtocolObject::from_ref(self.held_texture(handle)?)
+            }
+        };
+        let answered = resource.heap();
+        let answered_ptr = answered
+            .as_ref()
+            .map(|heap| &**heap as *const ProtocolObject<dyn MTLHeap>);
+        Ok(ResourceFacts {
+            label: resource.label().map(|label| label.to_string()),
+            own_device: resource.device().registryID() == registry,
+            storage_mode: resource.storageMode().0 as u64,
+            cpu_cache_mode: resource.cpuCacheMode().0 as u64,
+            hazard_tracking_mode: resource.hazardTrackingMode().0 as u64,
+            resource_options: resource.resourceOptions().0 as u64,
+            in_a_heap: answered_ptr.is_some(),
+            expected_heap: answered_ptr.is_some() && answered_ptr == placed_in,
+            heap_offset: resource.heapOffset() as u64,
+            aliasable: resource.isAliasable(),
+        })
+    }
+
+    fn set_resource_label(&mut self, of: QueriedResource, label: &str) -> Answer<()> {
+        let resource: &ProtocolObject<dyn MTLResource> = match of {
+            QueriedResource::Buffer(handle) => ProtocolObject::from_ref(self.held(handle)?),
+            QueriedResource::Texture(handle) => {
+                ProtocolObject::from_ref(self.held_texture(handle)?)
+            }
+        };
+        resource.setLabel(Some(&NSString::from_str(label)));
+        Ok(())
+    }
+
+    fn make_resource_aliasable(&mut self, of: QueriedResource) -> Answer<()> {
+        let resource: &ProtocolObject<dyn MTLResource> = match of {
+            QueriedResource::Buffer(handle) => ProtocolObject::from_ref(self.held(handle)?),
+            QueriedResource::Texture(handle) => {
+                ProtocolObject::from_ref(self.held_texture(handle)?)
+            }
+        };
+        // SAFETY: `makeAliasable` takes no argument and reads nothing but the receiver. Its own
+        // contract is that the resource's memory may be reused by another resource of the same
+        // heap from now on — so a case asks it of a resource it reads getters of afterwards and
+        // never of one it has bound, dispatched through or drawn with. No case of this suite does
+        // either: the family that calls it encodes nothing at all.
+        unsafe { resource.makeAliasable() };
+        Ok(())
+    }
+
+    fn resource_purgeable_state(
+        &mut self,
+        of: QueriedResource,
+        state: PurgeableState,
+    ) -> Answer<u64> {
+        let resource: &ProtocolObject<dyn MTLResource> = match of {
+            QueriedResource::Buffer(handle) => ProtocolObject::from_ref(self.held(handle)?),
+            QueriedResource::Texture(handle) => {
+                ProtocolObject::from_ref(self.held_texture(handle)?)
+            }
+        };
+        Ok(resource.setPurgeableState(metal_purgeable(state)).0 as u64)
+    }
+
+    fn texture_view(&mut self, of: Handle, request: &ViewRequest) -> Answer<Handle> {
+        let texture = self.held_texture(of)?;
+        let format = MTLPixelFormat(request.format.as_raw() as usize);
+        let texture_type = MTLTextureType(request.texture_type.as_raw() as usize);
+        let levels = NSRange::new(request.first_level as usize, request.level_count as usize);
+        let slices = NSRange::new(request.first_slice as usize, request.slice_count as usize);
+        let swizzle = metal_swizzle(request.swizzle);
+        // SAFETY: every one of the five values is the case's own, and the ranges lie inside the
+        // parent's own levels and slices with a format of the parent's size class -- which
+        // `ViewRequest::is_well_formed` decides from the request's shape and the parent's, and
+        // which the case's own guard holds every row of every table to before record mode runs.
+        // A range outside the parent's, or a format of another size class, is what Metal's
+        // validation stops, and the selectors read nothing but the values they are given.
+        let view = unsafe {
+            match request.call {
+                ViewCall::PixelFormat => texture.newTextureViewWithPixelFormat(format),
+                ViewCall::LevelsSlices => texture
+                    .newTextureViewWithPixelFormat_textureType_levels_slices(
+                        format,
+                        texture_type,
+                        levels,
+                        slices,
+                    ),
+                ViewCall::Swizzled => texture
+                    .newTextureViewWithPixelFormat_textureType_levels_slices_swizzle(
+                        format,
+                        texture_type,
+                        levels,
+                        slices,
+                        swizzle,
+                    ),
+                ViewCall::Descriptor => {
+                    let descriptor = MTLTextureViewDescriptor::new();
+                    descriptor.setPixelFormat(format);
+                    descriptor.setTextureType(texture_type);
+                    descriptor.setLevelRange(levels);
+                    descriptor.setSliceRange(slices);
+                    descriptor.setSwizzle(swizzle);
+                    texture.newTextureViewWithDescriptor(&descriptor)
+                }
+            }
+        }
+        .ok_or_else(|| {
+            Failure::named(
+                "Nil",
+                format!(
+                    "{} returned nil for {}",
+                    request.call.selector(),
+                    request.site()
+                ),
+            )
+        })?;
+        Ok(keep(&mut self.textures, view))
+    }
+
+    fn texture_view_facts(&mut self, texture: Handle, parent: Option<Handle>) -> Answer<ViewFacts> {
+        let of_parent: Option<*const ProtocolObject<dyn MTLTexture>> = match parent {
+            None => None,
+            Some(parent) => Some(self.held_texture(parent)? as *const _),
+        };
+        let texture = self.held_texture(texture)?;
+        let answered = texture.parentTexture();
+        let answered_ptr = answered
+            .as_ref()
+            .map(|parent| &**parent as *const ProtocolObject<dyn MTLTexture>);
+        Ok(ViewFacts {
+            has_parent: answered_ptr.is_some(),
+            expected_parent: answered_ptr.is_some() && answered_ptr == of_parent,
+            parent_relative_level: texture.parentRelativeLevel() as u64,
+            parent_relative_slice: texture.parentRelativeSlice() as u64,
+            swizzle: raw_swizzle(texture.swizzle()),
+            shareable: texture.isShareable(),
+            texture_type: texture.textureType().0 as u64,
+            pixel_format: texture.pixelFormat().0 as u64,
+            mipmap_level_count: texture.mipmapLevelCount() as u64,
+            array_length: texture.arrayLength() as u64,
+        })
+    }
+
+    fn shared_texture(&mut self, query: &HeapTextureQuery) -> Answer<Handle> {
+        let descriptor = queried_descriptor(query);
+        let texture = self
+            .device
+            .newSharedTextureWithDescriptor(&descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "Nil",
+                    format!(
+                        "newSharedTextureWithDescriptor: returned nil for {}",
+                        query.site()
+                    ),
+                )
+            })?;
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn shared_texture_handle(&mut self, texture: Handle) -> Answer<SharedHandleFacts> {
+        let registry = self.device.registryID();
+        let handle = self
+            .held_texture(texture)?
+            .newSharedTextureHandle()
+            .ok_or_else(|| {
+                Failure::named("Nil", "newSharedTextureHandle returned nil".to_owned())
+            })?;
+        let own_device = handle.device().registryID() == registry;
+        let opened = self.device.newSharedTextureWithHandle(&handle);
+        let facts = match &opened {
+            None => SharedHandleFacts {
+                own_device,
+                opens: false,
+                opened_shareable: false,
+                opened_width: 0,
+                opened_height: 0,
+                opened_levels: 0,
+            },
+            Some(opened) => SharedHandleFacts {
+                own_device,
+                opens: true,
+                opened_shareable: opened.isShareable(),
+                opened_width: opened.width() as u64,
+                opened_height: opened.height() as u64,
+                opened_levels: opened.mipmapLevelCount() as u64,
+            },
+        };
+        // Kept as the runtime side keeps it: a texture opened from a handle and released here
+        // would be a texture over memory a later row could still be asked about.
+        if let Some(opened) = opened {
+            keep(&mut self.textures, opened);
+        }
+        Ok(facts)
+    }
+}
+
+/// Metal's `MTLHeapType` for a case's heap type, by its raw value, so the two spellings cannot
+/// drift apart.
+fn metal_heap_type(heap_type: metal2vulkan_runtime::HeapType) -> MTLHeapType {
+    MTLHeapType(heap_type.raw() as isize)
+}
+
+/// Metal's `MTLPurgeableState` for a case's state, by its raw value.
+fn metal_purgeable(state: PurgeableState) -> MTLPurgeableState {
+    MTLPurgeableState(state.raw() as usize)
+}
+
+/// Metal's `MTLTextureSwizzleChannels` for a case's swizzle, each channel by its raw ordinal.
+fn metal_swizzle(
+    swizzle: metal2vulkan::metal::TextureSwizzleChannels,
+) -> MTLTextureSwizzleChannels {
+    let channel =
+        |held: metal2vulkan::metal::TextureSwizzle| MTLTextureSwizzle(held.as_raw() as u8);
+    MTLTextureSwizzleChannels {
+        red: channel(swizzle.red),
+        green: channel(swizzle.green),
+        blue: channel(swizzle.blue),
+        alpha: channel(swizzle.alpha),
+    }
+}
+
+/// The four raw ordinals of a swizzle Metal answered, in Metal's order.
+///
+/// Raw and not the translator's own enumeration, for the reason
+/// [`ViewFacts::swizzle`](crate::texture_views::ViewFacts::swizzle) gives: mapping into a
+/// `#[non_exhaustive]` enumeration would coerce a channel Metal names and it does not.
+fn raw_swizzle(swizzle: MTLTextureSwizzleChannels) -> [u32; 4] {
+    [
+        u32::from(swizzle.red.0),
+        u32::from(swizzle.green.0),
+        u32::from(swizzle.blue.0),
+        u32::from(swizzle.alpha.0),
+    ]
 }
 
 /// Metal's `MTLSparsePageSize` for a case's page, by its raw value, so the two spellings cannot
