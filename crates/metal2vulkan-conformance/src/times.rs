@@ -284,6 +284,15 @@ pub struct CallTimes {
     /// The least and the most a round's median elapsed time reached: the spread behind `wall`.
     pub wall_least: u64,
     pub wall_most: u64,
+    /// The median round's **sum** over this call: every call of this name added up, in
+    /// nanoseconds.
+    ///
+    /// A median says what one call costs and a sum says what the call costs the case, and a report
+    /// that carries only the first cannot tell a 30x on a call made once from a 30x on a call made
+    /// a thousand times. The paired table ratios on the sums for exactly that reason.
+    pub wall_total: u64,
+    pub on_cpu_total: u64,
+    pub blocked_total: u64,
 }
 
 /// What a leg cost over one case, over every round.
@@ -380,12 +389,16 @@ pub fn per_call(rounds: &[&CaseRound]) -> Vec<CallTimes> {
         blocked: Vec<u64>,
     }
 
-    /// What one round says about one call: the calls it made and the middle of each reading.
+    /// What one round says about one call: the calls it made, the middle of each reading, and
+    /// what the call cost the round in total.
     struct Round {
         calls: u64,
         wall: u64,
         on_cpu: u64,
         blocked: u64,
+        wall_total: u64,
+        on_cpu_total: u64,
+        blocked_total: u64,
     }
 
     let mut rounds_by_call: BTreeMap<&str, Vec<Round>> = BTreeMap::new();
@@ -400,6 +413,9 @@ pub fn per_call(rounds: &[&CaseRound]) -> Vec<CallTimes> {
         for (call, mut readings) in seen {
             rounds_by_call.entry(call).or_default().push(Round {
                 calls: readings.wall.len() as u64,
+                wall_total: readings.wall.iter().sum(),
+                on_cpu_total: readings.on_cpu.iter().sum(),
+                blocked_total: readings.blocked.iter().sum(),
                 wall: median(&mut readings.wall),
                 on_cpu: median(&mut readings.on_cpu),
                 blocked: median(&mut readings.blocked),
@@ -413,9 +429,16 @@ pub fn per_call(rounds: &[&CaseRound]) -> Vec<CallTimes> {
             let mut wall: Vec<u64> = readings.iter().map(|one| one.wall).collect();
             let mut on_cpu: Vec<u64> = readings.iter().map(|one| one.on_cpu).collect();
             let mut blocked: Vec<u64> = readings.iter().map(|one| one.blocked).collect();
+            let mut wall_total: Vec<u64> = readings.iter().map(|one| one.wall_total).collect();
+            let mut on_cpu_total: Vec<u64> = readings.iter().map(|one| one.on_cpu_total).collect();
+            let mut blocked_total: Vec<u64> =
+                readings.iter().map(|one| one.blocked_total).collect();
             let wall_least = wall.iter().copied().min().unwrap_or(0);
             let wall_most = wall.iter().copied().max().unwrap_or(0);
             CallTimes {
+                wall_total: median(&mut wall_total),
+                on_cpu_total: median(&mut on_cpu_total),
+                blocked_total: median(&mut blocked_total),
                 call: call.to_owned(),
                 least_calls: counts.iter().copied().min().unwrap_or(0),
                 most_calls: counts.iter().copied().max().unwrap_or(0),
@@ -627,6 +650,100 @@ pub fn fold(
     }
 }
 
+/// One call's cost on one leg, added up over a set of cases.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CallTotal {
+    /// The calls of this name those cases made, in the median round.
+    pub calls: u64,
+    /// What they cost in total, in nanoseconds, and how that splits.
+    pub wall: u64,
+    pub on_cpu: u64,
+    pub blocked: u64,
+    /// The middle case's own median for this call: what one such call costs, as against what they
+    /// cost together.
+    pub typical: u64,
+}
+
+/// One call, on both legs, over the cases **both legs did exactly**.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Paired {
+    pub call: String,
+    pub metal: CallTotal,
+    pub ours: CallTotal,
+}
+
+impl Paired {
+    /// How many times our leg's total is Metal's, where Metal's is not zero.
+    pub fn ratio(&self) -> Option<f64> {
+        (self.metal.wall > 0).then(|| self.ours.wall as f64 / self.metal.wall as f64)
+    }
+}
+
+/// How many cases both legs did exactly, so the paired table's denominator is printed rather
+/// than implied.
+pub fn comparable(metal: &Measurement, ours: &Measurement) -> usize {
+    ours.cases
+        .iter()
+        .filter(|one| {
+            metal
+                .case(&one.case)
+                .is_some_and(|theirs| !matches!(judge(theirs, one), TimeVerdict::Unmeasured { .. }))
+        })
+        .count()
+}
+
+/// The per-call table, paired over the cases both legs did exactly.
+///
+/// **Why the pairing is not optional.** Each leg's own pooled table is over the cases *that leg*
+/// finished without a notice, and the two sets are not the same: 107 of this suite's 383 cases
+/// announce a notice on our leg and none do on Metal's. A table built from the two pools compares
+/// `render_pipeline` over 132 Metal calls against 85 of ours — a ratio of different work, printed
+/// with the authority of a measurement. Measured on this Mac, not supposed: that is what the first
+/// whole-set run produced, and it is why this function exists.
+///
+/// So a call's row is summed over the cases where [`judge`] returns a verdict at all. Both legs
+/// then cover one case set, and the row's two call counts are printed anyway, because a case whose
+/// two legs make a call a different number of times is still comparing different work and only the
+/// counts can say so.
+///
+/// The ratio is on the **totals**, so a call is weighted by how often it runs: a 30x on a call
+/// made once is not the same finding as a 30x on a call made a thousand times.
+pub fn paired(metal: &Measurement, ours: &Measurement) -> Vec<Paired> {
+    let mut by_call: BTreeMap<String, (Vec<&CallTimes>, Vec<&CallTimes>)> = BTreeMap::new();
+    for one in &ours.cases {
+        let Some(theirs) = metal.case(&one.case) else {
+            continue;
+        };
+        if matches!(judge(theirs, one), TimeVerdict::Unmeasured { .. }) {
+            continue;
+        }
+        for call in &one.per_call {
+            by_call.entry(call.call.clone()).or_default().1.push(call);
+        }
+        for call in &theirs.per_call {
+            by_call.entry(call.call.clone()).or_default().0.push(call);
+        }
+    }
+    let total = |of: &[&CallTimes]| {
+        let mut typical: Vec<u64> = of.iter().map(|one| one.wall).collect();
+        CallTotal {
+            calls: of.iter().map(|one| one.most_calls).sum(),
+            wall: of.iter().map(|one| one.wall_total).sum(),
+            on_cpu: of.iter().map(|one| one.on_cpu_total).sum(),
+            blocked: of.iter().map(|one| one.blocked_total).sum(),
+            typical: median(&mut typical),
+        }
+    };
+    by_call
+        .into_iter()
+        .map(|(call, (theirs, ours))| Paired {
+            call,
+            metal: total(&theirs),
+            ours: total(&ours),
+        })
+        .collect()
+}
+
 /// Microseconds, three places, from nanoseconds: the unit a per-call figure reads in.
 fn us(nanos: u64) -> String {
     format!("{:.3}", nanos as f64 / 1_000.0)
@@ -686,61 +803,65 @@ pub fn render(metal: Option<&Measurement>, ours: &Measurement, show: bool) -> St
         return out;
     };
 
-    // Per call, worst ratio first: the question a reader brings is how much more a call costs us.
-    // The call counts are printed for both legs, because a row whose legs pooled different numbers
-    // of calls is comparing different work and nothing but the counts can say so.
-    out.push_str("\nPER CALL, pooled over the cases each leg did exactly, worst ratio first\n");
+    // Per call, paired over the cases both legs did exactly, worst ratio first. The question a
+    // reader brings is how much more a call costs us; the counts are printed for both legs
+    // because a row whose legs make a call a different number of times is comparing different
+    // work and nothing but the counts can say so.
+    //
     // Measured, not supposed: on this Mac `library` costs Metal about 23 ms and us about 0.1 ms,
     // while `compute_pipeline` costs Metal 0.09 ms and us 2.1 ms. Neither row is a result. Metal
     // compiles the AIR when the library is made and we translate it when the pipeline is made, so
     // the *same work* sits at a different call on each leg, and the two rows are only honest read
     // together. That is the per-call table's standing trap and it belongs in its heading.
+    let rows = {
+        let mut rows = paired(metal, ours);
+        rows.sort_by(|one, two| {
+            let ratio = |row: &Paired| row.ratio().unwrap_or(f64::INFINITY);
+            ratio(two)
+                .partial_cmp(&ratio(one))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        rows
+    };
+    out.push_str(&format!(
+        "\nPER CALL, over the {} case(s) BOTH legs did exactly, worst ratio of totals first\n",
+        comparable(metal, ours)
+    ));
     out.push_str(
         "  a per-call ratio is only honest read beside the per-case total: the two legs put the \
          same work at different\n  calls, and the measured example is right here -- Metal \
          compiles at `library`, we translate at `compute_pipeline`\n",
     );
     out.push_str(&format!(
-        "{:<34} {:>7} {:>10} {:>7} {:>10} {:>7}   {:>10} {:>10}\n",
-        "call", "metal n", "metal us", "ours n", "ours us", "ratio", "ours cpu", "ours blkd"
+        "{:<34} {:>7} {:>10} {:>10} {:>7} {:>10} {:>10} {:>7}   {:>9} {:>9}\n",
+        "call",
+        "metal n",
+        "metal tot",
+        "metal one",
+        "ours n",
+        "ours tot",
+        "ours one",
+        "ratio",
+        "ours cpu",
+        "ours blkd"
     ));
-    let mut rows: Vec<(&CallTimes, Option<&CallTimes>, f64)> = ours
-        .calls
-        .iter()
-        .map(|one| {
-            let theirs = metal.call(&one.call);
-            let ratio = match theirs {
-                Some(theirs) if theirs.wall > 0 => one.wall as f64 / theirs.wall as f64,
-                _ => f64::INFINITY,
-            };
-            (one, theirs, ratio)
-        })
-        .collect();
-    rows.sort_by(|one, two| {
-        two.2
-            .partial_cmp(&one.2)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for (one, theirs, ratio) in &rows {
-        let (their_n, their_wall) = match theirs {
-            Some(theirs) => (theirs.most_calls.to_string(), us(theirs.wall)),
-            None => ("-".to_owned(), "-".to_owned()),
-        };
-        let ratio = if ratio.is_finite() {
-            format!("{ratio:.1}x")
-        } else {
-            "-".to_owned()
-        };
+    for row in &rows {
+        let ratio = row
+            .ratio()
+            .map(|ratio| format!("{ratio:.1}x"))
+            .unwrap_or_else(|| "-".to_owned());
         out.push_str(&format!(
-            "{:<34} {:>7} {:>10} {:>7} {:>10} {:>7}   {:>10} {:>10}\n",
-            one.call,
-            their_n,
-            their_wall,
-            one.most_calls,
-            us(one.wall),
+            "{:<34} {:>7} {:>10} {:>10} {:>7} {:>10} {:>10} {:>7}   {:>9} {:>9}\n",
+            row.call,
+            row.metal.calls,
+            us(row.metal.wall),
+            us(row.metal.typical),
+            row.ours.calls,
+            us(row.ours.wall),
+            us(row.ours.typical),
             ratio,
-            us(one.on_cpu),
-            us(one.blocked)
+            us(row.ours.on_cpu),
+            us(row.ours.blocked)
         ));
     }
 
@@ -1067,6 +1188,95 @@ mod tests {
         let folded = CaseTimes::of("o", &[&clean, &stopped, &noticed]);
         assert_eq!(folded.stopped.as_deref(), Some("the venue lacks it"));
         assert_eq!(folded.degraded, ["first-code", "second-code"]);
+    }
+
+    /// A measurement of one leg over the cases given, for the pairing test.
+    fn measurement(leg: Leg, cases: Vec<CaseTimes>) -> Measurement {
+        Measurement {
+            leg,
+            venue: "test".to_owned(),
+            rounds: 1,
+            instrument: 1,
+            cpu_clock: true,
+            cases,
+            calls: Vec::new(),
+        }
+    }
+
+    /// A case's figures from a given number of calls of one name, each costing `each`.
+    fn calling(case: &str, call: &'static str, times: usize, each: u64) -> CaseTimes {
+        let round = CaseRound {
+            observed: (0..times).map(|_| seen(call, each, each)).collect(),
+            window_wall: each * times as u64,
+            window_on_cpu: each * times as u64,
+            window_process_cpu: each * times as u64,
+            stopped: None,
+            degraded: Vec::new(),
+        };
+        CaseTimes::of(case, &[&round])
+    }
+
+    /// **The per-call table is paired over the cases both legs did exactly.**
+    ///
+    /// This is the guard for a flaw the first whole-set run actually had: each leg's own pool was
+    /// over the cases *that leg* finished cleanly, and because 107 of this suite's cases announce
+    /// a notice on our leg and none do on Metal's, the table compared `render_pipeline` over 132
+    /// Metal calls against 85 of ours and printed a ratio of different work.
+    #[test]
+    fn a_case_only_one_leg_did_exactly_is_left_out_of_the_per_call_table() {
+        let clean_metal = calling("clean", "render_pipeline", 1, 100);
+        let clean_ours = calling("clean", "render_pipeline", 1, 200);
+        let noisy_metal = calling("noisy", "render_pipeline", 1_000, 100);
+        let mut noisy_ours = calling("noisy", "render_pipeline", 1_000, 100);
+        noisy_ours.degraded = vec!["a-notice".to_owned()];
+        let metal = measurement(Leg::Metal, vec![clean_metal, noisy_metal]);
+        let ours = measurement(Leg::Ours, vec![clean_ours, noisy_ours]);
+        assert_eq!(
+            comparable(&metal, &ours),
+            1,
+            "the degraded case was compared"
+        );
+        let rows = paired(&metal, &ours);
+        let [row] = rows.as_slice() else {
+            panic!("one call: {rows:?}");
+        };
+        assert_eq!(row.call, "render_pipeline");
+        assert_eq!(
+            (row.metal.calls, row.ours.calls),
+            (1, 1),
+            "the 1,000 calls of a case only one leg did exactly reached the paired table"
+        );
+        assert_eq!((row.metal.wall, row.ours.wall), (100, 200));
+        assert_eq!(row.ratio(), Some(2.0));
+    }
+
+    /// The ratio is on the totals, so a call is weighted by how often it runs. A 30x on a call
+    /// made once must not read the same as a 30x on a call made a thousand times.
+    #[test]
+    fn the_per_call_ratio_weights_a_call_by_how_often_it_runs() {
+        // A case of its own for each call, and the names must differ: a case is keyed by name
+        // throughout the suite (its recording is a file of that name) and the pairing looks one up
+        // by it, so two cases sharing a name pair the same Metal figures twice. Caught by writing
+        // this test with both named `c` and watching the hot row come out at double.
+        let metal = measurement(
+            Leg::Metal,
+            vec![
+                calling("hot-case", "hot", 1_000, 10),
+                calling("cold-case", "cold", 1, 10),
+            ],
+        );
+        let ours = measurement(
+            Leg::Ours,
+            vec![
+                calling("hot-case", "hot", 1_000, 100),
+                calling("cold-case", "cold", 1, 100),
+            ],
+        );
+        let rows = paired(&metal, &ours);
+        let hot = rows.iter().find(|row| row.call == "hot").unwrap();
+        assert_eq!((hot.metal.wall, hot.ours.wall), (10_000, 100_000));
+        assert_eq!(hot.metal.typical, 10, "the typical call lost its median");
+        assert_eq!(hot.ratio(), Some(10.0));
     }
 
     /// A span measures what it was asked to and nothing else: the call's name reaches the
