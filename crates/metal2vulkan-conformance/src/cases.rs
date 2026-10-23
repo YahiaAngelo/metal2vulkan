@@ -60,6 +60,7 @@ pub mod compute_threadgroups;
 pub mod denormal_word_fetches;
 pub mod depth_texel_reads;
 pub mod discard_hoist;
+pub mod draw_state_changes;
 pub mod etc_textures;
 pub mod event_orders;
 pub mod extended_range_blends;
@@ -333,6 +334,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(rotated_planes::all());
     cases.extend(render_chains::boxed());
     cases.extend(compute_render_chains::boxed());
+    cases.extend(draw_state_changes::boxed());
     cases
 }
 
