@@ -24,11 +24,15 @@ use std::time::Duration;
 /// The longest the interpreter waits for a command buffer.
 const WAIT: Duration = Duration::from_secs(60);
 
-/// A resource the program made.
+/// A resource the program made, or a slot a [`Step::Release`] emptied.
 enum Made {
     Buffer(Buffer),
     Heap(Heap),
     Texture(Texture),
+    /// The resource a [`Step::Release`] dropped. It is an explicit state rather than a hole: a
+    /// step that names a released resource is refused by the same path that refuses one that was
+    /// never made, and a [`Step::Make`] fills the slot again.
+    Released,
 }
 
 /// A read-back the device has to run before its bytes can be answered.
@@ -52,6 +56,7 @@ pub fn run(device: &Device, queue: &CommandQueue, work: &Work) -> Answer<Done> {
         device,
         queue,
         made,
+        resources: &work.resources,
         kernels: work.kernels,
         command_buffer: None,
         encoder: None,
@@ -115,13 +120,11 @@ fn descriptor(spec: &TextureSpec) -> Answer<TextureDescriptor> {
         })?;
     }
     if spec.kind == TextureKind::TextureBuffer {
-        let options = if spec.private {
-            ResourceOptions::private()
-        } else {
-            ResourceOptions::shared()
-        };
         return Ok(TextureDescriptor::texture_buffer(
-            format, spec.width, options, usage,
+            format,
+            spec.width,
+            crate::runtime_side::resource_options(spec.storage),
+            usage,
         ));
     }
     let mut d = TextureDescriptor::texture_2d(format, spec.width, spec.height, false);
@@ -137,11 +140,7 @@ fn descriptor(spec: &TextureSpec) -> Answer<TextureDescriptor> {
     d.sample_count = spec.samples.max(1);
     d.usage = usage;
     d.allow_gpu_optimized_contents = spec.gpu_optimized;
-    d.resource_options = if spec.private {
-        ResourceOptions::private()
-    } else {
-        ResourceOptions::shared()
-    };
+    d.resource_options = crate::runtime_side::resource_options(spec.storage);
     Ok(d)
 }
 
@@ -174,29 +173,24 @@ fn make(device: &Device, made: &[Made], resource: &Resource) -> Answer<Made> {
             }
             Ok(Made::Buffer(buffer))
         }
-        Resource::PrivateBuffer { length } => {
+        Resource::UnwrittenBuffer { length, storage } => {
             let buffer = device
-                .new_buffer((*length).max(1), ResourceOptions::private())
+                .new_buffer(
+                    (*length).max(1),
+                    crate::runtime_side::resource_options(*storage),
+                )
                 .map_err(|error| Failure::of(&error))?;
             Ok(Made::Buffer(buffer))
         }
-        Resource::Heap { size, private } => {
-            let options = if *private {
-                ResourceOptions::private()
-            } else {
-                ResourceOptions::shared()
-            };
+        Resource::Heap { size, storage } => {
+            let options = crate::runtime_side::resource_options(*storage);
             let heap = device
                 .new_heap(&HeapDescriptor::new(HeapType::Placement, *size, options))
                 .map_err(|error| Failure::of(&error))?;
             Ok(Made::Heap(heap))
         }
-        Resource::HeapForTexture { spec, private } => {
-            let options = if *private {
-                ResourceOptions::private()
-            } else {
-                ResourceOptions::shared()
-            };
+        Resource::HeapForTexture { spec, storage } => {
+            let options = crate::runtime_side::resource_options(*storage);
             let size = device
                 .heap_texture_size_and_align(&descriptor(spec)?)
                 .map_err(|error| Failure::of(&error))?
@@ -269,6 +263,8 @@ struct Run<'a> {
     device: &'a Device,
     queue: &'a CommandQueue,
     made: Vec<Made>,
+    /// The program's declarations, which a [`Step::Make`] reads to make a released resource again.
+    resources: &'a [Resource],
     kernels: Option<&'static str>,
     command_buffer: Option<CommandBuffer>,
     encoder: Option<BlitCommandEncoder>,
@@ -488,6 +484,8 @@ impl Run<'_> {
                     .fill_buffer(&buffer, *offset..*offset + *length, *value)
                     .map_err(|error| Failure::of(&error))
             }
+            Step::Release { resource } => self.release(*resource),
+            Step::Make { resource } => self.make_again(*resource),
             Step::ClearPass {
                 texture,
                 slice,
@@ -572,6 +570,57 @@ impl Run<'_> {
             }
             Step::Commit => self.close(),
         }
+    }
+
+    /// Drop the side's reference to the resource at `at`.
+    ///
+    /// Refused while a command buffer is open: a resource an uncommitted command buffer refers to
+    /// is not freed by this, so a case that released one there would read a fresh resource that
+    /// could not have taken the old one's memory and would prove less than it says.
+    fn release(&mut self, at: usize) -> Answer<()> {
+        if self.command_buffer.is_some() || self.encoder.is_some() {
+            return Err(Failure::named(
+                "ReleaseWhileEncoding",
+                format!("resource {at}, with a command buffer still open"),
+            ));
+        }
+        match self.made.get(at) {
+            Some(Made::Released) | None => Err(Failure::named(
+                "NoSuchResource",
+                format!("resource {at} is not made"),
+            )),
+            // The assignment drops what the slot held, which is the release.
+            Some(_) => {
+                self.made[at] = Made::Released;
+                Ok(())
+            }
+        }
+    }
+
+    /// Make the resource at `at` again, from its own declaration.
+    fn make_again(&mut self, at: usize) -> Answer<()> {
+        match self.made.get(at) {
+            None => {
+                return Err(Failure::named(
+                    "NoSuchResource",
+                    format!("resource {at} is not declared"),
+                ))
+            }
+            Some(Made::Released) => {}
+            Some(_) => {
+                return Err(Failure::named(
+                    "AlreadyMade",
+                    format!("resource {at} is still made; release it first"),
+                ))
+            }
+        }
+        let declared = self
+            .resources
+            .get(at)
+            .ok_or_else(|| Failure::named("NoSuchResource", format!("resource {at}")))?;
+        let one = make(self.device, &self.made, declared)?;
+        self.made[at] = one;
+        Ok(())
     }
 
     /// A render pass over one slice that clears it and draws nothing.

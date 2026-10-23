@@ -14,6 +14,12 @@
 //! other. So a program that fills carries its Metal answer
 //! ([`crate::case::MetalSource::Carried`]); a program of copies records on Metal.
 //!
+//! A program's resources are made before its steps run, and its steps may change that: a case that
+//! asks what *freshly allocated* memory holds says [`Step::Release`] and then [`Step::Make`], so
+//! the second allocation really happens after the first was freed ([`crate::cases::fresh_contents`]).
+//! Without those two steps such a case would declare two resources that were both live at once and
+//! would prove nothing about reused memory.
+//!
 //! Nothing here names a device, a vendor or an environment variable. A resource the venue cannot
 //! make comes back as the runtime's typed refusal, and the suite reads the venue's honest gap out
 //! of that refusal rather than out of a device name.
@@ -41,6 +47,8 @@ impl Rect {
     }
 }
 
+pub use crate::texture_query::Storage;
+
 /// How a texture is shaped. The format is its raw `MTLPixelFormat`, because a case states the
 /// probe's number and some of those numbers have no name in a public header. A number with no
 /// public name is still a number Metal takes: `MTLTextureDescriptor`'s pixel format is a raw
@@ -55,8 +63,8 @@ pub struct TextureSpec {
     pub levels: u64,
     pub slices: u64,
     pub samples: u64,
-    /// Whether the texture's storage is private; shared otherwise.
-    pub private: bool,
+    /// Where the texture's own memory lives ([`Storage`]).
+    pub storage: Storage,
     /// Whether the texture is a render target as well as read and viewed.
     pub render_target: bool,
     /// `allowGPUOptimizedContents`: whether the GPU may keep the texture in a layout of its own.
@@ -84,7 +92,7 @@ impl TextureSpec {
             levels: 1,
             slices: 1,
             samples: 1,
-            private: true,
+            storage: Storage::Private,
             render_target: false,
             gpu_optimized: true,
             usage: None,
@@ -123,7 +131,22 @@ impl TextureSpec {
     /// The same texture in shared storage.
     #[must_use]
     pub const fn shared(mut self) -> Self {
-        self.private = false;
+        self.storage = Storage::Shared;
+        self
+    }
+
+    /// The same texture in managed storage: the device's own copy, read back through a copy into a
+    /// shared resource rather than by a host call.
+    #[must_use]
+    pub const fn managed(mut self) -> Self {
+        self.storage = Storage::Managed;
+        self
+    }
+
+    /// The same texture in the storage mode `storage`, for a case that sweeps the modes.
+    #[must_use]
+    pub const fn stored(mut self, storage: Storage) -> Self {
+        self.storage = storage;
         self
     }
 
@@ -169,16 +192,22 @@ pub enum Plane {
 pub enum Resource {
     /// A buffer holding `bytes`, in shared storage so the host reads it back.
     Buffer { bytes: Vec<u8> },
-    /// A buffer of `length` bytes of **private** storage, which no host call reaches.
+    /// A buffer of `length` bytes that **nothing has written**, in the storage mode `storage`.
     ///
-    /// Its own variant rather than a flag on [`Resource::Buffer`], because a private buffer has no
-    /// bytes to be made with: a case that wants known bytes in one writes them with a
-    /// [`Step::FillBuffer`] or a copy, and that is part of what such a case means. Nothing here
-    /// assumes what a fresh buffer holds — Metal does not promise it — so a case over private
-    /// memory states its starting bytes rather than reading whatever the allocator left.
-    PrivateBuffer { length: u64 },
+    /// Its own variant rather than a flag on [`Resource::Buffer`], because that one is made *with*
+    /// its bytes: a case that passed it `vec![0; n]` and then claimed to read the zeros back would
+    /// be reading what it had just written, which is a row that cannot fail. So a case that wants
+    /// known bytes in such a buffer writes them with a [`Step::FillBuffer`] or a copy, and that
+    /// write is part of what the case means.
+    ///
+    /// **What a fresh buffer holds is not a Metal promise.** A case that reads one unwritten is
+    /// asking what this Metal and this runtime in fact do, which is a question worth recording and
+    /// is what [`crate::cases::fresh_contents`] asks; it is never a guarantee a case may lean on
+    /// elsewhere. Such a case gets its teeth from the order of its steps — fill one of this shape,
+    /// [`Step::Release`] it, [`Step::Make`] another — rather than from an assumption.
+    UnwrittenBuffer { length: u64, storage: Storage },
     /// A placement heap of `size` bytes.
-    Heap { size: u64, private: bool },
+    Heap { size: u64, storage: Storage },
     /// A buffer over `length` bytes of `heap` from `offset`.
     HeapBuffer {
         heap: usize,
@@ -189,7 +218,7 @@ pub enum Resource {
     Texture { spec: TextureSpec },
     /// A placement heap exactly as large as one texture of `spec` needs, as Metal sizes it: what
     /// a probe that placed one texture in a heap of Metal's size made.
-    HeapForTexture { spec: TextureSpec, private: bool },
+    HeapForTexture { spec: TextureSpec, storage: Storage },
     /// A texture placed in `heap` at `offset`.
     HeapTexture {
         heap: usize,
@@ -337,6 +366,31 @@ pub enum Step {
         /// The words the kernel writes per sample.
         words: usize,
     },
+    /// Release the resource at this index: the side drops its reference to it, and a later step
+    /// naming it is refused until a [`Step::Make`] makes it again.
+    ///
+    /// This is the teeth of a case about what a new resource holds. A program's resources are made
+    /// before its steps run, so a case cannot ask "what does memory that was just freed read as?"
+    /// by declaring two resources: the second was allocated while the first was still live. It has
+    /// to say *release this one, now make another*, and this is the first half of saying it.
+    ///
+    /// **It is refused while a command buffer is open**, because releasing a resource an
+    /// uncommitted command buffer refers to is a program whose own order is unclear, and because
+    /// the release only frees anything once the work that used it has completed. A case therefore
+    /// states a [`Step::Commit`] before it releases, and the refusal says so rather than the case
+    /// silently proving less than it reads.
+    Release { resource: usize },
+    /// Make the resource at this index again, from its own declaration in [`Work::resources`].
+    ///
+    /// The other half of the teeth: made **after** the [`Step::Release`] of the resource it
+    /// replaces, so a side that handed the freed memory back as it lies would read the old bytes.
+    /// A resource that is still made is refused rather than replaced, so a program cannot leak one
+    /// by mistake.
+    ///
+    /// A resource made over another — a texture over a buffer, a buffer or texture in a heap —
+    /// reads its own declaration again, so a case remakes the thing underneath first and then what
+    /// stands on it, in that order.
+    Make { resource: usize },
     /// Close the blit encoder, commit the command buffer and wait for it: its status is recorded
     /// and every read-back the steps before it asked for is answered.
     Commit,
@@ -381,6 +435,11 @@ impl Work {
     /// Add a buffer holding `bytes`, answering its index.
     pub fn buffer(&mut self, bytes: Vec<u8>) -> usize {
         self.add(Resource::Buffer { bytes })
+    }
+
+    /// Add a buffer of `length` bytes in `storage` that nothing has written, answering its index.
+    pub fn unwritten(&mut self, length: u64, storage: Storage) -> usize {
+        self.add(Resource::UnwrittenBuffer { length, storage })
     }
 
     /// How many reads the program asks for: a step that answers one.

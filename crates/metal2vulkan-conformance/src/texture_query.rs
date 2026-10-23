@@ -18,12 +18,25 @@
 
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 
-/// The storage a queried descriptor asks for. Two of Metal's four modes, because they are the two
-/// every case of this family sweeps and the two every device has.
+/// The storage mode a case asks a resource for: three of Metal's four modes, and the suite's one
+/// spelling of them.
+///
+/// It lives here because the queried descriptor was the first thing to need it, and it is used
+/// wherever a case states where a resource lives — a queried descriptor
+/// ([`HeapTextureQuery::storage`]) and a copy-and-fill program's buffers, heaps and textures
+/// ([`crate::work`]). One spelling rather than a second enumeration or a `private` flag per type,
+/// so a case that sweeps the modes sweeps one list.
+///
+/// `MTLStorageModeMemoryless` is the one mode no case states: it describes a texture whose contents
+/// exist only inside a render pass, which no case of this suite reads back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Storage {
     /// `MTLStorageModeShared`.
     Shared,
+    /// `MTLStorageModeManaged`: the device's own copy, which the host reaches through an explicit
+    /// synchronization. A case that reads such a resource reads it through a copy into a `Shared`
+    /// one, which needs none.
+    Managed,
     /// `MTLStorageModePrivate`.
     Private,
 }
@@ -33,6 +46,7 @@ impl Storage {
     pub fn word(self) -> &'static str {
         match self {
             Storage::Shared => "shared",
+            Storage::Managed => "managed",
             Storage::Private => "private",
         }
     }
@@ -149,9 +163,12 @@ impl HeapTextureQuery {
         out.extend(self.samples.to_le_bytes());
         out.extend(self.array_length.to_le_bytes());
         out.extend(self.usage.as_raw().to_le_bytes());
+        // The two modes that were here first keep their bytes, so a recording taken before the
+        // third existed is still the answer to the inputs it was taken from.
         out.extend(match self.storage {
             Storage::Shared => [0u8],
             Storage::Private => [1u8],
+            Storage::Managed => [2u8],
         });
         out
     }

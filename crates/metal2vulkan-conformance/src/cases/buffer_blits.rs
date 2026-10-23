@@ -48,7 +48,7 @@
 use crate::allowance::Allowance;
 use crate::case::{call, Abort, Case, Input, MetalSource, Side};
 use crate::transcript::{ByteLayout, Element, Negative, Node, Observed, Sites, Value};
-use crate::work::{Resource, Step, Work};
+use crate::work::{Resource, Step, Storage, Work};
 use metal2vulkan_runtime::Degradation;
 
 /// The byte a private destination is filled with before a row's own commands, so every byte the
@@ -174,11 +174,10 @@ impl Case for BufferBlits {
                 Resource::Buffer { bytes } => {
                     inputs.push(Input::bytes(format!("buffer:{at}"), bytes));
                 }
-                Resource::PrivateBuffer { length } => {
-                    inputs.push(Input::bytes(
-                        format!("private-buffer:{at}"),
-                        &length.to_le_bytes(),
-                    ));
+                Resource::UnwrittenBuffer { length, storage } => {
+                    let mut words = length.to_le_bytes().to_vec();
+                    words.extend(storage.word().as_bytes());
+                    inputs.push(Input::bytes(format!("private-buffer:{at}"), &words));
                 }
                 other => {
                     return Err(format!(
@@ -209,7 +208,10 @@ static ANY_RANGE: Row = Row {
     program: || {
         let mut work = Work::new();
         let source = work.buffer(counting(64));
-        let destination = work.add(Resource::PrivateBuffer { length: 64 });
+        let destination = work.add(Resource::UnwrittenBuffer {
+            length: 64,
+            storage: Storage::Private,
+        });
         let read_back = work.buffer(vec![0; 64]);
         // The destination's starting byte, in a command buffer of its own, so what the probe's
         // own commands left alone is a byte this case wrote.
@@ -249,7 +251,10 @@ static OVERLAPPING: Row = Row {
         let mut work = Work::new();
         let forward = work.buffer(counting(4099));
         let backward = work.buffer(counting(4099));
-        let private = work.add(Resource::PrivateBuffer { length: 4099 });
+        let private = work.add(Resource::UnwrittenBuffer {
+            length: 4099,
+            storage: Storage::Private,
+        });
         let read_back = work.buffer(vec![0; 4099]);
         copy(&mut work, forward, 1, forward, 7, 4000);
         copy(&mut work, backward, 9, backward, 2, 4000);
@@ -345,7 +350,10 @@ static EVERY_FILL_SIZE: Row = Row {
     case: "buffer-fills-of-every-size",
     program: || {
         let mut work = Work::new();
-        let destination = work.add(Resource::PrivateBuffer { length: BIG });
+        let destination = work.add(Resource::UnwrittenBuffer {
+            length: BIG,
+            storage: Storage::Private,
+        });
         let read_back = work.buffer(vec![0; BIG as usize]);
         for (offset, length, value) in FILLS {
             fill(&mut work, destination, offset, length, value);
@@ -525,7 +533,7 @@ mod tests {
             let work = (row.program)();
             let length = |at: usize| match &work.resources[at] {
                 Resource::Buffer { bytes } => bytes.len() as u64,
-                Resource::PrivateBuffer { length } => *length,
+                Resource::UnwrittenBuffer { length, .. } => *length,
                 other => panic!("{}: resource {at} is {other:?}", row.case),
             };
             for (at, step) in work.steps.iter().enumerate() {

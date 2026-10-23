@@ -222,6 +222,7 @@ edits one.
 | `buffer_blits` | Where a blit encoder's buffer fills and copies landed, overlapping ones included | run on Metal |
 | `simdgroup_lockstep` | The threadgroup words two loops only a simdgroup's lockstep orders came to | run on Metal |
 | `color_write_masks` | Which channels of a texel a draw changes under a write mask of none, some and all of them | run on Metal |
+| `fresh_contents` | What a new buffer or texture reads before anything writes it, and after memory that was written was released | run on Metal |
 
 A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
 case forbids re-recording with the reason why. Record mode refuses such a case rather than

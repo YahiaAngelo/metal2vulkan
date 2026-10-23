@@ -32,7 +32,7 @@ use crate::replay::{notice_allowance, NOTICES_SITE};
 use crate::transcript::{
     ByteLayout, Digest, DigestKind, Element, Node, Observed, Sites, Transcript, Value,
 };
-use crate::work::{Plane, Rect, Resource, Step, TextureSpec, Work};
+use crate::work::{Plane, Rect, Resource, Step, Storage, TextureSpec, Work};
 
 /// Where the carried values were measured.
 const MEASURED_IN: &str =
@@ -422,7 +422,7 @@ fn heap_work(raw: u32, p: &Probe, heap: u64, zeros: bool) -> Work {
     let mut work = Work::new();
     let made = work.add(Resource::Heap {
         size: heap,
-        private: false,
+        storage: Storage::Shared,
     });
     let texture = work.add(Resource::HeapTexture {
         heap: made,

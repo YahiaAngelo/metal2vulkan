@@ -2449,10 +2449,7 @@ fn queried_descriptor(query: &HeapTextureQuery) -> Retained<MTLTextureDescriptor
         descriptor.setArrayLength(query.array_length as usize);
     }
     descriptor.setUsage(MTLTextureUsage(query.usage.as_raw() as usize));
-    descriptor.setStorageMode(match query.storage {
-        Storage::Shared => MTLStorageMode::Shared,
-        Storage::Private => MTLStorageMode::Private,
-    });
+    descriptor.setStorageMode(storage_mode(query.storage).0);
     descriptor
 }
 
@@ -2475,6 +2472,26 @@ fn stencil_descriptor(face: &StencilDescriptor) -> Retained<MTLStencilDescriptor
     descriptor.setReadMask(face.read_mask);
     descriptor.setWriteMask(face.write_mask);
     descriptor
+}
+
+/// The storage mode and resource options a [`Storage`] names: the Metal side's one spelling of the
+/// three modes, which [`crate::metal_work`] reads too, so a case's storage mode cannot mean one
+/// thing to a queried descriptor and another to a program's buffer.
+pub fn storage_mode(storage: Storage) -> (MTLStorageMode, MTLResourceOptions) {
+    match storage {
+        Storage::Shared => (
+            MTLStorageMode::Shared,
+            MTLResourceOptions::StorageModeShared,
+        ),
+        Storage::Managed => (
+            MTLStorageMode::Managed,
+            MTLResourceOptions::StorageModeManaged,
+        ),
+        Storage::Private => (
+            MTLStorageMode::Private,
+            MTLResourceOptions::StorageModePrivate,
+        ),
+    }
 }
 
 /// The pixel format [`crate::case::TARGET_FORMAT`] names, as Metal spells it.

@@ -2450,11 +2450,23 @@ fn queried_descriptor(query: &HeapTextureQuery) -> TextureDescriptor {
     descriptor.sample_count = u64::from(query.samples);
     descriptor.array_length = u64::from(query.array_length);
     descriptor.usage = query.usage;
-    descriptor.resource_options = match query.storage {
+    descriptor.resource_options = resource_options(query.storage);
+    descriptor
+}
+
+/// The resource options a [`Storage`] names: the runtime side's one spelling of the three modes,
+/// which [`crate::runtime_work`] reads too, so a case's storage mode cannot mean one thing to a
+/// queried descriptor and another to a program's buffer.
+pub fn resource_options(storage: Storage) -> ResourceOptions {
+    match storage {
         Storage::Shared => ResourceOptions::shared(),
         Storage::Private => ResourceOptions::private(),
-    };
-    descriptor
+        Storage::Managed => ResourceOptions::new(
+            metal2vulkan_runtime::StorageMode::Managed,
+            metal2vulkan_runtime::CpuCacheMode::DefaultCache,
+            metal2vulkan_runtime::HazardTrackingMode::Default,
+        ),
+    }
 }
 
 /// Encode one render pass of a program into `command_buffer`, answering the first refusal it met.

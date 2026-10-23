@@ -36,7 +36,7 @@ use crate::replay::NOTICES_SITE;
 use crate::transcript::{
     ByteLayout, Digest, DigestKind, Element, Gaps, Node, Observed, Region, Sites, Transcript, Value,
 };
-use crate::work::{Rect, Resource, Step, TextureKind, TextureSpec, Work};
+use crate::work::{Rect, Resource, Step, Storage, TextureKind, TextureSpec, Work};
 
 /// Where the carried values were measured.
 const MEASURED_IN: &str =
@@ -340,7 +340,7 @@ fn row_work(work: &mut Work, row: &Row) -> Result<(), String> {
         buffer,
         spec: TextureSpec {
             kind: TextureKind::TextureBuffer,
-            private: false,
+            storage: Storage::Shared,
             ..TextureSpec::texture_2d(row.format, 12, 1)
         },
         offset: row.offset,
@@ -589,7 +589,7 @@ impl LongFills {
                 buffer,
                 spec: TextureSpec {
                     kind: TextureKind::TextureBuffer,
-                    private: false,
+                    storage: Storage::Shared,
                     ..TextureSpec::texture_2d(format, width, 1)
                 },
                 offset,
