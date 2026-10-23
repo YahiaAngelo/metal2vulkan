@@ -22,10 +22,9 @@
 //!   `half`.
 //! - **Stores.** A full-screen draw of the owned fixture `rt6_samples`'s fill (`float4` and
 //!   `half4` outputs) of the writes' values into a new 4096 x 5 target: `store <float|half> <k>
-//!   <word>`. A `float` output rounds to `half` toward zero first. The digest holds the 16,405
-//!   texels of the sweep and its specials; Metal's words for the 4,075 past them were never
-//!   recorded, so the lane asserts they are zero on the device it runs rather than claiming
-//!   Metal's. Closing that needs a fresh Metal probe of the whole target.
+//!   <word>`. A `float` output rounds to `half` toward zero first. The draw covers all 20,480
+//!   texels and every one of them is digested; the 4,075 past the sweep take the input's zeros and
+//!   Metal stores `0x00000000` in each (`rgb10a2-srgb-stores-f` and `-h`).
 //! - **Loads.** A 1024 x 4 target holding every color code in each channel and each alpha code,
 //!   loaded and stored by a pass whose draw writes another attachment alone: `load <i> <before>
 //!   <after>`. Each color code moves as `R10Unorm_X6_sRGB`'s does (`ExtendedRange::load_code`,
@@ -64,7 +63,12 @@ const SAMPLES: [[&str; 2]; 2] = [
     ["36b79f318a83d9ac", "e1978cceb4591a05"],
 ];
 const CLEARS: [&str; 2] = ["325c8263917a086f", "8b361b1736bc7625"];
-const STORES: [&str; 2] = ["27b2e44d676d4976", "26b22082a3e6db54"];
+/// The stores' digests over the whole 4096 by 5 target, from the 20,480 words each of the
+/// conformance recordings `rgb10a2-srgb-stores-f` and `rgb10a2-srgb-stores-h` holds of this chip's
+/// Metal run. The first 16,405 of those same words digest to `27b2e44d676d4976` and
+/// `26b22082a3e6db54`, the digests this lane compared while it printed only those, and the 4,075
+/// past them are `0x00000000` on Metal.
+const STORES: [&str; 2] = ["92b08315643e0b2a", "cf64ce62b70ddfe3"];
 const LOADS: &str = "308f150fdcbbb82a";
 
 /// Every word `question` read back has a line in `text`, the string its digest is taken over: a
@@ -581,25 +585,10 @@ fn passes_clear_store_and_load_rgb10a2_srgb_as_metal_does() {
         let got = blit_words(&lane, &target, (4096, height));
         let kind = if half == 1 { "half" } else { "float" };
         let mut text = String::new();
-        for (k, w) in got.iter().take(n).enumerate() {
+        for (k, w) in got.iter().enumerate() {
             writeln!(text, "store {kind} {k} {w:08x}").unwrap();
         }
-        covers(&text, n, "stores");
-        // The target's texels past the sweep, whose inputs are zeros. Metal's words there were
-        // never recorded, so the lane holds the device to zero and claims nothing of Metal's; a
-        // probe of the whole target would let the digest cover them instead.
-        let past: Vec<(usize, u32)> = (got.iter().enumerate().skip(n))
-            .filter(|(_, &w)| w != 0)
-            .map(|(k, &w)| (k, w))
-            .collect();
-        assert!(
-            past.is_empty(),
-            "stores {kind}: {} of the {} texels past the sweep are not zero, the first {:08x?}; \
-             Metal's words there are unrecorded",
-            past.len(),
-            got.len() - n,
-            &past[..past.len().min(4)]
-        );
+        covers(&text, got.len(), "stores");
         if digest(&text) != STORES[half] {
             wrong.push(format!(
                 "stores {kind}: {} (Metal's {})",

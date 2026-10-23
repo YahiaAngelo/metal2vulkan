@@ -8,10 +8,10 @@
 //! answers `NeverReturned` as a recorded fact rather than blocking the suite.
 
 use crate::case::{
-    Answer, ArgumentSlot, Bindings, CommandDraw, Failure, Fill, Handle, IndirectReadBack,
-    MeshCommand, MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest,
-    SamplerSpec, ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec,
-    TileFacts, TilePipelineSpec, TileStep, Venue,
+    Answer, ArgumentSlot, Bindings, CommandDraw, Failure, Fill, FragmentFill, FragmentFilled,
+    Handle, IndirectReadBack, MeshCommand, MeshFunctions, MeshStep, PassOutcome, PlaneTexture,
+    RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion, StageInput,
+    TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -32,11 +32,7 @@ use metal2vulkan::pipeline::{
 };
 use metal2vulkan_runtime::{
     BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue,
-    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, IndirectCommand,
-    IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane,
-    IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption, PipelineOptions,
-    RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
-    ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor,
+    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor,
 };
 use std::time::Duration;
 
@@ -129,6 +125,48 @@ impl<'a> RuntimeSide<'a> {
         self.buffers
             .get(handle.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
+    }
+
+    /// Level 0 of `texture` read back through a blit into a shared buffer of its own, at
+    /// `row_pitch` bytes a row: what a private texture's bytes are, since the host reaches none of
+    /// them directly.
+    fn blit_out(&mut self, texture: &Texture, size: [u32; 2], row_pitch: u32) -> Answer<Vec<u8>> {
+        let length = u64::from(row_pitch) * u64::from(size[1]);
+        let back = self
+            .device
+            .new_buffer(length.max(1), ResourceOptions::shared())
+            .map_err(Failure::from_error)?;
+        let command_buffer = self
+            .queue()?
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        let mut blit = command_buffer
+            .blit_command_encoder()
+            .map_err(Failure::from_error)?;
+        blit.copy_from_texture_to_buffer(
+            texture,
+            0,
+            0,
+            Origin::new(0, 0, 0),
+            Size::new(size[0].into(), size[1].into(), 1),
+            &back,
+            0,
+            row_pitch.into(),
+            length,
+            BlitOption::None,
+        )
+        .map_err(Failure::from_error)?;
+        blit.end_encoding().map_err(Failure::from_error)?;
+        command_buffer.commit().map_err(Failure::from_error)?;
+        if command_buffer.wait_until_completed_for(WAIT).is_err() {
+            return Err(Failure::named(
+                "ReadBackNeverReturned",
+                "the blit of the target into a buffer did not complete",
+            ));
+        }
+        let handle = keep(&mut self.buffers, back);
+        keep(&mut self.command_buffers, command_buffer);
+        self.read_buffer(handle, 0, length as usize)
     }
 
     /// The descriptor of a mesh render pipeline of `library`'s `functions`.
@@ -751,6 +789,79 @@ impl Side for RuntimeSide<'_> {
     fn work(&mut self, work: &crate::work::Work) -> Answer<crate::work::Done> {
         let queue = self.queue()?.clone();
         crate::runtime_work::run(self.device, &queue, work)
+    }
+
+    fn fragment_fill(&mut self, fill: &FragmentFill<'_>) -> Answer<FragmentFilled> {
+        let state = {
+            let library = self.libraries.get(fill.library.0 as usize).ok_or_else(|| {
+                Failure::named("NoSuchHandle", format!("library {}", fill.library.0))
+            })?;
+            let function = |name: &str| -> Answer<StageSource> {
+                Ok(StageSource::Function(
+                    library
+                        .new_function_with_name(name)
+                        .map_err(|error| Failure::of(&error))?
+                        .function_descriptor(),
+                ))
+            };
+            let mut descriptor = RenderPipelineDescriptor::new(function(fill.vertex)?);
+            descriptor.fragment = Some(function(fill.fragment)?);
+            descriptor.color_attachments[0] = Some(ColorAttachmentDescriptor::new(fill.format));
+            self.device
+                .new_render_pipeline_state(&descriptor, &PipelineOptions::default())
+                .map_err(Failure::from_error)?
+        };
+        let mut target = TextureDescriptor::texture_2d(
+            fill.format,
+            u64::from(fill.size[0]),
+            u64::from(fill.size[1]),
+            false,
+        );
+        target.usage = TextureUsage::RENDER_TARGET;
+        target.resource_options = ResourceOptions::private();
+        let target = self
+            .device
+            .new_texture(&target)
+            .map_err(Failure::from_error)?;
+        let bound: Vec<Buffer> = fill
+            .buffers
+            .iter()
+            .map(|handle| self.held(*handle).cloned())
+            .collect::<Answer<Vec<Buffer>>>()?;
+        let mut pass = RenderPassDescriptor::new();
+        let attachment = &mut pass.color_attachments[0];
+        attachment.texture = Some(target.clone());
+        attachment.load_action = LoadAction::DontCare;
+        attachment.store_action = StoreAction::Store;
+        let command_buffer = self
+            .queue()?
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        let mut encoder = command_buffer
+            .render_command_encoder(&pass)
+            .map_err(Failure::from_error)?;
+        encoder
+            .set_render_pipeline_state(&state)
+            .map_err(Failure::from_error)?;
+        for (index, buffer) in bound.iter().enumerate() {
+            encoder
+                .set_fragment_buffer(Some(buffer), 0, index as u32)
+                .map_err(Failure::from_error)?;
+        }
+        encoder
+            .draw_primitives(PrimitiveType::Triangle, 0, fill.vertices, 1, 0)
+            .map_err(Failure::from_error)?;
+        encoder.end_encoding().map_err(Failure::from_error)?;
+        command_buffer.commit().map_err(Failure::from_error)?;
+        let status = if command_buffer.wait_until_completed_for(WAIT).is_err() {
+            Value::Nothing(Negative::NeverReturned)
+        } else {
+            status_value(command_buffer.status())
+        };
+        keep(&mut self.command_buffers, command_buffer);
+        let bytes = self.blit_out(&target, fill.size, fill.row_pitch)?;
+        keep(&mut self.textures, target);
+        Ok(FragmentFilled { status, bytes })
     }
 
     fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {

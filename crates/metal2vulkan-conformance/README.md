@@ -180,6 +180,7 @@ edits one.
 | `math_routines` | The words `frexp` and `ilogb` write, scalar and per lane, over both widths | run on Metal |
 | `stage_in_regions` | How a stage-in region clamps a dispatch's indices | run on Metal |
 | `extended_range_planes` | A two-plane extended-range texture joined into one and split back again | run on Metal |
+| `rgb10a2_srgb` | What a kernel reads, writes and samples of Apple's padded 10-bit sRGB format, and what a full-screen draw stores into it | run on Metal |
 | `texture_buffer_fills` | Which bytes a fill changed over a texture made on a buffer | carried; `fillTexture:` is Apple SPI |
 | `texture_fills`, `sample_fills` | Which bytes a texture fill, and a multisample sample fill, changed | carried; `fillTexture:` is Apple SPI |
 | `two_plane_heap_blits` | What a blit moved between two-plane textures placed in a heap | run on Metal |
