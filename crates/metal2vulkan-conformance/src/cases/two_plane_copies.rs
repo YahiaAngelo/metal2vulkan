@@ -245,6 +245,8 @@ fn row_blit_work(blit: &RowBlit) -> Work {
             slice,
             region: Rect::new(0, 0, w, h),
             bytes: words,
+            // An uncompressed plane's rows are its texel rows.
+            rows: h,
             bytes_per_row: 4 * w,
             bytes_per_image: 4 * w * h,
         });

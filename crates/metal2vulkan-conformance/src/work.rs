@@ -391,6 +391,13 @@ pub enum Step {
         slice: u64,
         region: Rect,
         bytes: Vec<u8>,
+        /// The rows of bytes the call hands, which for a block-compressed format are the region's
+        /// **block** rows and not its texel rows.
+        ///
+        /// A case states it because neither side can derive it: `MTLTexture` answers no block
+        /// extent, and the difference is the whole subject of the compressed families. An
+        /// uncompressed case states the region's height, which is what it always meant.
+        rows: u64,
         bytes_per_row: u64,
         bytes_per_image: u64,
     },

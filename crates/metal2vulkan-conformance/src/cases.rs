@@ -31,6 +31,8 @@ pub mod color_write_masks;
 pub mod command_queues;
 pub mod compressed_blits;
 pub mod compressed_decode;
+pub mod compressed_moves;
+pub mod compressed_views;
 pub mod compute_threadgroups;
 pub mod depth_texel_reads;
 pub mod discard_hoist;
@@ -55,6 +57,7 @@ pub mod nearest_positions;
 pub mod pass_bytes;
 pub mod pixel_downscales;
 pub mod pixel_samplers;
+pub mod pvrtc_rows;
 pub mod rate_maps;
 pub mod rgb10a2_srgb;
 pub mod sample_fills;
@@ -97,6 +100,15 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {
+        cases.push(Box::new(case));
+    }
+    for case in compressed_moves::all() {
+        cases.push(Box::new(case));
+    }
+    for case in compressed_views::all() {
+        cases.push(Box::new(case));
+    }
+    for case in pvrtc_rows::all() {
         cases.push(Box::new(case));
     }
     for case in level_sizes::all() {

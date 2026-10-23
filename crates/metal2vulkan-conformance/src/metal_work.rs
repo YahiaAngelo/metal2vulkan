@@ -666,12 +666,17 @@ impl Run<'_> {
                 slice,
                 region,
                 bytes,
+                rows,
                 bytes_per_row,
                 bytes_per_image,
             } => {
                 let texture = self.texture(*texture)?;
-                let wanted = (*bytes_per_image as usize)
-                    .max(*bytes_per_row as usize * region.size[1].max(1) as usize);
+                // The most Metal reads: every image's pitch but the last, then the last image's
+                // rows at their pitch. The rows are the case's, because a block-compressed
+                // region's rows are its block rows and nothing here can derive them.
+                let images = region.size[2].max(1) as usize;
+                let wanted = *bytes_per_image as usize * (images - 1)
+                    + *bytes_per_row as usize * (*rows).max(1) as usize;
                 if bytes.len() < wanted {
                     return Err(Failure::named(
                         "TooFewBytes",

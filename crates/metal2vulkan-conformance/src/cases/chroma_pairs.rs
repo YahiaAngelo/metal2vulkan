@@ -518,6 +518,8 @@ fn replace(texture: usize, region: Rect, bytes: Vec<u8>, pitch: u64) -> Step {
         slice: 0,
         region,
         bytes,
+        // An uncompressed format's rows are its texel rows.
+        rows: region.size[1],
         bytes_per_row: pitch,
         // 0, as Metal's host call takes for a 2D texture and as the lane passes.
         bytes_per_image: 0,

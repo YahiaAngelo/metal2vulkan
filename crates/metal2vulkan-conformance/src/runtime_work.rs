@@ -508,6 +508,10 @@ impl Run<'_> {
                 slice,
                 region,
                 bytes,
+                // The runtime checks the slice it is handed against the region and the pitches
+                // itself, and answers a typed error, so the stated rows are the Metal side's
+                // guard alone.
+                rows: _,
                 bytes_per_row,
                 bytes_per_image,
             } => {

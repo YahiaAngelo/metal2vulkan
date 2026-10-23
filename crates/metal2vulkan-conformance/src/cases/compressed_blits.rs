@@ -320,6 +320,8 @@ impl CompressedBlits {
             level: 0,
             slice: 0,
             region,
+            // Every format here is uncompressed on the host side, so the rows are texel rows.
+            rows: region.size[1],
             bytes: fed.cpu_in.clone(),
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
@@ -414,6 +416,8 @@ impl CompressedBlits {
             level: 0,
             slice: 0,
             region,
+            // Every format here is uncompressed on the host side, so the rows are texel rows.
+            rows: region.size[1],
             bytes: fed.out_of_compressed.clone(),
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
@@ -456,6 +460,8 @@ impl CompressedBlits {
             level: 0,
             slice: 0,
             region,
+            // Every format here is uncompressed on the host side, so the rows are texel rows.
+            rows: region.size[1],
             bytes: fed.into_compressed.clone(),
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
@@ -498,6 +504,8 @@ impl CompressedBlits {
             level: 0,
             slice: 0,
             region,
+            // Every format here is uncompressed on the host side, so the rows are texel rows.
+            rows: region.size[1],
             bytes: fed.over_a_buffer.clone(),
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
