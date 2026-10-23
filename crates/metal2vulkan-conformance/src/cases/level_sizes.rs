@@ -6,8 +6,8 @@
 //! own check is the rule against itself.
 //!
 //! **The port re-measures it here.** Record mode runs both kernels on Metal at every level of
-//! [`LEVELS`], so each recording holds Metal's own words and the rule becomes a committed
-//! cross-check ([`tests::every_recorded_extent_is_the_lanes_rule`]). The levels are the ones that
+//! `LEVELS`, so each recording holds Metal's own words and the rule becomes a committed
+//! cross-check (the test `every_recorded_extent_is_the_lanes_rule`). The levels are the ones that
 //! make the rule visible: inside the texture's three levels, past them, at 31 and 32 (a shift the
 //! width of the word), at 255 and 256 (where Metal takes the level's low eight bits), and at
 //! `u32::MAX`.

@@ -10,7 +10,7 @@
 //! every call it makes is public Metal: a texture of any descriptor, a texture over a buffer, the
 //! blit copies, `replaceRegion:` and `getBytes:`. So each recording holds the bytes Metal's own
 //! blits wrote, and the rule becomes a committed cross-check
-//! ([`tests::every_recorded_blit_is_the_rules`]) instead of the expectation. That is what the port
+//! (the test `every_recorded_blit_is_the_rules`) instead of the expectation. That is what the port
 //! adds: the lane can only say our bytes and the rule disagree, never which of the two moved.
 //!
 //! One case per format, so a venue that holds no texture of one answers its typed refusal and
@@ -170,7 +170,7 @@ impl CompressedBlits {
         &FORMATS[self.at]
     }
 
-    /// The rule the format's texels follow, which every format of [`FORMATS`] has.
+    /// The rule the format's texels follow, which every format of `FORMATS` has.
     fn rule(&self) -> CompressedBlit {
         CompressedBlit::of(self.format().format)
             .expect("every format of the family has a compressed-blit rule")

@@ -9,7 +9,7 @@
 //! **The port re-measures it here.** Record mode runs the case on this M3 Max, so each recording
 //! holds Metal's own 1,024 texels per format rather than a model's output, and the fitted rule
 //! becomes a cross-check instead of the expectation
-//! ([`tests::every_recorded_texel_is_the_lanes_fitted_rule`]). That is the one thing the port adds:
+//! (the test `every_recorded_texel_is_the_lanes_fitted_rule`). That is the one thing the port adds:
 //! if Apple's decode ever moves, the recording moves with it and the rule's test says so, where the
 //! lane would have failed without saying which side was wrong.
 //!

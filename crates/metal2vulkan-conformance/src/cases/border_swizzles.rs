@@ -12,7 +12,7 @@
 //! **The port re-measures it on this M3 Max**, which matters more here than in most of the batch:
 //! the rule was fitted on another chip, and the one thing the lane cannot tell us is whether this
 //! chip agrees. Record mode runs the case, each recording holds Metal's own words, and the rule is a
-//! committed cross-check ([`tests::every_recorded_texel_is_the_lanes_rule`]).
+//! committed cross-check (the test `every_recorded_texel_is_the_lanes_rule`).
 //!
 //! **One case per format**, eight of them, each sweeping the six swizzles against the ten samplers
 //! and the three coordinates — one inside at a texel centre, and one a texel past each edge, where

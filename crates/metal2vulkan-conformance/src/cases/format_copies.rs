@@ -9,7 +9,7 @@
 //! **The port re-measures both here**: every call is public Metal, so record mode runs the program
 //! and each recording holds the bytes Metal moved. The lane's expectation is that the destination
 //! and the source both read back what was written, which the case states as the recording rather
-//! than as an assertion ([`tests::every_recorded_copy_moved_the_bytes`]).
+//! than as an assertion (the test `every_recorded_copy_moved_the_bytes`).
 //!
 //! **One case per pair**, so a venue that holds no texture of one format answers its typed refusal
 //! there and counts as lacking the feature instead of taking fifteen other pairs with it.
