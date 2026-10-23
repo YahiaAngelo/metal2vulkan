@@ -48,7 +48,7 @@
 //! dropped: 515 of each site's 4,096 words for `R16Float`, 1,026 for `RG16Float` and 2,045 for
 //! `RGBA16Float`, the same count at all three access sites, largest difference 33,279 as unsigned
 //! words (Metal `0xffff` against our `0x7e00`). The differing words are exactly the NaN texels
-//! whose code is not already `0x7e00` -- for `R16Float`, the twelve such values of [`V`] at their
+//! whose code is not already `0x7e00` -- for `R16Float`, the twelve such values of the half table at their
 //! 515 texels -- and no finite, zero, denormal or infinite texel differs anywhere.
 //!
 //! That stays `divergent` rather than being loosened: `device-nan-encoding`'s own definition says
