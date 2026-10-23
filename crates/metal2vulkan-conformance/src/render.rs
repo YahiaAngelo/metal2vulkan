@@ -185,12 +185,54 @@ impl ColorState {
     }
 }
 
+/// One stage of a render pipeline: the function's entry name, and the library it comes from when
+/// the pipeline's two stages do not share one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StageFunction<'a> {
+    /// The library the function comes from, when that is not the one the call to
+    /// [`crate::case::Side::render_pipeline`] names.
+    pub library: Option<Handle>,
+    pub entry: &'a str,
+}
+
+impl<'a> StageFunction<'a> {
+    /// A function of the library the call names.
+    #[must_use]
+    pub const fn named(entry: &'a str) -> Self {
+        Self {
+            library: None,
+            entry,
+        }
+    }
+
+    /// A function of `library`, whichever library the call names.
+    #[must_use]
+    pub const fn of(library: Handle, entry: &'a str) -> Self {
+        Self {
+            library: Some(library),
+            entry,
+        }
+    }
+
+    /// The words a case's input fingerprint covers: the entry, and the library only where the
+    /// stage names one of its own, so a pipeline of one library fingerprints as it always has.
+    fn words(&self) -> Vec<u8> {
+        let mut bytes = self.entry.as_bytes().to_vec();
+        bytes.push(0);
+        if let Some(library) = self.library {
+            bytes.extend(library.0.to_le_bytes());
+        }
+        bytes
+    }
+}
+
 /// A vertex-and-fragment render pipeline a case makes:
 /// `newRenderPipelineStateWithDescriptor:error:`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RenderPipelineSpec<'a> {
-    pub vertex: &'a str,
-    pub fragment: &'a str,
+    pub vertex: StageFunction<'a>,
+    /// The fragment stage, or `None` for a pipeline that rasterizes without one.
+    pub fragment: Option<StageFunction<'a>>,
     /// The color attachments by index; `None` at an index of `MTLPixelFormatInvalid`, which is how
     /// a pipeline that writes attachment 1 alone is stated.
     pub colors: &'a [Option<ColorState>],
@@ -199,8 +241,23 @@ pub struct RenderPipelineSpec<'a> {
 }
 
 impl<'a> RenderPipelineSpec<'a> {
-    /// A single-sampled pipeline of `vertex` and `fragment` over `colors`.
+    /// A single-sampled pipeline of `vertex` and `fragment`, both of the library the call names,
+    /// over `colors`.
     pub const fn new(vertex: &'a str, fragment: &'a str, colors: &'a [Option<ColorState>]) -> Self {
+        Self::of(
+            StageFunction::named(vertex),
+            Some(StageFunction::named(fragment)),
+            colors,
+        )
+    }
+
+    /// A single-sampled pipeline of stages that may each name their own library, and whose fragment
+    /// stage may be absent.
+    pub const fn of(
+        vertex: StageFunction<'a>,
+        fragment: Option<StageFunction<'a>>,
+        colors: &'a [Option<ColorState>],
+    ) -> Self {
         Self {
             vertex,
             fragment,
@@ -219,10 +276,11 @@ impl<'a> RenderPipelineSpec<'a> {
     /// The words a case's input fingerprint covers: the functions, every attachment and the sample
     /// count.
     pub fn words(&self) -> Vec<u8> {
-        let mut bytes = self.vertex.as_bytes().to_vec();
-        bytes.push(0);
-        bytes.extend(self.fragment.as_bytes());
-        bytes.push(0);
+        let mut bytes = self.vertex.words();
+        match &self.fragment {
+            Some(fragment) => bytes.extend(fragment.words()),
+            None => bytes.push(0xff),
+        }
         for color in self.colors {
             match color {
                 Some(state) => bytes.extend(state.words()),
