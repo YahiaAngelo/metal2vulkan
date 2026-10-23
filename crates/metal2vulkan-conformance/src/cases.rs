@@ -70,6 +70,7 @@ pub mod extended_range_two_planes;
 pub mod extended_swizzles;
 pub mod fetch_ordered;
 pub mod format_copies;
+pub mod frame_chains;
 pub mod fresh_contents;
 pub mod half_output_blends;
 pub mod half_read_nans;
@@ -335,6 +336,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(render_chains::boxed());
     cases.extend(compute_render_chains::boxed());
     cases.extend(draw_state_changes::boxed());
+    cases.extend(frame_chains::boxed());
     cases
 }
 
