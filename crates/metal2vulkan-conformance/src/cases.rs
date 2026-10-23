@@ -24,6 +24,7 @@
 //!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
+pub mod border_swizzles;
 pub mod buffer_blits;
 pub mod chroma_pairs;
 pub mod command_queues;
@@ -39,6 +40,7 @@ pub mod half_write_nans;
 pub mod handler_waits;
 pub mod heap_metal_sizes;
 pub mod indirect_private_types;
+pub mod level_sizes;
 pub mod math_routines;
 pub mod mesh_barriers;
 pub mod mesh_commands;
@@ -81,6 +83,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {
+        cases.push(Box::new(case));
+    }
+    for case in level_sizes::all() {
+        cases.push(Box::new(case));
+    }
+    for case in border_swizzles::all() {
         cases.push(Box::new(case));
     }
     for case in extended_range_planes::all() {
