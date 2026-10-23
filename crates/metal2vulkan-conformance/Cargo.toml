@@ -1,0 +1,35 @@
+[package]
+name = "metal2vulkan-conformance"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "The Metal conformance suite: one case run on Metal and on metal2vulkan-runtime, recorded and compared"
+# Never publish this workspace member to crates.io.
+publish = false
+readme = "README.md"
+
+[dependencies]
+# The translator's public API, with the feature set `cargo test -p metal2vulkan --all-features`
+# builds, so one target directory builds the product (and the runtime on it) once for every suite
+# rather than once per feature set.
+metal2vulkan = { path = "../metal2vulkan", features = ["serde", "ash", "cli"] }
+metal2vulkan-runtime = { path = "../metal2vulkan-runtime" }
+# Fixture paths and `llvm_assemble` only: the suite's shaders are the owned public fixtures.
+metal2vulkan-devtools = { path = "../metal2vulkan-devtools" }
+base64 = "0.22"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-metal = "0.3"
+
+# Device-executing tests are gated on non-default cfgs rather than features, because the ordinary
+# gate builds with `--all-features`: `--cfg m2v_gpu` (a real GPU) and `--cfg m2v_cpu_icd` (a CPU
+# Vulkan ICD such as lavapipe). See docs/VALIDATION.md.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(m2v_gpu)", "cfg(m2v_cpu_icd)"] }
