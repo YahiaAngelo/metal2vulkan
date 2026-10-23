@@ -210,11 +210,23 @@ fn announced_fields(found: &Comparison) -> Vec<String> {
 /// Whether `error` is a device's honest gap rather than ours: the typed refusal names capabilities
 /// a device could enable, or a measured driver defect. A refusal the translator or the runtime has
 /// not built, and one Metal itself gives, is ours to answer for.
+///
+/// Two variants carry such a refusal, not one. `Error::Unsupported` is the plain form; a dispatch
+/// or draw whose shape the device cannot take is refused by the **bind stage**, which wraps the
+/// same typed `Unsupported` in `Error::Bind`, and that is where a device's threadgroup and
+/// threadgroup-memory limits are met. Reading only the plain form made a device limit read as a
+/// divergence or a refusal of ours, which is the one thing the `LacksFeature` verdict exists to
+/// prevent (verified on lavapipe, whose emulated 32-lane simdgroups refuse a tile threadgroup of
+/// 1024 threads that Metal runs). What the bind stage has **not built** — `Needs::NotImplemented`
+/// and the rest — is still ours to answer for, by the same test as the plain form.
 pub fn device_gap(error: &Error) -> Option<String> {
-    let Error::Unsupported(unsupported) = error else {
-        return None;
-    };
-    device_gap_of(unsupported)
+    match error {
+        Error::Unsupported(unsupported) => device_gap_of(unsupported),
+        Error::Bind(metal2vulkan::error::BindError::Unsupported(unsupported)) => {
+            device_gap_of(unsupported)
+        }
+        _ => None,
+    }
 }
 
 /// [`device_gap`] of a typed `Unsupported`.
