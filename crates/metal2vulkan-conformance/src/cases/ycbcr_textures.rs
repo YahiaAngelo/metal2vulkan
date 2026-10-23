@@ -11,11 +11,11 @@
 //! standing for the surface, which is what makes the lane run on a host with no CoreVideo, but
 //! Metal takes an IOSurface and nothing else. So:
 //!
-//! - [`format_descriptors`] is **recorded on Metal**, because it asks only about descriptors:
+//! - [`FormatDescriptors`] is **recorded on Metal**, because it asks only about descriptors:
 //!   `heapTextureSizeAndAlignWithDescriptor:` and whether `newTextureWithDescriptor:` answers a
 //!   texture, over every two-plane YCbCr format the translator names. Both are CPU calls over a
 //!   descriptor Metal makes no texture of, so the case allocates nothing and reaches no GPU.
-//! - [`texel_reads`] is **carried**, and record mode is forbidden from running it: the Metal side
+//! - [`TexelReads`] is **carried**, and record mode is forbidden from running it: the Metal side
 //!   has no call that makes a texture over a surface's plane, so there is nothing for it to run.
 //!   What it carries is not a model of ours — it is Metal's own `read()` of every texel of one
 //!   surface, taken on **this oracle**: `fixtures/public/ycbcr/metal_m3_max.bin`, 960 texels of
@@ -36,10 +36,10 @@
 //!
 //! # Why neither case can fault a GPU
 //!
-//! [`format_descriptors`] runs no GPU work at all. The multisample descriptors of the lane's own
+//! [`FormatDescriptors`] runs no GPU work at all. The multisample descriptors of the lane's own
 //! sweep are **left out by construction**: the runtime answers them `Error::Invalid`, which is its
 //! word for "Metal's validation stops it, ending the process", and the suite's standing rule is
-//! that no case may end Metal's process. [`texel_reads`] is one 40 x 24 texture and one dispatch
+//! that no case may end Metal's process. [`TexelReads`] is one 40 x 24 texture and one dispatch
 //! of 960 threads, and its Metal leg never runs at all.
 
 use crate::case::{

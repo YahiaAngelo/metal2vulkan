@@ -1,5 +1,5 @@
 //! Metal's 4:2:2 chroma-pair textures (`GBGR422`, `BGRG422`): what a copy moves, and what a
-//! kernel's `read()` of one answers.
+//! kernel's `read()` and nearest sample of one answer.
 //!
 //! Ported from `runtime_lane/chroma_pairs.rs`. Both of these formats are **public** Metal pixel
 //! formats, and every call the lane makes of them — `newTextureWithDescriptor:`,
@@ -16,9 +16,9 @@
 //! wrong model from a wrong implementation, because both sides of its comparison are ours. Record
 //! mode asks Metal.
 //!
-//! # The two families
+//! # The three families
 //!
-//! [`copies`] is the lane's copy sweep as one declarative program ([`crate::work`]): a whole blit
+//! [`ChromaCopies`] is the lane's copy sweep as one declarative program ([`crate::work`]): a whole blit
 //! in and out, the host's whole `replaceRegion:`/`getBytes:`, seven blits in of regions whose x
 //! and width fall off the 2-texel pairs at buffer offsets and pitches of 34 and 30 bytes, six
 //! blits out of such regions, four host copies in and four host reads out, three copies between
@@ -26,19 +26,24 @@
 //! `BGRG422`, `RG8Unorm` and `R16Uint`. Each read-back's bytes are recorded whole under a layout
 //! that names the row and the texel, so a diff says which texel of which sub-case moved.
 //!
-//! [`texel_reads`] is the lane's read: a 16 x 16 `Shared` texture of the format holding the
-//! lane's pattern, read texel by texel by the owned fixture `fpv_swizzled_reads`' `fpv_swz_read`
-//! at the 256 texel positions, as 256 `float4`s. Comparison is exact and the case carries **one**
-//! allowance, on the notices site alone: on MoltenVK the runtime reads these texels through the
-//! texture's decoded twin and announces `carried-decoded-twin` once, which Metal never announces,
-//! and that notice is what justifies the notices site differing. Every texel still compares bit
-//! for bit.
+//! [`ChromaTexels`] is the lane's texel table, over a 16 x 16 texture of the format holding the
+//! lane's pattern, reached two ways through the owned fixture `fpv_swizzled_reads`:
+//! `read()` at the 256 integer texel positions, and `sample()` at the 256 texel centres through a
+//! nearest clamp-to-edge sampler. Both answer 256 `float4`s, recorded whole. The two are separate
+//! cases because Metal defines them differently: a chroma-pair format is **filterable**, so
+//! sampling is the operation its feature tables grant it and a nearest sample at a centre is
+//! defined to be that texel, while whether Metal defines `read()` for these formats is what the
+//! recording answers rather than assumes. Comparison is exact and each case carries **one**
+//! allowance, on the notices site alone: where a device's own driver does not decode these texels
+//! as Metal does, the runtime reaches them through the texture's decoded twin and announces
+//! `carried-decoded-twin` once, which Metal never announces, and that notice is what justifies the
+//! notices site differing. Every texel still compares bit for bit.
 //!
 //! # Why nothing here can fault a GPU
 //!
 //! Every program is a handful of 16 x 16 textures, blits of regions inside them, and one compute
-//! dispatch of 256 threads. The two descriptors the lane finds Metal's **validation** aborts
-//! plain too — a mipmapped 4:2:2 texture, and a view of one in another format — are left out by
+//! dispatch of 256 threads, with at most one sampler state. The two descriptors the lane finds
+//! Metal's **validation** aborts plain too — a mipmapped 4:2:2 texture, and a view of one in another format — are left out by
 //! construction: the runtime spells that outcome `Error::Invalid`, "Metal's validation stops it,
 //! ending the process", and the suite's standing rule is that no case may end Metal's process. So
 //! is the render-target half of the lane, whose pipeline Metal's validation aborts plain too.
@@ -628,7 +633,8 @@ impl Case for ChromaCopies {
     }
 }
 
-/// Every texel of one format, reached one way ([`Access`]).
+/// Every texel of one format, reached one way: `read()` of its position, or a nearest sample at
+/// its centre.
 pub struct ChromaTexels {
     name: &'static str,
     format: PixelFormat,

@@ -11,7 +11,7 @@
 //! # What is carried, and why
 //!
 //! Metal's answer here is **carried**, and record mode is forbidden from running it, for the same
-//! reason as [`super::ycbcr_textures::texel_reads`]: a texture of a two-plane YCbCr format exists
+//! reason as [`super::ycbcr_textures::TexelReads`]: a texture of a two-plane YCbCr format exists
 //! only over an IOSurface, and the Metal side has no call that makes one. The runtime takes a
 //! buffer standing for the surface, which is what lets the case run where there is no CoreVideo.
 //!
