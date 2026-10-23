@@ -200,7 +200,7 @@ impl Device {
                 .usage(usage | vk::BufferUsageFlags::TRANSFER_DST),
         );
         // SAFETY: the device is live and `info` valid.
-        let buffer = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
+        let buffer = unsafe { crate::creation::buffer(raw_device, &info) }.map_err(vulkan)?;
         // SAFETY: `buffer` is a live buffer of this device.
         let requirements = unsafe { raw_device.get_buffer_memory_requirements(buffer) };
         let placement = match crate::memory::allocate(
@@ -222,9 +222,9 @@ impl Device {
             unsafe { release::object(raw_device, buffer) };
         };
         // SAFETY: the placement meets the buffer's requirements and is not bound elsewhere.
-        if let Err(error) =
-            unsafe { raw_device.bind_buffer_memory(buffer, placement.memory, placement.offset) }
-        {
+        if let Err(error) = unsafe {
+            crate::creation::bind_buffer(raw_device, buffer, placement.memory, placement.offset)
+        } {
             release(&placement);
             return Err(vulkan(error));
         }
@@ -364,9 +364,9 @@ impl Device {
             unsafe { release::object(raw_device, image) };
         };
         // SAFETY: the placement meets the image's requirements and is not bound elsewhere.
-        if let Err(error) =
-            unsafe { raw_device.bind_image_memory(image, placement.memory, placement.offset) }
-        {
+        if let Err(error) = unsafe {
+            crate::creation::bind_image(raw_device, image, placement.memory, placement.offset)
+        } {
             release(&placement);
             return Err(vulkan(error));
         }
@@ -383,7 +383,7 @@ impl Device {
             .format(format)
             .subresource_range(range);
         // SAFETY: the image is live and bound; the view type takes its layers.
-        let view = match unsafe { raw_device.create_image_view(&view_info, None) } {
+        let view = match unsafe { crate::creation::image_view(raw_device, &view_info) } {
             Ok(view) => view,
             Err(error) => {
                 release(&placement);

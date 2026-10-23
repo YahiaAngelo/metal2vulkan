@@ -204,7 +204,12 @@ impl Device {
         let image = StandInImage { raw, placement };
         // SAFETY: the placement meets the image's requirements and is bound nowhere else.
         if let Err(error) = unsafe {
-            raw_device.bind_image_memory(raw, image.placement.memory, image.placement.offset)
+            crate::creation::bind_image(
+                raw_device,
+                raw,
+                image.placement.memory,
+                image.placement.offset,
+            )
         } {
             self.drop_stand_in_image(&image);
             return Err(vulkan(error));

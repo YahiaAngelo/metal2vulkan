@@ -2094,7 +2094,7 @@ impl Device {
             }
             (None, None) => (|| {
                 // SAFETY: the device is live and `info` valid.
-                let raw = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
+                let raw = unsafe { crate::creation::buffer(raw_device, &info) }.map_err(vulkan)?;
                 shared.counts.buffer_made(info.usage);
                 let placed = if of_heap {
                     self.place_heap_buffer(raw, length, class, placement)
@@ -2175,7 +2175,7 @@ impl Device {
                 .usage(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST),
         );
         // SAFETY: the device is live and `info` valid.
-        let raw = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
+        let raw = unsafe { crate::creation::buffer(raw_device, &info) }.map_err(vulkan)?;
         // SAFETY: `raw` is a live buffer of this device.
         let requirements = unsafe { raw_device.get_buffer_memory_requirements(raw) };
         let allocated = crate::memory::allocate(
@@ -2186,8 +2186,9 @@ impl Device {
         );
         let placed = allocated.and_then(|placement| {
             // SAFETY: the placement meets the buffer's requirements and is not bound elsewhere.
-            match unsafe { raw_device.bind_buffer_memory(raw, placement.memory, placement.offset) }
-            {
+            match unsafe {
+                crate::creation::bind_buffer(raw_device, raw, placement.memory, placement.offset)
+            } {
                 Ok(()) => Ok(placement),
                 Err(error) => {
                     lock(&shared.memory).free(raw_device, &placement);
@@ -2239,7 +2240,7 @@ impl Device {
                 .push_next(&mut usage),
         );
         // SAFETY: the device is live and `info` and its chain valid.
-        let raw = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
+        let raw = unsafe { crate::creation::buffer(raw_device, &info) }.map_err(vulkan)?;
         shared
             .counts
             .buffer_made(vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS);
@@ -2556,8 +2557,9 @@ impl Device {
             crate::memory::allocate(&shared.memory, raw_device, &requirements, class)?
         };
         // SAFETY: the placement meets the buffer's requirements and is not bound elsewhere.
-        let bound =
-            unsafe { raw_device.bind_buffer_memory(raw, placement.memory, placement.offset) };
+        let bound = unsafe {
+            crate::creation::bind_buffer(raw_device, raw, placement.memory, placement.offset)
+        };
         let address = match bound {
             Ok(()) => lock(&shared.addresses).place(at, length),
             Err(error) => {

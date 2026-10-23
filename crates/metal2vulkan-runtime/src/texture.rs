@@ -1013,7 +1013,7 @@ impl Image {
         let mut usage = vk::ImageViewUsageCreateInfo::default();
         let info = view.create_info(image, &mut usage);
         // SAFETY: the caller's.
-        unsafe { self.device.shared().vk().create_image_view(&info, None) }.map_err(vulkan)
+        unsafe { crate::creation::image_view(self.device.shared().vk(), &info) }.map_err(vulkan)
     }
 
     /// Exchange the image's `VkImage` and views with `objects`'s: the image is `objects`'s new
@@ -1931,9 +1931,9 @@ impl Device {
             }
         };
         // SAFETY: the placement meets the image's requirements and is not bound elsewhere.
-        if let Err(error) =
-            unsafe { raw_device.bind_image_memory(raw, placement.memory, placement.offset) }
-        {
+        if let Err(error) = unsafe {
+            crate::creation::bind_image(raw_device, raw, placement.memory, placement.offset)
+        } {
             lock(&shared.memory).free(raw_device, &placement);
             // SAFETY: the image is unused.
             unsafe { release::object(raw_device, raw) };
@@ -2591,7 +2591,9 @@ impl Device {
         // SAFETY: the image is live and unbound; the memory is the buffer's, which outlives the
         // texture holding it, in a type the image takes, at an offset `aliases` checked against
         // the image's alignment and size.
-        if let Err(error) = unsafe { raw_device.bind_image_memory(raw, memory, memory_offset) } {
+        if let Err(error) =
+            unsafe { crate::creation::bind_image(raw_device, raw, memory, memory_offset) }
+        {
             // SAFETY: the image is live and unbound, and no command uses it.
             unsafe { release::object(raw_device, raw) };
             return Err(vulkan(error));
@@ -2856,9 +2858,9 @@ impl Device {
                 }
             };
         // SAFETY: the placement meets the image's requirements and is not bound elsewhere.
-        if let Err(error) =
-            unsafe { raw_device.bind_image_memory(raw, placement.memory, placement.offset) }
-        {
+        if let Err(error) = unsafe {
+            crate::creation::bind_image(raw_device, raw, placement.memory, placement.offset)
+        } {
             lock(&shared.memory).free(raw_device, &placement);
             // SAFETY: the image is unused.
             unsafe { release::object(raw_device, raw) };
@@ -3791,7 +3793,7 @@ impl Staging<'_> {
                 .usage(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST),
         );
         // SAFETY: the device is live and `info` valid.
-        let raw = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
+        let raw = unsafe { crate::creation::buffer(raw_device, &info) }.map_err(vulkan)?;
         // SAFETY: `raw` is a live buffer of this device.
         let requirements = unsafe { raw_device.get_buffer_memory_requirements(raw) };
         let placement = match crate::memory::allocate(
@@ -3818,7 +3820,12 @@ impl Staging<'_> {
         }
         // SAFETY: the placement meets the buffer's requirements and is not bound elsewhere.
         unsafe {
-            raw_device.bind_buffer_memory(raw, staging.placement.memory, staging.placement.offset)
+            crate::creation::bind_buffer(
+                raw_device,
+                raw,
+                staging.placement.memory,
+                staging.placement.offset,
+            )
         }
         .map_err(vulkan)?;
         Ok(staging)

@@ -823,7 +823,7 @@ impl Device {
                     .push_next(&mut external),
             );
             // SAFETY: the device is live and `info` and its chain valid.
-            let raw = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
+            let raw = unsafe { crate::creation::buffer(raw_device, &info) }.map_err(vulkan)?;
             shared.counts.buffer_made(info.usage);
             // SAFETY: `raw` is a live buffer of this device.
             let requirements = unsafe { raw_device.get_buffer_memory_requirements(raw) };
@@ -1153,8 +1153,9 @@ impl Device {
                 })?;
         // SAFETY: the placement is the pages' memory, the buffer's size and requirements of it
         // available from `at` (the caller's), and the buffer is unbound.
-        let bound =
-            unsafe { raw_device.bind_buffer_memory(raw, placement.memory, placement.offset + at) };
+        let bound = unsafe {
+            crate::creation::bind_buffer(raw_device, raw, placement.memory, placement.offset + at)
+        };
         match bound {
             Ok(()) => {
                 shared.counts.host_pointer_import_made(size);

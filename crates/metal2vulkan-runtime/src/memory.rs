@@ -632,7 +632,7 @@ fn address_buffer(
             .usage(usage(true)),
     );
     // SAFETY: the device is live and `info` valid.
-    let raw = unsafe { device.create_buffer(&info, None) }.map_err(vulkan)?;
+    let raw = unsafe { crate::creation::buffer(device, &info) }.map_err(vulkan)?;
     // SAFETY: `raw` is a live buffer of this device.
     let required = unsafe { device.get_buffer_memory_requirements(raw) }.size;
     Ok((raw, required))
@@ -651,7 +651,7 @@ unsafe fn bind_addresses(
     memory: vk::DeviceMemory,
 ) -> Result<BlockAddresses, Error> {
     // SAFETY: the caller's contract.
-    if let Err(error) = unsafe { device.bind_buffer_memory(raw, memory, 0) } {
+    if let Err(error) = unsafe { crate::creation::bind_buffer(device, raw, memory, 0) } {
         // SAFETY: the buffer is unused.
         unsafe { release::object(device, raw) };
         return Err(vulkan(error));
@@ -1412,7 +1412,7 @@ impl Memory {
             // SAFETY: `info` and its chain live for the call; the type index is the device's and
             // allows the dma-buf (and the image, unbound and made for dma-bufs, whose size this
             // is). A failed import leaves the descriptor open, the caller's.
-            match unsafe { device.allocate_memory(&info, None) } {
+            match unsafe { crate::creation::allocate_memory(device, &info) } {
                 Ok(memory) => {
                     // A successful import owns the descriptor: Vulkan closes it with the memory.
                     let _ = fd.into_raw_fd();
@@ -1537,7 +1537,7 @@ impl BlockMaker {
             info = info.push_next(&mut flags);
         }
         // SAFETY: `info` and its chain live for the call; the type index is the device's.
-        let memory = match unsafe { device.allocate_memory(&info, None) } {
+        let memory = match unsafe { crate::creation::allocate_memory(device, &info) } {
             Ok(memory) => memory,
             Err(error) => {
                 release_addresses();
@@ -1601,7 +1601,7 @@ fn buffer_types(
 ) -> Result<u32, Error> {
     let info = sharing.buffer(vk::BufferCreateInfo::default().size(16).usage(usage));
     // SAFETY: the device is live and `info` valid.
-    let raw = unsafe { device.create_buffer(&info, None) }.map_err(vulkan)?;
+    let raw = unsafe { crate::creation::buffer(device, &info) }.map_err(vulkan)?;
     // SAFETY: `raw` is a live buffer of this device, destroyed right after the query with no
     // memory bound.
     Ok(unsafe {
@@ -1706,7 +1706,7 @@ unsafe fn import_pointer(
         }
         // SAFETY: `info` and its chain live for the call; the type index is the device's and
         // allows the pointer; the caller's contract keeps the memory mapped.
-        match unsafe { device.allocate_memory(&info, None) } {
+        match unsafe { crate::creation::allocate_memory(device, &info) } {
             Ok(memory) => return Ok((memory, type_index)),
             Err(error) => failure = ImportFailure::Vulkan(error),
         }
