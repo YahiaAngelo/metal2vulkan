@@ -1307,4 +1307,176 @@ mod tests {
         let equal = row(&golden, ComparisonClass::Exact, CandidateStatus::Mismatch);
         assert!(equal.validate_content().is_err());
     }
+
+    /// A recorded timing reaches no digest, no fingerprint and no verdict.
+    ///
+    /// This is the guard that protects the corpus. The corpus is never deleted or rewritten and
+    /// re-qualifying it on Metal is expensive, so a figure that changes on every run must not be
+    /// able to make a stored row stale, nor to decide a verdict. Nothing in this crate derives a
+    /// fingerprint *from* a row — a translator fingerprint and an executor ABI are handed to a row
+    /// as strings — so what a timing could reach is a row's own content digests and the comparisons
+    /// that read a row, and both are pinned here: the three rows differ only in their figures (and
+    /// one has none at all), and every answer about them is the same answer.
+    #[test]
+    fn a_timing_reaches_no_digest_no_fingerprint_and_no_verdict() {
+        let case = case();
+        let input_sha256 = case.computed_input_sha256().unwrap();
+        let output = [1u8, 0, 0, 0];
+        let output_sha256 = sha256_bytes(&output);
+        let metal = |timing: Option<CaseTiming>| MetalObservation {
+            case_id: case.case_id.clone(),
+            air_sha256: case.air_sha256.clone(),
+            input_sha256: input_sha256.clone(),
+            metal_output_sha256: output_sha256.clone(),
+            output_b64: "AQAAAA==".into(),
+            environment_id: "metal-env".into(),
+            environment: serde_json::json!({"device": "test"}),
+            oracle_abi: "oracle-v1".into(),
+            timing,
+            status: MetalStatus::Qualified,
+        };
+        let fast = CaseTiming {
+            runs: 3,
+            total_micros: 300,
+            least_micros: 90,
+        };
+        let slow = CaseTiming {
+            runs: 3,
+            total_micros: 9_000_000,
+            least_micros: 2_900_000,
+        };
+        // The figures do differ where they are stored, so nothing below holds vacuously.
+        let member =
+            |row: &MetalObservation| serde_json::to_value(row).unwrap().get("timing").cloned();
+        assert_ne!(member(&metal(Some(fast))), member(&metal(Some(slow))));
+        assert_eq!(member(&metal(None)), None);
+
+        let rows = [metal(None), metal(Some(fast)), metal(Some(slow))];
+        for row in &rows {
+            // The content digest is over the output bytes and nothing else: a row whose digest
+            // took its timing in as well is refused, whatever its figure.
+            assert_eq!(row.validate_content(), Ok(()));
+            assert_eq!(row.metal_output_sha256, output_sha256);
+            assert!(row.dependency_matches(&case, "oracle-v1"));
+            assert!(!row.dependency_matches(&case, "oracle-v2"));
+            assert_eq!(row.observed_output(), Some(&row.output_b64));
+            assert_eq!(row.reference_gap_for(&case, "oracle-v1"), None);
+            assert_eq!(
+                MetalObservation::current([row.clone()], &case, "metal-env", "oracle-v1"),
+                Ok(row.clone())
+            );
+        }
+        let mut folded = metal(Some(fast));
+        folded.metal_output_sha256 = sha256_bytes(&[output.as_slice(), b"300"].concat());
+        assert!(folded
+            .validate_content()
+            .unwrap_err()
+            .contains("output hash mismatch"));
+
+        // Two rows that differ only in their figures are one row: no comparison can separate
+        // them, so a re-measurement is never new evidence.
+        assert_eq!(metal(Some(fast)), metal(Some(slow)));
+        assert_eq!(fast, slow);
+
+        // No load-bearing field moved: a timed row is the untimed row's bytes plus one member.
+        let without_timing = |row: &MetalObservation| {
+            let mut value = serde_json::to_value(row).unwrap();
+            value.as_object_mut().unwrap().remove("timing");
+            value
+        };
+        let untimed = serde_json::to_value(metal(None)).unwrap();
+        assert_eq!(without_timing(&metal(Some(fast))), untimed);
+        assert_eq!(without_timing(&metal(Some(slow))), untimed);
+        // And an untimed row serializes to exactly the bytes it had: a row recorded before the
+        // figure existed is not rewritten by reading and writing it again.
+        assert_eq!(
+            serde_json::to_string(&metal(None)).unwrap(),
+            serde_json::to_string(
+                &serde_json::from_str::<MetalObservation>(
+                    &serde_json::to_string(&metal(None)).unwrap()
+                )
+                .unwrap()
+            )
+            .unwrap()
+        );
+        assert!(!serde_json::to_string(&metal(None))
+            .unwrap()
+            .contains("timing"));
+
+        let candidate = |timing: Option<CaseTiming>| CandidateObservation {
+            case_id: case.case_id.clone(),
+            air_sha256: case.air_sha256.clone(),
+            input_sha256: input_sha256.clone(),
+            golden_output_sha256: output_sha256.clone(),
+            spv_sha256: "33".repeat(32),
+            translator_fingerprint: "55".repeat(32),
+            candidate_output_sha256: output_sha256.clone(),
+            output_b64: "AQAAAA==".into(),
+            backend: Backend::Vulkan,
+            environment_id: "vk-env".into(),
+            environment: serde_json::json!({"driver": "test"}),
+            executor_abi: "executor-v1".into(),
+            comparison: ComparisonClass::Exact,
+            census: None,
+            timing,
+            status: CandidateStatus::Match,
+        };
+        let golden = metal(Some(fast));
+        let dependencies = CandidateDependencies {
+            case: &case,
+            metal: &golden,
+            spv_sha256: &"33".repeat(32),
+            translator_fingerprint: &"55".repeat(32),
+            backend: Backend::Vulkan,
+            environment_id: "vk-env",
+            executor_abi: "executor-v1",
+        };
+        for row in [
+            candidate(None),
+            candidate(Some(fast)),
+            candidate(Some(slow)),
+        ] {
+            assert_eq!(row.validate_content(), Ok(()));
+            assert_eq!(row.candidate_output_sha256, output_sha256);
+            assert_eq!(row.translator_fingerprint, "55".repeat(32));
+            // The verdict a row is held to is the one its bytes decide.
+            assert!(row.class_holds());
+            assert!(row.dependency_matches(&dependencies));
+            let mut mismatched = row.clone();
+            mismatched.status = CandidateStatus::Mismatch;
+            assert!(mismatched.validate_content().is_err());
+        }
+        assert_eq!(candidate(Some(fast)), candidate(Some(slow)));
+        let candidate_without_timing = |row: &CandidateObservation| {
+            let mut value = serde_json::to_value(row).unwrap();
+            value.as_object_mut().unwrap().remove("timing");
+            value
+        };
+        let untimed = serde_json::to_value(candidate(None)).unwrap();
+        assert_eq!(candidate_without_timing(&candidate(Some(fast))), untimed);
+        assert_eq!(candidate_without_timing(&candidate(Some(slow))), untimed);
+    }
+
+    /// Every execution's figure is in the timing a row records, and the least one names the
+    /// cheapest of them: the first execution's compiles do not decide it.
+    #[test]
+    fn a_timing_covers_every_execution_it_was_read_from() {
+        use std::time::Duration;
+        assert_eq!(CaseTiming::of([]), None);
+        let one = CaseTiming::of([Duration::from_micros(700)]).unwrap();
+        assert_eq!(
+            (one.runs, one.total_micros, one.least_micros),
+            (1, 700, 700)
+        );
+        let three = CaseTiming::of([
+            Duration::from_micros(5_000),
+            Duration::from_micros(300),
+            Duration::from_micros(412),
+        ])
+        .unwrap();
+        assert_eq!(
+            (three.runs, three.total_micros, three.least_micros),
+            (3, 5_712, 300)
+        );
+    }
 }

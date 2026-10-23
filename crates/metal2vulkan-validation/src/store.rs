@@ -1487,6 +1487,99 @@ mod tests {
         }
     }
 
+    /// A row this build stores records what its case cost in time, and the store refuses one that
+    /// does not. This is where the owner's rule — every suite records timing for every case it
+    /// runs, not a selection — holds by construction rather than by review: the two paths that
+    /// produce a row (a Metal qualification and a candidate run on a device) hand the store their
+    /// own measurement, and a path that lost its clock cannot write a row at all.
+    ///
+    /// Rows already on disk are untouched by this. One recorded before the figure existed carries
+    /// none, is read as it always was, and keeps its own bytes when a new row rewrites its shard.
+    #[test]
+    fn a_stored_row_records_what_its_case_cost() {
+        let scratch = ScratchDir::new("stored-row-timing").unwrap();
+        let store = CorpusStore::new(scratch.path());
+        let case = make_case("timed", "KgAAAA==");
+        store.put_case(case.clone()).unwrap();
+        let metal = |timing| MetalObservation {
+            timing,
+            case_id: case.case_id.clone(),
+            air_sha256: case.air_sha256.clone(),
+            input_sha256: case.computed_input_sha256().unwrap(),
+            metal_output_sha256: crate::hash::sha256_bytes(&[42, 0, 0, 0]),
+            output_b64: "KgAAAA==".into(),
+            environment_id: "metal-env".into(),
+            environment: serde_json::json!({}),
+            oracle_abi: "v1".into(),
+            status: MetalStatus::Qualified,
+        };
+        let refused = store.upsert_metal(metal(None)).unwrap_err();
+        assert!(
+            refused.contains("records no timing") && refused.contains(&case.case_id),
+            "{refused}"
+        );
+        assert!(store.read_metal().unwrap().is_empty());
+        store
+            .upsert_metal(metal(Some(crate::observation::test_timing())))
+            .unwrap();
+
+        let mut rows = store.read_metal().unwrap();
+        assert_eq!(rows.len(), 1);
+        let stored = rows.pop().unwrap().timing.expect("a stored Metal timing");
+        assert_eq!(stored.runs, crate::observation::test_timing().runs);
+        assert_eq!(
+            stored.total_micros,
+            crate::observation::test_timing().total_micros
+        );
+        assert_eq!(
+            stored.least_micros,
+            crate::observation::test_timing().least_micros
+        );
+
+        let mut untimed = candidate(&case, Backend::Vulkan, "vk-env");
+        untimed.timing = None;
+        let refused = store.upsert_candidate(untimed).unwrap_err();
+        assert!(
+            refused.contains("records no timing") && refused.contains("vk-env"),
+            "{refused}"
+        );
+        assert!(store.read_candidates(Backend::Vulkan).unwrap().is_empty());
+        store
+            .upsert_candidate(candidate(&case, Backend::Vulkan, "vk-env"))
+            .unwrap();
+        let mut rows = store.read_candidates(Backend::Vulkan).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows.pop().unwrap().timing.is_some());
+
+        // A row a shard already holds without a figure is read as it is, and stays byte for byte
+        // as it is when another row joins its shard.
+        let shard = shard_index_for_hash(&case.air_sha256).unwrap();
+        let path = scratch
+            .path()
+            .join("observations/metal")
+            .join(shard_name(shard));
+        let mut old = metal(None);
+        old.environment_id = "old-env".into();
+        let line = serde_json::to_string(&old).unwrap();
+        assert!(!line.contains("timing"));
+        let mut text = fs::read_to_string(&path).unwrap();
+        text.insert_str(0, &format!("{line}\n"));
+        fs::write(&path, &text).unwrap();
+        let read = store.read_metal().unwrap();
+        assert_eq!(read.len(), 2);
+        assert!(read
+            .iter()
+            .any(|row| row.environment_id == "old-env" && row.timing.is_none()));
+        let mut joined = metal(Some(crate::observation::test_timing()));
+        joined.environment_id = "second-env".into();
+        store.upsert_metal(joined).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(
+            written.lines().any(|written| written == line),
+            "the untimed row was rewritten"
+        );
+    }
+
     /// The store's own writes keep every shard in key order with one row per slot, and
     /// `layout_errors` names a shard whose rows were appended out of order, a slot written twice,
     /// and a row in a shard its AIR does not select (23b3bbbc appended MoltenVK rows).
