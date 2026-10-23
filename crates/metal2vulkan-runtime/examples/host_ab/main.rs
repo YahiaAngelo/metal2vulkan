@@ -214,6 +214,7 @@ mod gpu;
 mod native;
 mod percall;
 mod runtime;
+mod vkfloor;
 mod workloads;
 
 use gpu::Gpu;
@@ -767,7 +768,11 @@ fn print_percall(table: &Table, rounds: usize) {
     println!("Each call timed alone, warm, {rounds} rounds; ns a call.\n");
     println!("| call | Metal | runtime | runtime/Metal | runtime - Metal |");
     println!("|---|---:|---:|---:|---:|");
-    for call in &calls {
+    // A call of the driver's own, which the runtime's side alone times, has no Metal counterpart
+    // and goes in its own table below (`vkfloor.rs`).
+    let (floor, metal): (Vec<&&str>, Vec<&&str>) =
+        calls.iter().partition(|call| call.starts_with("vk_"));
+    for call in &metal {
         let (n, r) = of(call, "self");
         let added = match (n, r) {
             (Some(n), Some(r)) => format!("{:+.1}", r - n),
@@ -779,6 +784,18 @@ fn print_percall(table: &Table, rounds: usize) {
             show(r),
             ratio((n, r)).map_or("-".to_owned(), |v| format!("{v:.2}x"))
         );
+    }
+    if !floor.is_empty() {
+        println!(
+            "\nThe driver's own calls under them, on the Vulkan device the runtime holds \
+             (MoltenVK here), which Metal has no counterpart for: what a gap above costs \
+             outside our code.\n"
+        );
+        println!("| driver call | cost |");
+        println!("|---|---:|");
+        for call in &floor {
+            println!("| {call} | {} |", show(of(call, "self").1));
+        }
     }
     let mut worst: Vec<(&str, f64, f64, f64)> = calls
         .iter()

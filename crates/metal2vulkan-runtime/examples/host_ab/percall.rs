@@ -92,7 +92,7 @@ impl Totals {
 /// Time one call group: `windows` measured windows, each preparing the call's state, making the
 /// call `inner` times, then draining it. Every window runs inside an autorelease pool, as a
 /// Metal program's frame does, so nothing of one window is released inside another's timing.
-fn group<G: Gpu, S>(
+pub fn group<G: Gpu, S>(
     g: &G,
     name: &str,
     (inner, windows): (usize, usize),
@@ -912,6 +912,10 @@ pub fn percall<G: Gpu>(g: &G, s: &Scene<G>, library: &G::Library, sizes: &Sizes)
         },
         drop,
     );
+
+    // The driver's own cost under the calls above, where the side has one (`vkfloor.rs`).
+    // SAFETY: the pages are this process's, eight megabytes of them, and they outlive the call.
+    unsafe { g.driver_floor(w, o.pages) };
 
     // Nothing above may have made a pipeline: the groups bind states made before them, and a
     // making is pipeline-creation time, which has its own ceiling and no place in a call's cost.

@@ -1213,6 +1213,11 @@ impl Gpu for Runtime {
         f()
     }
 
+    unsafe fn driver_floor(&self, windows: usize, pages: *mut u8) {
+        // SAFETY: the caller's contract, passed on.
+        unsafe { crate::vkfloor::measure(self, &self.device, windows, pages) };
+    }
+
     fn work_counts(&self) -> Vec<(&'static str, f64)> {
         let c = self.device.work_counts();
         let replayed = &c.commands_replayed;
