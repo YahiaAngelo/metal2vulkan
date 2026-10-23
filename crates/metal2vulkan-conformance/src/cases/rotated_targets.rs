@@ -50,6 +50,7 @@ use crate::render::{
 };
 use crate::transcript::{Node, Observed, Sites, Value};
 use metal2vulkan::metal::{BlendFactor, BlendOperation, ColorWriteMask, PixelFormat};
+use metal2vulkan_runtime::Degradation;
 
 use super::extended_range_targets::{
     fixture, fixture_inputs, not_read, program, shader_refs, shape, VERTEX,
@@ -483,20 +484,29 @@ impl Case for RotatedTarget {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // None, and that is a deliberate refusal to guess.
+        // One allowance, and it loosens **no texel**: it names the notice this venue announces.
         //
-        // On MoltenVK every byte of both legs compares exactly and nothing is announced, which is
-        // the answer this family wants: `rt6_fill_rgba32float` is the `float4` fill, not the
-        // `half4` one, so no fast-math rounding notice applies to it.
+        // Metal has no notices at all, so a recording's notice set is empty and any notice of ours
+        // has to be declared by its code or the case cannot be read on the venue that announces it.
+        // Which code depends on the state, not on the device: a state that blends keeps the
+        // device's own conversion of the channels it blends
+        // (`PrecisionNote::DeviceColorConversion`), and an unblended one has the fragment round
+        // each output by Metal's rule itself (`ShaderColorConversion`). So the case names the one
+        // its own blend implies, and a venue that announces neither (MoltenVK on this M3 Max, where
+        // every byte of both legs matched) leaves it unfired, which the report says and the suite
+        // documents as a venue-specific allowance doing its job.
         //
-        // A first lavapipe run showed that venue announcing `shader-color-conversion` and
-        // `device-color-conversion` and moving the blended states' codes by one, and
-        // `docs/API.md`'s catalogue entry for the latter names exactly that shape. An allowance for
-        // it is therefore plausible -- but this round did not get a lavapipe run back that
-        // *justified* one, and the suite's own allowance report says so plainly: named on 12 sites,
-        // fired on no venue, checked by no run. An allowance no run justified is a claim without
-        // evidence, so the venue that needs one adds it with the run that shows it.
-        Vec::new()
+        // **No tolerance on any texel, deliberately.** On lavapipe the blended states store a code
+        // one apart from Metal's, and that is exactly the shape `DeviceColorConversion` describes
+        // -- but the note's own definition ends "validation derives no tolerance and no explanation
+        // from it: a difference stays a mismatch for review". Loosening a texel here would be this
+        // suite overruling that, so the twelve blended states stay divergent on lavapipe and are a
+        // per-venue divergence to carry, not a tolerance to write. The two unblended states, whose
+        // texels match bit for bit there, read announced.
+        vec![crate::replay::notice_allowance(match self.state.blend {
+            None => Degradation::ShaderColorConversion.code(),
+            Some(_) => Degradation::DeviceColorConversion.code(),
+        })]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
