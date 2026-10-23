@@ -4719,6 +4719,68 @@ fn a_multisampled_sparse_texture_without_the_sample_count_is_the_devices_gap() {
     ));
 }
 
+/// A device's gap is the device's gap in **every** variant that carries a typed refusal, and our
+/// unbuilt work stays ours in every one of them.
+///
+/// Which `Error` variant wraps an `Unsupported` says *where the refusal was decided*, never *whose
+/// gap it is*: the plain form decides it as the call is made, `Error::Bind` as a dispatch or draw
+/// is planned, and `Error::Compile` as a kernel the runtime dispatches for itself is built. Only
+/// [`Unsupported::needs`] says whose gap it is, so the same `needs` must read the same way through
+/// all three, and the carrier must not change the answer.
+///
+/// `Error::Compile` was the one [`crate::verdict::device_gap`] did not read, and it is reachable:
+/// an extended-range attachment's shadow load is built on demand through `owned_kernel`, whose 43
+/// builds wrap the compile layer's refusal in `Error::Compile`, and `extended_shadow_module`
+/// refuses `Unsupported::needs(FramebufferFetch, c)` -- a `Needs::AnyOf`, the device's own gap --
+/// where the device's profile lacks a capability its module needs.
+/// `render/extended_shadow.rs`'s pre-instance load hands that refusal to the caller with `?`, so
+/// before this a device without the capability had its gap scored as a refusal of ours.
+///
+/// Both halves over the same three carriers, because one direction alone is vacuous here: a test
+/// that only checked the gaps would pass a `device_gap` that answered `Some` for everything.
+#[test]
+fn a_device_gap_reads_the_same_through_every_variant_that_carries_a_refusal() {
+    use metal2vulkan::device::VkFeature;
+    use metal2vulkan::error::{BindError, Capability, Error as CompileError, Feature, Unsupported};
+    use metal2vulkan_runtime::Error;
+    // One `Unsupported` that is the device's gap, and one that is ours, each put through every
+    // carrier unchanged. Built once so the two directions cannot drift apart.
+    let theirs = Unsupported::needs(
+        Feature::FramebufferFetch,
+        Capability::Feature(VkFeature::ShaderInt8),
+    );
+    let ours = Unsupported::not_implemented(Feature::FramebufferFetch);
+    let carriers: [(&str, fn(Unsupported) -> Error); 3] = [
+        ("Error::Unsupported", Error::Unsupported),
+        ("Error::Bind", |u| Error::Bind(BindError::Unsupported(u))),
+        ("Error::Compile", |u| {
+            Error::Compile(CompileError::Unsupported(u))
+        }),
+    ];
+    for (carrier, wrap) in carriers {
+        let gap = wrap(theirs.clone());
+        assert!(
+            crate::verdict::device_gap(&gap).is_some(),
+            "{carrier} carries the same typed refusal, so a device's gap in it is the device's gap"
+        );
+        // And through the one call every refusal of the suite passes: `Failure::of` is where
+        // `lacks` is set, so a carrier it does not read loses the fact for the whole run.
+        assert!(
+            Failure::of(&gap).lacks.is_some(),
+            "{carrier}: a refusal the venue cannot answer must reach the run as the venue's gap"
+        );
+        let mine = wrap(ours.clone());
+        assert!(
+            crate::verdict::device_gap(&mine).is_none(),
+            "{carrier}: what we have not built stays ours to answer for"
+        );
+        assert!(
+            Failure::of(&mine).lacks.is_none(),
+            "{carrier}: our own unbuilt work must not be excused as the venue's gap"
+        );
+    }
+}
+
 /// Every field of a [`crate::texture::TextureRequest`] reaches **both** sides' texture
 /// descriptors, checked field by field with no device, each at a value no other field holds.
 ///
