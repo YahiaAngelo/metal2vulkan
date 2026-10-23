@@ -41,6 +41,7 @@ pub mod extended_range_blends;
 pub mod extended_range_planes;
 pub mod extended_range_targets;
 pub mod extended_range_two_planes;
+pub mod extended_swizzles;
 pub mod fetch_ordered;
 pub mod format_copies;
 pub mod fresh_contents;
@@ -255,6 +256,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
             .map(|case| Box::new(case) as Box<dyn Case>),
     );
 
+    for case in extended_swizzles::all() {
+        cases.push(Box::new(case));
+    }
     cases.extend(texel_swizzles::all());
     for case in swizzled_storage::all() {
         cases.push(Box::new(case));
