@@ -101,7 +101,7 @@ metal2vulkan kernel.ll kernel.spv --profile device.json --emit-meta kernel.json
 The flow follows Metal's object lifecycle: describe the device, parse a library, compile a
 pipeline, then plan and instantiate each dispatch or draw.
 
-```rust
+```rust,ignore
 use metal2vulkan::device::{Device, DeviceDescription, DevicePolicy};
 use metal2vulkan::library::Library;
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, FunctionDescriptor, StageSource};
