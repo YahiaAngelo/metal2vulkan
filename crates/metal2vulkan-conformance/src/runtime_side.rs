@@ -5225,6 +5225,80 @@ fn encode_pass(command_buffer: &CommandBuffer, pass: &RenderPass, pools: &Pools)
             } => encoder
                 .draw_primitives_indirect(*primitive, buffer(*arguments)?, *offset)
                 .map_err(Failure::from_error)?,
+            // Metal's short draw selectors are the long ones with its own documented defaults, and
+            // the runtime's API has one entry point a family rather than five. So our leg reaches
+            // these four through that entry point with the defaults written out, which is what
+            // makes the comparison a reading of Metal's defaults: a short form that behaved as
+            // something other than one instance from base 0 would differ here.
+            RenderStep::DrawPlain {
+                primitive,
+                first,
+                count,
+            } => encoder
+                .draw_primitives(*primitive, *first, *count, 1, 0)
+                .map_err(Failure::from_error)?,
+            RenderStep::DrawInstanced {
+                primitive,
+                first,
+                count,
+                instances,
+            } => encoder
+                .draw_primitives(*primitive, *first, *count, *instances, 0)
+                .map_err(Failure::from_error)?,
+            RenderStep::DrawIndexedPlain {
+                primitive,
+                count,
+                index_type,
+                indices,
+                offset,
+            } => encoder
+                .draw_indexed_primitives(
+                    *primitive,
+                    *count,
+                    *index_type,
+                    buffer(*indices)?,
+                    *offset,
+                    1,
+                    0,
+                    0,
+                )
+                .map_err(Failure::from_error)?,
+            RenderStep::DrawIndexedInstanced {
+                primitive,
+                count,
+                index_type,
+                indices,
+                offset,
+                instances,
+            } => encoder
+                .draw_indexed_primitives(
+                    *primitive,
+                    *count,
+                    *index_type,
+                    buffer(*indices)?,
+                    *offset,
+                    *instances,
+                    0,
+                    0,
+                )
+                .map_err(Failure::from_error)?,
+            RenderStep::DrawIndexedIndirect {
+                primitive,
+                index_type,
+                indices,
+                index_offset,
+                arguments,
+                offset,
+            } => encoder
+                .draw_indexed_primitives_indirect(
+                    *primitive,
+                    *index_type,
+                    buffer(*indices)?,
+                    *index_offset,
+                    buffer(*arguments)?,
+                    *offset,
+                )
+                .map_err(Failure::from_error)?,
             RenderStep::UseBuffer {
                 buffer: held,
                 write,

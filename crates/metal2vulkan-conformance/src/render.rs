@@ -1257,6 +1257,56 @@ pub enum RenderStep {
         arguments: Handle,
         offset: u64,
     },
+    /// `drawPrimitives:vertexStart:vertexCount:`, the form that names no instance count at all.
+    ///
+    /// Metal's shortest draw. It is a call of its own rather than [`RenderStep::Draw`] with one
+    /// instance: the two selectors are two entry points of the driver, and a case that asks what
+    /// the short form does may not ask it through the long one.
+    DrawPlain {
+        primitive: PrimitiveType,
+        first: u32,
+        count: u32,
+    },
+    /// `drawPrimitives:vertexStart:vertexCount:instanceCount:`, which names the instances and
+    /// leaves the base instance to Metal's own 0, where [`RenderStep::Draw`] passes it.
+    DrawInstanced {
+        primitive: PrimitiveType,
+        first: u32,
+        count: u32,
+        instances: u32,
+    },
+    /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:`, the shortest
+    /// indexed draw: no instance count, no base vertex and no base instance.
+    DrawIndexedPlain {
+        primitive: PrimitiveType,
+        count: u32,
+        index_type: IndexType,
+        indices: Handle,
+        offset: u64,
+    },
+    /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:`,
+    /// which names the instances and leaves the base vertex and base instance at Metal's 0.
+    DrawIndexedInstanced {
+        primitive: PrimitiveType,
+        count: u32,
+        index_type: IndexType,
+        indices: Handle,
+        offset: u64,
+        instances: u32,
+    },
+    /// `drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:
+    /// indirectBufferOffset:`, whose argument buffer holds the draw's five 32-bit arguments:
+    /// `indexCount`, `instanceCount`, `indexStart`, `baseVertex` (signed) and `baseInstance`.
+    DrawIndexedIndirect {
+        primitive: PrimitiveType,
+        index_type: IndexType,
+        indices: Handle,
+        /// `indexBufferOffset`: where the draw's indices start, which is the encoder's parameter
+        /// rather than the argument buffer's.
+        index_offset: u64,
+        arguments: Handle,
+        offset: u64,
+    },
     /// `useResource:usage:stages:` of a buffer, which is how a resource an **indirect** command's
     /// functions reach is made resident: a command's buffer bindings are addresses, so Metal
     /// tracks nothing for them and the pass must say what they are.
@@ -1450,6 +1500,11 @@ impl RenderStep {
             RenderStep::Draw { .. } => "drawPrimitives",
             RenderStep::DrawIndexed { .. } => "drawIndexedPrimitives",
             RenderStep::DrawIndirect { .. } => "drawPrimitivesWithIndirectBuffer",
+            RenderStep::DrawPlain { .. } => "drawPrimitivesPlain",
+            RenderStep::DrawInstanced { .. } => "drawPrimitivesInstanced",
+            RenderStep::DrawIndexedPlain { .. } => "drawIndexedPrimitivesPlain",
+            RenderStep::DrawIndexedInstanced { .. } => "drawIndexedPrimitivesInstanced",
+            RenderStep::DrawIndexedIndirect { .. } => "drawIndexedPrimitivesWithIndirectBuffer",
             // `UseBuffer` is an indirect command's own residency call and names the same site
             // as `RenderStep::UseResource` below. No case holds both, and a case that comes to
             // hold both has to rename one and re-record it: the site a step is emitted at is
@@ -1558,6 +1613,67 @@ impl RenderStep {
                 primitive, offset, ..
             } => {
                 bytes.extend(primitive.as_raw().to_le_bytes());
+                bytes.extend(offset.to_le_bytes());
+            }
+            RenderStep::DrawPlain {
+                primitive,
+                first,
+                count,
+            } => {
+                bytes.extend(primitive.as_raw().to_le_bytes());
+                bytes.extend(first.to_le_bytes());
+                bytes.extend(count.to_le_bytes());
+            }
+            RenderStep::DrawInstanced {
+                primitive,
+                first,
+                count,
+                instances,
+            } => {
+                bytes.extend(primitive.as_raw().to_le_bytes());
+                bytes.extend(first.to_le_bytes());
+                bytes.extend(count.to_le_bytes());
+                bytes.extend(instances.to_le_bytes());
+            }
+            RenderStep::DrawIndexedPlain {
+                primitive,
+                count,
+                index_type,
+                offset,
+                ..
+            } => {
+                bytes.extend(primitive.as_raw().to_le_bytes());
+                bytes.extend(count.to_le_bytes());
+                bytes.extend(index_type.as_raw().to_le_bytes());
+                bytes.extend(offset.to_le_bytes());
+            }
+            RenderStep::DrawIndexedInstanced {
+                primitive,
+                count,
+                index_type,
+                offset,
+                instances,
+                ..
+            } => {
+                bytes.extend(primitive.as_raw().to_le_bytes());
+                bytes.extend(count.to_le_bytes());
+                bytes.extend(index_type.as_raw().to_le_bytes());
+                bytes.extend(offset.to_le_bytes());
+                bytes.extend(instances.to_le_bytes());
+            }
+            // The five arguments of an indexed indirect draw are the **argument buffer's** bytes,
+            // which the case fingerprints as its own buffer contents, so the call's own parameters
+            // are the primitive, the index type and the two offsets.
+            RenderStep::DrawIndexedIndirect {
+                primitive,
+                index_type,
+                index_offset,
+                offset,
+                ..
+            } => {
+                bytes.extend(primitive.as_raw().to_le_bytes());
+                bytes.extend(index_type.as_raw().to_le_bytes());
+                bytes.extend(index_offset.to_le_bytes());
                 bytes.extend(offset.to_le_bytes());
             }
             RenderStep::UseBuffer { write, stages, .. } => {
@@ -2192,7 +2308,41 @@ mod tests {
                 arguments: handle(),
                 offset: 0,
             },
-            RenderStep::DrawIndirect { .. } => RenderStep::UseBuffer {
+            RenderStep::DrawIndirect { .. } => RenderStep::DrawPlain {
+                primitive: PrimitiveType::Triangle,
+                first: 0,
+                count: 3,
+            },
+            RenderStep::DrawPlain { .. } => RenderStep::DrawInstanced {
+                primitive: PrimitiveType::Triangle,
+                first: 0,
+                count: 3,
+                instances: 1,
+            },
+            RenderStep::DrawInstanced { .. } => RenderStep::DrawIndexedPlain {
+                primitive: PrimitiveType::Triangle,
+                count: 3,
+                index_type: IndexType::UInt16,
+                indices: handle(),
+                offset: 0,
+            },
+            RenderStep::DrawIndexedPlain { .. } => RenderStep::DrawIndexedInstanced {
+                primitive: PrimitiveType::Triangle,
+                count: 3,
+                index_type: IndexType::UInt16,
+                indices: handle(),
+                offset: 0,
+                instances: 1,
+            },
+            RenderStep::DrawIndexedInstanced { .. } => RenderStep::DrawIndexedIndirect {
+                primitive: PrimitiveType::Triangle,
+                index_type: IndexType::UInt16,
+                indices: handle(),
+                index_offset: 0,
+                arguments: handle(),
+                offset: 0,
+            },
+            RenderStep::DrawIndexedIndirect { .. } => RenderStep::UseBuffer {
                 buffer: handle(),
                 write: false,
                 stages: crate::case::STAGE_VERTEX,

@@ -111,6 +111,7 @@ pub mod pvrtc_rows;
 pub mod rate_maps;
 pub mod render_chains;
 pub mod render_depth_stencil_state;
+pub mod render_draw_forms;
 pub mod render_pass_descriptors;
 pub mod render_residency;
 pub mod render_state;
@@ -397,6 +398,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(compute_render_chains::boxed());
     cases.extend(draw_state_changes::boxed());
     cases.extend(render_state::all());
+    cases.extend(render_draw_forms::all());
     cases.extend(render_depth_stencil_state::all());
     cases.extend(render_residency::all());
     cases.extend(frame_chains::boxed());

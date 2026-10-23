@@ -6152,6 +6152,104 @@ impl MetalSide {
                     );
                 }
             }
+            RenderStep::DrawPlain {
+                primitive: kind,
+                first,
+                count,
+            } => {
+                // SAFETY: the draw names a vertex range of the case's own positions, and every
+                // buffer the vertex function reads was bound by a step before it.
+                unsafe {
+                    encoder.drawPrimitives_vertexStart_vertexCount(
+                        primitive(*kind),
+                        *first as usize,
+                        *count as usize,
+                    );
+                }
+            }
+            RenderStep::DrawInstanced {
+                primitive: kind,
+                first,
+                count,
+                instances,
+            } => {
+                // SAFETY: as `DrawPlain`'s, for `instances` instances of the same range.
+                unsafe {
+                    encoder.drawPrimitives_vertexStart_vertexCount_instanceCount(
+                        primitive(*kind),
+                        *first as usize,
+                        *count as usize,
+                        *instances as usize,
+                    );
+                }
+            }
+            RenderStep::DrawIndexedPlain {
+                primitive: kind,
+                count,
+                index_type,
+                indices,
+                offset,
+            } => {
+                let buffer = self.held(*indices)?;
+                // SAFETY: the index buffer holds `count` indices of that type from that offset,
+                // which the case states as one of its inputs, and every index names a vertex of
+                // the case's own positions.
+                unsafe {
+                    encoder
+                        .drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset(
+                            primitive(*kind),
+                            *count as usize,
+                            MTLIndexType(index_type.as_raw() as usize),
+                            buffer,
+                            *offset as usize,
+                        );
+                }
+            }
+            RenderStep::DrawIndexedInstanced {
+                primitive: kind,
+                count,
+                index_type,
+                indices,
+                offset,
+                instances,
+            } => {
+                let buffer = self.held(*indices)?;
+                // SAFETY: as `DrawIndexedPlain`'s, for `instances` instances of the same indices.
+                unsafe {
+                    encoder.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount(
+                        primitive(*kind),
+                        *count as usize,
+                        MTLIndexType(index_type.as_raw() as usize),
+                        buffer,
+                        *offset as usize,
+                        *instances as usize,
+                    );
+                }
+            }
+            RenderStep::DrawIndexedIndirect {
+                primitive: kind,
+                index_type,
+                indices,
+                index_offset,
+                arguments,
+                offset,
+            } => {
+                let index_buffer = self.held(*indices)?;
+                let argument_buffer = self.held(*arguments)?;
+                // SAFETY: the argument buffer holds the draw's five 32-bit arguments at that
+                // offset and the index buffer holds the indices they name, both written by the
+                // case before the pass.
+                unsafe {
+                    encoder.drawIndexedPrimitives_indexType_indexBuffer_indexBufferOffset_indirectBuffer_indirectBufferOffset(
+                        primitive(*kind),
+                        MTLIndexType(index_type.as_raw() as usize),
+                        index_buffer,
+                        *index_offset as usize,
+                        argument_buffer,
+                        *offset as usize,
+                    );
+                }
+            }
             RenderStep::UseBuffer {
                 buffer,
                 write,
