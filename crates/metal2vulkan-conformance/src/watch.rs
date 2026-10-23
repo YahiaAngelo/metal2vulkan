@@ -265,6 +265,54 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.render_pipeline_facts(state, imageblock)
     }
 
+    fn render_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::render_descriptors::DescriptorSpec<'_>,
+    ) -> Answer<crate::render_descriptors::RenderDescriptorFacts> {
+        let _span = self.watch("render_descriptor_facts");
+        self.inner.render_descriptor_facts(library, spec)
+    }
+
+    fn heap_buffer_size_and_align(
+        &mut self,
+        query: &crate::device_queries::HeapBufferQuery,
+    ) -> Answer<crate::texture_query::SizeAndAlign> {
+        let _span = self.watch("heap_buffer_size_and_align");
+        self.inner.heap_buffer_size_and_align(query)
+    }
+
+    fn supports_vertex_amplification_count(&mut self, count: u64) -> Answer<bool> {
+        let _span = self.watch("supports_vertex_amplification_count");
+        self.inner.supports_vertex_amplification_count(count)
+    }
+
+    fn supports_rasterization_rate_map_layers(&mut self, layers: u64) -> Answer<bool> {
+        let _span = self.watch("supports_rasterization_rate_map_layers");
+        self.inner.supports_rasterization_rate_map_layers(layers)
+    }
+
+    fn minimum_linear_texture_alignment(&mut self, format: PixelFormat) -> Answer<u64> {
+        let _span = self.watch("minimum_linear_texture_alignment");
+        self.inner.minimum_linear_texture_alignment(format)
+    }
+
+    fn convert_sparse_pixel_regions(
+        &mut self,
+        query: &crate::device_queries::RegionQuery,
+    ) -> Answer<Vec<crate::device_queries::Box6>> {
+        let _span = self.watch("convert_sparse_pixel_regions");
+        self.inner.convert_sparse_pixel_regions(query)
+    }
+
+    fn convert_sparse_tile_regions(
+        &mut self,
+        query: &crate::device_queries::RegionQuery,
+    ) -> Answer<Vec<crate::device_queries::Box6>> {
+        let _span = self.watch("convert_sparse_tile_regions");
+        self.inner.convert_sparse_tile_regions(query)
+    }
+
     fn function_facts(
         &mut self,
         library: Handle,

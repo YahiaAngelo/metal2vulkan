@@ -17,6 +17,7 @@ use crate::case::{
 use crate::compute_pass::{
     ComputePass, ComputePassOutcome, ComputeStep, Dispatching, PassResource,
 };
+use crate::device_queries::{Box6, HeapBufferQuery, RegionQuery};
 use crate::function_bindings::{
     ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
     TextureFacts, ThreadgroupFacts, TypeFacts, DEPTH,
@@ -33,6 +34,11 @@ use crate::render::{
     ColorState, LodClamp, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction,
     StepResource, TargetSpec,
 };
+use crate::render_descriptors::{
+    AttributeFacts as DescriptorAttributeFacts, ColorFacts, DescriptorSpec, LayoutFacts,
+    LinkedCounts, RenderDescriptorFacts, SuppliedLists, VertexDescriptorFacts, AWAY, READ_BUFFERS,
+    READ_COLORS, READ_VERTEX_SLOTS,
+};
 use crate::sparse_query::{
     HeapFacts, QueryPage, SparseHeapSpec, SparseTextureFacts, SparseTextureSpec, SparseTileQuery,
     TileSize,
@@ -44,14 +50,14 @@ use metal2vulkan::bind::{
 };
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{
-    BarrierScope, BindingAccess, DispatchType, IndexType, IndirectCommandType, PixelFormat,
-    PrimitiveType, RenderStages, ResourceUsage, TextureType, TextureUsage,
+    BarrierScope, BindingAccess, DispatchType, IndexType, IndirectCommandType, Mutability,
+    PixelFormat, PrimitiveType, RenderStages, ResourceUsage, TextureType, TextureUsage,
 };
 use metal2vulkan::pipeline::{
     ColorAttachmentDescriptor, MeshPipelineDescriptor, RenderPipelineDescriptor,
     StageInputAttributeDescriptor, StageInputDescriptor, StageInputLayoutDescriptor, StageSource,
-    TileRenderPipelineDescriptor, VertexAttributeDescriptor, VertexBufferLayoutDescriptor,
-    VertexDescriptor,
+    TessellationDescriptor, TileRenderPipelineDescriptor, VertexAttributeDescriptor,
+    VertexBufferLayoutDescriptor, VertexDescriptor,
 };
 use metal2vulkan_runtime::{
     ArgumentEncoder, BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus,
@@ -60,7 +66,8 @@ use metal2vulkan_runtime::{
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
     LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
     RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState,
-    SamplerStateOptions, ScissorRect, Size, StoreAction, Texture, TextureDescriptor, Viewport,
+    SamplerStateOptions, ScissorRect, Size, SparseTextureRegionAlignmentMode, StoreAction, Texture,
+    TextureDescriptor, Viewport,
 };
 use std::time::Duration;
 
@@ -87,6 +94,257 @@ fn barrier_scope(bits: u64) -> Answer<BarrierScope> {
 
 /// The longest the side waits for a command buffer. A wait that runs out is recorded, not retried.
 const WAIT: Duration = Duration::from_secs(60);
+
+/// The runtime's region for a case's six numbers.
+fn our_region(held: &Box6) -> Region {
+    Region::new_3d(held[0], held[1], held[2], held[3], held[4], held[5])
+}
+
+/// A case's six numbers for the runtime's region.
+fn their_region(held: &Region) -> Box6 {
+    [
+        held.origin.x,
+        held.origin.y,
+        held.origin.z,
+        held.size.width,
+        held.size.height,
+        held.size.depth,
+    ]
+}
+
+/// The runtime's size for a case's three axes.
+fn our_size(axes: [u64; 3]) -> Size {
+    Size::new(axes[0], axes[1], axes[2])
+}
+
+/// Set every field [`AWAY`] states on `descriptor` and `options`, each away from Metal's own
+/// default.
+///
+/// The label and the binary archives are the **creation's** options rather than the descriptor's
+/// fields, which is where the runtime takes `MTLRenderPipelineDescriptor.label` and
+/// `binaryArchives` from, so a reset has to put both back.
+fn state_descriptor(descriptor: &mut RenderPipelineDescriptor, options: &mut PipelineOptions) {
+    options.label = Some(AWAY.label.to_owned());
+    // Metal's deprecated `sampleCount` and its `rasterSampleCount` are one field of the runtime's,
+    // which is the claim the case's two sites check.
+    descriptor.raster_sample_count = AWAY.sample_count;
+    descriptor.alpha_to_coverage = AWAY.alpha_to_coverage;
+    descriptor.alpha_to_one = AWAY.alpha_to_one;
+    descriptor.rasterization_enabled = AWAY.rasterization_enabled;
+    descriptor.max_vertex_amplification_count = AWAY.max_vertex_amplification_count;
+    descriptor.depth_format = Some(AWAY.depth_format);
+    descriptor.stencil_format = Some(AWAY.stencil_format);
+    descriptor.input_primitive_topology = AWAY.input_primitive_topology;
+    let mut tessellation = TessellationDescriptor::default();
+    tessellation.max_tessellation_factor = AWAY.max_tessellation_factor;
+    tessellation.partition_mode = AWAY.tessellation_partition_mode;
+    tessellation.factor_format = AWAY.tessellation_factor_format;
+    tessellation.factor_step_function = AWAY.tessellation_factor_step_function;
+    tessellation.output_winding_order = AWAY.tessellation_output_winding_order;
+    tessellation.control_point_index_type = AWAY.tessellation_control_point_index_type;
+    tessellation.factor_scale_enabled = AWAY.tessellation_factor_scale_enabled;
+    descriptor.tessellation = Some(tessellation);
+    descriptor.support_indirect_command_buffers = AWAY.support_indirect_command_buffers;
+    descriptor.support_adding_vertex_binary_functions = AWAY.support_adding_vertex_binary_functions;
+    descriptor.support_adding_fragment_binary_functions =
+        AWAY.support_adding_fragment_binary_functions;
+    descriptor.max_vertex_call_stack_depth = AWAY.max_vertex_call_stack_depth;
+    descriptor.max_fragment_call_stack_depth = AWAY.max_fragment_call_stack_depth;
+    for color in AWAY.colors {
+        let mut attachment = ColorAttachmentDescriptor::new(color.pixel_format);
+        attachment.blending_enabled = color.blending_enabled;
+        attachment.source_rgb_blend_factor = color.source_rgb;
+        attachment.destination_rgb_blend_factor = color.destination_rgb;
+        attachment.rgb_blend_operation = color.rgb_operation;
+        attachment.source_alpha_blend_factor = color.source_alpha;
+        attachment.destination_alpha_blend_factor = color.destination_alpha;
+        attachment.alpha_blend_operation = color.alpha_operation;
+        attachment.write_mask = color.write_mask;
+        if let Some(slot) = descriptor.color_attachments.get_mut(color.index as usize) {
+            *slot = Some(attachment);
+        }
+    }
+    for (index, mutability) in AWAY.vertex_buffers {
+        descriptor.vertex_buffers.insert(*index, *mutability);
+    }
+    for (index, mutability) in AWAY.fragment_buffers {
+        descriptor.fragment_buffers.insert(*index, *mutability);
+    }
+    let mut layout = VertexDescriptor::new();
+    for attribute in AWAY.attributes {
+        layout.attributes.insert(
+            attribute.index,
+            VertexAttributeDescriptor::new(
+                attribute.format,
+                attribute.offset,
+                attribute.buffer_index,
+            ),
+        );
+    }
+    for stated in AWAY.layouts {
+        let mut held = VertexBufferLayoutDescriptor::new(Some(stated.stride));
+        held.step_function = stated.step_function;
+        held.step_rate = stated.step_rate;
+        layout.layouts.insert(stated.index, held);
+    }
+    descriptor.vertex_descriptor = Some(layout);
+}
+
+/// What `descriptor` and `options` answer of themselves, the runtime's side of every getter of
+/// `MTLRenderPipelineDescriptor`'s own surface.
+///
+/// The slots Metal's arrays answer for an index nothing set are the **runtime's claim about
+/// Metal's defaults**, written here rather than taken from the case: an attachment the descriptor
+/// holds no entry for is Metal's `MTLPixelFormatInvalid` with blending off and every channel
+/// written, a buffer slot nothing set is `MTLMutabilityDefault`, and an attribute slot nothing set
+/// is format `Invalid` at offset 0 in buffer 0 with a layout of stride 0 stepping per vertex at a
+/// rate of 1. Each of those is a claim the Metal leg's recording checks.
+fn read_descriptor(
+    descriptor: &RenderPipelineDescriptor,
+    options: &PipelineOptions,
+    supplied: bool,
+) -> RenderDescriptorFacts {
+    let entry = |source: &StageSource| match source {
+        StageSource::Function(held) => held.function.info().name.to_owned(),
+        StageSource::Compiled(_) => COMPILED.to_owned(),
+    };
+    let stage_lists = |source: Option<&StageSource>| -> (u64, LinkedCounts) {
+        match source {
+            Some(StageSource::Function(held)) => (
+                held.libraries.preloaded.len() as u64,
+                LinkedCounts {
+                    functions: held.linked.functions.len() as u64,
+                    private_functions: held.linked.private_functions.len() as u64,
+                    binary_functions: held.linked.binary_functions.len() as u64,
+                    groups: held.linked.groups.len() as u64,
+                },
+            ),
+            _ => (0, LinkedCounts::default()),
+        }
+    };
+    let (vertex_libraries, vertex_linked) = stage_lists(Some(&descriptor.vertex));
+    let (fragment_libraries, fragment_linked) = stage_lists(descriptor.fragment.as_ref());
+    let colors = (0..READ_COLORS)
+        .map(|index| {
+            let held = descriptor
+                .color_attachments
+                .get(index as usize)
+                .and_then(Option::as_ref)
+                .copied()
+                .unwrap_or_else(|| ColorAttachmentDescriptor::new(PixelFormat::Invalid));
+            ColorFacts {
+                pixel_format: held.pixel_format.as_raw(),
+                blending_enabled: held.blending_enabled,
+                source_rgb: held.source_rgb_blend_factor.as_raw(),
+                destination_rgb: held.destination_rgb_blend_factor.as_raw(),
+                rgb_operation: held.rgb_blend_operation.as_raw(),
+                source_alpha: held.source_alpha_blend_factor.as_raw(),
+                destination_alpha: held.destination_alpha_blend_factor.as_raw(),
+                alpha_operation: held.alpha_blend_operation.as_raw(),
+                write_mask: held.write_mask.as_raw(),
+            }
+        })
+        .collect();
+    let mutability = |stated: &std::collections::BTreeMap<u32, Mutability>| -> Vec<u32> {
+        (0..READ_BUFFERS)
+            .map(|index| {
+                stated
+                    .get(&index)
+                    .copied()
+                    .unwrap_or(Mutability::Default)
+                    .as_raw()
+            })
+            .collect()
+    };
+    let tessellation = descriptor.tessellation.unwrap_or_default();
+    RenderDescriptorFacts {
+        label: options.label.clone(),
+        vertex_function: Some(entry(&descriptor.vertex)),
+        fragment_function: descriptor.fragment.as_ref().map(entry),
+        vertex_descriptor: descriptor.vertex_descriptor.as_ref().map_or_else(
+            || VertexDescriptorFacts::empty(READ_VERTEX_SLOTS),
+            read_vertex_descriptor,
+        ),
+        sample_count: u64::from(descriptor.raster_sample_count),
+        raster_sample_count: u64::from(descriptor.raster_sample_count),
+        alpha_to_coverage_enabled: descriptor.alpha_to_coverage,
+        alpha_to_one_enabled: descriptor.alpha_to_one,
+        rasterization_enabled: descriptor.rasterization_enabled,
+        max_vertex_amplification_count: u64::from(descriptor.max_vertex_amplification_count),
+        colors,
+        depth_attachment_pixel_format: descriptor
+            .depth_format
+            .unwrap_or(PixelFormat::Invalid)
+            .as_raw(),
+        stencil_attachment_pixel_format: descriptor
+            .stencil_format
+            .unwrap_or(PixelFormat::Invalid)
+            .as_raw(),
+        input_primitive_topology: descriptor.input_primitive_topology.as_raw(),
+        tessellation_partition_mode: tessellation.partition_mode.as_raw(),
+        max_tessellation_factor: u64::from(tessellation.max_tessellation_factor),
+        tessellation_factor_scale_enabled: tessellation.factor_scale_enabled,
+        tessellation_factor_format: tessellation.factor_format.as_raw(),
+        tessellation_control_point_index_type: tessellation.control_point_index_type.as_raw(),
+        tessellation_factor_step_function: tessellation.factor_step_function.as_raw(),
+        tessellation_output_winding_order: tessellation.output_winding_order.as_raw(),
+        vertex_buffers: mutability(&descriptor.vertex_buffers),
+        fragment_buffers: mutability(&descriptor.fragment_buffers),
+        support_indirect_command_buffers: descriptor.support_indirect_command_buffers,
+        binary_archives: options.binary_archives.len() as u64,
+        supplied: supplied.then_some(SuppliedLists {
+            vertex_preloaded_libraries: vertex_libraries,
+            fragment_preloaded_libraries: fragment_libraries,
+            vertex_linked_functions: vertex_linked,
+            fragment_linked_functions: fragment_linked,
+        }),
+        support_adding_vertex_binary_functions: descriptor.support_adding_vertex_binary_functions,
+        support_adding_fragment_binary_functions: descriptor
+            .support_adding_fragment_binary_functions,
+        max_vertex_call_stack_depth: u64::from(descriptor.max_vertex_call_stack_depth),
+        max_fragment_call_stack_depth: u64::from(descriptor.max_fragment_call_stack_depth),
+    }
+}
+
+/// The name a stage made from an already-compiled function records. No case of this family states
+/// one; a side that did would otherwise record the compiled stage as a function named nothing.
+const COMPILED: &str = "compiled";
+
+/// What a vertex descriptor's first [`READ_VERTEX_SLOTS`] attribute and layout slots answer, the
+/// runtime's side of Metal's two arrays.
+fn read_vertex_descriptor(layout: &VertexDescriptor) -> VertexDescriptorFacts {
+    VertexDescriptorFacts {
+        attributes: (0..READ_VERTEX_SLOTS)
+            .map(|index| {
+                let held = layout.attributes.get(&index).copied().unwrap_or_else(|| {
+                    VertexAttributeDescriptor::new(metal2vulkan::metal::VertexFormat::Invalid, 0, 0)
+                });
+                DescriptorAttributeFacts {
+                    format: held.format.as_raw(),
+                    offset: u64::from(held.offset),
+                    buffer_index: u64::from(held.buffer_index),
+                }
+            })
+            .collect(),
+        layouts: (0..READ_VERTEX_SLOTS)
+            .map(|index| {
+                let held = layout
+                    .layouts
+                    .get(&index)
+                    .copied()
+                    .unwrap_or_else(|| VertexBufferLayoutDescriptor::new(Some(0)));
+                LayoutFacts {
+                    // `MTLBufferLayoutStrideDynamic` is the runtime's `None`, and Metal answers
+                    // the sentinel itself (`NSUIntegerMax`); a slot nothing set has a stride of 0
+                    // either way, so no shape of this family reaches the sentinel.
+                    stride: held.stride.map_or(u64::MAX, u64::from),
+                    step_function: held.step_function.as_raw(),
+                    step_rate: u64::from(held.step_rate),
+                }
+            })
+            .collect(),
+    }
+}
 
 /// The bytes the handler-wait probe's command buffer fills, so it has real work to be scheduled and
 /// completed for rather than being an empty commit.
@@ -1646,6 +1904,44 @@ impl Side for RuntimeSide<'_> {
                 required.depth,
             ],
         })
+    }
+
+    fn render_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &DescriptorSpec<'_>,
+    ) -> Answer<RenderDescriptorFacts> {
+        let held = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let stage = |entry: &str| -> Answer<StageSource> {
+            Ok(StageSource::Function(
+                held.new_function_with_name(entry)
+                    .map_err(Failure::from_error)?
+                    .function_descriptor(),
+            ))
+        };
+        // The runtime has no mutable descriptor object, so Metal's `init` is
+        // `RenderPipelineDescriptor::new` and Metal's `reset` is the same call again. The stating
+        // still runs for a reset shape — the point of the shape is that what the reset undoes was
+        // really set — and then the whole value is replaced, which is the only reset our side has.
+        let mut descriptor = RenderPipelineDescriptor::new(stage(spec.vertex)?);
+        let mut options = PipelineOptions::default();
+        if let Some(fragment) = spec.fragment {
+            descriptor.fragment = Some(stage(fragment)?);
+        }
+        if spec.shape.sets() {
+            state_descriptor(&mut descriptor, &mut options);
+        }
+        if spec.shape.resets() {
+            descriptor = RenderPipelineDescriptor::new(stage(spec.vertex)?);
+            options = PipelineOptions::default();
+            if let Some(fragment) = spec.fragment {
+                descriptor.fragment = Some(stage(fragment)?);
+            }
+        }
+        Ok(read_descriptor(&descriptor, &options, !spec.shape.resets()))
     }
 
     fn function_facts(
@@ -3226,6 +3522,59 @@ impl Side for RuntimeSide<'_> {
             size: answered.size,
             align: answered.align,
         })
+    }
+
+    fn heap_buffer_size_and_align(&mut self, query: &HeapBufferQuery) -> Answer<SizeAndAlign> {
+        let options = ResourceOptions::from_raw(query.options).map_err(Failure::from_error)?;
+        let answered = self
+            .device
+            .heap_buffer_size_and_align(query.length, options);
+        Ok(SizeAndAlign {
+            size: answered.size,
+            align: answered.align,
+        })
+    }
+
+    fn supports_vertex_amplification_count(&mut self, count: u64) -> Answer<bool> {
+        self.device
+            .properties()
+            .supports_vertex_amplification_count(count)
+            .map_err(|gap| Failure::named("RuntimeGap", format!("{gap:?}")))
+    }
+
+    fn supports_rasterization_rate_map_layers(&mut self, layers: u64) -> Answer<bool> {
+        self.device
+            .properties()
+            .supports_rasterization_rate_map_with_layer_count(layers)
+            .map_err(|gap| Failure::named("RuntimeGap", format!("{gap:?}")))
+    }
+
+    fn minimum_linear_texture_alignment(&mut self, format: PixelFormat) -> Answer<u64> {
+        self.device
+            .properties()
+            .minimum_linear_texture_alignment_for_pixel_format(format)
+            .map_err(Failure::from_error)
+    }
+
+    fn convert_sparse_pixel_regions(&mut self, query: &RegionQuery) -> Answer<Vec<Box6>> {
+        let pixels: Vec<Region> = query.regions.iter().map(our_region).collect();
+        let mut tiles: Vec<Region> = pixels.clone();
+        let mode = match query.inward {
+            true => SparseTextureRegionAlignmentMode::Inward,
+            false => SparseTextureRegionAlignmentMode::Outward,
+        };
+        self.device
+            .convert_sparse_pixel_regions(&pixels, &mut tiles, our_size(query.tile), mode)
+            .map_err(Failure::from_error)?;
+        Ok(tiles.iter().map(their_region).collect())
+    }
+
+    fn convert_sparse_tile_regions(&mut self, query: &RegionQuery) -> Answer<Vec<Box6>> {
+        let tiles: Vec<Region> = query.regions.iter().map(our_region).collect();
+        let pixels = self
+            .device
+            .convert_sparse_tile_regions(&tiles, our_size(query.tile));
+        Ok(pixels.iter().map(their_region).collect())
     }
 
     fn queue_slots(&mut self, max: Option<u32>, cap: u32) -> Answer<QueueSlots> {
