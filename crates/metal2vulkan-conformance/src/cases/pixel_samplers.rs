@@ -462,17 +462,19 @@ impl Case for PixelSamplers {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        let mut allowances = Vec::new();
-        // Metal announces nothing, so a notice of ours is a difference at the notices site. These
-        // are the kinds a pixel-sampler case may provoke on a device without Metal's own sampler.
-        for kind in [
-            Degradation::PixelSamplerScaling,
+        // Metal announces nothing, so a notice of ours is a difference at the notices site.
+        // These are the two kinds a run of this round provoked: on lavapipe an argument buffer's
+        // pixel sampler is handed to the device's own, and the device converts an 8-bit texel to a
+        // float its own way. A venue that announces another kind — `pixel-sampler-scaling`, which
+        // neither venue here provoked — reads as divergent at that site until whoever adds the
+        // venue names it with a run behind it.
+        [
             Degradation::ArgumentPixelSamplerScaling,
             Degradation::FloatSampleFilter,
-        ] {
-            allowances.push(notice_allowance(kind.code()));
-        }
-        allowances
+        ]
+        .iter()
+        .map(|kind| notice_allowance(kind.code()))
+        .collect()
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {

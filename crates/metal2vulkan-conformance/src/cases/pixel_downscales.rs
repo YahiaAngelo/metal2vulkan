@@ -414,10 +414,10 @@ impl Case for PixelDownscales {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Metal announces nothing, so a notice of ours is a difference at the notices site. These
-        // are the kinds a pixel-sampler case may provoke on a device without Metal's own sampler.
+        // Metal announces nothing, so a notice of ours is a difference at the notices site.
+        // These are the two kinds a run of this round provoked (see `pixel_samplers`); a venue
+        // that announces another reads as divergent there until someone names it with a run.
         [
-            Degradation::PixelSamplerScaling,
             Degradation::ArgumentPixelSamplerScaling,
             Degradation::FloatSampleFilter,
         ]
