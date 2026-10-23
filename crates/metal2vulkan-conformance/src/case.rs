@@ -349,6 +349,338 @@ pub trait Side {
         let _ = work;
         Err(Failure::unavailable("work"))
     }
+
+    /// `newRenderPipelineStateWithMeshDescriptor:options:reflection:error:` of the library's
+    /// functions, over `functions.attachments` color attachments of [`TARGET_FORMAT`].
+    fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {
+        let _ = (library, functions);
+        Err(Failure::unavailable("mesh_pipeline"))
+    }
+
+    /// `newTextureWithDescriptor:` of a 2D [`TARGET_FORMAT`] render target of `width` by
+    /// `height`, whose bytes the host reads.
+    ///
+    /// The target joins the same handle space as [`texture_2d`](Side::texture_2d), so
+    /// [`read_texture`](Side::read_texture) reads it back and a texture has one pool however it
+    /// was made. Only the descriptor differs: a target is a render target of
+    /// [`TARGET_FORMAT`], not a shader-read-and-write texture of the case's format.
+    fn render_target(&mut self, width: u32, height: u32) -> Answer<Handle> {
+        let _ = (width, height);
+        Err(Failure::unavailable("render_target"))
+    }
+
+    /// One command buffer with one render pass over `targets`, each cleared to zero and stored,
+    /// whose commands are `steps` in order, then `endEncoding`, `commit` and a bounded wait.
+    ///
+    /// Every step is encoded, whatever an earlier one answered, because that is what the probe
+    /// does: a refused draw leaves the pass and its other commands as they were, and the answer
+    /// names which step refused ([`PassOutcome::refused`]).
+    fn mesh_pass(&mut self, targets: &[Handle], steps: &[MeshStep]) -> Answer<PassOutcome> {
+        let _ = (targets, steps);
+        Err(Failure::unavailable("mesh_pass"))
+    }
+
+    /// `newRenderPipelineStateWithMeshDescriptor:` as [`mesh_pipeline`] does, with
+    /// `supportIndirectCommandBuffers` set, so an indirect command may set the state.
+    ///
+    /// [`mesh_pipeline`]: Side::mesh_pipeline
+    fn mesh_pipeline_for_commands(
+        &mut self,
+        library: Handle,
+        functions: &MeshFunctions<'_>,
+    ) -> Answer<Handle> {
+        let _ = (library, functions);
+        Err(Failure::unavailable("mesh_pipeline_for_commands"))
+    }
+
+    /// `newIndirectCommandBufferWithDescriptor:maxCommandCount:options:` of `commands` commands
+    /// of both mesh draw kinds, binding its own pipeline state, one object buffer and one mesh
+    /// buffer, then every command of `commands` encoded by the host in order.
+    fn mesh_command_buffer(&mut self, commands: &[MeshCommand]) -> Answer<Handle> {
+        let _ = commands;
+        Err(Failure::unavailable("mesh_command_buffer"))
+    }
+
+    /// One command buffer with one render pass over `targets`, each cleared to zero and stored,
+    /// which makes `used` resident for the object, mesh and fragment stages, executes every
+    /// command of `commands`, then `endEncoding`, `commit` and a bounded wait.
+    fn execute_mesh_commands(
+        &mut self,
+        targets: &[Handle],
+        commands: Handle,
+        used: &[Handle],
+    ) -> Answer<PassOutcome> {
+        let _ = (targets, commands, used);
+        Err(Failure::unavailable("execute_mesh_commands"))
+    }
+
+    /// A texture over `buffer`: over one plane of the surface the buffer stands for, or over the
+    /// buffer itself ([`PlaneTexture`]).
+    ///
+    /// The buffer stands for the surface with its planes where the surface's lie, which is how the
+    /// probe wrote these cases: a host without CoreVideo then runs them unchanged, and the bytes a
+    /// fill wrote are the buffer's own.
+    fn plane_texture(&mut self, buffer: Handle, over: &PlaneTexture) -> Answer<Handle> {
+        let _ = (buffer, over);
+        Err(Failure::unavailable("plane_texture"))
+    }
+
+    /// One command buffer with one blit encoder holding one fill of `texture` ([`Fill`]),
+    /// committed and waited for.
+    ///
+    /// Metal's texture fills are private selectors, so Metal's own side answers
+    /// [`Failure::unavailable`] here and a case that uses this carries its Metal answer.
+    fn fill_texture(&mut self, texture: Handle, fill: &Fill) -> Answer<Value> {
+        let _ = (texture, fill);
+        Err(Failure::unavailable("fill_texture"))
+    }
+}
+
+/// One render command the host encodes into an indirect command buffer: the command's own pipeline
+/// state, the buffers it binds, and its one mesh draw.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MeshCommand {
+    /// The state the command sets, from [`Side::mesh_pipeline_for_commands`].
+    pub pipeline: Handle,
+    /// The object buffers the command binds, each at its index.
+    pub object_buffers: Vec<(Handle, u32)>,
+    /// The mesh buffers the command binds, each at its index.
+    pub mesh_buffers: Vec<(Handle, u32)>,
+    /// The command's draw: `drawMeshThreadgroups` of a grid, or `drawMeshThreads` of threads.
+    pub draw: CommandDraw,
+}
+
+/// An indirect render command's mesh draw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandDraw {
+    /// `drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`.
+    Threadgroups {
+        groups: [u32; 3],
+        object: [u32; 3],
+        mesh: [u32; 3],
+    },
+    /// `drawMeshThreads:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`.
+    Threads {
+        threads: [u32; 3],
+        object: [u32; 3],
+        mesh: [u32; 3],
+    },
+}
+
+/// A texture a case makes over a buffer: over one plane of the surface the buffer stands for, or
+/// over the buffer itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaneTexture {
+    /// The surface's four-character OSType, `None` for a texture over the buffer itself.
+    pub ostype: Option<[u8; 4]>,
+    /// The texture's raw `MTLPixelFormat`.
+    pub format: u32,
+    /// The texture's extent in texels.
+    pub size: [u32; 2],
+    /// The plane of the surface the texture covers.
+    pub plane: u32,
+    /// Each of the surface's two planes: its first byte in the buffer and its `bytesPerRow`. A
+    /// texture over the buffer itself uses the first alone.
+    pub planes: [(u64, u64); 2],
+}
+
+/// One fill of a texture, as the probe encoded it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Fill {
+    /// `fillTexture:level:slice:region:pattern:` (Apple SPI) of these pattern bytes.
+    Pattern {
+        level: u32,
+        slice: u32,
+        /// The region as `x`, `y`, `width`, `height`.
+        region: [u32; 4],
+        pattern: Vec<u8>,
+    },
+    /// `fillTexture:level:slice:region:color:pixelFormat:` (Apple SPI) of this color packed in
+    /// this raw `MTLPixelFormat`.
+    Color {
+        level: u32,
+        slice: u32,
+        region: [u32; 4],
+        /// The color's four channels.
+        color: [f64; 4],
+        /// The raw `MTLPixelFormat` the color packs in.
+        packed_into: u32,
+    },
+}
+
+impl Fill {
+    /// The site name the fill's answer is emitted at: the call it makes.
+    pub fn call(&self) -> &'static str {
+        match self {
+            Fill::Pattern { .. } => "fillTexture",
+            Fill::Color { .. } => "fillTextureColor",
+        }
+    }
+
+    /// The words the fill's parameters fingerprint as.
+    pub fn words(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        match self {
+            Fill::Pattern {
+                level,
+                slice,
+                region,
+                pattern,
+            } => {
+                out.extend(b"pattern");
+                out.extend(level.to_le_bytes());
+                out.extend(slice.to_le_bytes());
+                for axis in region {
+                    out.extend(axis.to_le_bytes());
+                }
+                out.extend(pattern);
+            }
+            Fill::Color {
+                level,
+                slice,
+                region,
+                color,
+                packed_into,
+            } => {
+                out.extend(b"color");
+                out.extend(level.to_le_bytes());
+                out.extend(slice.to_le_bytes());
+                for axis in region {
+                    out.extend(axis.to_le_bytes());
+                }
+                for channel in color {
+                    out.extend(channel.to_le_bytes());
+                }
+                out.extend(packed_into.to_le_bytes());
+            }
+        }
+        out
+    }
+}
+
+/// The color format every mesh case's attachments take: `MTLPixelFormatRGBA32Uint`, whose texel is
+/// four 32-bit words, so what a shader stores is read back as the words it stored and a diff names
+/// the word rather than a byte.
+pub const TARGET_FORMAT: &str = "RGBA32Uint";
+
+/// The bytes one [`TARGET_FORMAT`] texel takes.
+pub const TARGET_TEXEL: u32 = 16;
+
+/// The functions of a mesh render pipeline, as a case names them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MeshFunctions<'a> {
+    /// The object function, where the pipeline has one.
+    pub object: Option<&'a str>,
+    pub mesh: &'a str,
+    pub fragment: &'a str,
+    /// The color attachments of [`TARGET_FORMAT`] the pipeline writes.
+    pub attachments: u32,
+}
+
+/// One command a case encodes into a render pass.
+///
+/// The stage and scope fields are the raw `MTLRenderStages` and `MTLBarrierScope` bits, so the
+/// vocabulary names neither API's types and a case reads as the Metal call it makes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MeshStep {
+    /// `setRenderPipelineState:`.
+    Pipeline(Handle),
+    /// `setObjectBuffer:offset:atIndex:`.
+    ObjectBuffer {
+        buffer: Handle,
+        offset: u64,
+        index: u32,
+    },
+    /// `setObjectBytes:length:atIndex:`.
+    ObjectBytes { bytes: Vec<u8>, index: u32 },
+    /// `setMeshBuffer:offset:atIndex:`.
+    MeshBuffer {
+        buffer: Handle,
+        offset: u64,
+        index: u32,
+    },
+    /// `setFragmentBuffer:offset:atIndex:`.
+    FragmentBuffer {
+        buffer: Handle,
+        offset: u64,
+        index: u32,
+    },
+    /// `drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`.
+    DrawThreadgroups {
+        groups: [u32; 3],
+        object: [u32; 3],
+        mesh: [u32; 3],
+    },
+    /// `drawMeshThreads:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`.
+    DrawThreads {
+        threads: [u32; 3],
+        object: [u32; 3],
+        mesh: [u32; 3],
+    },
+    /// `drawMeshThreadgroupsWithIndirectBuffer:indirectBufferOffset:
+    /// threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`.
+    DrawIndirect {
+        buffer: Handle,
+        offset: u64,
+        object: [u32; 3],
+        mesh: [u32; 3],
+    },
+    /// `memoryBarrierWithScope:afterStages:beforeStages:`.
+    BarrierScope { scope: u64, after: u64, before: u64 },
+    /// `memoryBarrierWithResources:count:afterStages:beforeStages:` over buffers.
+    BarrierResources {
+        buffers: Vec<Handle>,
+        after: u64,
+        before: u64,
+    },
+}
+
+impl MeshStep {
+    /// The site name the step's answer is emitted at: the call it makes, so a refusal reads as the
+    /// Metal call we refused.
+    pub fn call(&self) -> &'static str {
+        match self {
+            MeshStep::Pipeline(_) => "setRenderPipelineState",
+            MeshStep::ObjectBuffer { .. } => "setObjectBuffer",
+            MeshStep::ObjectBytes { .. } => "setObjectBytes",
+            MeshStep::MeshBuffer { .. } => "setMeshBuffer",
+            MeshStep::FragmentBuffer { .. } => "setFragmentBuffer",
+            MeshStep::DrawThreadgroups { .. } => "drawMeshThreadgroups",
+            MeshStep::DrawThreads { .. } => "drawMeshThreads",
+            MeshStep::DrawIndirect { .. } => "drawMeshThreadgroupsWithIndirectBuffer",
+            MeshStep::BarrierScope { .. } => "memoryBarrierWithScope",
+            MeshStep::BarrierResources { .. } => "memoryBarrierWithResources",
+        }
+    }
+}
+
+/// `MTLBarrierScopeBuffers`.
+pub const SCOPE_BUFFERS: u64 = 0x1;
+
+/// `MTLRenderStageVertex`.
+pub const STAGE_VERTEX: u64 = 0x1;
+
+/// `MTLRenderStageFragment`.
+pub const STAGE_FRAGMENT: u64 = 0x2;
+
+/// `MTLRenderStageObject`.
+pub const STAGE_OBJECT: u64 = 0x8;
+
+/// `MTLRenderStageMesh`.
+pub const STAGE_MESH: u64 = 0x10;
+
+/// What one render pass came to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PassOutcome {
+    /// What each step of the pass answered, in the order the case gave them: `None` where the call
+    /// answered, the typed error where it did not. A side whose calls cannot refuse (Metal's
+    /// encoder methods return nothing) answers `None` throughout, so a refusal of ours compares
+    /// against Metal's answer and reads as a refusal rather than a divergence.
+    pub refused: Vec<Option<Failure>>,
+    /// The command buffer's status after the bounded wait, as the variant of its name.
+    pub status: Value,
+    /// The command buffer's error after it completed, where it reported one.
+    pub error: Option<Value>,
 }
 
 /// What an indirect render command's getters answered, beside what the whole record holds.
