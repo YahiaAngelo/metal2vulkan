@@ -19,7 +19,9 @@ use crate::case::{
     Venue,
 };
 use crate::queue_slots::QueueSlots;
-use crate::render::{Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, TargetSpec};
+use crate::render::{
+    Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
+};
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
 use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
@@ -1347,17 +1349,20 @@ impl Side for MetalSide {
         library: Handle,
         spec: &RenderPipelineSpec<'_>,
     ) -> Answer<Handle> {
-        let held = self
-            .libraries
-            .get(library.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
-        let function = |name: &str| {
-            held.newFunctionWithName(&NSString::from_str(name))
-                .ok_or_else(|| Failure::named("NoSuchFunction", name.to_owned()))
+        let function = |stage: &StageFunction<'_>| {
+            let named = stage.library.unwrap_or(library);
+            let held = self
+                .libraries
+                .get(named.0 as usize)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", named.0)))?;
+            held.newFunctionWithName(&NSString::from_str(stage.entry))
+                .ok_or_else(|| Failure::named("NoSuchFunction", stage.entry.to_owned()))
         };
         let descriptor = MTLRenderPipelineDescriptor::new();
-        descriptor.setVertexFunction(Some(&*function(spec.vertex)?));
-        descriptor.setFragmentFunction(Some(&*function(spec.fragment)?));
+        descriptor.setVertexFunction(Some(&*function(&spec.vertex)?));
+        if let Some(fragment) = &spec.fragment {
+            descriptor.setFragmentFunction(Some(&*function(fragment)?));
+        }
         descriptor.setRasterSampleCount(spec.samples as usize);
         for (at, color) in spec.colors.iter().enumerate() {
             let Some(color) = color else { continue };

@@ -14,7 +14,9 @@ use crate::case::{
     TileFacts, TilePipelineSpec, TileStep, Venue,
 };
 use crate::queue_slots::QueueSlots;
-use crate::render::{RenderPass, RenderPipelineSpec, RenderStep, RenderWork, TargetSpec};
+use crate::render::{
+    RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
+};
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
@@ -1302,19 +1304,20 @@ impl Side for RuntimeSide<'_> {
         library: Handle,
         spec: &RenderPipelineSpec<'_>,
     ) -> Answer<Handle> {
-        let held = self
-            .libraries
-            .get(library.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
-        let stage = |name: &str| -> Answer<StageSource> {
+        let stage = |stage: &StageFunction<'_>| -> Answer<StageSource> {
+            let named = stage.library.unwrap_or(library);
+            let held = self
+                .libraries
+                .get(named.0 as usize)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", named.0)))?;
             Ok(StageSource::Function(
-                held.new_function_with_name(name)
+                held.new_function_with_name(stage.entry)
                     .map_err(Failure::from_error)?
                     .function_descriptor(),
             ))
         };
-        let mut descriptor = RenderPipelineDescriptor::new(stage(spec.vertex)?);
-        descriptor.fragment = Some(stage(spec.fragment)?);
+        let mut descriptor = RenderPipelineDescriptor::new(stage(&spec.vertex)?);
+        descriptor.fragment = spec.fragment.as_ref().map(&stage).transpose()?;
         descriptor.raster_sample_count = spec.samples;
         for (at, color) in spec.colors.iter().enumerate() {
             let Some(color) = color else { continue };

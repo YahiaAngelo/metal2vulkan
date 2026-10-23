@@ -93,48 +93,71 @@ pub struct HalfWriteNans {
     name: &'static str,
     format: PixelFormat,
     shape: Shape,
+    /// Whether one word of the format holds every channel. A packed format's channel is narrower
+    /// than the `half` written into it, so it has no room for a NaN's payload and what reaches the
+    /// texel is the device's own encoding; a format whose word is one channel stores the bits it
+    /// was handed.
+    packed: bool,
 }
 
 /// Every format the lane writes: the three 16-bit float widths, the three 32-bit float widths, and
 /// the packed one whose NaN is the format's own.
 pub fn all() -> Vec<HalfWriteNans> {
-    let shape = |word, words| Shape { word, words };
+    // One word is one channel for every float format, and the whole texel for the packed one.
+    let channels = |name, format, word, words| HalfWriteNans {
+        name,
+        format,
+        shape: Shape { word, words },
+        packed: false,
+    };
+    let whole_texel = |name, format, word| HalfWriteNans {
+        name,
+        format,
+        shape: Shape { word, words: 1 },
+        packed: true,
+    };
     vec![
-        HalfWriteNans {
-            name: "half-write-nans-r16f",
-            format: PixelFormat::R16Float,
-            shape: shape(Element::U16, 1),
-        },
-        HalfWriteNans {
-            name: "half-write-nans-rg16f",
-            format: PixelFormat::RG16Float,
-            shape: shape(Element::U16, 2),
-        },
-        HalfWriteNans {
-            name: "half-write-nans-rgba16f",
-            format: PixelFormat::RGBA16Float,
-            shape: shape(Element::U16, 4),
-        },
-        HalfWriteNans {
-            name: "half-write-nans-r32f",
-            format: PixelFormat::R32Float,
-            shape: shape(Element::U32, 1),
-        },
-        HalfWriteNans {
-            name: "half-write-nans-rg32f",
-            format: PixelFormat::RG32Float,
-            shape: shape(Element::U32, 2),
-        },
-        HalfWriteNans {
-            name: "half-write-nans-rgba32f",
-            format: PixelFormat::RGBA32Float,
-            shape: shape(Element::U32, 4),
-        },
-        HalfWriteNans {
-            name: "half-write-nans-rg11b10f",
-            format: PixelFormat::RG11B10Float,
-            shape: shape(Element::U32, 1),
-        },
+        channels(
+            "half-write-nans-r16f",
+            PixelFormat::R16Float,
+            Element::U16,
+            1,
+        ),
+        channels(
+            "half-write-nans-rg16f",
+            PixelFormat::RG16Float,
+            Element::U16,
+            2,
+        ),
+        channels(
+            "half-write-nans-rgba16f",
+            PixelFormat::RGBA16Float,
+            Element::U16,
+            4,
+        ),
+        channels(
+            "half-write-nans-r32f",
+            PixelFormat::R32Float,
+            Element::U32,
+            1,
+        ),
+        channels(
+            "half-write-nans-rg32f",
+            PixelFormat::RG32Float,
+            Element::U32,
+            2,
+        ),
+        channels(
+            "half-write-nans-rgba32f",
+            PixelFormat::RGBA32Float,
+            Element::U32,
+            4,
+        ),
+        whole_texel(
+            "half-write-nans-rg11b10f",
+            PixelFormat::RG11B10Float,
+            Element::U32,
+        ),
     ]
 }
 
@@ -193,15 +216,21 @@ impl Case for HalfWriteNans {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // The kernel writes `half` into a storage texture. A device whose half texel writes are not
-        // Metal's encodes its own way, and the runtime announces that; only the notice set is
-        // loosened, so every stored word still compares exactly. A device that does encode as Metal
-        // shows as exact with the allowance unused, and one that does not shows the word it stored
-        // beside Metal's. The allowance fails the case if the notice stops firing, so it cannot
-        // outlive its reason.
-        vec![crate::replay::notice_allowance(
-            Degradation::DeviceNanEncoding.code(),
-        )]
+        // The kernel writes `half` into a storage texture, and only the notice set is loosened, so
+        // every stored word still compares exactly whatever the device does.
+        //
+        // The loosening is carried by the formats that cannot hold a NaN's bits: a channel narrower
+        // than the half it is given has no room for the payload, so what reaches the texel is the
+        // device's own encoding and the runtime announces it. The float and half formats store the
+        // bits they are handed, so a run of them needs no tolerance at all — and this round's runs
+        // on both venues confirmed it, which is why they name none. A device that does encode its
+        // own way there shows the word it stored beside Metal's rather than passing quietly.
+        if self.packed {
+            return vec![crate::replay::notice_allowance(
+                Degradation::DeviceNanEncoding.code(),
+            )];
+        }
+        Vec::new()
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
