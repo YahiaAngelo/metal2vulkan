@@ -20,6 +20,16 @@
 //! [`MetalSource::measured_on`] and the report counts it as measured elsewhere. That machine is
 //! gone.
 //!
+//! # The kernel is not the probe's, and the digests say it does not matter
+//!
+//! The lane samples through an AIR kernel it generates at run time; a case samples through the
+//! committed fixture `fpv_swizzled_reads`' `fpv_swz_sample`. Both do one plain `sample(s, uv)` of
+//! the same texture through the same sampler state and write one `float4` a job in job order, so
+//! the output bytes are the same program's observable output and the probe's digest is a digest of
+//! them. That is an argument, and the cases check it: both bands hash to exactly the probe's
+//! numbers, so the substitution is sound rather than assumed. A reader who changes the kernel's
+//! output shape breaks both digests at once, which is the right failure.
+//!
 //! # What the port does not fix
 //!
 //! The probe kept each band's answer as **one SHA-256 of the whole output**, so that is what the
