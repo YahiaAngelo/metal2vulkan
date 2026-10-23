@@ -1,0 +1,698 @@
+#!/usr/bin/env python3
+"""Resolve the Metal calls the conformance suite's native leg makes, to items of the SDK.
+
+The suite's Metal leg reaches Metal through `objc2-metal`, whose Rust name for a binding is its
+selector with each `:` turned into `_`. So a call site names its selector outright, and the one
+thing a reader cannot see from the name is **which type** receives it: twenty types bind
+`setLabel:`, four bind `setUsage:`, and the SDK item a call exercises is a property of the receiver.
+
+This types the receiver. Within a function it follows what each local was made from — a class
+method of a named Metal class, a getter whose answer `objc2_metal.tsv` records, a field of the
+side's own struct, a parameter's declared type — and resolves the call against the type it lands
+on, walking that type's supertypes to the one that declares the selector (`MTLTexture`'s `label`
+is `MTLResource`'s item).
+
+The resolution checks itself: a receiver typed `T` sent a selector that `objc2-metal` does not bind
+on `T` or any of its supertypes is a **typing error**, not a Metal call, and
+[`Leg.mistyped`][Leg] carries it so the caller can fail rather than quietly count the wrong item.
+The honest limit is the other direction: a receiver this cannot type is reported in
+[`Leg.unresolved`][Leg] and attributed to no item.
+
+A call site also carries where it sits: the function that holds it, and the enclosing `match` arms,
+so a call made only for one step of the case vocabulary is attributed to that step and not to every
+case that encodes any step at all.
+"""
+
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+#: Rust types that wrap the Metal type a value really is.
+UNWRAP = re.compile(r"\b(?:Option|Retained|ProtocolObject|Vec|Box|NonNull|dyn|mut|Self)\b")
+
+IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+#: Calls that answer what they were given: an `Option` or `Result` adapter around a Metal object,
+#: which the suite's leg uses to turn a `nil` into an error. Following them is what lets
+#: `device.newCommandQueue().ok_or_else(..)?` type as an `MTLCommandQueue`.
+THROUGH = {
+    "ok_or",
+    "ok_or_else",
+    "unwrap",
+    "expect",
+    "clone",
+    "as_ref",
+    "as_deref",
+    "to_owned",
+    "retain",
+    "map_err",
+    "unwrap_or_else",
+    "borrow",
+    # A pool lookup and an `Option`'s contents: `self.libraries.get(i)`, `self.encoder.take()`.
+    "get",
+    "take",
+    "first",
+    "last",
+    "pop",
+    "as_mut",
+}
+
+
+def blanked(text: str) -> str:
+    """`text` with comments and string literals replaced by spaces of the same length.
+
+    Keeping the length means every offset still points where it did, so a brace walk over the
+    result can be read against the original text.
+    """
+    out = list(text)
+    i = 0
+    n = len(text)
+    while i < n:
+        two = text[i : i + 2]
+        if two == "//":
+            while i < n and text[i] != "\n":
+                out[i] = " "
+                i += 1
+        elif two == "/*":
+            out[i] = out[i + 1] = " "
+            i += 2
+            while i < n and text[i - 1 : i + 1] != "*/":
+                out[i] = " "
+                i += 1
+            if i < n:
+                out[i] = " "
+                i += 1
+        elif text[i] == '"':
+            out[i] = " "
+            i += 1
+            while i < n and text[i] != '"':
+                if text[i] == "\\":
+                    out[i] = " "
+                    i += 1
+                if i < n:
+                    out[i] = " "
+                    i += 1
+            # The quote that closes it, so the next one found opens a string rather than closing
+            # the one just left.
+            if i < n:
+                out[i] = " "
+                i += 1
+        elif text[i] == "'" and text[i + 1 : i + 2] and text[i + 2 : i + 3] == "'":
+            # A character literal. A lifetime (`'a`) is one quote and is left alone.
+            out[i] = out[i + 1] = out[i + 2] = " "
+            i += 3
+        else:
+            i += 1
+    return "".join(out)
+
+
+def block(text: str, open_at: int) -> tuple[int, int]:
+    """The half-open span of the brace block that opens at or after `open_at`."""
+    start = text.find("{", open_at)
+    if start < 0:
+        return (len(text), len(text))
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return (start, i + 1)
+    return (start, len(text))
+
+
+def metal_type(decl: str) -> str:
+    """The Metal class or protocol a type declaration is, or `""`.
+
+    `&ProtocolObject<dyn MTLDevice>`, `Retained<MTLTextureDescriptor>` and
+    `Vec<Retained<ProtocolObject<dyn MTLBuffer>>>` each name one Metal type; anything naming none,
+    or more than one, is not a receiver this follows.
+    """
+    bare = UNWRAP.sub(" ", decl)
+    names = [w for w in IDENT.findall(bare) if w.startswith("MTL")]
+    return names[0] if len(names) == 1 and len(set(names)) == 1 else ""
+
+
+@dataclass
+class Api:
+    """What `objc2-metal` binds: which type answers which selector, and with what."""
+
+    #: `(type, rust name)` to the selector it sends.
+    selector: dict[tuple[str, str], str]
+    #: `(type, rust name)` to the Metal type the call answers, where it answers one.
+    answers: dict[tuple[str, str], str]
+    #: A type to the types it inherits from, nearest first.
+    supertypes: dict[str, list[str]]
+
+    @classmethod
+    def read(cls, path: Path) -> "Api":
+        selector: dict[tuple[str, str], str] = {}
+        answers: dict[tuple[str, str], str] = {}
+        supertypes: dict[str, list[str]] = {}
+        section = ""
+        for line in path.read_text().splitlines():
+            if line.startswith("#"):
+                section = line
+                continue
+            fields = line.split("\t")
+            if "supertypes" in section:
+                supertypes[fields[0]] = [f for f in fields[2].split(" ") if f]
+            else:
+                ty, sel, rust, answered = fields
+                selector[(ty, rust)] = sel
+                if answered:
+                    answers[(ty, rust)] = answered
+        return cls(selector, answers, supertypes)
+
+    def chain(self, ty: str) -> list[str]:
+        """`ty` and every type it inherits from, nearest first."""
+        out = [ty]
+        i = 0
+        while i < len(out):
+            for parent in self.supertypes.get(out[i], []):
+                if parent not in out:
+                    out.append(parent)
+            i += 1
+        return out
+
+    def binds(self, ty: str, rust: str) -> tuple[str, str] | None:
+        """The `(declaring type, selector)` a receiver of type `ty` sends `rust` to, or `None`."""
+        for owner in self.chain(ty):
+            if (owner, rust) in self.selector:
+                return (owner, self.selector[(owner, rust)])
+        return None
+
+    def answered(self, ty: str, rust: str) -> str:
+        """The Metal type a call of `rust` on `ty` answers, or `""`."""
+        for owner in self.chain(ty):
+            if (owner, rust) in self.selector:
+                return self.answers.get((owner, rust), "")
+        return ""
+
+    def receivers(self, rust: str) -> set[str]:
+        """Every type that binds the Rust name `rust`."""
+        return {ty for ty, name in self.selector if name == rust}
+
+
+@dataclass
+class Call:
+    """One Metal call the leg's source makes."""
+
+    #: The file it is in, relative to the crate.
+    file: str
+    #: The function that holds it.
+    function: str
+    #: The enclosing `match` arm variants, outermost first, as `Enum::Variant`.
+    arms: tuple[str, ...]
+    #: The Rust name, which is the selector with `:` as `_`.
+    rust: str
+    #: The receiver's type, or `""` where it could not be typed.
+    receiver: str
+    #: The SDK item, as `(declaring type, selector)`, where the receiver typed.
+    item: tuple[str, str] | None
+
+
+@dataclass
+class Leg:
+    """Every Metal call the leg makes, and what the typing could not reach."""
+
+    calls: list[Call] = field(default_factory=list)
+    #: Call sites whose receiver did not type, as `(file, function, rust name, receiver text)`.
+    unresolved: list[tuple[str, str, str, str]] = field(default_factory=list)
+    #: Call sites whose receiver typed to something that does not bind the selector: a bug in this
+    #: typing, never a Metal call.
+    mistyped: list[tuple[str, str, str, str]] = field(default_factory=list)
+    #: Call sites whose receiver did not type but whose Rust name only one type in `objc2-metal`
+    #: binds, so the receiver is that type whatever made it.
+    by_uniqueness: list[tuple[str, str, str]] = field(default_factory=list)
+    #: Which functions call which, by name, for the reachability closure.
+    calls_function: dict[str, set[str]] = field(default_factory=dict)
+    #: The `match` arms each function's calls to other functions sit under.
+    function_arms: dict[tuple[str, str], set[tuple[str, ...]]] = field(default_factory=dict)
+
+
+@dataclass
+class Function:
+    """A function of the source, with the span of its body."""
+
+    name: str
+    #: The `impl` header it is in, or `""` at module level.
+    impl: str
+    file: str
+    signature: str
+    start: int
+    end: int
+
+
+def functions(text: str, file: str) -> list[Function]:
+    """Every function the (blanked) source declares, with its body's span."""
+    out: list[Function] = []
+    impls: list[tuple[str, int]] = []
+    for match in re.finditer(r"\bimpl\b[^{;]*\{", text):
+        header = match.group(0)[:-1].strip()
+        span = block(text, match.start())
+        impls.append((header, span[1]))
+        impls[-1] = (header, span[1])
+    for match in re.finditer(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)", text):
+        open_at = text.find("{", match.end())
+        semi = text.find(";", match.end())
+        if open_at < 0 or (0 <= semi < open_at and "=>" not in text[match.end() : semi]):
+            # A declaration with no body (a trait's required method).
+            continue
+        start, end = block(text, match.end())
+        here = [h for h, stop in impls if h and match.start() < stop and start < stop]
+        out.append(
+            Function(
+                name=match.group(1),
+                impl=min(here, key=len) if here else "",
+                file=file,
+                signature=text[match.end() : start],
+                start=start,
+                end=end,
+            )
+        )
+    return out
+
+
+def arms_of(text: str, start: int, end: int, enums: set[str]) -> list[tuple[int, int, str]]:
+    """Every `match` arm in `text[start:end]`, with the variants of `enums` its pattern names.
+
+    Read from the `match` keyword, not from the variant names: a call inside an arm is only gated
+    by the arm it is in, and `Failure::named(..)` before an unrelated `=>` is not an arm at all.
+    An arm matching several variants (`A | B`) is attributed to each, and a nested `match` is
+    found by this same walk, so a call carries every arm around it.
+    """
+    out: list[tuple[int, int, str]] = []
+    for match in re.finditer(r"\bmatch\b", text[start:end]):
+        at = start + match.start()
+        open_at, close = block(text, at)
+        if close > end:
+            continue
+        i = open_at + 1
+        while i < close - 1:
+            arrow = _at_depth(text, i, close - 1, "=>")
+            if arrow < 0:
+                break
+            pattern = text[i:arrow]
+            body_end = _arm_end(text, arrow + 2, close - 1)
+            for name in re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)", pattern):
+                if name.group(1) in enums:
+                    out.append((arrow, body_end, f"{name.group(1)}::{name.group(2)}"))
+            i = body_end + 1
+    return out
+
+
+def _at_depth(text: str, start: int, end: int, want: str) -> int:
+    """Where `want` next appears in `text[start:end]` at bracket depth zero."""
+    depth = 0
+    i = start
+    while i < end:
+        c = text[i]
+        if c in "{([":
+            depth += 1
+        elif c in "})]":
+            depth -= 1
+        elif depth == 0 and text[i : i + len(want)] == want:
+            return i
+        i += 1
+    return -1
+
+
+def _arm_end(text: str, start: int, end: int) -> int:
+    """Where the arm body that starts at `start` ends: its block, or the comma after it."""
+    i = start
+    while i < end and text[i].isspace():
+        i += 1
+    if i < end and text[i] == "{":
+        return block(text, i)[1]
+    comma = _at_depth(text, i, end, ",")
+    return comma if comma >= 0 else end
+
+
+def receiver_of(text: str, at: int) -> str:
+    """The text of the receiver expression whose `.` is at `at`.
+
+    Whitespace is part of an expression because `rustfmt` breaks a call chain across lines, so a
+    receiver is very often the line above the `.`; a newline is only an end when what precedes it
+    is not an expression at all.
+    """
+    i = at
+    depth = 0
+    while i > 0:
+        c = text[i - 1]
+        if c in ")]":
+            depth += 1
+        elif c in "([":
+            if depth == 0:
+                break
+            depth -= 1
+        elif c in "{}":
+            break
+        elif c.isspace():
+            # Whitespace continues a chain only where an expression precedes it.
+            before = text[:i].rstrip()
+            if depth == 0 and not (before and (before[-1].isalnum() or before[-1] in "_)]?")):
+                break
+        elif depth == 0 and not (c.isalnum() or c in "_.:&*?"):
+            break
+        i -= 1
+    return " ".join(text[i:at].split())
+
+
+class Typing:
+    """What each name in one function's body is.
+
+    A name is typed by the `let` that binds it **nearest before** the use, so a body that reuses
+    one name for two objects — `let attachment = ...depthAttachment()` after
+    `let attachment = ...colorAttachments()...` — types each use as what it was last made from
+    rather than as whichever binding the file happens to end with.
+    """
+
+    def __init__(self, api: Api, fields: dict[str, str], locals_: dict[str, str] | None = None):
+        self.api = api
+        self.fields = fields
+        #: The Metal type each function of the leg itself answers, where it answers one. A pool
+        #: getter (`self.held(handle)`) is how most of this source reaches a Metal object.
+        self.locals = locals_ or {}
+        #: Each name's bindings, as `(offset, declared type, initializer)`, in source order.
+        self.bindings: dict[str, list[tuple[int, str, str]]] = {}
+        #: Parameters, which hold for the whole body.
+        self.names: dict[str, str] = {}
+        #: Where the expression being typed sits, so a binding after it does not answer it.
+        self.at = 0
+
+    def closure_params(self, body: str, offset: int) -> None:
+        """Take the declared types of every closure parameter in `body`.
+
+        A closure is how this source hands one encoder's work to two call sites, so its parameters
+        type as many receivers as a function's do.
+        """
+        for match in re.finditer(r"\|([^|]*:[^|]*)\|", body):
+            for part in _split(match.group(1)):
+                if ":" not in part:
+                    continue
+                name, decl = part.split(":", 1)
+                name = name.strip().removeprefix("mut ").strip()
+                ty = metal_type(decl)
+                if IDENT.fullmatch(name) and ty:
+                    self.bind(offset + match.start(), name, decl, "")
+
+    def param_types(self, signature: str) -> None:
+        """Take the declared types of a signature's parameters."""
+        depth = 0
+        start = signature.find("(")
+        parts: list[str] = []
+        piece = ""
+        for c in signature[start + 1 :]:
+            if c in "(<[":
+                depth += 1
+            elif c in ")>]":
+                if depth == 0:
+                    break
+                depth -= 1
+            if c == "," and depth == 0:
+                parts.append(piece)
+                piece = ""
+            else:
+                piece += c
+        parts.append(piece)
+        for part in parts:
+            if ":" not in part:
+                continue
+            name, decl = part.split(":", 1)
+            name = name.strip().removeprefix("mut ").strip()
+            if IDENT.fullmatch(name):
+                ty = metal_type(decl)
+                if ty:
+                    self.names[name] = ty
+
+    def expression(self, expr: str) -> str:
+        """The Metal type `expr` is, or `""`."""
+        expr = _unsafe_as_parens(" ".join(expr.split()))
+        expr = expr.strip("&*").strip().rstrip("?;").strip()
+        if not expr:
+            return ""
+        if expr.endswith(")"):
+            open_at = _matching(expr)
+            if open_at >= 0:
+                head = expr[:open_at].strip()
+                if "::" in head:
+                    ty, _, called = head.rpartition("::")
+                    ty = ty.strip().strip("&*<>").split("::")[-1].strip()
+                    return self.api.answered(ty, called.strip()) if ty.startswith("MTL") else ""
+                if "." in head:
+                    recv, _, called = head.rpartition(".")
+                    called = called.strip()
+                    if called in THROUGH:
+                        # An `Option` or `Result` adapter answers what it was given.
+                        return self.expression(recv)
+                    if recv.strip() == "self":
+                        return self.locals.get(called, "")
+                    owner = self.expression(recv)
+                    return self.api.answered(owner, called) if owner else ""
+                if not head:
+                    # A parenthesised expression, or the block of an `unsafe` the next rule turned
+                    # into one.
+                    return self.expression(expr[open_at + 1 : -1])
+                if head.strip() in self.locals:
+                    return self.locals[head.strip()]
+                return ""
+        if expr.endswith("]"):
+            open_at = expr.rfind("[")
+            if open_at > 0:
+                return self.expression(expr[:open_at])
+        if expr.startswith("MTL") and "::" not in expr and IDENT.fullmatch(expr):
+            return expr
+        steps = [piece.strip() for piece in expr.split(".")]
+        head = steps[0].split("[")[0].strip()
+        owner = self.fields if head == "self" else None
+        if owner is not None:
+            steps = steps[1:]
+            if not steps:
+                return ""
+            ty = self.fields.get(steps[0].split("[")[0], "")
+            steps = steps[1:]
+        else:
+            ty = self.name(head)
+            steps = steps[1:]
+        for step in steps:
+            if not ty:
+                return ""
+            ty = self.api.answered(ty, step.split("[")[0].strip())
+        return ty
+
+    def bind(self, at: int, name: str, decl: str, expr: str) -> None:
+        """Take `let name: decl = expr`, bound at offset `at`."""
+        self.bindings.setdefault(name, []).append((at, decl, expr))
+
+    def name(self, name: str) -> str:
+        """The Metal type `name` holds where it is being used, or `""`."""
+        before = [b for b in self.bindings.get(name, []) if b[0] < self.at]
+        if before:
+            at, decl, expr = before[-1]
+            ty = metal_type(decl) if decl else ""
+            if ty:
+                return ty
+            here, self.at = self.at, at
+            try:
+                return self.expression(expr)
+            finally:
+                self.at = here
+        return self.names.get(name, "")
+
+    def typed(self, expr: str, at: int) -> str:
+        """The Metal type the expression `expr`, which sits at offset `at`, is."""
+        self.at = at
+        return self.expression(expr)
+
+
+def _unsafe_as_parens(expr: str) -> str:
+    """`expr` with each `unsafe { .. }` block written as `( .. )`.
+
+    An `unsafe` block is an expression here — `unsafe { device.newX(..) }.ok_or_else(..)?` — so
+    reading its braces as parentheses lets one rule type the block and the chain after it.
+    """
+    out = expr
+    while True:
+        at = out.find("unsafe")
+        if at < 0:
+            return out
+        rest = out[at + len("unsafe") :]
+        if not rest.lstrip().startswith("{"):
+            return out
+        open_at = at + len("unsafe") + rest.index("{")
+        depth = 0
+        close = len(out) - 1
+        for i in range(open_at, len(out)):
+            if out[i] == "{":
+                depth += 1
+            elif out[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    close = i
+                    break
+        out = out[:at] + "(" + out[open_at + 1 : close] + ")" + out[close + 1 :]
+
+
+def _split(text: str) -> list[str]:
+    """`text` split on the commas at depth zero."""
+    out: list[str] = []
+    piece = ""
+    depth = 0
+    for c in text:
+        if c in "(<[":
+            depth += 1
+        elif c in ")>]":
+            depth -= 1
+        if c == "," and depth == 0:
+            out.append(piece)
+            piece = ""
+        else:
+            piece += c
+    out.append(piece)
+    return out
+
+
+def _matching(expr: str) -> int:
+    """Where the `(` that closes at `expr`'s last character opens."""
+    depth = 0
+    for i in range(len(expr) - 1, -1, -1):
+        if expr[i] in ")]}":
+            depth += 1
+        elif expr[i] in "([{":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def struct_fields(text: str, name: str) -> dict[str, str]:
+    """The Metal type of each field of struct `name`, where it has one."""
+    match = re.search(rf"\bstruct\s+{name}\b[^{{;]*\{{", text)
+    if not match:
+        return {}
+    start, end = block(text, match.start())
+    out: dict[str, str] = {}
+    depth = 0
+    piece = ""
+    for c in text[start + 1 : end - 1]:
+        if c in "(<[":
+            depth += 1
+        elif c in ")>]":
+            depth -= 1
+        if c == "," and depth == 0:
+            if ":" in piece:
+                field_name, decl = piece.split(":", 1)
+                ty = metal_type(decl)
+                if ty:
+                    out[field_name.strip().removeprefix("pub ").strip()] = ty
+            piece = ""
+        else:
+            piece += c
+    if ":" in piece:
+        field_name, decl = piece.split(":", 1)
+        ty = metal_type(decl)
+        if ty:
+            out[field_name.strip().removeprefix("pub ").strip()] = ty
+    return out
+
+
+def read_leg(api: Api, src: Path, files: list[str], enums: set[str]) -> Leg:
+    """Every Metal call the leg's `files` make, typed."""
+    leg = Leg()
+    blank = {name: blanked((src / name).read_text()) for name in files}
+    fields: dict[str, str] = {}
+    answers: dict[str, str] = {}
+    for name, text in blank.items():
+        for struct in re.findall(r"\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)", text):
+            fields.update(struct_fields(text, struct))
+        for fn in functions(text, name):
+            arrow = fn.signature.rfind("->")
+            if arrow >= 0:
+                ty = metal_type(fn.signature[arrow + 2 :])
+                if ty:
+                    answers[fn.name] = ty
+    for name, text in blank.items():
+        for fn in functions(text, name):
+            arms = arms_of(text, fn.start, fn.end, enums)
+            typing = Typing(api, fields, answers)
+            typing.param_types(fn.signature)
+            typing.closure_params(text[fn.start : fn.end], fn.start)
+            # Every `let` of the body, so a use of a name is typed by the one nearest before it.
+            # A binding, including the `let Some(x) = ..` and `let Ok(x) = ..` forms this source
+            # uses to unwrap a pool slot or an `Option` field.
+            for match in re.finditer(
+                r"\blet\s+(?:mut\s+)?(?:(?:Some|Ok)\(\s*(?:mut\s+)?)?"
+                r"([A-Za-z_][A-Za-z0-9_]*)\)?\s*(?::([^=;]*))?=",
+                text[fn.start : fn.end],
+            ):
+                at = fn.start + match.end()
+                stop = _statement_end(text, at, fn.end)
+                typing.bind(fn.start + match.start(), match.group(1), match.group(2) or "", text[at:stop])
+            for match in re.finditer(r"\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(", text[fn.start : fn.end]):
+                rust = match.group(1)
+                at = fn.start + match.start()
+                here = tuple(v for lo, hi, v in arms if lo <= at < hi)
+                owners = api.receivers(rust)
+                recv = receiver_of(text, at)
+                if recv == "self" or not owners:
+                    # `self` is the leg's own side, never a Metal object, so a name it shares with
+                    # a selector (`buffer`, `texture`) is this source's own function.
+                    # Not a Metal call at all. A call to another function of the leg is an edge of
+                    # the reachability graph instead.
+                    leg.calls_function.setdefault(fn.name, set()).add(rust)
+                    leg.function_arms.setdefault((fn.name, rust), set()).add(here)
+                    continue
+                ty = typing.typed(recv, at)
+                if not ty and len(owners) == 1:
+                    # Only one type binds the name, so no typing is needed to know the receiver.
+                    ty = next(iter(owners))
+                    leg.by_uniqueness.append((name, fn.name, rust))
+                if not ty:
+                    leg.unresolved.append((name, fn.name, rust, recv))
+                    leg.calls.append(Call(name, fn.name, here, rust, "", None))
+                    continue
+                item = api.binds(ty, rust)
+                if item is None:
+                    leg.mistyped.append((name, fn.name, rust, ty))
+                    leg.calls.append(Call(name, fn.name, here, rust, ty, None))
+                    continue
+                leg.calls.append(Call(name, fn.name, here, rust, ty, item))
+            # A call to another function of the leg: an edge of the reachability graph. A path
+            # qualifier is kept where it is a module (`crate::metal_work::run`) or `Self`, and
+            # dropped where it is a type, because `MTLTextureDescriptor::new` is a Metal call and
+            # not this source's own `new`.
+            for match in re.finditer(
+                r"\b((?:[A-Za-z_][A-Za-z0-9_]*::)*)([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+                text[fn.start : fn.end],
+            ):
+                rust = match.group(2)
+                at = fn.start + match.start()
+                if text[at - 1 : at] == "." or rust in ("fn", "if", "match", "while", "for"):
+                    continue
+                qualifier = [part for part in match.group(1).split("::") if part]
+                if qualifier and qualifier[-1][:1].isupper() and qualifier[-1] != "Self":
+                    continue
+                if api.receivers(rust):
+                    continue
+                here = tuple(v for lo, hi, v in arms if lo <= at < hi)
+                leg.calls_function.setdefault(fn.name, set()).add(rust)
+                leg.function_arms.setdefault((fn.name, rust), set()).add(here)
+    return leg
+
+
+def _statement_end(text: str, at: int, end: int) -> int:
+    """Where the statement that starts at `at` ends: its `;` at depth zero."""
+    depth = 0
+    for i in range(at, end):
+        c = text[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            if depth == 0:
+                return i
+            depth -= 1
+        elif c == ";" and depth == 0:
+            return i
+    return end
