@@ -1,8 +1,31 @@
 //! What a divergence is and how it prints.
 //!
-//! A failure names the site that moved by its path from the root, and prints the one leaf fact that
-//! differs: the element of a byte region, the line of an ordered list, or what a set is missing and
-//! holds extra. It never prints two whole values and leaves the reader to bisect them.
+//! A failure names the site that moved by its path from the root and says, in one line, **how
+//! much** of it moved: how many of the site's leaves differ and the largest difference where the
+//! values are numbers. Then it prints the first differing leaf ([`DivergenceKind::detail`]) for a
+//! reader who wants somewhere to start. It never prints two whole values and leaves the reader to
+//! bisect them.
+//!
+//! # Why the summary leads and the position follows
+//!
+//! That first line is what a `known-gaps.tsv` row's `answer` field holds, so it has to be both
+//! honest and **stable**.
+//!
+//! Honest: a bound read off the first mismatch is not a bound. Of twelve rotated-target
+//! divergences measured in this round, every one differs by a single code at the first mismatch
+//! and four reach **two** codes well past it -- one of them at row 1, byte 905 -- so a row taken
+//! from the first mismatch would have told a reader the gap was one code.
+//!
+//! Stable: a typed error is a property of the code path, but a first-mismatch position is a
+//! property of the **data walk**, so changing any earlier leaf renames the row without the gap
+//! changing at all. A count of differing leaves and the largest difference are properties of the
+//! comparison, so they do not move for reasons unrelated to the bug.
+//!
+//! The shape is `site`, `count`, and then whatever that kind can say. It degrades cleanly: a
+//! count exists for every kind, and only the largest difference is numbers-only, so a texel
+//! divergence reads "8419 elements differ, the largest difference 2" and a missing field reads as
+//! the one fact it is. Where a site has exactly one leaf the two values **are** the whole fact and
+//! are printed, because they are stable too.
 
 use crate::transcript::{Element, Negative, Value};
 use std::collections::BTreeSet;
@@ -31,30 +54,71 @@ impl std::fmt::Display for Divergence {
     }
 }
 
+/// Where one differing element of a byte region sits, and what the two sides read there.
+///
+/// It is the exemplar a report prints, never part of what a [`DivergenceKind`] prints: a walk
+/// position is not a property of the bug.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ElementAt {
+    pub image: u32,
+    pub row: u32,
+    pub index: u32,
+    /// The byte offset of the element inside the region, for a reader who wants the raw bytes.
+    pub at: usize,
+    pub metal: Value,
+    pub ours: Value,
+}
+
+/// Where one differing byte between the rows sits, and what the two sides read there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GapAt {
+    pub at: usize,
+    pub metal: u8,
+    pub ours: u8,
+}
+
+/// Which line of an ordered list differs first, and what the two sides hold there.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineAt {
+    pub at: usize,
+    pub metal: Option<String>,
+    pub ours: Option<String>,
+}
+
 /// What moved at a site.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DivergenceKind {
-    /// One element of a byte region differs.
+    /// Elements of a byte region differ.
     Element {
         element: Element,
-        image: u32,
-        row: u32,
-        index: u32,
-        /// The byte offset of the element inside the region, for a reader who wants the raw bytes.
-        at: usize,
-        metal: Value,
-        ours: Value,
+        /// How many of the region's elements differ: a property of the comparison, so it is
+        /// stable where a first-mismatch position is not.
+        count: usize,
+        /// The largest difference over them, where the values are numbers
+        /// ([`crate::allowance::difference`]). `None` where the element's values are not numbers,
+        /// which is the one thing this shape cannot say.
+        largest: Option<f64>,
+        /// The first of them, for a reader who wants somewhere to start. **Not** part of what the
+        /// kind prints, and so not part of a ledger row's identity.
+        first: ElementAt,
     },
-    /// A byte between the rows or the images of a region differs, where the case compares the
-    /// gaps.
-    Gap { at: usize, metal: u8, ours: u8 },
+    /// Bytes between the rows or the images of a region differ, where the case compares the gaps.
+    Gap {
+        /// How many such bytes differ.
+        count: usize,
+        /// The largest difference over them.
+        largest: Option<f64>,
+        /// The first of them.
+        first: GapAt,
+    },
     /// A region's bytes are a different length, so there is no element to name.
     Length { metal: usize, ours: usize },
-    /// One line of an ordered list differs, or one side has a line the other does not.
+    /// Lines of an ordered list differ, or one side has lines the other does not.
     Line {
-        at: usize,
-        metal: Option<String>,
-        ours: Option<String>,
+        /// How many lines differ.
+        count: usize,
+        /// The first of them.
+        first: LineAt,
     },
     /// A set differs: what Metal held and we did not, what we held and Metal did not, and how many
     /// both held.
@@ -123,39 +187,107 @@ impl std::fmt::Display for Side {
     }
 }
 
+impl DivergenceKind {
+    /// Where the first differing leaf sits, for a reader who wants somewhere to start.
+    ///
+    /// Kept out of [`Display`](std::fmt::Display) on purpose: a walk position is not a property of
+    /// the bug, and the printed line is what a `known-gaps.tsv` row's `answer` field holds, so a
+    /// position in it would rename the row whenever an earlier leaf moved. The report prints this
+    /// beneath the summary, where it helps and binds nothing.
+    pub fn detail(&self) -> Option<String> {
+        match self {
+            DivergenceKind::Element { element, first, .. } => Some(format!(
+                "first at [image {}, row {}, {}] ({element:?}, byte {}): Metal {}, ours {}",
+                first.image,
+                first.row,
+                first.index,
+                first.at,
+                print(&first.metal),
+                print(&first.ours)
+            )),
+            DivergenceKind::Gap { first, .. } => Some(format!(
+                "first at byte {}: {:#04x} on Metal and {:#04x} here",
+                first.at, first.metal, first.ours
+            )),
+            DivergenceKind::Line { first, .. } => Some(match (&first.metal, &first.ours) {
+                (Some(metal), Some(ours)) => {
+                    format!("first at line {}: Metal {metal:?}, ours {ours:?}", first.at)
+                }
+                (Some(metal), None) => {
+                    format!("line {} is missing; Metal has {metal:?}", first.at)
+                }
+                (None, Some(ours)) => format!("line {} is extra: {ours:?}", first.at),
+                (None, None) => format!("first at line {}", first.at),
+            }),
+            // Every other kind is one leaf, so what it prints is already the whole fact and there
+            // is no position to add.
+            _ => None,
+        }
+    }
+}
+
 impl std::fmt::Display for DivergenceKind {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DivergenceKind::Element {
                 element,
-                image,
-                row,
-                index,
-                at,
-                metal,
-                ours,
-            } => write!(
-                out,
-                "element [image {image}, row {row}, {index}] ({element:?}, byte {at}): \
-                 Metal {}, ours {}",
-                print(metal),
-                print(ours)
-            ),
-            DivergenceKind::Gap { at, metal, ours } => write!(
-                out,
-                "the byte at {at}, between the rows, is {metal:#04x} on Metal and {ours:#04x} here"
-            ),
+                count,
+                largest,
+                first,
+            } => {
+                // One element: its two values are the whole fact, and they are stable. More: the
+                // count and the largest difference, because a bound read off one element is not a
+                // bound.
+                if *count == 1 {
+                    return write!(
+                        out,
+                        "1 element differs ({element:?}): Metal {}, ours {}",
+                        print(&first.metal),
+                        print(&first.ours)
+                    );
+                }
+                write!(out, "{count} elements differ ({element:?})")?;
+                match largest {
+                    Some(largest) => write!(out, ", the largest difference {largest}"),
+                    None => Ok(()),
+                }
+            }
+            DivergenceKind::Gap {
+                count,
+                largest,
+                first,
+            } => {
+                if *count == 1 {
+                    return write!(
+                        out,
+                        "1 byte between the rows differs: {:#04x} on Metal and {:#04x} here",
+                        first.metal, first.ours
+                    );
+                }
+                write!(out, "{count} bytes between the rows differ")?;
+                match largest {
+                    Some(largest) => write!(out, ", the largest difference {largest}"),
+                    None => Ok(()),
+                }
+            }
             DivergenceKind::Length { metal, ours } => {
                 write!(out, "Metal wrote {metal} bytes, we read {ours}")
             }
-            DivergenceKind::Line { at, metal, ours } => match (metal, ours) {
-                (Some(metal), Some(ours)) => {
-                    write!(out, "line {at}: Metal {metal:?}, ours {ours:?}")
+            DivergenceKind::Line { count, first } => {
+                if *count > 1 {
+                    return write!(out, "{count} lines differ");
                 }
-                (Some(metal), None) => write!(out, "line {at} is missing; Metal has {metal:?}"),
-                (None, Some(ours)) => write!(out, "line {at} is extra: {ours:?}"),
-                (None, None) => write!(out, "line {at}"),
-            },
+                match (&first.metal, &first.ours) {
+                    (Some(metal), Some(ours)) => {
+                        write!(out, "1 line differs: Metal {metal:?}, ours {ours:?}")
+                    }
+                    (Some(metal), None) => {
+                        write!(out, "1 line is missing; Metal has {metal:?}")
+                    }
+                    (None, Some(ours)) => write!(out, "1 line is extra: {ours:?}"),
+                    (None, None) => write!(out, "1 line differs"),
+                }
+            }
             DivergenceKind::Set {
                 missing,
                 extra,

@@ -184,7 +184,13 @@ impl std::fmt::Display for Verdict {
             Verdict::Divergent { found, refused } => {
                 out.write_str("divergent")?;
                 for divergence in found {
+                    // The summary first, which is the line a `known-gaps.tsv` row's answer holds,
+                    // then where to start looking. The position is a line of its own precisely so
+                    // that it is not part of the row's identity.
                     write!(out, "\n  {divergence}")?;
+                    if let Some(detail) = divergence.kind.detail() {
+                        write!(out, "\n    {detail}")?;
+                    }
                 }
                 // A refusal is never hidden behind a divergence: plain Metal answered the call
                 // and we did not, which is a gap of its own kind however the rest of the case

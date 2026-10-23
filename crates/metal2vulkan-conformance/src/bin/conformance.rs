@@ -49,6 +49,7 @@
 //! its own line of the exit status.
 
 use metal2vulkan_conformance::device::{Policy, Venues};
+use metal2vulkan_conformance::known_gaps::Expectation;
 use metal2vulkan_conformance::run;
 
 fn main() -> std::process::ExitCode {
@@ -178,6 +179,21 @@ fn command() -> Result<bool, String> {
             println!();
             for why in &unexpected {
                 println!("not what known-gaps.tsv expects: {why}");
+            }
+            // The rows to add, in the ledger's own format, each on one line and all of them under
+            // one unambiguous heading. The report above is prose for a person; this is for
+            // whoever has to edit the file, and it removes the step where a site or an answer is
+            // reconstructed by hand or by somebody's parser.
+            let rows: Vec<String> = unexpected.iter().filter_map(Expectation::row).collect();
+            if !rows.is_empty() {
+                println!(
+                    "\nknown-gaps.tsv rows for the {} gap(s) above, one per line, tab-separated; \
+                     replace the last field with the open bug before committing:",
+                    rows.len()
+                );
+                for row in rows {
+                    println!("{row}");
+                }
             }
             Ok(false)
         }

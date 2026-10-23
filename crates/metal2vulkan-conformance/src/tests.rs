@@ -450,11 +450,28 @@ fn one_word_moving_names_its_row_and_index() {
     };
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].path, "case/output");
-    let DivergenceKind::Element { row, index, at, .. } = &found[0].kind else {
+    let DivergenceKind::Element {
+        count,
+        largest,
+        first,
+        ..
+    } = &found[0].kind
+    else {
         panic!("not an element: {:?}", found[0].kind);
     };
-    assert_eq!((*row, *index, *at), (1, 0, 8));
-    // The message names the leaf, not two whole regions.
+    assert_eq!((first.row, first.index, first.at), (1, 0, 8));
+    // One element moved, by 6: the summary is the count and how far, which is what a known-gaps
+    // row's answer holds and what makes it stable.
+    assert_eq!(*count, 1);
+    assert_eq!(*largest, Some(6.0));
+    let summary = found[0].kind.to_string();
+    assert!(summary.contains("1 element differs"), "{summary}");
+    assert!(summary.contains("Metal 3"), "{summary}");
+    // The walk position is a line of its own, so it is never part of the row's identity.
+    assert!(!summary.contains("row 1"), "{summary}");
+    let detail = found[0].kind.detail().unwrap();
+    assert!(detail.contains("row 1"), "{detail}");
+    // The message names the leaf, not two whole regions, and the report prints both lines.
     let printed = replayed.verdict.to_string();
     assert!(printed.contains("row 1"), "{printed}");
     assert!(printed.contains("Metal 3"), "{printed}");
@@ -1050,7 +1067,7 @@ fn an_ulps_allowance_reaches_a_float_inside_a_byte_column() {
             found.divergences[0].kind,
             DivergenceKind::Element {
                 element: Element::F32,
-                index: 0,
+                count: 1,
                 ..
             }
         ),
@@ -1672,6 +1689,28 @@ fn the_known_gaps_ledger_parses_and_names_real_cases() {
         assert!(known.waiting_on.contains("NOT established"), "{known:?}");
     }
 
+    // Every row's site must be one its case's committed recording actually holds. A row for a
+    // site that cannot exist is otherwise committable and silently unheld: one stream in this
+    // round nearly added a row for `case/texels/argb8` of a case whose `argb8` leg refuses at the
+    // pipeline and so produces no texels at all, and it was caught only because a hand count
+    // disagreed with a parser's. This makes that near-miss impossible without a device.
+    for known in &ledger {
+        let recording = crate::recording::read(&known.case)
+            .unwrap_or_else(|why| panic!("{}: {why}", known.case));
+        let held = recording.answers.iter().any(|answer| {
+            answer
+                .outcomes
+                .iter()
+                .any(|outcome| site_exists(&outcome.transcript.root, "case", &known.site))
+        });
+        assert!(
+            held,
+            "{}: no site {} in the committed recording. A row's site is the one the report \
+             prints, and a site the case never produces can never be held in either direction",
+            known.case, known.site
+        );
+    }
+
     // The zero-screen-width refusal is closed, so no row may name that case: the ledger holds
     // rows in both directions and a stale row would fail the run it is selected in.
     assert!(
@@ -1709,6 +1748,18 @@ fn a_ledger_row_missing_a_field_is_refused() {
         .remove(0);
     assert_eq!(row.expects, crate::known_gaps::Expects::Divergent);
     assert_eq!(row.venue, "llvmpipe");
+}
+
+/// Whether `want` is the path of `node` or of anything under it, with `node` sitting at `at`.
+fn site_exists(node: &Node, at: &str, want: &str) -> bool {
+    if at == want {
+        return true;
+    }
+    // A node's name may itself carry slashes, so the path is built the way the comparison's walk
+    // builds it rather than by splitting the wanted path.
+    node.children
+        .iter()
+        .any(|child| site_exists(child, &format!("{at}/{}", child.name), want))
 }
 
 /// A venue, for a test that holds a row against one venue and not another.
