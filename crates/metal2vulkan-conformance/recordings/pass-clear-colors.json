@@ -1,0 +1,346 @@
+{
+  "format": 1,
+  "case": "pass-clear-colors",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8958a817ee7102addc7d7697881b59edadfed930ec92ba27825ee0e67c6e864d"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "color-0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "color_clears",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 0,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 0,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 0,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 4607182418800017408,
+                                    "width": "double"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "color-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "color_clears",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 4607182418800017408,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 4607182418800017408,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 4607182418800017408,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 4607182418800017408,
+                                    "width": "double"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "color-2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "color_clears",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 0,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 0,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 0,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 0,
+                                    "width": "double"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "color-3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "color_clears",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 4598175219545276416,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 4602678819172646912,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 4604930618986332160,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 13830554455654793216,
+                                    "width": "double"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "color-4",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "color_clears",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 9221120237041090560,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 9218868437227405312,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 18442240474082181120,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 9223372036854775808,
+                                    "width": "double"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "color-5",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "color_clears",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 9218868437227405311,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 18442240474082181119,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 4503599627370496,
+                                    "width": "double"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 4372995238176751616,
+                                    "width": "double"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

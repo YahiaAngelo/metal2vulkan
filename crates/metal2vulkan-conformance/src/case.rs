@@ -888,6 +888,28 @@ pub trait Side {
         Err(Failure::unavailable("mesh_descriptor_facts"))
     }
 
+    /// What a **render pass descriptor** answers of itself
+    /// ([`PassDescriptorFacts`](crate::pass_descriptors::PassDescriptorFacts)):
+    /// `MTLRenderPassDescriptor`, its three attachment descriptors and its colour-attachment
+    /// array, in the shape [`spec`](crate::pass_descriptors::PassSpec) states.
+    ///
+    /// One call, for the reason [`Side::render_descriptor_facts`] gives: the descriptor is mutable
+    /// and the observation is what it answers **after** a stated sequence of setters, so a case
+    /// cannot state it as independent calls over objects neither side's handle space holds. No
+    /// encoder is made from the descriptor and nothing is allocated, which is what keeps the family
+    /// off the GPU.
+    ///
+    /// The runtime has no descriptor object: its `RenderPassDescriptor` is a value a consumer
+    /// fills, so Metal's `renderPassDescriptor` is `RenderPassDescriptor::new` and an attachment
+    /// set to nil is its `Default` again.
+    fn pass_descriptor_facts(
+        &mut self,
+        spec: &crate::pass_descriptors::PassSpec,
+    ) -> Answer<crate::pass_descriptors::PassDescriptorFacts> {
+        let _ = spec;
+        Err(Failure::unavailable("pass_descriptor_facts"))
+    }
+
     /// `newFunctionWithName:` of `entry`, or `newFunctionWithName:constantValues:error:` where
     /// `constants` holds a value, and what the function then answers about **itself**
     /// ([`crate::function_facts::FunctionFacts`]).

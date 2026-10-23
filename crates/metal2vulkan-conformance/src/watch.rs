@@ -292,6 +292,14 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.tile_descriptor_facts(library, spec)
     }
 
+    fn pass_descriptor_facts(
+        &mut self,
+        spec: &crate::pass_descriptors::PassSpec,
+    ) -> Answer<crate::pass_descriptors::PassDescriptorFacts> {
+        let _span = self.watch("pass_descriptor_facts");
+        self.inner.pass_descriptor_facts(spec)
+    }
+
     fn mesh_descriptor_facts(
         &mut self,
         library: Handle,

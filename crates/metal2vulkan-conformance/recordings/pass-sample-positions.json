@@ -1,0 +1,335 @@
+{
+  "format": 1,
+  "case": "pass-sample-positions",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "1b1c1091c982d456fa851ee7728be66023f4adcdf4aa6809e80438dcb9b3e0bb"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "positions-0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "sample_position_count",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_positions",
+                      "observed": {
+                        "value": {
+                          "list": []
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "positions-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "sample_position_count",
+                      "observed": {
+                        "value": {
+                          "uint": 4
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_positions",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 1031798784,
+                                    "width": "single"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 1044381696,
+                                    "width": "single"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 1050673152,
+                                    "width": "single"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 1054867456,
+                                    "width": "single"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 1058013184,
+                                    "width": "single"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 1060110336,
+                                    "width": "single"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 1062207488,
+                                    "width": "single"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 1064304640,
+                                    "width": "single"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "positions-2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "sample_position_count",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_positions",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 0,
+                                    "width": "single"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 1056964608,
+                                    "width": "single"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 1064304640,
+                                    "width": "single"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 1031798784,
+                                    "width": "single"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "positions-3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "sample_position_count",
+                      "observed": {
+                        "value": {
+                          "uint": 4
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_positions",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 1036831949,
+                                    "width": "single"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 1045220557,
+                                    "width": "single"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 1050253722,
+                                    "width": "single"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 1060320051,
+                                    "width": "single"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 1057803469,
+                                    "width": "single"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 1055286886,
+                                    "width": "single"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "list": [
+                                {
+                                  "float": {
+                                    "bits": 1065336439,
+                                    "width": "single"
+                                  }
+                                },
+                                {
+                                  "float": {
+                                    "bits": 981668463,
+                                    "width": "single"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

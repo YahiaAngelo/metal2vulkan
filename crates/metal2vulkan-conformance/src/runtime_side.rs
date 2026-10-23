@@ -37,6 +37,10 @@ use crate::mesh_descriptors::{
     DescriptorSpec as MeshDescriptorSpec, MeshDescriptorFacts, SuppliedLists as MeshSuppliedLists,
     AWAY as MESH_AWAY,
 };
+use crate::pass_descriptors::{
+    AttachmentFacts, Indices, Numbers, PassDescriptorFacts, PassSpec, Reads, Row, Shape,
+    ASSIGNED_COLOR, DEPTH_AT, MUTATED_AFTER, READ_COLORS as PASS_COLORS, STENCIL_AT, SWEPT_COLOR,
+};
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -77,10 +81,13 @@ use metal2vulkan_runtime::{
     CommandQueue, ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Heap,
     HeapDescriptor, HeapType, HostMemory, IndirectCommand, IndirectCommandBuffer,
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
-    LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
-    RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState,
-    SamplerStateOptions, ScissorRect, Size, SparseTextureRegionAlignmentMode, StoreAction, Texture,
-    TextureDescriptor, Viewport,
+    LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, Origin,
+    PipelineOption, PipelineOptions, RasterizationRateMap, Region,
+    RenderPassColorAttachmentDescriptor, RenderPassDepthAttachmentDescriptor, RenderPassDescriptor,
+    RenderPassStencilAttachmentDescriptor, RenderPipelineState, ResourceOptions, ResourceRef,
+    SamplePosition, SamplerState, SamplerStateOptions, ScissorRect, Size,
+    SparseTextureRegionAlignmentMode, StoreAction, StoreActionOptions, Texture, TextureDescriptor,
+    Viewport,
 };
 use std::time::Duration;
 
@@ -2365,6 +2372,89 @@ impl Side for RuntimeSide<'_> {
             &options,
             !spec.shape.resets(),
         ))
+    }
+
+    fn pass_descriptor_facts(&mut self, spec: &PassSpec) -> Answer<PassDescriptorFacts> {
+        // The runtime has no descriptor object: Metal's `renderPassDescriptor` is this call, and
+        // an attachment Metal's program sets to nil is this type's `Default` again.
+        let mut descriptor = RenderPassDescriptor::new();
+        if spec.shape.sets() {
+            for index in 0..PASS_COLORS {
+                let stated = crate::pass_descriptors::stated_row(index);
+                state_color_attachment(&mut descriptor.color_attachments[index as usize], &stated)?;
+            }
+            state_depth_attachment(
+                &mut descriptor.depth_attachment,
+                &crate::pass_descriptors::stated_row(DEPTH_AT),
+            )?;
+            state_stencil_attachment(
+                &mut descriptor.stencil_attachment,
+                &crate::pass_descriptors::stated_row(STENCIL_AT),
+            )?;
+        }
+        if spec.shape == Shape::Assigned {
+            // Metal's `setObject:atIndexedSubscript:` and its two attachment setters, as the
+            // runtime spells them: an assignment into the descriptor's own value. A value assigned
+            // in Rust is a copy by construction, so what this side answers is the assigned values
+            // and never the later mutation; whether Metal agrees is the case's measurement.
+            let assigned = crate::pass_descriptors::stated_row(ASSIGNED_COLOR);
+            let after = crate::pass_descriptors::stated_row(MUTATED_AFTER);
+            let mut color = RenderPassColorAttachmentDescriptor::default();
+            state_color_attachment(&mut color, &assigned)?;
+            descriptor.color_attachments[ASSIGNED_COLOR as usize] = color.clone();
+            state_color_attachment(&mut color, &after)?;
+
+            let mut depth = RenderPassDepthAttachmentDescriptor::default();
+            state_depth_attachment(&mut depth, &crate::pass_descriptors::stated_row(DEPTH_AT))?;
+            descriptor.depth_attachment = depth.clone();
+            state_depth_attachment(&mut depth, &after)?;
+            depth.clear_depth = crate::pass_descriptors::BASE.clear_depth;
+
+            let mut stencil = RenderPassStencilAttachmentDescriptor::default();
+            state_stencil_attachment(
+                &mut stencil,
+                &crate::pass_descriptors::stated_row(STENCIL_AT),
+            )?;
+            descriptor.stencil_attachment = stencil.clone();
+            state_stencil_attachment(&mut stencil, &after)?;
+            stencil.clear_stencil = crate::pass_descriptors::BASE.clear_stencil;
+        }
+        if let Some(row) = spec.row {
+            let shifted = |shift: u64| match spec.reads.rotates() {
+                true => row.rotated(shift),
+                false => row,
+            };
+            state_color_attachment(
+                &mut descriptor.color_attachments[SWEPT_COLOR as usize],
+                &shifted(0),
+            )?;
+            state_depth_attachment(&mut descriptor.depth_attachment, &shifted(1))?;
+            state_stencil_attachment(&mut descriptor.stencil_attachment, &shifted(2))?;
+        }
+        if let Some(numbers) = spec.numbers {
+            descriptor.render_target_array_length = numbers.0[0];
+            descriptor.render_target_width = numbers.0[1];
+            descriptor.render_target_height = numbers.0[2];
+            descriptor.default_raster_sample_count = numbers.0[3];
+            descriptor.tile_width = numbers.0[4];
+            descriptor.tile_height = numbers.0[5];
+            descriptor.imageblock_sample_length = numbers.0[6];
+            descriptor.threadgroup_memory_length = numbers.0[7];
+        }
+        if let Some(stated) = spec.positions {
+            descriptor.sample_positions = stated
+                .iter()
+                .map(|(x, y)| SamplePosition::new(*x, *y))
+                .collect();
+        }
+        if spec.shape == Shape::Cleared {
+            for index in 0..PASS_COLORS {
+                descriptor.color_attachments[index as usize] = Default::default();
+            }
+            descriptor.depth_attachment = Default::default();
+            descriptor.stencil_attachment = Default::default();
+        }
+        Ok(read_pass_descriptor(&descriptor, spec.reads))
     }
 
     fn function_facts(
@@ -5513,4 +5603,202 @@ fn drawn_primitive_type(draw: IndirectDraw) -> u64 {
         | IndirectDraw::IndexedPrimitives { primitive_type, .. } => primitive_type.raw(),
         _ => DrawPrimitiveType::from(PrimitiveType::Point).raw(),
     }
+}
+
+/// State one colour attachment of the runtime's descriptor from `row`.
+///
+/// A raw value the runtime does not define is its typed error, which the case records at the row
+/// rather than turning into a cast.
+fn state_color_attachment(
+    attachment: &mut RenderPassColorAttachmentDescriptor,
+    row: &Row,
+) -> Answer<()> {
+    attachment.load_action = LoadAction::from_raw(row.actions.load).map_err(Failure::from_error)?;
+    attachment.store_action =
+        StoreAction::from_raw(row.actions.store).map_err(Failure::from_error)?;
+    attachment.store_action_options =
+        StoreActionOptions::from_raw(row.actions.options).map_err(Failure::from_error)?;
+    attachment.level = row.indices.0[0];
+    attachment.slice = row.indices.0[1];
+    attachment.depth_plane = row.indices.0[2];
+    attachment.resolve_level = row.indices.0[3];
+    attachment.resolve_slice = row.indices.0[4];
+    attachment.resolve_depth_plane = row.indices.0[5];
+    attachment.clear_color = ClearColor::new(
+        row.clear_color[0],
+        row.clear_color[1],
+        row.clear_color[2],
+        row.clear_color[3],
+    );
+    Ok(())
+}
+
+/// State the depth attachment of the runtime's descriptor from `row`.
+fn state_depth_attachment(
+    attachment: &mut RenderPassDepthAttachmentDescriptor,
+    row: &Row,
+) -> Answer<()> {
+    attachment.load_action = LoadAction::from_raw(row.actions.load).map_err(Failure::from_error)?;
+    attachment.store_action =
+        StoreAction::from_raw(row.actions.store).map_err(Failure::from_error)?;
+    attachment.store_action_options =
+        StoreActionOptions::from_raw(row.actions.options).map_err(Failure::from_error)?;
+    attachment.level = row.indices.0[0];
+    attachment.slice = row.indices.0[1];
+    attachment.depth_plane = row.indices.0[2];
+    attachment.resolve_level = row.indices.0[3];
+    attachment.resolve_slice = row.indices.0[4];
+    attachment.resolve_depth_plane = row.indices.0[5];
+    attachment.clear_depth = row.clear_depth;
+    attachment.depth_resolve_filter =
+        MultisampleDepthResolveFilter::from_raw(row.filters.depth).map_err(Failure::from_error)?;
+    Ok(())
+}
+
+/// State the stencil attachment of the runtime's descriptor from `row`.
+fn state_stencil_attachment(
+    attachment: &mut RenderPassStencilAttachmentDescriptor,
+    row: &Row,
+) -> Answer<()> {
+    attachment.load_action = LoadAction::from_raw(row.actions.load).map_err(Failure::from_error)?;
+    attachment.store_action =
+        StoreAction::from_raw(row.actions.store).map_err(Failure::from_error)?;
+    attachment.store_action_options =
+        StoreActionOptions::from_raw(row.actions.options).map_err(Failure::from_error)?;
+    attachment.level = row.indices.0[0];
+    attachment.slice = row.indices.0[1];
+    attachment.depth_plane = row.indices.0[2];
+    attachment.resolve_level = row.indices.0[3];
+    attachment.resolve_slice = row.indices.0[4];
+    attachment.resolve_depth_plane = row.indices.0[5];
+    attachment.clear_stencil = row.clear_stencil;
+    attachment.stencil_resolve_filter =
+        MultisampleStencilResolveFilter::from_raw(row.filters.stencil)
+            .map_err(Failure::from_error)?;
+    Ok(())
+}
+
+/// What one colour attachment of the runtime's descriptor answers.
+fn read_color_attachment(attachment: &RenderPassColorAttachmentDescriptor) -> AttachmentFacts {
+    AttachmentFacts {
+        has_texture: attachment.texture.is_some(),
+        has_resolve_texture: attachment.resolve_texture.is_some(),
+        indices: Indices([
+            attachment.level,
+            attachment.slice,
+            attachment.depth_plane,
+            attachment.resolve_level,
+            attachment.resolve_slice,
+            attachment.resolve_depth_plane,
+        ]),
+        actions: crate::pass_descriptors::Actions {
+            load: attachment.load_action.raw(),
+            store: attachment.store_action.raw(),
+            options: attachment.store_action_options.raw(),
+        },
+    }
+}
+
+/// What the depth attachment of the runtime's descriptor answers.
+fn read_depth_attachment(attachment: &RenderPassDepthAttachmentDescriptor) -> AttachmentFacts {
+    AttachmentFacts {
+        has_texture: attachment.texture.is_some(),
+        has_resolve_texture: attachment.resolve_texture.is_some(),
+        indices: Indices([
+            attachment.level,
+            attachment.slice,
+            attachment.depth_plane,
+            attachment.resolve_level,
+            attachment.resolve_slice,
+            attachment.resolve_depth_plane,
+        ]),
+        actions: crate::pass_descriptors::Actions {
+            load: attachment.load_action.raw(),
+            store: attachment.store_action.raw(),
+            options: attachment.store_action_options.raw(),
+        },
+    }
+}
+
+/// What the stencil attachment of the runtime's descriptor answers.
+fn read_stencil_attachment(attachment: &RenderPassStencilAttachmentDescriptor) -> AttachmentFacts {
+    AttachmentFacts {
+        has_texture: attachment.texture.is_some(),
+        has_resolve_texture: attachment.resolve_texture.is_some(),
+        indices: Indices([
+            attachment.level,
+            attachment.slice,
+            attachment.depth_plane,
+            attachment.resolve_level,
+            attachment.resolve_slice,
+            attachment.resolve_depth_plane,
+        ]),
+        actions: crate::pass_descriptors::Actions {
+            load: attachment.load_action.raw(),
+            store: attachment.store_action.raw(),
+            options: attachment.store_action_options.raw(),
+        },
+    }
+}
+
+/// What the runtime's descriptor answers under `reads`.
+fn read_pass_descriptor(descriptor: &RenderPassDescriptor, reads: Reads) -> PassDescriptorFacts {
+    let mut facts = PassDescriptorFacts::empty();
+    for index in 0..reads.colors() {
+        let color = &descriptor.color_attachments[index as usize];
+        if matches!(reads, Reads::Whole | Reads::Attachments) {
+            facts.colors.push(read_color_attachment(color));
+        }
+        let clear = color.clear_color;
+        facts.color_clears.push([
+            clear.red.to_bits(),
+            clear.green.to_bits(),
+            clear.blue.to_bits(),
+            clear.alpha.to_bits(),
+        ]);
+    }
+    if matches!(reads, Reads::Whole | Reads::Attachments | Reads::ClearDepth) {
+        let depth = &descriptor.depth_attachment;
+        facts.clear_depth = Some(depth.clear_depth.to_bits());
+        if reads != Reads::ClearDepth {
+            facts.depth = Some(read_depth_attachment(depth));
+            facts.depth_resolve_filter = Some(depth.depth_resolve_filter.raw());
+        }
+    }
+    if matches!(
+        reads,
+        Reads::Whole | Reads::Attachments | Reads::ClearStencil
+    ) {
+        let stencil = &descriptor.stencil_attachment;
+        facts.clear_stencil = Some(stencil.clear_stencil);
+        if reads != Reads::ClearStencil {
+            facts.stencil = Some(read_stencil_attachment(stencil));
+            facts.stencil_resolve_filter = Some(stencil.stencil_resolve_filter.raw());
+        }
+    }
+    if matches!(reads, Reads::Whole | Reads::Numbers) {
+        facts.numbers = Some(Numbers([
+            descriptor.render_target_array_length,
+            descriptor.render_target_width,
+            descriptor.render_target_height,
+            descriptor.default_raster_sample_count,
+            descriptor.tile_width,
+            descriptor.tile_height,
+            descriptor.imageblock_sample_length,
+            descriptor.threadgroup_memory_length,
+        ]));
+        facts.has_visibility_buffer = Some(descriptor.visibility_result_buffer.is_some());
+        facts.has_rate_map = Some(descriptor.rasterization_rate_map.is_some());
+    }
+    if matches!(reads, Reads::Whole | Reads::Positions) {
+        facts.position_count = Some(descriptor.sample_positions.len() as u64);
+        facts.positions = Some(
+            descriptor
+                .sample_positions
+                .iter()
+                .map(|position| (position.x.to_bits(), position.y.to_bits()))
+                .collect(),
+        );
+    }
+    facts
 }

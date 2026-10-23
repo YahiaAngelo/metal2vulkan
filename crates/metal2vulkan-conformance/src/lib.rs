@@ -68,6 +68,7 @@ pub mod known_gaps;
 pub mod library_facts;
 pub mod measured;
 pub mod mesh_descriptors;
+pub mod pass_descriptors;
 pub mod pipeline_facts;
 pub mod queue_slots;
 pub mod record;

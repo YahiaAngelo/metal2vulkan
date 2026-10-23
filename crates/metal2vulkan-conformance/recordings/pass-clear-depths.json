@@ -1,0 +1,323 @@
+{
+  "format": 1,
+  "case": "pass-clear-depths",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4091ebed47b93ee026235862985ea5ef9525f9a09df7a939d079b83f856fc6c8"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0x0000000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 0,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0x3ff0000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 4607182418800017408,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0x3fe0000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 4602678819172646912,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0x8000000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 9223372036854775808,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0x4000000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 4611686018427387904,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0xbff0000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 13830554455654793216,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0x7ff8000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 9221120237041090560,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0xfff8000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 18444492273895866368,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0x7ff0000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 9218868437227405312,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0xfff0000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 18442240474082181120,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0x0010000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 4503599627370496,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0x3cb0000000000000",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 4372995238176751616,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "depth-0x3fefffffffffffff",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "clear_depth",
+                      "observed": {
+                        "value": {
+                          "float": {
+                            "bits": 4607182418800017407,
+                            "width": "double"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

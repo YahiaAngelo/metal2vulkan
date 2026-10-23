@@ -42,6 +42,10 @@ use crate::mesh_descriptors::{
     DescriptorSpec as MeshDescriptorSpec, MeshDescriptorFacts, SuppliedLists as MeshSuppliedLists,
     AWAY as MESH_AWAY,
 };
+use crate::pass_descriptors::{
+    AttachmentFacts, Indices, Numbers, PassDescriptorFacts, PassSpec, Reads, Row, Shape,
+    ASSIGNED_COLOR, DEPTH_AT, MUTATED_AFTER, READ_COLORS as PASS_COLORS, STENCIL_AT, SWEPT_COLOR,
+};
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -91,15 +95,17 @@ use objc2_metal::{
     MTLPipelineBufferDescriptorArray, MTLPipelineOption, MTLPixelFormat, MTLPointerType,
     MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor,
     MTLRasterizationRateMap, MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder,
-    MTLRenderPassDescriptor, MTLRenderPipelineColorAttachmentDescriptor,
-    MTLRenderPipelineColorAttachmentDescriptorArray, MTLRenderPipelineDescriptor,
-    MTLRenderPipelineReflection, MTLRenderPipelineState, MTLRenderStages, MTLResource,
-    MTLResourceOptions, MTLResourceUsage, MTLSamplePosition, MTLSamplerAddressMode,
-    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
-    MTLScissorRect, MTLSharedEvent, MTLSharedEventHandle, MTLSize, MTLSparsePageSize,
-    MTLSparseTextureRegionAlignmentMode, MTLStageInputOutputDescriptor, MTLStencilDescriptor,
-    MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLStoreActionOptions,
-    MTLStructMember, MTLStructType, MTLTessellationControlPointIndexType,
+    MTLRenderPassAttachmentDescriptor, MTLRenderPassColorAttachmentDescriptor,
+    MTLRenderPassColorAttachmentDescriptorArray, MTLRenderPassDepthAttachmentDescriptor,
+    MTLRenderPassDescriptor, MTLRenderPassStencilAttachmentDescriptor,
+    MTLRenderPipelineColorAttachmentDescriptor, MTLRenderPipelineColorAttachmentDescriptorArray,
+    MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
+    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplePosition,
+    MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
+    MTLSamplerState, MTLScissorRect, MTLSharedEvent, MTLSharedEventHandle, MTLSize,
+    MTLSparsePageSize, MTLSparseTextureRegionAlignmentMode, MTLStageInputOutputDescriptor,
+    MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction,
+    MTLStoreActionOptions, MTLStructMember, MTLStructType, MTLTessellationControlPointIndexType,
     MTLTessellationFactorFormat, MTLTessellationFactorStepFunction, MTLTessellationPartitionMode,
     MTLTexture, MTLTextureBinding, MTLTextureDescriptor, MTLTextureReferenceType,
     MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage,
@@ -2820,6 +2826,104 @@ impl Side for MetalSide {
             stages(&descriptor)?;
         }
         Ok(read_mesh_descriptor(&descriptor, !spec.shape.resets()))
+    }
+
+    fn pass_descriptor_facts(&mut self, spec: &PassSpec) -> Answer<PassDescriptorFacts> {
+        let descriptor: Retained<MTLRenderPassDescriptor> =
+            MTLRenderPassDescriptor::renderPassDescriptor();
+        if spec.shape.sets() {
+            for index in 0..PASS_COLORS {
+                let color: Retained<MTLRenderPassColorAttachmentDescriptor> =
+                    pass_color(&descriptor, index);
+                let stated = crate::pass_descriptors::stated_row(index);
+                state_pass_attachment(&color, &stated);
+                color.setClearColor(clear_color_of(&stated));
+            }
+            let depth: Retained<MTLRenderPassDepthAttachmentDescriptor> =
+                descriptor.depthAttachment();
+            let stated = crate::pass_descriptors::stated_row(DEPTH_AT);
+            state_pass_attachment(&depth, &stated);
+            depth.setClearDepth(stated.clear_depth);
+            depth.setDepthResolveFilter(MTLMultisampleDepthResolveFilter(
+                stated.filters.depth as usize,
+            ));
+            let stencil: Retained<MTLRenderPassStencilAttachmentDescriptor> =
+                descriptor.stencilAttachment();
+            let stated = crate::pass_descriptors::stated_row(STENCIL_AT);
+            state_pass_attachment(&stencil, &stated);
+            stencil.setClearStencil(stated.clear_stencil);
+            stencil.setStencilResolveFilter(MTLMultisampleStencilResolveFilter(
+                stated.filters.stencil as usize,
+            ));
+        }
+        if spec.shape == Shape::Assigned {
+            assign_pass_attachments(&descriptor);
+        }
+        if let Some(row) = spec.row {
+            let shifted = |shift: u64| match spec.reads.rotates() {
+                true => row.rotated(shift),
+                false => row,
+            };
+            let color: Retained<MTLRenderPassColorAttachmentDescriptor> =
+                pass_color(&descriptor, SWEPT_COLOR);
+            let stated = shifted(0);
+            state_pass_attachment(&color, &stated);
+            color.setClearColor(clear_color_of(&stated));
+            let depth: Retained<MTLRenderPassDepthAttachmentDescriptor> =
+                descriptor.depthAttachment();
+            let stated = shifted(1);
+            state_pass_attachment(&depth, &stated);
+            depth.setClearDepth(stated.clear_depth);
+            depth.setDepthResolveFilter(MTLMultisampleDepthResolveFilter(
+                stated.filters.depth as usize,
+            ));
+            let stencil: Retained<MTLRenderPassStencilAttachmentDescriptor> =
+                descriptor.stencilAttachment();
+            let stated = shifted(2);
+            state_pass_attachment(&stencil, &stated);
+            stencil.setClearStencil(stated.clear_stencil);
+            stencil.setStencilResolveFilter(MTLMultisampleStencilResolveFilter(
+                stated.filters.stencil as usize,
+            ));
+        }
+        if let Some(numbers) = spec.numbers {
+            descriptor.setRenderTargetArrayLength(numbers.0[0] as usize);
+            descriptor.setRenderTargetWidth(numbers.0[1] as usize);
+            descriptor.setRenderTargetHeight(numbers.0[2] as usize);
+            descriptor.setDefaultRasterSampleCount(numbers.0[3] as usize);
+            descriptor.setTileWidth(numbers.0[4] as usize);
+            descriptor.setTileHeight(numbers.0[5] as usize);
+            descriptor.setImageblockSampleLength(numbers.0[6] as usize);
+            descriptor.setThreadgroupMemoryLength(numbers.0[7] as usize);
+        }
+        if let Some(stated) = spec.positions {
+            let positions: Vec<metal2vulkan_runtime::SamplePosition> = stated
+                .iter()
+                .map(|(x, y)| metal2vulkan_runtime::SamplePosition::new(*x, *y))
+                .collect();
+            // The suite's one guard for the shapes Metal asserts on, which every family that sets
+            // sample positions goes through. The count is held against the row's own length: this
+            // descriptor has no attachment, so Metal counts the positions against nothing until an
+            // encoder opens, and the coordinate rule is the one the setter itself asserts on.
+            if let Some(refusal) =
+                crate::render::forbidden_positions(&positions, positions.len() as u32)
+            {
+                return Err(refusal);
+            }
+            let held: Vec<MTLSamplePosition> = stated
+                .iter()
+                .map(|(x, y)| MTLSamplePosition { x: *x, y: *y })
+                .collect();
+            // SAFETY: the pointer is to `held.len()` positions that live for the call, and the
+            // guard above has just held the count and every coordinate.
+            unsafe {
+                descriptor.setSamplePositions_count(held.as_ptr(), held.len());
+            }
+        }
+        if spec.shape == Shape::Cleared {
+            clear_pass_attachments(&descriptor);
+        }
+        Ok(read_pass_descriptor(&descriptor, spec.reads))
     }
 
     fn function_facts(
@@ -7363,4 +7467,222 @@ pub(crate) fn status_word(status: MTLCommandBufferStatus) -> &'static str {
         MTLCommandBufferStatus::Error => "Error",
         _ => "Unknown",
     }
+}
+
+/// State every field of one attachment descriptor from `row`: the three actions and the six index
+/// fields, which `MTLRenderPassAttachmentDescriptor` declares for all three kinds.
+///
+/// The parameter is the superclass the kinds share, so the calls here are the superclass's items
+/// once rather than three times over its subclasses.
+fn state_pass_attachment(attachment: &MTLRenderPassAttachmentDescriptor, row: &Row) {
+    attachment.setLoadAction(MTLLoadAction(row.actions.load as usize));
+    attachment.setStoreAction(MTLStoreAction(row.actions.store as usize));
+    attachment.setStoreActionOptions(MTLStoreActionOptions::from_bits_retain(
+        row.actions.options as usize,
+    ));
+    attachment.setLevel(row.indices.0[0] as usize);
+    attachment.setSlice(row.indices.0[1] as usize);
+    attachment.setDepthPlane(row.indices.0[2] as usize);
+    attachment.setResolveLevel(row.indices.0[3] as usize);
+    attachment.setResolveSlice(row.indices.0[4] as usize);
+    attachment.setResolveDepthPlane(row.indices.0[5] as usize);
+}
+
+/// What one attachment descriptor answers, through the superclass all three kinds share.
+fn read_pass_attachment(attachment: &MTLRenderPassAttachmentDescriptor) -> AttachmentFacts {
+    // Each getter's answer is bound to a local of its declared type, as the other facts walks do:
+    // the coverage derivation types a receiver from what bound it.
+    let texture: Option<Retained<ProtocolObject<dyn MTLTexture>>> = attachment.texture();
+    let resolve: Option<Retained<ProtocolObject<dyn MTLTexture>>> = attachment.resolveTexture();
+    AttachmentFacts {
+        has_texture: texture.is_some(),
+        has_resolve_texture: resolve.is_some(),
+        indices: Indices([
+            attachment.level() as u64,
+            attachment.slice() as u64,
+            attachment.depthPlane() as u64,
+            attachment.resolveLevel() as u64,
+            attachment.resolveSlice() as u64,
+            attachment.resolveDepthPlane() as u64,
+        ]),
+        actions: crate::pass_descriptors::Actions {
+            load: attachment.loadAction().0 as u64,
+            store: attachment.storeAction().0 as u64,
+            options: attachment.storeActionOptions().bits() as u64,
+        },
+    }
+}
+
+/// The colour attachment at `index` of `descriptor`'s array.
+fn pass_color(
+    descriptor: &MTLRenderPassDescriptor,
+    index: u32,
+) -> Retained<MTLRenderPassColorAttachmentDescriptor> {
+    let array: Retained<MTLRenderPassColorAttachmentDescriptorArray> =
+        descriptor.colorAttachments();
+    // SAFETY: `index` is below `READ_COLORS`, the eight attachments Metal's array holds, which
+    // every caller here keeps it to.
+    unsafe { array.objectAtIndexedSubscript(index as usize) }
+}
+
+/// Metal's number of sample positions, and the positions themselves.
+///
+/// `getSamplePositions:count:` answers the count for a count of 0 and writes the array for a count
+/// long enough, which is the only way to ask Metal how many the descriptor holds.
+fn pass_positions(descriptor: &MTLRenderPassDescriptor) -> (u64, Vec<(u32, u32)>) {
+    // SAFETY: a count of 0 with a null pointer is the documented way to ask for the count alone,
+    // and nothing is written.
+    let count = unsafe { descriptor.getSamplePositions_count(std::ptr::null_mut(), 0) };
+    let mut held: Vec<MTLSamplePosition> = vec![MTLSamplePosition { x: 0.0, y: 0.0 }; count];
+    if count > 0 {
+        // SAFETY: the pointer is to `count` positions that live for the call, and the count is the
+        // one Metal has just answered.
+        unsafe {
+            descriptor.getSamplePositions_count(held.as_mut_ptr(), count);
+        }
+    }
+    (
+        count as u64,
+        held.iter()
+            .map(|position| (position.x.to_bits(), position.y.to_bits()))
+            .collect(),
+    )
+}
+
+/// The pass's own eight numbers, in [`Numbers`]' order.
+fn pass_numbers(descriptor: &MTLRenderPassDescriptor) -> Numbers {
+    Numbers([
+        descriptor.renderTargetArrayLength() as u64,
+        descriptor.renderTargetWidth() as u64,
+        descriptor.renderTargetHeight() as u64,
+        descriptor.defaultRasterSampleCount() as u64,
+        descriptor.tileWidth() as u64,
+        descriptor.tileHeight() as u64,
+        descriptor.imageblockSampleLength() as u64,
+        descriptor.threadgroupMemoryLength() as u64,
+    ])
+}
+
+/// What `descriptor` answers under `reads`.
+fn read_pass_descriptor(descriptor: &MTLRenderPassDescriptor, reads: Reads) -> PassDescriptorFacts {
+    let mut facts = PassDescriptorFacts::empty();
+    for index in 0..reads.colors() {
+        let color: Retained<MTLRenderPassColorAttachmentDescriptor> = pass_color(descriptor, index);
+        let clear: MTLClearColor = color.clearColor();
+        if matches!(reads, Reads::Whole | Reads::Attachments) {
+            facts.colors.push(read_pass_attachment(&color));
+        }
+        facts.color_clears.push([
+            clear.red.to_bits(),
+            clear.green.to_bits(),
+            clear.blue.to_bits(),
+            clear.alpha.to_bits(),
+        ]);
+    }
+    if matches!(reads, Reads::Whole | Reads::Attachments | Reads::ClearDepth) {
+        let depth: Retained<MTLRenderPassDepthAttachmentDescriptor> = descriptor.depthAttachment();
+        facts.clear_depth = Some(depth.clearDepth().to_bits());
+        if reads != Reads::ClearDepth {
+            facts.depth = Some(read_pass_attachment(&depth));
+            facts.depth_resolve_filter = Some(depth.depthResolveFilter().0 as u64);
+        }
+    }
+    if matches!(
+        reads,
+        Reads::Whole | Reads::Attachments | Reads::ClearStencil
+    ) {
+        let stencil: Retained<MTLRenderPassStencilAttachmentDescriptor> =
+            descriptor.stencilAttachment();
+        facts.clear_stencil = Some(stencil.clearStencil());
+        if reads != Reads::ClearStencil {
+            facts.stencil = Some(read_pass_attachment(&stencil));
+            facts.stencil_resolve_filter = Some(stencil.stencilResolveFilter().0 as u64);
+        }
+    }
+    if matches!(reads, Reads::Whole | Reads::Numbers) {
+        facts.numbers = Some(pass_numbers(descriptor));
+        let visibility: Option<Retained<ProtocolObject<dyn MTLBuffer>>> =
+            descriptor.visibilityResultBuffer();
+        let map: Option<Retained<ProtocolObject<dyn MTLRasterizationRateMap>>> =
+            descriptor.rasterizationRateMap();
+        facts.has_visibility_buffer = Some(visibility.is_some());
+        facts.has_rate_map = Some(map.is_some());
+    }
+    if matches!(reads, Reads::Whole | Reads::Positions) {
+        let (count, positions) = pass_positions(descriptor);
+        facts.position_count = Some(count);
+        facts.positions = Some(positions);
+    }
+    facts
+}
+
+/// `row`'s clear colour as Metal's structure.
+fn clear_color_of(row: &Row) -> MTLClearColor {
+    MTLClearColor {
+        red: row.clear_color[0],
+        green: row.clear_color[1],
+        blue: row.clear_color[2],
+        alpha: row.clear_color[3],
+    }
+}
+
+/// [`Shape::Assigned`]: build each attachment apart from the pass, state it, assign it in, and
+/// then mutate it **through the object that was assigned**.
+///
+/// What the pass answers afterwards says whether the assignment copied the descriptor. The
+/// mutation states the values of another attachment of the stated table, so the two answers are
+/// values the record already holds elsewhere and a reader can tell which one came back.
+fn assign_pass_attachments(descriptor: &MTLRenderPassDescriptor) {
+    let array: Retained<MTLRenderPassColorAttachmentDescriptorArray> =
+        descriptor.colorAttachments();
+    let color: Retained<MTLRenderPassColorAttachmentDescriptor> =
+        MTLRenderPassColorAttachmentDescriptor::new();
+    let assigned = crate::pass_descriptors::stated_row(ASSIGNED_COLOR);
+    state_pass_attachment(&color, &assigned);
+    color.setClearColor(clear_color_of(&assigned));
+    // SAFETY: the slot is below the eight attachments the array holds.
+    unsafe { array.setObject_atIndexedSubscript(Some(&color), ASSIGNED_COLOR as usize) };
+    let after = crate::pass_descriptors::stated_row(MUTATED_AFTER);
+    state_pass_attachment(&color, &after);
+    color.setClearColor(clear_color_of(&after));
+
+    let depth: Retained<MTLRenderPassDepthAttachmentDescriptor> =
+        MTLRenderPassDepthAttachmentDescriptor::new();
+    let assigned = crate::pass_descriptors::stated_row(DEPTH_AT);
+    state_pass_attachment(&depth, &assigned);
+    depth.setClearDepth(assigned.clear_depth);
+    depth.setDepthResolveFilter(MTLMultisampleDepthResolveFilter(
+        assigned.filters.depth as usize,
+    ));
+    descriptor.setDepthAttachment(Some(&depth));
+    state_pass_attachment(&depth, &after);
+    depth.setClearDepth(crate::pass_descriptors::BASE.clear_depth);
+
+    let stencil: Retained<MTLRenderPassStencilAttachmentDescriptor> =
+        MTLRenderPassStencilAttachmentDescriptor::new();
+    let assigned = crate::pass_descriptors::stated_row(STENCIL_AT);
+    state_pass_attachment(&stencil, &assigned);
+    stencil.setClearStencil(assigned.clear_stencil);
+    stencil.setStencilResolveFilter(MTLMultisampleStencilResolveFilter(
+        assigned.filters.stencil as usize,
+    ));
+    descriptor.setStencilAttachment(Some(&stencil));
+    state_pass_attachment(&stencil, &after);
+    stencil.setClearStencil(crate::pass_descriptors::BASE.clear_stencil);
+}
+
+/// [`Shape::Cleared`]: set every attachment of the pass to nil.
+///
+/// `objc2-metal` 0.3.2 declares the three getters non-null, so a nil answered here would panic
+/// rather than compare. That it does not is this shape's measurement: Metal answers a fresh
+/// descriptor, which the read then records field by field.
+fn clear_pass_attachments(descriptor: &MTLRenderPassDescriptor) {
+    let array: Retained<MTLRenderPassColorAttachmentDescriptorArray> =
+        descriptor.colorAttachments();
+    for index in 0..PASS_COLORS {
+        // SAFETY: the slot is below the eight attachments the array holds.
+        unsafe { array.setObject_atIndexedSubscript(None, index as usize) };
+    }
+    descriptor.setDepthAttachment(None);
+    descriptor.setStencilAttachment(None);
 }

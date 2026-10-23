@@ -111,6 +111,7 @@ pub mod pvrtc_rows;
 pub mod rate_maps;
 pub mod render_chains;
 pub mod render_depth_stencil_state;
+pub mod render_pass_descriptors;
 pub mod render_residency;
 pub mod render_state;
 pub mod rgb10a2_srgb;
@@ -193,6 +194,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in mesh_pipeline_descriptors::all() {
+        cases.push(Box::new(case));
+    }
+    for case in render_pass_descriptors::all() {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {
