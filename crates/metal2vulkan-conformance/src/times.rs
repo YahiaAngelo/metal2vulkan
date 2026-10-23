@@ -917,6 +917,17 @@ pub fn render(metal: Option<&Measurement>, ours: &Measurement, show: bool) -> St
          same work at different\n  calls, and the measured example is right here -- Metal \
          compiles at `library`, we translate at `compute_pipeline`\n",
     );
+    // A reader meeting a ratio hugely in our favour needs the reason beside it, not in a report
+    // they may never open. Both sentences are measurements of this tree, not cautions in general.
+    out.push_str(
+        "  A RATIO FAR IN OUR FAVOUR IS A SETUP DIFFERENCE UNTIL SOMEBODY SHOWS OTHERWISE. The \
+         suite's recordings make 733\n  shader references over 152 distinct (shader, entry) \
+         pairs, so 90% are to a shader another case already used,\n  and our leg has a shader \
+         cache while Metal's newLibraryWithData recompiles every call. Our counters sum to 518\n           shader modules and 1,040 pipelines for 122 ms of measured compile -- about 78 us each, \
+         which is not a price at\n  which any compile to machine code happens, so something below \
+         us is handing back work already done. Use\n  --cold-shaders for the only setting under \
+         which the compile rows compare like with like.\n",
+    );
     out.push_str(&format!(
         "{:<34} {:>7} {:>10} {:>10} {:>7} {:>10} {:>10} {:>7}   {:>9} {:>9}\n",
         "call",
@@ -1376,5 +1387,86 @@ mod tests {
             cost < 100_000,
             "the instrument measured itself at {cost} ns a call"
         );
+    }
+}
+
+/// Every case of the suite carries a time record, and this is what makes that structural.
+///
+/// **The requirement is not that a command can time a selection, it is that a suite cannot exist
+/// without its timing being recorded.** A case added tomorrow is timed with no author action and
+/// no opt-in, because this fails until `conformance times --write` has been run over it. Nothing
+/// here needs Metal or a device: it reads the committed recordings, so it holds on every host and
+/// in CI.
+///
+/// A leg that could not finish the case is a **recorded hole**, not an absence: `record_times`
+/// writes its record with the reason in [`CaseTimes::stopped`], and [`judge`] refuses such a leg
+/// before the margin. So the check is unconditional and has no allowlist — an allowlist is exactly
+/// the thing that would let a case be added and silently untimed.
+#[cfg(test)]
+mod every_case_is_timed {
+    /// Each case's recording holds at least one [`super::TimeRecord`].
+    #[test]
+    fn every_case_carries_its_timing() {
+        let mut missing: Vec<&str> = Vec::new();
+        let mut legs = 0;
+        let mut holes = 0;
+        for case in crate::cases::all() {
+            let recording = crate::recording::read(case.name())
+                .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+            if recording.times.is_empty() {
+                missing.push(case.name());
+                continue;
+            }
+            legs += recording.times.len();
+            holes += recording
+                .times
+                .iter()
+                .filter(|held| held.times.stopped.is_some())
+                .count();
+        }
+        // A screen's worth, never the whole list: this failed with 542 names in it once, which is
+        // a wall of text a reader scrolls past rather than a failure they act on.
+        let shown: Vec<&str> = missing.iter().take(10).copied().collect();
+        let rest = missing.len().saturating_sub(shown.len());
+        assert!(
+            missing.is_empty(),
+            "{} case(s) carry no timing at all, so the suite's timing is not recorded for every \
+             case. Run `conformance times --runs 8 --write` on a Mac over the whole set; a leg \
+             that cannot run records its reason rather than nothing. First: {shown:?}{}",
+            missing.len(),
+            if rest > 0 {
+                format!(" and {rest} more")
+            } else {
+                String::new()
+            }
+        );
+        // Not a bound, a floor: a tree where this reached zero would mean the reader above counted
+        // nothing, which is how a test like this rots into always passing.
+        assert!(legs > 0, "no leg of any case carries a figure");
+        println!(
+            "{legs} leg record(s) over {} case(s), {holes} of them recorded holes",
+            crate::cases::all().len()
+        );
+    }
+
+    /// A recorded hole says **why**, so the reader is never left to guess whether a leg was
+    /// refused, stopped, or simply never asked.
+    #[test]
+    fn a_recorded_hole_names_its_reason() {
+        for case in crate::cases::all() {
+            let Ok(recording) = crate::recording::read(case.name()) else {
+                continue;
+            };
+            for held in &recording.times {
+                if let Some(why) = &held.times.stopped {
+                    assert!(
+                        !why.trim().is_empty(),
+                        "{}: its {} leg records a hole with no reason",
+                        case.name(),
+                        held.leg
+                    );
+                }
+            }
+        }
     }
 }

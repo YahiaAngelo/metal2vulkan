@@ -196,6 +196,17 @@ impl Census {
              name cannot be timed at all. Narrowing it\n  to a real figure needs a call graph; the \
              gap is the work.\n",
         );
+        // The honest baseline stays in the generated output, not only in a report: "timing is
+        // recorded for every suite" must never come to mean "recorded for everything we can see".
+        if !self.runtime.is_empty() {
+            out.push_str(&format!(
+                "  SO AT LEAST {:.0}% OF THE RUNTIME'S FRAME SURFACE IS UNTIMEABLE BY ANY CASE \
+                 ({} of {} methods).\n  Every case being timed does not make the API timed.\n",
+                100.0 * (self.runtime.len() - reached) as f64 / self.runtime.len() as f64,
+                self.runtime.len() - reached,
+                self.runtime.len()
+            ));
+        }
         let untimed = self.untimed_side();
         if untimed.is_empty() {
             out.push_str("\nevery Side call is timed by this selection\n");

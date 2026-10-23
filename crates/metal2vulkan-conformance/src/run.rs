@@ -470,6 +470,47 @@ pub fn validated_leg(case: &dyn Case) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether our leg's shader cache carries over between the cases of a round.
+///
+/// **This exists because the first whole-set run produced a figure nobody could defend.** Metal's
+/// `library` cost 46 ms a call against our 0.2 ms, which read as our compiling 200 times faster.
+/// It is not a compiler comparison. The suite's 547 recordings make 733 shader references over
+/// **152 distinct (shader, entry) pairs**, so 90% of the references are to a shader another case
+/// already used, and our leg has a shader cache while Metal's `newLibraryWithData` recompiles
+/// every call. Warm is what a consumer sees across a session and is the right default; cold is the
+/// only setting under which the compile rows compare like with like.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shaders {
+    /// One device and one shader cache for the whole round, so a shader another case compiled is
+    /// already there. What a consumer sees, and what the counters half measures.
+    Warm,
+    /// A device and a shader cache of its own for every case, so no case is handed another's
+    /// compile.
+    Cold,
+}
+
+/// A device open for a measurement, with the sink its notices go to.
+struct Open {
+    device: metal2vulkan_runtime::Device,
+    notices: Notices,
+    /// Dropped with the device, which removes the directory.
+    _cache: ScratchCache,
+}
+
+/// A fresh device, its own shader-cache directory, and its notices drained of the venue's own.
+fn open(venues: Venues, policy: Policy) -> Result<Open, String> {
+    let notices = Notices::default();
+    let cache = ScratchCache::new().map_err(|error| error.to_string())?;
+    let device = device::open_under(venues, policy, &notices, &cache)?;
+    // The notices the device announced as it was made are the venue's, not any case's.
+    notices.take();
+    Ok(Open {
+        device,
+        notices,
+        _cache: cache,
+    })
+}
+
 /// Measure what `cases` cost **on our stack** on the venue `venues` names, over `rounds` rounds.
 ///
 /// The measurement's shape is the cost half's, for the same reasons measured there: the whole
@@ -489,21 +530,30 @@ pub fn times_on_under(
     policy: Policy,
     cases: &[Box<dyn Case>],
     rounds: u32,
+    shaders: Shaders,
 ) -> Result<crate::times::Measurement, String> {
     let instrument = crate::times::instrument_nanos();
     let mut venue = String::new();
     let mut taken: Vec<Vec<crate::times::CaseRound>> = Vec::new();
     for _ in 0..rounds.max(1) {
-        let notices = Notices::default();
-        let cache = ScratchCache::new().map_err(|error| error.to_string())?;
-        let device = device::open_under(venues, policy, &notices, &cache)?;
-        // The notices the device announced as it was made are the venue's, not any case's.
-        notices.take();
-        venue = device.name().to_owned();
         let mut round = Vec::with_capacity(cases.len());
+        // A device and a shader cache per round is the measurement's own shape, matching the gate's
+        // ([`cost_on_under`]). `Shaders::Cold` gives each case its own of both instead, which is
+        // the only way to read our compile cost per shader rather than per *first* use of a shader
+        // — see [`Shaders`].
+        let mut warm = match shaders {
+            Shaders::Warm => Some(open(venues, policy)?),
+            Shaders::Cold => None,
+        };
         for case in cases {
-            let taker = notices.clone();
-            let side = RuntimeSide::new(&device, move || taker.take());
+            let mut cold = match shaders {
+                Shaders::Warm => None,
+                Shaders::Cold => Some(open(venues, policy)?),
+            };
+            let open = warm.as_mut().or(cold.as_mut()).expect("one of the two");
+            venue = open.device.name().to_owned();
+            let taker = open.notices.clone();
+            let side = RuntimeSide::new(&open.device, move || taker.take());
             round.push(timed(case.as_ref(), side)?);
         }
         taken.push(round);
@@ -694,12 +744,13 @@ fn record_one_time(
         let Some(times) = measured.case(case) else {
             continue;
         };
-        // A leg that did not finish the case keeps nothing, and that is not an error for the
-        // case: the other leg may still have figures worth keeping, and a case whose Metal leg
-        // the safety rule refuses is exactly that shape.
-        if times.stopped.is_some() {
-            continue;
-        }
+        // **A leg that did not finish the case still writes its record**, carrying the reason in
+        // `CaseTimes::stopped`. The absence of a record and a recorded hole mean different things
+        // to a reader and to a test: every case carrying its timing is what makes "every suite has
+        // its timing recorded" a structural property instead of a habit, and a case whose Metal leg
+        // the safety rule refuses must say so in its own file rather than by having nothing there.
+        // Such a record's figures are not a measurement of the case and nothing compares them:
+        // `crate::times::judge` refuses a stopped leg before it reaches the margin.
         let record = TimeRecord {
             leg: measured.leg,
             venue: measured.venue.clone(),
@@ -720,7 +771,11 @@ fn record_one_time(
         written += 1;
     }
     if written == 0 {
-        return Err("neither leg finished the case, so there is nothing to keep".to_owned());
+        return Err(
+            "the measurement holds no leg for this case at all, so nothing can be written; a case \
+             the run did not reach cannot carry its timing"
+                .to_owned(),
+        );
     }
     recording
         .times
