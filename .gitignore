@@ -44,3 +44,7 @@ Thumbs.db
 # Python
 __pycache__/
 *.py[cod]
+
+# A recording is built in a sibling file and renamed over its target, so an interrupted
+# whole-set write can leave one of these. It is not a recording and must never be committed.
+crates/metal2vulkan-conformance/recordings/*.tmp

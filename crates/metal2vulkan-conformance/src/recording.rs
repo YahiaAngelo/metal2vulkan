@@ -512,6 +512,11 @@ pub fn read(case: &str) -> Result<Recording, String> {
 
 /// Write `recording` to the file [`recording_path`] names, pretty-printed so a diff of a
 /// re-recording reads.
+///
+/// The write is atomic: the text is built in a sibling file and renamed over the target, so the
+/// recording on disk is only ever the old file or the whole new one. A whole-set write touches
+/// every recording in turn and is interruptible on a shared machine, and a plain write would
+/// leave whichever recording it held at the time unparseable.
 pub fn write(recording: &Recording) -> Result<std::path::PathBuf, String> {
     let dir = recordings_dir();
     std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
@@ -519,6 +524,157 @@ pub fn write(recording: &Recording) -> Result<std::path::PathBuf, String> {
     let mut text = serde_json::to_string_pretty(recording)
         .map_err(|error| format!("{}: {error}", path.display()))?;
     text.push('\n');
-    std::fs::write(&path, text).map_err(|error| format!("{}: {error}", path.display()))?;
+    write_atomically(&path, &text)?;
     Ok(path)
+}
+
+/// The file a write to `path` builds in before it becomes `path`.
+///
+/// **It sits in `path`'s own directory, and that is the whole point.** `rename` is atomic only
+/// within one filesystem, so a temporary under `TMPDIR` -- which on a machine whose temp is a
+/// different filesystem is a copy, not a rename -- would defeat this entirely. Appending to the
+/// full path keeps it beside its target by construction; do not "tidy" it into a temp directory.
+///
+/// The name ends in `.tmp` and not in `.json`, so none of the three walkers over this directory
+/// can mistake a leftover for a recording: `land-check.sh` and `coverage.py` glob `*.json`, and
+/// `the_case_set_is_the_recordings_the_document_counted` asks for a `json` extension, which a
+/// `.json.tmp` file does not have. The process id is in the name so two writers of one case
+/// cannot build in the same file.
+fn temp_beside(path: &std::path::Path) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(format!(".{}.tmp", std::process::id()));
+    std::path::PathBuf::from(name)
+}
+
+/// Write `text` to `path` so that `path` is only ever the old file or the whole new one.
+///
+/// A plain `std::fs::write` truncates the target and then fills it, so a process killed in that
+/// window leaves a recording half-written and unparseable -- and a whole-set write does this 722
+/// times in a row, with a `maclock` ticket that another stream may need back. Building the text
+/// in a sibling file and renaming it over the target closes the window: `rename` replaces the
+/// directory entry in one step, so a reader sees one file or the other and never a partial one.
+/// An interrupt can still leave a *stray temporary*, which is harmless by name, and the next
+/// write of that case by that process id replaces it.
+fn write_atomically(path: &std::path::Path, text: &str) -> Result<(), String> {
+    let temp = temp_beside(path);
+    std::fs::write(&temp, text).map_err(|error| format!("{}: {error}", temp.display()))?;
+    if let Err(error) = std::fs::rename(&temp, path) {
+        // The target is untouched, so the only thing to clean up is the sibling.
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("{}: {error}", path.display()));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod atomic_writes {
+    use super::{temp_beside, write_atomically};
+
+    /// A scratch directory of this test's own, so no test ever writes in `recordings/`.
+    fn scratch(what: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "metal2vulkan-conformance-{what}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        dir
+    }
+
+    /// **A write that fails leaves the recording that was there whole.** This is the property the
+    /// plain `std::fs::write` did not have: it truncated the target first, so a process killed in
+    /// that window left the recording unparseable, and a whole-set write does it 722 times in a
+    /// row on a machine where another stream may want its device ticket back.
+    ///
+    /// The failure is interposed where a kill would land -- between building the text and the
+    /// rename -- by putting a directory where the temporary has to go, so writing it cannot
+    /// succeed. Restore the old one-call body and this test fails on its first assertion, because
+    /// that body reports success and replaces the target.
+    #[test]
+    fn a_write_that_fails_leaves_the_previous_recording_whole() {
+        let dir = scratch("failed-write");
+        let target = dir.join("a-case.json");
+        let before = "{\n  \"case\": \"a-case\"\n}\n";
+        std::fs::write(&target, before).expect("the recording that was there");
+
+        // Where the temporary must go, so building it cannot succeed.
+        std::fs::create_dir_all(temp_beside(&target)).expect("the obstruction");
+
+        let answer = write_atomically(&target, "the new text, never to arrive");
+        assert!(
+            answer.is_err(),
+            "a write whose temporary could not be built reported success"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("the target still readable"),
+            before,
+            "a write that failed changed the recording on disk"
+        );
+
+        std::fs::remove_dir_all(&dir).expect("the scratch directory removed");
+    }
+
+    /// A write that succeeds replaces the target and leaves no sibling behind.
+    #[test]
+    fn a_write_that_succeeds_leaves_no_temporary() {
+        let dir = scratch("good-write");
+        let target = dir.join("a-case.json");
+        std::fs::write(&target, "the old one\n").expect("the recording that was there");
+
+        write_atomically(&target, "the new one\n").expect("the write");
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("the target"),
+            "the new one\n"
+        );
+        assert!(
+            !temp_beside(&target).exists(),
+            "the write left its temporary beside the recording"
+        );
+
+        std::fs::remove_dir_all(&dir).expect("the scratch directory removed");
+    }
+
+    /// **The temporary sits in its target's own directory, and nothing may move it.** `rename` is
+    /// atomic only within one filesystem, so a temporary under `TMPDIR` would become a copy on a
+    /// machine whose temp is a different filesystem and this would all be for nothing. Its name
+    /// also has to stay off `*.json`, because three separate walkers over `recordings/` would
+    /// otherwise count a leftover as a recording.
+    #[test]
+    fn the_temporary_is_beside_its_target_and_is_not_a_recording() {
+        let target = super::recording_path("a-case");
+        let temp = temp_beside(&target);
+        assert_eq!(
+            temp.parent(),
+            target.parent(),
+            "the temporary left its target's directory, so the rename is no longer atomic"
+        );
+        assert_eq!(
+            temp.extension().and_then(|end| end.to_str()),
+            Some("tmp"),
+            "the temporary does not end in .tmp"
+        );
+        assert_ne!(
+            temp.extension().and_then(|end| end.to_str()),
+            Some("json"),
+            "a leftover temporary would be read as a recording"
+        );
+    }
+
+    /// No temporary is committed beside the recordings. A stray is harmless to the suite by name,
+    /// but `git add -A` would commit one, and that is how three separate pieces of damage reached
+    /// a tree in this project already.
+    #[test]
+    fn no_temporary_is_committed_beside_the_recordings() {
+        let strays: Vec<String> = std::fs::read_dir(super::recordings_dir())
+            .expect("the recordings directory")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|end| end == "tmp"))
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            strays.is_empty(),
+            "temporary file(s) left beside the recordings: {strays:?}"
+        );
+    }
 }
