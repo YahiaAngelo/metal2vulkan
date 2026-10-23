@@ -245,6 +245,14 @@ const PASS_NOTICES: &[Degradation] = &[
     Degradation::SharedInSystemMemory,
     // The device's own compiler rewrote the stage's fast-math arithmetic as it made the pipeline.
     Degradation::FastMathRewrites,
+    // The fixture's vertex function writes `[[point_size]]`, which a device without
+    // `shaderPointSize`'s guarantee takes as its own point size. Announced on lavapipe.
+    Degradation::DevicePointSize,
+    // A device that resolves the multisampled attachment through a pass of its own rather than in
+    // the store, and converts the colour in a shader to do it. Announced on lavapipe, where the
+    // whole resolve is emulated; MoltenVK resolves in the store and announces neither.
+    Degradation::ShaderResolve,
+    Degradation::ShaderColorConversion,
 ];
 
 /// The three vertices of the probe's triangle, which covers what lies left of `edge`.
