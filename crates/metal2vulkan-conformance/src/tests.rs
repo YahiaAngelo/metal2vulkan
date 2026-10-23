@@ -1075,18 +1075,25 @@ fn a_carried_answer_taken_on_another_chip_names_it() {
             case.name()
         );
     }
-    // One family, and no others. A second would mean a table nobody noticed came from another
-    // machine. `two_plane_heap_blits` used to be the other one and now records on Metal: nothing
-    // it does is Apple SPI, so its answer is this chip's.
-    assert!(
-        elsewhere
-            .iter()
-            .any(|name| name.starts_with("texture-fills-")),
-        "texture_fills carries the M4's digests: {elsewhere:?}"
-    );
+    // These families, and no others. One the list does not name would mean a table nobody noticed
+    // came from another machine. `two_plane_heap_blits` used to be here and now records on Metal:
+    // nothing it does is Apple SPI, so its answer is this chip's.
+    //
+    // - `texture-fills-*`: the M4's fill digests, which `fillTexture:` being Apple SPI keeps
+    //   carried.
+    // - `ycbcr-minify-band-*`: the M4's per-band digests of a minified two-plane YCbCr texture's
+    //   samples, which stay carried because a texture of such a format exists only over an
+    //   IOSurface and the Metal side has no call that makes one.
+    const KNOWN: [&str; 2] = ["texture-fills-", "ycbcr-minify-band-"];
+    for family in KNOWN {
+        assert!(
+            elsewhere.iter().any(|name| name.starts_with(family)),
+            "{family} carries the M4's digests: {elsewhere:?}"
+        );
+    }
     for name in &elsewhere {
         assert!(
-            name.starts_with("texture-fills-"),
+            KNOWN.iter().any(|family| name.starts_with(family)),
             "{name} carries another chip's values and is not one of the known families"
         );
     }

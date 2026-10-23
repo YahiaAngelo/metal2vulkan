@@ -24,6 +24,7 @@
 //!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
+pub mod chroma_pairs;
 pub mod command_queues;
 pub mod depth_texel_reads;
 pub mod extended_range_blends;
@@ -55,6 +56,8 @@ pub mod tile_threadgroups;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
 pub mod two_plane_samples;
+pub mod ycbcr_minify;
+pub mod ycbcr_textures;
 
 use crate::case::Case;
 
@@ -139,6 +142,11 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(shared_events::rising_value()));
+    cases.extend(chroma_pairs::all());
+    cases.extend(ycbcr_textures::all());
+    for case in ycbcr_minify::all() {
+        cases.push(Box::new(case));
+    }
     cases
 }
 
