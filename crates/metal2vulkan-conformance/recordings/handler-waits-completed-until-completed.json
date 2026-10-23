@@ -1,0 +1,99 @@
+{
+  "format": 1,
+  "case": "handler-waits-completed-until-completed",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": {
+        "never_returned": {
+          "from": "metal2vulkan-validation runtime_lane::handler_waits, waits_from_a_command_buffer_s_own_handlers_answer_at_once",
+          "call": "addCompletedHandler/waitUntilCompleted"
+        }
+      },
+      "device": "Apple M4",
+      "runs": 1,
+      "outcomes": [
+        {
+          "runs": 1,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "wait",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d72de2436a59cd01cd657b031240a6a9db04c26b0409b021224a418b52d20ae4"
+                        }
+                      }
+                    },
+                    {
+                      "name": "command-buffer",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d490f85e91dad7f435df667667005be4da495cc9176f4797331a937872cefbc3"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "addCompletedHandler/waitUntilCompleted",
+                  "observed": {
+                    "value": {
+                      "nothing": "never_returned"
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "not_run"
+    }
+  ]
+}

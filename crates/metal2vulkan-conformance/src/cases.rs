@@ -31,6 +31,7 @@ pub mod extended_range_planes;
 pub mod extended_range_targets;
 pub mod extended_range_two_planes;
 pub mod half_write_nans;
+pub mod handler_waits;
 pub mod heap_metal_sizes;
 pub mod indirect_private_types;
 pub mod math_routines;
@@ -131,6 +132,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in textures::all() {
+        cases.push(Box::new(case));
+    }
+    for case in handler_waits::all() {
         cases.push(Box::new(case));
     }
     cases
