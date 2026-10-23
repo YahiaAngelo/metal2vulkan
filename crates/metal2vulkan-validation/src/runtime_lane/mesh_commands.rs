@@ -1234,6 +1234,11 @@ fn a_pipeline_on_a_buffer_of_no_draw_of_its_kind_is_refused() {
 /// 256 bytes keeps `a`'s 64 words off `b`, so b[0] and a[63] read 0xb and 0xa; one of 16 bytes
 /// lets them reach `b`, and a[63], past both, reads 0. From the CPU's records at the commit, and
 /// from the records a host step reads where an encoder made the buffer resident for writing.
+///
+/// Each object threadgroup is one thread: the function's barriers lie where its thread 0 alone
+/// reaches them, which both Metal's and Vulkan's rules allow only where every thread of the
+/// threadgroup reaches them (NVIDIA's GPU waited at them for good with 32 threads). The M3 Max
+/// answers each case alike with 1 thread and with 32.
 #[test]
 fn a_command_s_mesh_draw_runs_with_its_own_object_threadgroup_lengths() {
     on_device(|device, _| {
@@ -1249,6 +1254,7 @@ fn a_command_s_mesh_draw_runs_with_its_own_object_threadgroup_lengths() {
                 1,
             )
             .unwrap();
+        // One object thread (the doc), 32 mesh threads.
         let (one, threads) = (Size::new(1, 1, 1), Size::new(32, 1, 1));
         // The encoder's lengths, the command's, and Metal's b[0] and a[63].
         let cases: [([u32; 2], [u32; 2], [u32; 2]); 2] = [
@@ -1288,9 +1294,7 @@ fn a_command_s_mesh_draw_runs_with_its_own_object_threadgroup_lengths() {
                         .set_object_threadgroup_memory_length(length, index)
                         .unwrap();
                 }
-                command
-                    .draw_mesh_threadgroups(one, threads, threads)
-                    .unwrap();
+                command.draw_mesh_threadgroups(one, one, threads).unwrap();
                 if written {
                     // An earlier encoder makes the buffer resident for writing: its execution's
                     // commands are then a host step's.
@@ -1320,9 +1324,7 @@ fn a_command_s_mesh_draw_runs_with_its_own_object_threadgroup_lengths() {
                 set_encoder(encoder, *encoder_lengths);
                 encoder.set_render_pipeline_state(&state).unwrap();
                 encoder.set_object_buffer(Some(&out), 0, 0).unwrap();
-                encoder
-                    .draw_mesh_threadgroups(one, threads, threads)
-                    .unwrap();
+                encoder.draw_mesh_threadgroups(one, one, threads).unwrap();
             };
             lane.execute_after(&name, &icb, 1, setup, &[&out]).unwrap();
             let metal = match encoder_lengths[0] {
