@@ -1,0 +1,150 @@
+{
+  "format": 1,
+  "case": "sample-fills-whole-2",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_samples",
+      "entry": "rt6_read_bytes4",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": {
+        "carried": {
+          "from": "runtime_lane::sample_fills, from the probe ms.m (an Apple M3 Max, macOS 27.0.1)"
+        }
+      },
+      "device": "apple-m3-max",
+      "runs": 1,
+      "outcomes": [
+        {
+          "runs": 1,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "case-geometry",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "675915ef61ef6af10cb955c2abc983e2beaab978ed0205cb43d60218e4b29544"
+                        }
+                      }
+                    },
+                    {
+                      "name": "fill-pattern",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "97ed8e55519b020c4d9aceb40e0d3bc7eaa22d080d49592bf21206cb697c8a58"
+                        }
+                      }
+                    },
+                    {
+                      "name": "kernels-ll",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "kernels-air-ll",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "metal-lines",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ca208ca294348632d67305825a0fe256d368d466d1634707b821d989e55ead00"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "samples/whole-2",
+                  "observed": {
+                    "value": {
+                      "lines": [
+                        "after  s0 y0: | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1",
+                        "after  s0 y1: | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1",
+                        "after  s0 y2: | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1 | d4c3b2a1 d4c3b2a1"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "not_run"
+    }
+  ]
+}

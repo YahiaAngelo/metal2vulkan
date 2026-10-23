@@ -9,7 +9,9 @@ pub mod indirect_private_types;
 pub mod math_routines;
 pub mod pass_bytes;
 pub mod stage_in_regions;
+pub mod sample_fills;
 pub mod texture_buffer_fills;
+pub mod texture_fills;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
 
@@ -36,6 +38,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.push(Box::new(two_plane_copies::row_blits()));
     cases.push(Box::new(two_plane_copies::announced_row_blits()));
     cases.push(Box::new(two_plane_copies::pad_fills()));
+    for case in texture_fills::all() {
+        cases.push(Box::new(case));
+    }
+    for case in sample_fills::all() {
+        cases.push(Box::new(case));
+    }
     cases
 }
 

@@ -1,0 +1,153 @@
+{
+  "format": 1,
+  "case": "sample-fills-array-4",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_samples",
+      "entry": "rt6_read_bytes4",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": {
+        "carried": {
+          "from": "runtime_lane::sample_fills, from the probe ms.m (an Apple M3 Max, macOS 27.0.1)"
+        }
+      },
+      "device": "apple-m3-max",
+      "runs": 1,
+      "outcomes": [
+        {
+          "runs": 1,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "case-geometry",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3e003cea0ba88498b47a581909b06eb6b6f0e5f6a9b6a057c0eba7b08c705490"
+                        }
+                      }
+                    },
+                    {
+                      "name": "fill-pattern",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a8faed6abbf35c12a4b26e40f6feb19d736d90045c83b9f9a31f638d323e6811"
+                        }
+                      }
+                    },
+                    {
+                      "name": "kernels-ll",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "kernels-air-ll",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "metal-lines",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ca208ca294348632d67305825a0fe256d368d466d1634707b821d989e55ead00"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "samples/array-4",
+                  "observed": {
+                    "value": {
+                      "lines": [
+                        "after  s0 y0: | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040",
+                        "after  s0 y1: | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040",
+                        "after  s0 y2: | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040",
+                        "after  s1 y0: | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | 33221100 77665544 bbaa9988 ffeeddcc | 33221100 77665544 bbaa9988 ffeeddcc | 33221100 77665544 bbaa9988 ffeeddcc | ffbf8040 ffbf8040 ffbf8040 ffbf8040",
+                        "after  s1 y1: | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | 33221100 77665544 bbaa9988 ffeeddcc | 33221100 77665544 bbaa9988 ffeeddcc | 33221100 77665544 bbaa9988 ffeeddcc | ffbf8040 ffbf8040 ffbf8040 ffbf8040",
+                        "after  s1 y2: | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040 | ffbf8040 ffbf8040 ffbf8040 ffbf8040"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "not_run"
+    }
+  ]
+}
