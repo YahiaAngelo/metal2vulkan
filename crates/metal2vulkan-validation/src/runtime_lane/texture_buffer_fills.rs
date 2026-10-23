@@ -8,8 +8,10 @@
 //! encoder, and every byte of the buffer read back. A fill is the probe's argument
 //! `x,w[,y,h,d,level,slice,z]:` (`y` 0, `h` and `d` 1, the rest 0 where left out) and its pattern:
 //! `p<n>` the `n` bytes `a1 a2 ..`, `p<n>@<b>` from the byte `b`, `c<pf>` the color
-//! (0.25, -0.5, 1.25, 0.75) packed in `pf`. Metal's answer is the first 16 hex digits of the
-//! SHA-256 of the buffer's bytes; a group's, of its cases' buffers in order.
+//! (0.25, -0.5, 1.25, 0.75) packed in `pf`. Metal's answer is the runs of bytes its fills changed
+//! ([`METAL_RUNS`], one line a case), beside the first 16 hex digits of the SHA-256 of the
+//! buffer's bytes the probe printed; a group's digest, of its cases' buffers in order. A differing
+//! case names its first differing byte.
 //!
 //! - **Streams**: patterns longer than the texel, of lengths not a power of two, and up to 256
 //!   bytes; regions past the texture's width, past the buffer's end, of no rows, of no images, at
@@ -45,6 +47,15 @@ use sha2::{Digest, Sha256};
 
 /// The buffer's bytes.
 const BYTES: usize = 512;
+
+/// Metal's bytes of every stream and group case, as the runs its fills changed in the buffer's
+/// first bytes: a line `<case> | <offset>: <bytes> | ...` each, the case named as the tables name
+/// it (a group's case `<group>#<k>`), recovered on an Apple M3 Max under MoltenVK beside the
+/// digests the probes printed.
+const METAL_RUNS: &str = include_str!("../../fixtures/public/texture_buffer_fills/metal_runs.txt");
+
+/// The SHA-256 of [`METAL_RUNS`].
+const METAL_RUNS_SHA: &str = "74e7623a2f205ae68228c27eef22d0817b3f1c10baa4ed15c3dd0e95c65d6847";
 
 /// A stream: its name, the format's raw value, the texture's offset, its fills, and Metal's
 /// answer.
@@ -367,6 +378,63 @@ fn the_inputs_are_the_probes() {
     );
 }
 
+/// Metal's bytes of the case `key`: the buffer's first bytes with its recorded runs written in.
+fn metal_bytes(key: &str) -> Vec<u8> {
+    let line = METAL_RUNS
+        .lines()
+        .find(|line| {
+            line.split_once(' ')
+                .map_or(*line == key, |(name, _)| name == key)
+        })
+        .unwrap_or_else(|| panic!("no Metal runs of {key}"));
+    let mut bytes = first_bytes();
+    for run in line.split('|').skip(1) {
+        let (at, values) = run.split_once(':').expect("a run's offset");
+        let at = usize::from_str_radix(at.trim().trim_start_matches("0x"), 16).expect("an offset");
+        for (i, value) in values.split_whitespace().enumerate() {
+            bytes[at + i] = u8::from_str_radix(value, 16).expect("a byte");
+        }
+    }
+    bytes
+}
+
+/// The byte `ours` and Metal's part at, or `None` where they are alike.
+fn unlike_metal(ours: &[u8], metal: &[u8]) -> Option<String> {
+    ours.iter()
+        .zip(metal)
+        .position(|(got, want)| got != want)
+        .map(|at| {
+            format!(
+                "byte {at:#x} is {:02x}, Metal's {:02x}",
+                ours[at], metal[at]
+            )
+        })
+}
+
+/// The recorded runs are the probes': their own SHA-256, one line a case, and every case's
+/// digest as the probe printed it.
+#[test]
+fn the_recorded_runs_are_the_probes() {
+    assert_eq!(
+        crate::hash::hex_encode(Sha256::digest(METAL_RUNS)),
+        METAL_RUNS_SHA,
+        "the recorded runs"
+    );
+    let mut lines = 0;
+    for (name, _, _, _, metal) in STREAMS {
+        assert_eq!(digest(&metal_bytes(name)), metal, "{name}");
+        lines += 1;
+    }
+    for (name, _, _, cases, metal) in GROUPS {
+        let bytes: Vec<Vec<u8>> = (0..cases.len())
+            .map(|k| metal_bytes(&format!("{name}#{k}")))
+            .collect();
+        assert_eq!(digest(&bytes.concat()), metal, "{name}");
+        lines += cases.len();
+    }
+    assert_eq!(METAL_RUNS.lines().count(), lines, "a line a case");
+}
+
 /// The runs of `bytes` that differ from the buffer's first bytes, as the probe prints them.
 fn runs(bytes: &[u8]) -> String {
     let first = first_bytes();
@@ -392,23 +460,27 @@ fn texture_buffer_fills_write_metal_s_bytes() {
     on_device(|device, messages| {
         let queue = device.new_command_queue().unwrap();
         let mut wrong = Vec::new();
-        for (name, format, offset, fills, metal) in STREAMS {
+        for (name, format, offset, fills, _) in STREAMS {
             let ours = case(device, &queue, format, offset, fills);
-            if digest(&ours) != metal {
-                println!("TEXTURE-BUFFER-FILLS-DIFFERS {name}:{}", runs(&ours));
+            if let Some(unlike) = unlike_metal(&ours, &metal_bytes(name)) {
+                println!(
+                    "TEXTURE-BUFFER-FILLS-DIFFERS {name}: {unlike}:{}",
+                    runs(&ours)
+                );
                 wrong.push(name.to_owned());
             }
         }
-        for (name, format, offset, cases, metal) in GROUPS {
-            let ours: Vec<Vec<u8>> = cases
-                .iter()
-                .map(|fills| case(device, &queue, format, offset, fills))
-                .collect();
-            if digest(&ours.concat()) != metal {
-                for (k, bytes) in ours.iter().enumerate() {
-                    println!("TEXTURE-BUFFER-FILLS-DIFFERS {name} {k}:{}", runs(bytes));
+        for (name, format, offset, cases, _) in GROUPS {
+            for (k, fills) in cases.iter().enumerate() {
+                let ours = case(device, &queue, format, offset, fills);
+                let key = format!("{name}#{k}");
+                if let Some(unlike) = unlike_metal(&ours, &metal_bytes(&key)) {
+                    println!(
+                        "TEXTURE-BUFFER-FILLS-DIFFERS {key}: {unlike}:{}",
+                        runs(&ours)
+                    );
+                    wrong.push(key);
                 }
-                wrong.push(name.to_owned());
             }
         }
         let mut kinds = forced(&[(

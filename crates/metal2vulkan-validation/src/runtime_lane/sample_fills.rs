@@ -7,9 +7,10 @@
 //! (color `(0.25, 0.5, 0.75, 1)`, depth 0.25, stencil `0x5a`), one fill, and every sample read
 //! back by a dispatch: a color format's bits through an unsigned view of its components
 //! (`candidate::runtime_samples`), a depth's bits, a stencil's value (`Depth32Float_Stencil8`'s
-//! through its `X32_Stencil8` view). Metal's answer per case is the first 16 hex digits of the
-//! SHA-256 of the probe's read-back lines, `after  s<slice> y<row>:` and each texel's samples as
-//! it printed them. A sample whose bytes `n · b` of a texel's are 16 or fewer takes its own bytes
+//! through its `X32_Stencil8` view). Metal's answer per case is its read-back lines,
+//! `after  s<slice> y<row>:` and each texel's samples as the probe printed them, committed in
+//! [`METAL_LINES`] beside the first 16 hex digits of their SHA-256, which the probe printed. A
+//! differing case names its first differing line. A sample whose bytes `n · b` of a texel's are 16 or fewer takes its own bytes
 //! of the pattern, past 16 every sample the pattern cut at the texel (`tests::blit_fill` checks
 //! the rule on every measured case without a device). The depths outside `[0, 1]` (`d32-wide-4`)
 //! are not compared where the device's depth copies go by a draw that announced the values it
@@ -27,6 +28,14 @@ use metal2vulkan_runtime::{
     ResourceOptions, StoreAction, Texture, TextureDescriptor,
 };
 use sha2::{Digest, Sha256};
+
+/// Metal's lines per case, each case's block headed `[<case>]` (the `d32-wide-4` case apart,
+/// whose depths out of `[0, 1]` a drawn depth copy changes on the devices that copy depth by a
+/// draw, so only its digest is Metal's).
+const METAL_LINES: &str = include_str!("../../fixtures/public/sample_fills/metal.txt");
+
+/// The SHA-256 of [`METAL_LINES`].
+const METAL_LINES_SHA: &str = "ca208ca294348632d67305825a0fe256d368d466d1634707b821d989e55ead00";
 
 /// The probe's 16-byte pattern.
 const P16: &str = "00112233445566778899aabbccddeeff";
@@ -517,6 +526,47 @@ fn run(lane: &Lane, case: &Case) -> Option<Vec<String>> {
     Some(out)
 }
 
+/// Metal's lines of `case`, or `None` where none are recorded.
+fn metal_lines(case: &str) -> Option<Vec<String>> {
+    let head = format!("[{case}]\n");
+    let at = METAL_LINES.find(&head)? + head.len();
+    let rest = &METAL_LINES[at..];
+    let end = rest.find("\n[").map_or(rest.len(), |n| n + 1);
+    Some(rest[..end].lines().map(str::to_owned).collect())
+}
+
+/// How `lines` differ from Metal's, or `None` where they are alike: the first line they part at.
+fn unlike_metal(lines: &[String], metal: &[String]) -> Option<String> {
+    if lines == metal {
+        return None;
+    }
+    match lines.iter().zip(metal).position(|(got, want)| got != want) {
+        Some(i) => Some(format!(
+            "line {i} is `{}`, Metal's `{}`",
+            lines[i], metal[i]
+        )),
+        None => Some(format!("{} lines, Metal's {}", lines.len(), metal.len())),
+    }
+}
+
+/// The recorded lines are the probe's: their own SHA-256, and each case's digest the probe
+/// printed of its lines.
+#[test]
+fn the_recorded_lines_are_the_probes() {
+    assert_eq!(
+        crate::hash::hex_encode(Sha256::digest(METAL_LINES)),
+        METAL_LINES_SHA,
+        "the recorded lines"
+    );
+    for case in &CASES {
+        let Some(lines) = metal_lines(case.0) else {
+            assert_eq!(case.0, "d32-wide-4", "a case without recorded lines");
+            continue;
+        };
+        assert_eq!(digest(&lines), case.8, "{}", case.0);
+    }
+}
+
 /// Every case's samples are Metal's, but a depth whose drawn copy announced (once a device, at
 /// the first depth fill) that it changes values out of `[0, 1]`.
 #[test]
@@ -529,16 +579,20 @@ fn multisample_fills_write_metal_s_samples() {
         let Some(lines) = run(&lane, case) else {
             continue;
         };
-        let got = digest(&lines);
         drawn |= messages
             .take_notices()
             .iter()
             .filter_map(|m| m.degradation.as_ref())
             .any(|n| n.degradation == Degradation::DrawnDepthCopy);
-        let (case_name, metal) = (case.0, case.8);
-        if got == metal {
+        let case_name = case.0;
+        let unlike = match metal_lines(case_name) {
+            Some(metal) => unlike_metal(&lines, &metal),
+            None => (digest(&lines) != case.8)
+                .then(|| format!("{}, Metal's digest {}", digest(&lines), case.8)),
+        };
+        let Some(unlike) = unlike else {
             continue;
-        }
+        };
         if drawn && case_name == "d32-wide-4" {
             println!(
                 "SAMPLE-FILLS-DRAWN {name}: {case_name}: the drawn depth copy announced its \
@@ -547,7 +601,7 @@ fn multisample_fills_write_metal_s_samples() {
             );
             continue;
         }
-        wrong.push(format!("{case_name}: {got}, Metal's {metal}"));
+        wrong.push(format!("{case_name}: {unlike}"));
     }
     for line in &wrong {
         println!("SAMPLE-FILLS-DIFFERS {name}: {line}");

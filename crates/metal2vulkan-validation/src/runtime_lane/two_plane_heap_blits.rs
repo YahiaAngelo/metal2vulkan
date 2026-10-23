@@ -412,3 +412,89 @@ fn blits_into_a_heap_s_two_plane_texture_write_metal_s_bytes() {
         );
     });
 }
+
+/// The runs of `after` that differ from `before`, as ` | <offset>: <bytes>` each.
+fn changed_runs(before: &[u8], after: &[u8]) -> String {
+    let mut out = String::new();
+    let mut at = 0;
+    while at < after.len() {
+        if after[at] == before[at] {
+            at += 1;
+            continue;
+        }
+        let mut end = at;
+        while end < after.len() && after[end] != before[end] {
+            end += 1;
+        }
+        out += &format!(" | {at:#x}:");
+        for byte in &after[at..end] {
+            out += &format!(" {byte:02x}");
+        }
+        at = end;
+    }
+    out
+}
+
+#[test]
+fn dump_scratch() {
+    on_device(|device, messages| {
+        let queue = device.new_command_queue().unwrap();
+        let mut out = String::new();
+        for case in &CASES {
+            let options = if case.private {
+                ResourceOptions::private()
+            } else {
+                ResourceOptions::shared()
+            };
+            let heap = device
+                .new_heap(&HeapDescriptor::new(
+                    HeapType::Placement,
+                    case.heap,
+                    options,
+                ))
+                .unwrap();
+            let texture = |format, [w, h]: [u64; 2], at| {
+                let mut descriptor = TextureDescriptor::texture_2d(format, w, h, false);
+                descriptor.usage = TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE;
+                descriptor.resource_options = options;
+                heap.new_texture_at_offset(&descriptor, at).unwrap()
+            };
+            let source = texture(case.formats.0, case.source.0, case.source.1);
+            let destination = texture(case.formats.1, case.destination.0, case.destination.1);
+            let bytes = heap.new_buffer_at_offset(case.heap, options, 0).unwrap();
+            let before = random_bytes(case.heap, case.seed);
+            put(device, &queue, &bytes, &before);
+            let (from, to, [w, h]) = case.copy;
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut blit = command_buffer.blit_command_encoder().unwrap();
+            blit.copy_from_texture_to_texture(
+                &source,
+                0,
+                0,
+                Origin::new(from[0], from[1], 0),
+                Size::new(w, h, 1),
+                &destination,
+                0,
+                0,
+                Origin::new(to[0], to[1], 0),
+            )
+            .unwrap();
+            blit.end_encoding().unwrap();
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            let got = get(device, &queue, &bytes, case.heap);
+            let digest: String = Sha256::digest(&got)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            assert_eq!(digest[..16], *case.metal, "{}", case.name);
+            out += &format!("{}{}\n", case.name, changed_runs(&before, &got));
+        }
+        messages.take_notices();
+        std::fs::write(
+            "/Users/aneesiqbal/.cache/m2v-conformance/evidence/scratch/two_plane_heap_blits.txt",
+            out,
+        )
+        .unwrap();
+    });
+}
