@@ -1,4 +1,4 @@
-//! Running a [`Work`] program on native Metal, through public `objc2-metal` calls alone.
+//! Running a [`Work`] program on native Metal.
 //!
 //! This exists because a carried-only row's stated reason was wrong. `two_plane_copies` and
 //! `two_plane_heap_blits` said the two-plane extended-range formats are Apple's private ones and so
@@ -8,23 +8,63 @@
 //! that confusion, and a case can only run on Metal if something runs the program.
 //!
 //! So the interpreter mirrors [`crate::runtime_work`] call for call, in the same order, with one
-//! blit encoder at a time, and refuses exactly the steps Metal really has no public call for:
-//! `fillTexture:` and `fillTextureColor:`, which are Apple SPI. A case built on those still carries
-//! its Metal answer; a case built on copies does not.
+//! blit encoder at a time.
 //!
-//! Nothing here is unsafe for the GPU that the probes these cases came from were not: the same
-//! shapes, through the same public calls, are what produced the tables in the first place.
+//! # Apple SPI is not the same thing as absent
+//!
+//! The pattern fill was the second stated reason a copy-and-fill case had to carry its answer, and
+//! it does not hold either. `fillTexture:level:slice:region:bytes:length:` has no public header, so
+//! `objc2-metal` binds nothing for it, but the selector is there: the committed probe
+//! `probes/surface_buffer_fills.m` calls it, and so does [`Run::fill_texture`], by selector, after
+//! **`respondsToSelector:`** — a release that drops it answers [`Failure::unavailable`] and the
+//! case reads as unrecorded rather than the process dying on an unrecognised selector. So a case
+//! built on [`Step::FillTexture`] can be recorded on Metal, which is what the heap-run cases of
+//! `texture_fills` are.
+//!
+//! The **colour** fills stay refused. `fillTexture:level:slice:region:color:` and
+//! `fillTexture:level:slice:region:color:pixelFormat:` are reachable the same way, and the probe
+//! checks both selectors, but no case here needs them yet and an arm nothing calls is dead code.
+//! A `Fill::Color` case still carries its Metal answer; whoever needs one adds the arm beside the
+//! pattern fill's.
+//!
+//! # Two shapes this side must never hand Metal
+//!
+//! Reaching the fill means reaching its two known hazards, so both are refused before anything is
+//! encoded rather than left to the device
+//! (`metal2vulkan_runtime::Error::EmptyFillPattern` and `LongTextureBufferFillPattern` record what
+//! each does on an Apple M3 Max):
+//!
+//! - a **pattern of no bytes**, where plain Metal reads a unit's bytes from the pattern's address
+//!   all the same — bytes the call never gave it;
+//! - a **texture buffer's pattern over 32,752 bytes**, where **Metal's process ends** in the call.
+//!   That is one of the shapes the round's safety rule names, and it is reachable from here the
+//!   moment the arm exists.
+//!
+//! Nothing else here is unsafe for the GPU that the probes these cases came from were not: the same
+//! shapes, through the same calls, are what produced the tables in the first place.
 
 use crate::case::{Answer, Failure};
 use crate::work::{Done, Plane, Rect, Resource, Step, TextureKind, TextureSpec, Work};
 use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
+use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject, Sel};
+use objc2::sel;
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLBlitOption, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder,
     MTLCommandQueue, MTLDevice, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLOrigin, MTLPixelFormat,
     MTLRegion, MTLResourceOptions, MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor,
     MTLTextureType, MTLTextureUsage,
 };
+
+/// `fillTexture:level:slice:region:bytes:length:` (Apple SPI), the pattern fill. Named as a
+/// function because `sel!` interns on first use.
+fn fill_texture_selector() -> Sel {
+    sel!(fillTexture:level:slice:region:bytes:length:)
+}
+
+/// The longest pattern a **texture buffer's** fill may take: past this Metal's process ends in the
+/// call (`metal2vulkan_runtime::Error::LongTextureBufferFillPattern`, measured on an Apple M3 Max).
+/// A fill of any other texture takes a pattern of any length.
+const LONGEST_TEXTURE_BUFFER_PATTERN: usize = 32_752;
 
 /// A resource the program made on Metal.
 enum Made {
@@ -408,14 +448,18 @@ impl Run<'_> {
     /// Run one step.
     fn step(&mut self, step: &Step) -> Answer<()> {
         match step {
-            // The two fills are Apple SPI: `fillTexture:` and `fillTextureColor:` are the calls
-            // that have no public form, and they are the only reason a copy-and-fill case has to
-            // carry its Metal answer. The format a case names is not the reason.
-            Step::FillTexture { .. } => Err(Failure::unavailable(
-                "fillTexture:level:slice:region:pattern: (Apple SPI)",
-            )),
+            Step::FillTexture {
+                texture,
+                level,
+                slice,
+                region,
+                pattern,
+            } => self.fill_texture(*texture, *level, *slice, region, pattern),
+            // The colour fills are reachable by selector exactly as the pattern fill is, and the
+            // probe checks both, but no case here needs one and an arm nothing calls is dead code.
+            // Such a case carries its Metal answer; whoever needs one adds the arm above.
             Step::FillTextureColor { .. } => Err(Failure::unavailable(
-                "fillTextureColor:level:slice:region:color:packedInFormat: (Apple SPI)",
+                "fillTexture:level:slice:region:color:pixelFormat: (Apple SPI, no arm built)",
             )),
             Step::CopyBufferToTexture {
                 buffer,
@@ -636,6 +680,67 @@ impl Run<'_> {
             }
             Step::Commit => self.close(),
         }
+    }
+
+    /// `fillTexture:level:slice:region:bytes:length:` (Apple SPI): every unit of `region` of the
+    /// texture's `level` and `slice` takes `pattern`'s bytes.
+    ///
+    /// The selector is looked up and checked before it is sent, and both of the call's known
+    /// hazards are refused first (the module docs).
+    fn fill_texture(
+        &mut self,
+        texture: usize,
+        level: u64,
+        slice: u64,
+        region: &Rect,
+        pattern: &[u8],
+    ) -> Answer<()> {
+        if pattern.is_empty() {
+            return Err(Failure::named(
+                "EmptyFillPattern",
+                "a fill of no pattern bytes: plain Metal reads a unit's bytes from the pattern's \
+                 address all the same",
+            ));
+        }
+        let held = self.texture(texture)?;
+        if held.textureType() == MTLTextureType::TypeTextureBuffer
+            && pattern.len() > LONGEST_TEXTURE_BUFFER_PATTERN
+        {
+            return Err(Failure::named(
+                "LongTextureBufferFillPattern",
+                format!(
+                    "a texture buffer's fill of {} pattern bytes, past the \
+                     {LONGEST_TEXTURE_BUFFER_PATTERN} where Metal's process ends in the call",
+                    pattern.len()
+                ),
+            ));
+        }
+        let encoder = self.encoder()?;
+        let selector = fill_texture_selector();
+        if !encoder.respondsToSelector(selector) {
+            return Err(Failure::unavailable(
+                "fillTexture:level:slice:region:bytes:length:",
+            ));
+        }
+        let target: &AnyObject = encoder.as_ref();
+        let bytes = pattern.as_ptr().cast::<std::ffi::c_void>();
+        // SAFETY: the selector is there, checked just above, and takes the arguments the committed
+        // probe `probes/surface_buffer_fills.m` declares and Metal's own
+        // `methodSignatureForSelector:` confirmed. `pattern` outlives the call, which copies its
+        // bytes as `fillBuffer:` does, and it is neither empty nor past the length that ends
+        // Metal's process, both refused above.
+        unsafe {
+            let _: () = objc2::msg_send![
+                target,
+                fillTexture: &*held,
+                level: level as usize,
+                slice: slice as usize,
+                region: region_of(region),
+                bytes: bytes,
+                length: pattern.len(),
+            ];
+        }
+        Ok(())
     }
 
     /// Close the blit encoder, if one is open.

@@ -182,7 +182,8 @@ edits one.
 | `extended_range_planes` | A two-plane extended-range texture joined into one and split back again | run on Metal |
 | `rgb10a2_srgb` | What a kernel reads, writes and samples of Apple's padded 10-bit sRGB format, and what a full-screen draw stores into it | run on Metal |
 | `texture_buffer_fills` | Which bytes a fill changed over a texture made on a buffer | carried; `fillTexture:` is Apple SPI |
-| `texture_fills`, `sample_fills` | Which bytes a texture fill, and a multisample sample fill, changed | carried; `fillTexture:` is Apple SPI |
+| `texture_fills`, `sample_fills` | Which bytes a texture fill, and a multisample sample fill, changed | carried; the per-format digests are the probes' own truncating formatter's, on an Apple M4 |
+| `texture_fills`' heap runs | Every byte of the heap one two-plane fill changed, where the per-format digest elided the run | run on Metal, through the fill's SPI selector |
 | `two_plane_heap_blits` | What a blit moved between two-plane textures placed in a heap | run on Metal |
 | `two_plane_copies` | What a blit or a fill moved across a two-plane surface's rows | run on Metal where the case fills nothing; carried where it does (`fillTexture:` is Apple SPI) |
 | `mesh_draws` | The texels each mesh threadgroup's primitive drew, and the grids Metal draws nothing for | run on Metal |
@@ -202,6 +203,22 @@ edits one.
 A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
 case forbids re-recording with the reason why. Record mode refuses such a case rather than
 pretending it can ask Metal again.
+
+**Apple SPI is not the same thing as absent.** `fillTexture:level:slice:region:bytes:length:` has
+no public header, so `objc2-metal` binds nothing for it and the copy-and-fill vocabulary's pattern
+fill was carried from `probes/`. `metal_work` reaches it by its selector after
+`respondsToSelector:`, so a case built on it can be **run** rather than carried; the heap-run cases
+above are the first. Two consequences worth stating plainly, because a stale reason in this table is
+how `two_plane_copies` lost its Metal leg in the first place:
+
+- `texture_fills`' per-format digests stay carried for a different reason than they used to. Not
+  because the fill cannot be reached, but because each is a digest of twenty per-case answers of
+  which only the outer digest was ever written down, and that one was taken on an Apple M4. Making
+  those rows `MetalSource::Run` and recording per-case values on this chip is a packet of its own.
+- `texture_buffer_fills`, and `two_plane_copies`' filling cases, say "`fillTexture:` is Apple SPI".
+  That is still true of the words and no longer the whole reason: nothing has moved them yet. The
+  colour fills (`fillTexture:...:color:` and `...:color:pixelFormat:`) have no arm in `metal_work`
+  at all, so a case built on one is carried outright.
 
 ## `probes/`
 
