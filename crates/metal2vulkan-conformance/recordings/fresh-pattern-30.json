@@ -38,6 +38,36 @@
                           "hex": "ff22076fc4780b0ecf45db5d8fa56282422e9ff53e5b4bac1b4473cfb7866c95"
                         }
                       }
+                    },
+                    {
+                      "name": "work/resource:0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a381df45122a29d6e2b05cde521e05275d8d35ba53a19aed84964f2907a5f60a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "work/buffer:1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "14beb5761edc2c0b023c8f984c9de4bb71818340e0990bc8be0acc7a37f51081"
+                        }
+                      }
+                    },
+                    {
+                      "name": "work/steps",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ea131489680a12426e204acbab436658c977f36b7d0fdf31c3898b32f69ecf95"
+                        }
+                      }
                     }
                   ]
                 },

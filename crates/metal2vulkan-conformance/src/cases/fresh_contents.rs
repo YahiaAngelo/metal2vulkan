@@ -65,9 +65,9 @@
 //!
 //! Every answer here is one texel repeated by construction — a level holds Metal's pattern, or the
 //! old bytes, or zero — so each site records the **runs of equal texels** rather than the bytes
-//! themselves ([`texel_runs`]). That is a lossless encoding and not a digest: the bytes are
+//! themselves (`texel_runs`). That is a lossless encoding and not a digest: the bytes are
 //! rebuilt from it in the guard that keeps it honest
-//! ([`tests::the_runs_rebuild_the_bytes_they_came_from`]), and it sizes a row by how many times its
+//! (`the_runs_rebuild_the_bytes_they_came_from`), and it sizes a row by how many times its
 //! answer changes instead of by how many bytes it holds, which is what lets the 16 MiB buffer row
 //! record its whole answer in one line.
 //!
@@ -121,7 +121,7 @@ const READ_AND_TARGET: u32 = 5;
 /// many texels it covers, and the texel's own bytes.
 ///
 /// This is a **lossless encoding** of the bytes and not a digest of them
-/// ([`tests::the_runs_rebuild_the_bytes_they_came_from`]), and it is per texel rather than per byte
+/// (`the_runs_rebuild_the_bytes_they_came_from`), and it is per texel rather than per byte
 /// for a measured reason: every answer in this family is one texel repeated, but a texel of
 /// Metal's pattern is not one byte repeated — `RGBA8Unorm` reads `ff00ffff` — so runs of equal
 /// *bytes* turned a 16 KiB level into 8,193 runs and a 3.5 MB recording, while runs of equal
@@ -221,7 +221,7 @@ fn buffer_program(length: u64, storage: Storage) -> Work {
     work
 }
 
-/// A buffer row: every length of [`LENGTHS`] in one storage mode.
+/// A buffer row: every buffer length the family sweeps, in one storage mode.
 pub struct FreshBuffers {
     case: &'static str,
     storage: Storage,
@@ -242,7 +242,14 @@ impl Case for FreshBuffers {
         for length in LENGTHS {
             words.extend(length.to_le_bytes());
         }
-        Ok(vec![Input::bytes("lengths-and-bytes", &words)])
+        let mut inputs = vec![Input::bytes("lengths-and-bytes", &words)];
+        for length in LENGTHS {
+            inputs.extend(program_inputs(
+                &format!("bytes-{length}"),
+                &buffer_program(length, self.storage),
+            ));
+        }
+        Ok(inputs)
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
@@ -261,6 +268,33 @@ impl Case for FreshBuffers {
         }
         Ok(())
     }
+}
+
+/// The inputs one program feeds its run: every byte of every resource it is made with, and the
+/// **steps it encodes, in order**.
+///
+/// The steps are in the fingerprint and not only the bytes, and that was found by breaking
+/// something rather than reasoned out: reordering one row's release on purpose — so the release
+/// came while a command buffer was open and the interpreter refused it — left the fingerprint
+/// unchanged, so the run compared against a recording taken from a *different* program and read as
+/// our side diverging. A case must prove its inputs, and a program's order is one of them.
+fn program_inputs(what: &str, work: &Work) -> Vec<Input> {
+    let mut inputs = Vec::new();
+    for (at, resource) in work.resources.iter().enumerate() {
+        inputs.push(match resource {
+            // A buffer is made with its bytes, so the bytes are the input.
+            Resource::Buffer { bytes } => Input::bytes(format!("{what}/buffer:{at}"), bytes),
+            other => Input::bytes(
+                format!("{what}/resource:{at}"),
+                format!("{other:?}").as_bytes(),
+            ),
+        });
+    }
+    inputs.push(Input::bytes(
+        format!("{what}/steps"),
+        format!("{:?}", work.steps).as_bytes(),
+    ));
+    inputs
 }
 
 /// Read `index` of a program's reads, or nothing where the program answered fewer. A short answer
@@ -750,7 +784,12 @@ impl Case for FreshTexture {
         let mut words = self.row.shape.words();
         words.extend(self.row.storage.word().as_bytes());
         words.extend([OLD, BEFORE]);
-        Ok(vec![Input::bytes("shape-and-bytes", &words)])
+        let mut inputs = vec![Input::bytes("shape-and-bytes", &words)];
+        inputs.extend(program_inputs(
+            "work",
+            &texture_program(&self.row.shape, self.row.storage),
+        ));
+        Ok(inputs)
     }
 
     fn allowances(&self) -> Vec<Allowance> {
@@ -1003,7 +1042,9 @@ impl Case for FreshPattern {
     fn inputs(&self) -> Result<Vec<Input>, String> {
         let mut words = self.row.shape().words();
         words.push(BEFORE);
-        Ok(vec![Input::bytes("shape-and-bytes", &words)])
+        let mut inputs = vec![Input::bytes("shape-and-bytes", &words)];
+        inputs.extend(program_inputs("work", &self.row.program()));
+        Ok(inputs)
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
@@ -1102,7 +1143,9 @@ impl Case for FreshOverBuffer {
         words.extend(self.storage.word().as_bytes());
         words.extend(OVER_BUFFER.1.to_le_bytes());
         words.extend([OLD, BEFORE]);
-        Ok(vec![Input::bytes("shape-and-bytes", &words)])
+        let mut inputs = vec![Input::bytes("shape-and-bytes", &words)];
+        inputs.extend(program_inputs("work", &self.program()));
+        Ok(inputs)
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {

@@ -38,6 +38,56 @@
                           "hex": "0daa4f7c5cdbe5c24b6ffec517a14d9c8c2de072fced49f038b6356c94f27d04"
                         }
                       }
+                    },
+                    {
+                      "name": "work/resource:0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "938c7af209e96e7c3d879e560bcecb1e3b8f494d0647f7711d649eef3a75e81a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "work/buffer:1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9c9b3365a5704fb1bbd5dbac227ecc2e878dedce86338eca2ec1278e21ac1a9e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "work/buffer:2",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f3306068285abaa9bf588a5b5f25795863b77cb21e03b476e7f5e17061010000"
+                        }
+                      }
+                    },
+                    {
+                      "name": "work/buffer:3",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f3306068285abaa9bf588a5b5f25795863b77cb21e03b476e7f5e17061010000"
+                        }
+                      }
+                    },
+                    {
+                      "name": "work/steps",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "1c4cda296dbe4c5acc0b7f35c0db4a45553511c9833fa7638820b00f347bd2bd"
+                        }
+                      }
                     }
                   ]
                 },
