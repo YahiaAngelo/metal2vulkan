@@ -36,6 +36,7 @@ pub mod compressed_decode;
 pub mod compressed_moves;
 pub mod compressed_views;
 pub mod compute_threadgroups;
+pub mod denormal_word_fetches;
 pub mod depth_texel_reads;
 pub mod discard_hoist;
 pub mod etc_textures;
@@ -183,6 +184,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in half_texel_nans::all() {
         cases.push(Box::new(case));
     }
+    cases.push(Box::new(denormal_word_fetches::all().remove(0)));
     cases.extend(extended_range_targets::all());
     for case in extended_range_blends::all() {
         cases.push(Box::new(case));
