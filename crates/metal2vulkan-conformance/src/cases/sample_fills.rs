@@ -282,7 +282,10 @@ fn row_work(r: &Row) -> Result<Work, String> {
             (format, flatten) => work.add(Resource::View {
                 texture,
                 format: format.unwrap_or(r.format),
+                level: 0,
+                level_count: 1,
                 slice: layer,
+                slice_count: 1,
                 flatten,
             }),
         };

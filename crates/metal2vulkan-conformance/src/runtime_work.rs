@@ -131,10 +131,13 @@ fn descriptor(spec: &TextureSpec) -> Answer<TextureDescriptor> {
     d.texture_type = match spec.kind {
         TextureKind::Type2D => TextureType::Type2D,
         TextureKind::Type2DArray => TextureType::Type2DArray,
+        TextureKind::Cube => TextureType::Cube,
+        TextureKind::Type3D => TextureType::Type3D,
         TextureKind::Type2DMultisample => TextureType::Type2DMultisample,
         TextureKind::Type2DMultisampleArray => TextureType::Type2DMultisampleArray,
         TextureKind::TextureBuffer => TextureType::TextureBuffer,
     };
+    d.depth = spec.depth.max(1);
     d.array_length = spec.slices.max(1);
     d.mipmap_level_count = spec.levels.max(1);
     d.sample_count = spec.samples.max(1);
@@ -238,7 +241,10 @@ fn make(device: &Device, made: &[Made], resource: &Resource) -> Answer<Made> {
         Resource::View {
             texture,
             format,
+            level,
+            level_count,
             slice,
+            slice_count,
             flatten,
         } => {
             let held = texture_at(*texture)?;
@@ -251,7 +257,12 @@ fn make(device: &Device, made: &[Made], resource: &Resource) -> Answer<Made> {
                 held.texture_type()
             };
             let view = held
-                .new_texture_view_with_levels_slices(format, kind, 0..1, *slice..*slice + 1)
+                .new_texture_view_with_levels_slices(
+                    format,
+                    kind,
+                    *level..*level + *level_count,
+                    *slice..*slice + *slice_count,
+                )
                 .map_err(|error| Failure::of(&error))?;
             Ok(Made::Texture(view))
         }
@@ -497,6 +508,10 @@ impl Run<'_> {
                 slice,
                 region,
                 bytes,
+                // The runtime checks the slice it is handed against the region and the pitches
+                // itself, and answers a typed error, so the stated rows are the Metal side's
+                // guard alone.
+                rows: _,
                 bytes_per_row,
                 bytes_per_image,
             } => {
@@ -520,9 +535,10 @@ impl Run<'_> {
                 bytes_per_row,
                 bytes_per_image,
                 length,
+                before,
             } => {
                 let texture = self.texture(*texture)?;
-                let mut bytes = vec![0u8; *length];
+                let mut bytes = vec![*before; *length];
                 texture
                     .get_bytes(
                         &mut bytes,
@@ -861,5 +877,6 @@ fn option_of(plane: Plane) -> BlitOption {
         Plane::Whole => BlitOption::None,
         Plane::Depth => BlitOption::DepthFromDepthStencil,
         Plane::Stencil => BlitOption::StencilFromDepthStencil,
+        Plane::RowLinearPvrtc => BlitOption::RowLinearPVRTC,
     }
 }

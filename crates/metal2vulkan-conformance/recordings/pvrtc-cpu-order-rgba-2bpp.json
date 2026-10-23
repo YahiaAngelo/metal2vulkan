@@ -1,0 +1,759 @@
+{
+  "format": 1,
+  "case": "pvrtc-cpu-order-rgba-2bpp",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "format",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "2306a50dfc78db58d8ebabebdefee3b081602d0bbb39b10d593841d56925f847"
+                        }
+                      }
+                    },
+                    {
+                      "name": "program",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e87c64ba81d6f60cf782c29ef7491c2352141a49ab20dd035e1ef385709f54d3"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-0/pitch-0/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trcCsbKztLW2twGxsrO0tba3A7Gys7S1trcEsbKztLW2twaxsrO0tba3BbGys7S1trcHsbKztLW2tw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 64
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 64,
+                        "rows": 1,
+                        "image_pitch": 64,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-0/pitch-0/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxscCwcLDxMXGxwHBwsPExcbHA8HCw8TFxscEwcLDxMXGxwbBwsPExcbHBcHCw8TFxscHwcLDxMXGxw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 64
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 64,
+                        "rows": 1,
+                        "image_pitch": 64,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-0/pitch-16/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trcCsbKztLW2twGxsrO0tba3A7Gys7S1trcEsbKztLW2twaxsrO0tba3BbGys7S1trcHsbKztLW2tw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 64
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 64,
+                        "rows": 1,
+                        "image_pitch": 64,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-0/pitch-16/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxscCwcLDxMXGxwHBwsPExcbHA8HCw8TFxscEwcLDxMXGxwbBwsPExcbHBcHCw8TFxscHwcLDxMXGxw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 64
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 64,
+                        "rows": 1,
+                        "image_pitch": 64,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-1/pitch-0/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trcBsbKztLW2tw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 16
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 16,
+                        "row_pitch": 16,
+                        "rows": 1,
+                        "image_pitch": 16,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-1/pitch-0/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxscBwcLDxMXGxw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 16
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 16,
+                        "row_pitch": 16,
+                        "rows": 1,
+                        "image_pitch": 16,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-1/pitch-8/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trcBsbKztLW2tw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 16
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 16,
+                        "row_pitch": 16,
+                        "rows": 1,
+                        "image_pitch": 16,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-1/pitch-8/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxscBwcLDxMXGxw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 16
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 16,
+                        "row_pitch": 16,
+                        "rows": 1,
+                        "image_pitch": 16,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-2/pitch-0/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-2/pitch-0/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxsc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-2/pitch-8/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-2/pitch-8/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxsc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-3/pitch-0/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-3/pitch-0/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxsc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-3/pitch-8/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-3/pitch-8/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxsc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-4/pitch-0/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-4/pitch-0/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxsc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-4/pitch-8/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "16/level-4/pitch-8/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxsc="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 8
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 8,
+                        "row_pitch": 8,
+                        "rows": 1,
+                        "image_pitch": 8,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "32/level-0/pitch-0/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trcCsbKztLW2twixsrO0tba3CrGys7S1trcBsbKztLW2twOxsrO0tba3CbGys7S1trcLsbKztLW2twSxsrO0tba3BrGys7S1trcMsbKztLW2tw6xsrO0tba3BbGys7S1trcHsbKztLW2tw2xsrO0tba3D7Gys7S1trcQsbKztLW2txKxsrO0tba3GLGys7S1trcasbKztLW2txGxsrO0tba3E7Gys7S1trcZsbKztLW2txuxsrO0tba3FLGys7S1trcWsbKztLW2txyxsrO0tba3HrGys7S1trcVsbKztLW2txexsrO0tba3HbGys7S1trcfsbKztLW2tw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 256
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 1,
+                        "image_pitch": 256,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "32/level-0/pitch-0/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxscEwcLDxMXGxwHBwsPExcbHBcHCw8TFxscIwcLDxMXGxwzBwsPExcbHCcHCw8TFxscNwcLDxMXGxwLBwsPExcbHBsHCw8TFxscDwcLDxMXGxwfBwsPExcbHCsHCw8TFxscOwcLDxMXGxwvBwsPExcbHD8HCw8TFxscQwcLDxMXGxxTBwsPExcbHEcHCw8TFxscVwcLDxMXGxxjBwsPExcbHHMHCw8TFxscZwcLDxMXGxx3BwsPExcbHEsHCw8TFxscWwcLDxMXGxxPBwsPExcbHF8HCw8TFxscawcLDxMXGxx7BwsPExcbHG8HCw8TFxscfwcLDxMXGxw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 256
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 1,
+                        "image_pitch": 256,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "32/level-0/pitch-32/put",
+                  "observed": {
+                    "value": {
+                      "bytes": "ALGys7S1trcCsbKztLW2twixsrO0tba3CrGys7S1trcBsbKztLW2twOxsrO0tba3CbGys7S1trcLsbKztLW2twSxsrO0tba3BrGys7S1trcMsbKztLW2tw6xsrO0tba3BbGys7S1trcHsbKztLW2tw2xsrO0tba3D7Gys7S1trcQsbKztLW2txKxsrO0tba3GLGys7S1trcasbKztLW2txGxsrO0tba3E7Gys7S1trcZsbKztLW2txuxsrO0tba3FLGys7S1trcWsbKztLW2txyxsrO0tba3HrGys7S1trcVsbKztLW2txexsrO0tba3HbGys7S1trcfsbKztLW2tw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 256
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 1,
+                        "image_pitch": 256,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "32/level-0/pitch-32/get",
+                  "observed": {
+                    "value": {
+                      "bytes": "AMHCw8TFxscEwcLDxMXGxwHBwsPExcbHBcHCw8TFxscIwcLDxMXGxwzBwsPExcbHCcHCw8TFxscNwcLDxMXGxwLBwsPExcbHBsHCw8TFxscDwcLDxMXGxwfBwsPExcbHCsHCw8TFxscOwcLDxMXGxwvBwsPExcbHD8HCw8TFxscQwcLDxMXGxxTBwsPExcbHEcHCw8TFxscVwcLDxMXGxxjBwsPExcbHHMHCw8TFxscZwcLDxMXGxx3BwsPExcbHEsHCw8TFxscWwcLDxMXGxxPBwsPExcbHF8HCw8TFxscawcLDxMXGxx7BwsPExcbHG8HCw8TFxscfwcLDxMXGxw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 256
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 1,
+                        "image_pitch": 256,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "statuses",
+                  "observed": {
+                    "value": {
+                      "lines": [
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": {
+        "stopped": {
+          "call": "work",
+          "message": "Replace Region Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nGetBytes Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nReplace Region Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nGetBytes Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nReplace Region Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nGetBytes Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nReplace Region Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nGetBytes Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nReplace Region Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nGetBytes Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nReplace Region Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP.\nGetBytes Validation\nbytesPerRow must be 0 for MTLPixelFormatPVRTC_RGBA_2BPP."
+        }
+      }
+    }
+  ]
+}

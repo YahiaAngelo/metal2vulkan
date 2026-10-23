@@ -231,6 +231,8 @@ fn descriptor(spec: &TextureSpec) -> Answer<Retained<MTLTextureDescriptor>> {
     descriptor.setTextureType(match spec.kind {
         TextureKind::Type2D => MTLTextureType::Type2D,
         TextureKind::Type2DArray => MTLTextureType::Type2DArray,
+        TextureKind::Cube => MTLTextureType::TypeCube,
+        TextureKind::Type3D => MTLTextureType::Type3D,
         TextureKind::Type2DMultisample => MTLTextureType::Type2DMultisample,
         TextureKind::Type2DMultisampleArray => MTLTextureType::Type2DMultisampleArray,
         TextureKind::TextureBuffer => MTLTextureType::TypeTextureBuffer,
@@ -238,6 +240,7 @@ fn descriptor(spec: &TextureSpec) -> Answer<Retained<MTLTextureDescriptor>> {
     // SAFETY: each setter writes one field of a descriptor this call owns; nothing reads it until
     // the texture is made.
     unsafe {
+        descriptor.setDepth(spec.depth.max(1) as usize);
         descriptor.setArrayLength(spec.slices.max(1) as usize);
         descriptor.setMipmapLevelCount(spec.levels.max(1) as usize);
         descriptor.setSampleCount(spec.samples.max(1) as usize);
@@ -392,7 +395,10 @@ fn make(
         Resource::View {
             texture,
             format,
+            level,
+            level_count,
             slice,
+            slice_count,
             flatten,
         } => {
             let held = texture_at(*texture)?;
@@ -401,8 +407,8 @@ fn make(
             } else {
                 held.textureType()
             };
-            let levels = objc2_foundation::NSRange::new(0, 1);
-            let slices = objc2_foundation::NSRange::new(*slice as usize, 1);
+            let levels = objc2_foundation::NSRange::new(*level as usize, *level_count as usize);
+            let slices = objc2_foundation::NSRange::new(*slice as usize, *slice_count as usize);
             // SAFETY: the view's format is of the texture's own size class, which the case states,
             // and the level and slice ranges are inside the texture.
             let view = unsafe {
@@ -660,12 +666,17 @@ impl Run<'_> {
                 slice,
                 region,
                 bytes,
+                rows,
                 bytes_per_row,
                 bytes_per_image,
             } => {
                 let texture = self.texture(*texture)?;
-                let wanted = (*bytes_per_image as usize)
-                    .max(*bytes_per_row as usize * region.size[1].max(1) as usize);
+                // The most Metal reads: every image's pitch but the last, then the last image's
+                // rows at their pitch. The rows are the case's, because a block-compressed
+                // region's rows are its block rows and nothing here can derive them.
+                let images = region.size[2].max(1) as usize;
+                let wanted = *bytes_per_image as usize * (images - 1)
+                    + *bytes_per_row as usize * (*rows).max(1) as usize;
                 if bytes.len() < wanted {
                     return Err(Failure::named(
                         "TooFewBytes",
@@ -695,9 +706,10 @@ impl Run<'_> {
                 bytes_per_row,
                 bytes_per_image,
                 length,
+                before,
             } => {
                 let texture = self.texture(*texture)?;
-                let mut bytes = vec![0u8; *length];
+                let mut bytes = vec![*before; *length];
                 // SAFETY: `bytes` is `length` bytes, which the case sized for the region's rows
                 // and images at these pitches, and the caller waited for the command buffer that
                 // wrote the texture.
@@ -912,6 +924,7 @@ fn option_of(plane: Plane) -> MTLBlitOption {
         Plane::Whole => MTLBlitOption::empty(),
         Plane::Depth => MTLBlitOption::DepthFromDepthStencil,
         Plane::Stencil => MTLBlitOption::StencilFromDepthStencil,
+        Plane::RowLinearPvrtc => MTLBlitOption::RowLinearPVRTC,
     }
 }
 

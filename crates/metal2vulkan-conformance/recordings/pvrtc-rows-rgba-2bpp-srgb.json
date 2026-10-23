@@ -1,0 +1,652 @@
+{
+  "format": 1,
+  "case": "pvrtc-rows-rgba-2bpp-srgb",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "format",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "432084da6cbd17bbd502bafb2a068f2887ac948f79a2e6fcc36944cf2152dc4d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "program",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "538f4c5ba468ee3f4bcbc814a44850087da3c31287cb5317f6df10f7638212c2"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "private",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "whole-16",
+                      "observed": {
+                        "value": {
+                          "bytes": "ALGys7S1trcBsbKztLW2twKxsrO0tba3A7Gys7S1trcEsbKztLW2twWxsrO0tba3BrGys7S1trcHsbKztLW2tw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 64
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 64,
+                            "rows": 1,
+                            "image_pitch": 64,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "whole-32",
+                      "observed": {
+                        "value": {
+                          "bytes": "ALGys7S1trcBsbKztLW2twKxsrO0tba3A7Gys7S1trcEsbKztLW2twWxsrO0tba3BrGys7S1trcHsbKztLW2twixsrO0tba3CbGys7S1trcKsbKztLW2twuxsrO0tba3DLGys7S1trcNsbKztLW2tw6xsrO0tba3D7Gys7S1trcQsbKztLW2txGxsrO0tba3ErGys7S1trcTsbKztLW2txSxsrO0tba3FbGys7S1trcWsbKztLW2txexsrO0tba3GLGys7S1trcZsbKztLW2txqxsrO0tba3G7Gys7S1trccsbKztLW2tx2xsrO0tba3HrGys7S1trcfsbKztLW2tw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 256
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 256,
+                            "row_pitch": 256,
+                            "rows": 1,
+                            "image_pitch": 256,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "region-whole",
+                      "observed": {
+                        "value": {
+                          "bytes": "EREREREREREREREREREREREREREREREREREREREREREREREREREREQDR0tPU1dbXAdHS09TV1tcRERERERERERERERERERERAtHS09TV1tcD0dLT1NXW1xEREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREQ=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 256
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 256,
+                            "row_pitch": 256,
+                            "rows": 1,
+                            "image_pitch": 256,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "region",
+                      "observed": {
+                        "value": {
+                          "bytes": "ANHS09TV1tcB0dLT1NXW1wLR0tPU1dbXA9HS09TV1tc="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 32
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 32,
+                            "row_pitch": 32,
+                            "rows": 1,
+                            "image_pitch": 32,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "level-0",
+                      "observed": {
+                        "value": {
+                          "bytes": "ABESExQVFhcBERITFBUWFwIREhMUFRYXAxESExQVFhcEERITFBUWFwUREhMUFRYXBhESExQVFhcHERITFBUWFw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 64
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 64,
+                            "rows": 1,
+                            "image_pitch": 64,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "level-1",
+                      "observed": {
+                        "value": {
+                          "bytes": "ACEiIyQlJicBISIjJCUmJw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 16
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 16,
+                            "row_pitch": 16,
+                            "rows": 1,
+                            "image_pitch": 16,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "level-2",
+                      "observed": {
+                        "value": {
+                          "bytes": "ADEyMzQ1Njc="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 8
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 8,
+                            "rows": 1,
+                            "image_pitch": 8,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "level-3",
+                      "observed": {
+                        "value": {
+                          "bytes": "AEFCQ0RFRkc="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 8
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 8,
+                            "rows": 1,
+                            "image_pitch": 8,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "level-4",
+                      "observed": {
+                        "value": {
+                          "bytes": "AFFSU1RVVlc="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 8
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 8,
+                            "rows": 1,
+                            "image_pitch": 8,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "t2t",
+                      "observed": {
+                        "value": {
+                          "bytes": "ALGys7S1trcBsbKztLW2twKxsrO0tba3A7Gys7S1trcEsbKztLW2twWxsrO0tba3BrGys7S1trcHsbKztLW2tw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 64
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 64,
+                            "rows": 1,
+                            "image_pitch": 64,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "shared",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "whole-16",
+                      "observed": {
+                        "value": {
+                          "bytes": "ALGys7S1trcBsbKztLW2twKxsrO0tba3A7Gys7S1trcEsbKztLW2twWxsrO0tba3BrGys7S1trcHsbKztLW2tw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 64
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 64,
+                            "rows": 1,
+                            "image_pitch": 64,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "whole-32",
+                      "observed": {
+                        "value": {
+                          "bytes": "ALGys7S1trcBsbKztLW2twKxsrO0tba3A7Gys7S1trcEsbKztLW2twWxsrO0tba3BrGys7S1trcHsbKztLW2twixsrO0tba3CbGys7S1trcKsbKztLW2twuxsrO0tba3DLGys7S1trcNsbKztLW2tw6xsrO0tba3D7Gys7S1trcQsbKztLW2txGxsrO0tba3ErGys7S1trcTsbKztLW2txSxsrO0tba3FbGys7S1trcWsbKztLW2txexsrO0tba3GLGys7S1trcZsbKztLW2txqxsrO0tba3G7Gys7S1trccsbKztLW2tx2xsrO0tba3HrGys7S1trcfsbKztLW2tw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 256
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 256,
+                            "row_pitch": 256,
+                            "rows": 1,
+                            "image_pitch": 256,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "region-whole",
+                      "observed": {
+                        "value": {
+                          "bytes": "EREREREREREREREREREREREREREREREREREREREREREREREREREREQDR0tPU1dbXAdHS09TV1tcRERERERERERERERERERERAtHS09TV1tcD0dLT1NXW1xEREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREQ=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 256
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 256,
+                            "row_pitch": 256,
+                            "rows": 1,
+                            "image_pitch": 256,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "region",
+                      "observed": {
+                        "value": {
+                          "bytes": "ANHS09TV1tcB0dLT1NXW1wLR0tPU1dbXA9HS09TV1tc="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 32
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 32,
+                            "row_pitch": 32,
+                            "rows": 1,
+                            "image_pitch": 32,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "level-0",
+                      "observed": {
+                        "value": {
+                          "bytes": "ABESExQVFhcBERITFBUWFwIREhMUFRYXAxESExQVFhcEERITFBUWFwUREhMUFRYXBhESExQVFhcHERITFBUWFw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 64
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 64,
+                            "rows": 1,
+                            "image_pitch": 64,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "level-1",
+                      "observed": {
+                        "value": {
+                          "bytes": "ACEiIyQlJicBISIjJCUmJw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 16
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 16,
+                            "row_pitch": 16,
+                            "rows": 1,
+                            "image_pitch": 16,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "level-2",
+                      "observed": {
+                        "value": {
+                          "bytes": "ADEyMzQ1Njc="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 8
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 8,
+                            "rows": 1,
+                            "image_pitch": 8,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "level-3",
+                      "observed": {
+                        "value": {
+                          "bytes": "AEFCQ0RFRkc="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 8
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 8,
+                            "rows": 1,
+                            "image_pitch": 8,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "level-4",
+                      "observed": {
+                        "value": {
+                          "bytes": "AFFSU1RVVlc="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 8
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 8,
+                            "rows": 1,
+                            "image_pitch": 8,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "t2t",
+                      "observed": {
+                        "value": {
+                          "bytes": "ALGys7S1trcBsbKztLW2twKxsrO0tba3A7Gys7S1trcEsbKztLW2twWxsrO0tba3BrGys7S1trcHsbKztLW2tw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 64
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 64,
+                            "rows": 1,
+                            "image_pitch": 64,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "statuses",
+                  "observed": {
+                    "value": {
+                      "lines": [
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed",
+                        "Completed"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

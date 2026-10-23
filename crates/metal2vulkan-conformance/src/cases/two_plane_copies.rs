@@ -245,6 +245,8 @@ fn row_blit_work(blit: &RowBlit) -> Work {
             slice,
             region: Rect::new(0, 0, w, h),
             bytes: words,
+            // An uncompressed plane's rows are its texel rows.
+            rows: h,
             bytes_per_row: 4 * w,
             bytes_per_image: 4 * w * h,
         });
@@ -309,6 +311,9 @@ fn row_blit_work(blit: &RowBlit) -> Work {
         bytes_per_row: 4 * w,
         bytes_per_image: 4 * w * h,
         length: (4 * w * h) as usize,
+        // The read starts from zero, as this case's reads always did: it asks
+        // nothing about the padding between its rows.
+        before: 0,
     });
     work
 }

@@ -320,6 +320,8 @@ impl CompressedBlits {
             level: 0,
             slice: 0,
             region,
+            // Every format here is uncompressed on the host side, so the rows are texel rows.
+            rows: region.size[1],
             bytes: fed.cpu_in.clone(),
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
@@ -332,6 +334,9 @@ impl CompressedBlits {
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
             length: whole,
+            // The read starts from zero, as this case's reads always did: it asks
+            // nothing about the padding between its rows.
+            before: 0,
         });
         reads.push(Read {
             at: "cpu-in-cpu-out",
@@ -391,6 +396,9 @@ impl CompressedBlits {
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
             length: whole,
+            // The read starts from zero, as this case's reads always did: it asks
+            // nothing about the padding between its rows.
+            before: 0,
         });
         reads.push(Read {
             at: "blit-in-cpu-out",
@@ -414,6 +422,8 @@ impl CompressedBlits {
             level: 0,
             slice: 0,
             region,
+            // Every format here is uncompressed on the host side, so the rows are texel rows.
+            rows: region.size[1],
             bytes: fed.out_of_compressed.clone(),
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
@@ -439,6 +449,9 @@ impl CompressedBlits {
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
             length: whole,
+            // The read starts from zero, as this case's reads always did: it asks
+            // nothing about the padding between its rows.
+            before: 0,
         });
         reads.push(Read {
             at: "out-of-compressed",
@@ -456,6 +469,8 @@ impl CompressedBlits {
             level: 0,
             slice: 0,
             region,
+            // Every format here is uncompressed on the host side, so the rows are texel rows.
+            rows: region.size[1],
             bytes: fed.into_compressed.clone(),
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
@@ -470,6 +485,9 @@ impl CompressedBlits {
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
             length: whole,
+            // The read starts from zero, as this case's reads always did: it asks
+            // nothing about the padding between its rows.
+            before: 0,
         });
         reads.push(Read {
             at: "into-compressed",
@@ -498,6 +516,8 @@ impl CompressedBlits {
             level: 0,
             slice: 0,
             region,
+            // Every format here is uncompressed on the host side, so the rows are texel rows.
+            rows: region.size[1],
             bytes: fed.over_a_buffer.clone(),
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
