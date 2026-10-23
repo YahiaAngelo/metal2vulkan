@@ -45,7 +45,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "7f8a611307dcde1935e4d3f34ed2afe25523eebcb563b86f16e2aab9792b3b91"
+                          "hex": "7142ac54a53bf22c3bd34c232c04e72abc4ff90ac12c672a355ee2003496b92b"
                         }
                       }
                     }
@@ -162,6 +162,32 @@
                         "image_pitch": 24,
                         "images": 1,
                         "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture-2d-r32uint-3x2/get-bytes/1",
+                  "observed": {
+                    "value": {
+                      "bytes": "ud4ILVJ3nMHmEDVa/f39/f39/f39/f39/f39/f39/f1yl7zhCzBVep/E6RM="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 44
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 12,
+                        "row_pitch": 32,
+                        "rows": 2,
+                        "image_pitch": 44,
+                        "images": 1,
+                        "gaps": "compared"
                       }
                     }
                   }

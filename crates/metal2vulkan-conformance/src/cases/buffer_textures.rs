@@ -341,10 +341,32 @@ struct Bytes {
     /// The texture's first byte in the buffer, and the bytes between its rows.
     offset: u64,
     bytes_per_row: u64,
-    /// The host's reads: a region, the pitch it reads at, and the bytes it reads.
-    reads: &'static [([u64; 4], u64, usize)],
+    /// The host's reads.
+    reads: &'static [Read],
     /// The host's write: a region, the pitch it writes at, and the bytes it writes.
     write: ([u64; 4], u64, usize),
+}
+
+/// One read the host makes of a row's texture.
+struct Read {
+    /// The region read, as `x, y, width, height`.
+    region: [u64; 4],
+    /// The pitch the destination is read at, which may be wider than a row of the region.
+    pitch: u64,
+    /// The bytes of one row of the region, which the case **states**: `MTLTexture` answers no
+    /// bytes-per-texel, and a format table of ours would be a second spelling of Metal's to keep
+    /// in step. A read whose pitch is wider than this has padding between its rows, and that
+    /// padding is what [`Read::before`] asks about.
+    row_bytes: u64,
+    /// The bytes of the destination.
+    length: usize,
+    /// The byte every one of those `length` bytes holds before the call.
+    ///
+    /// A read at a pitch wider than its rows asks two questions at once — the bytes the call
+    /// wrote, and whether it left the padding between the rows alone. Zero answers the second
+    /// badly, because a call that wrote zeros there and a call that wrote nothing read alike, so
+    /// such a read states a byte no stripe of the buffer holds.
+    before: u8,
 }
 
 /// The bytes rows: a texture buffer whose texels are the buffer's bytes, and a 2D texture whose
@@ -360,11 +382,31 @@ const BYTES_ROWS: [Bytes; 2] = [
         height: 1,
         offset: 512,
         bytes_per_row: 64,
-        reads: &[([0, 0, 16, 1], 64, 64), ([4, 0, 4, 1], 16, 16)],
+        reads: &[
+            Read {
+                region: [0, 0, 16, 1],
+                pitch: 64,
+                row_bytes: 64,
+                length: 64,
+                before: 0,
+            },
+            Read {
+                region: [4, 0, 4, 1],
+                pitch: 16,
+                row_bytes: 16,
+                length: 16,
+                before: 0,
+            },
+        ],
         write: ([2, 0, 4, 1], 16, 16),
     },
     // Three `R32Uint` texels by two rows from byte 256 at a pitch of 32: the rows are 12 bytes and
     // lie 32 apart, so the 20 bytes between them are what the read and the write must leave alone.
+    //
+    // Its reads ask that of both sides of the call. The first reads the region at its own pitch,
+    // where the texture's padding must not reach the destination; the second reads it at a pitch
+    // of 32, where the destination has padding of its own and `getBytes:` must leave it as it
+    // found it.
     Bytes {
         key: "texture-2d-r32uint-3x2",
         kind: TextureKind::Type2D,
@@ -373,7 +415,27 @@ const BYTES_ROWS: [Bytes; 2] = [
         height: 2,
         offset: 256,
         bytes_per_row: 32,
-        reads: &[([0, 0, 3, 2], 12, 24)],
+        reads: &[
+            Read {
+                region: [0, 0, 3, 2],
+                pitch: 12,
+                row_bytes: 12,
+                length: 24,
+                before: 0,
+            },
+            // The same region into a destination whose rows lie 32 apart: 12 bytes of texels and
+            // 20 of padding, twice, and the last row's padding is past the bytes the call needs,
+            // so the destination is the 44 bytes the call reaches. `0xfd` is 253, which no stripe
+            // of the buffer holds (they are `i * 37 % 251`), so a padding byte the call wrote from
+            // the buffer and one it left alone cannot read alike.
+            Read {
+                region: [0, 0, 3, 2],
+                pitch: 32,
+                row_bytes: 12,
+                length: 44,
+                before: 0xfd,
+            },
+        ],
         write: ([0, 0, 3, 2], 12, 24),
     },
 ];
@@ -419,19 +481,17 @@ fn bytes_work() -> Work {
             offset: row.offset,
             bytes_per_row: row.bytes_per_row,
         });
-        for &([x, y, width, height], pitch, length) in row.reads {
+        for read in row.reads {
+            let [x, y, width, height] = read.region;
             work.step(Step::GetBytes {
                 texture,
                 level: 0,
                 slice: 0,
                 region: Rect::new(x, y, width, height),
-                bytes_per_row: pitch,
+                bytes_per_row: read.pitch,
                 bytes_per_image: 0,
-                length,
-                // These rows read at the region's own pitch, so there is no padding between the
-                // rows to ask about and no distinctive fill to ask it with. Zero is the byte the
-                // destination held before this field existed.
-                before: 0,
+                length: read.length,
+                before: read.before,
             });
         }
         let ([x, y, width, height], pitch, length) = row.write;
@@ -484,22 +544,36 @@ fn buffer_layout(row: &Bytes) -> ByteLayout {
     }
 }
 
-/// A read the host made, as a site's layout: the rows it read, at the pitch it read them at.
-fn read_layout(pitch: u64, length: usize) -> ByteLayout {
-    let row = u32::try_from(pitch).unwrap_or(u32::MAX).max(1);
+/// A read the host made, as a site's layout: the rows of the region it read, at the pitch it read
+/// them at, with the padding between them compared where the pitch leaves any.
+///
+/// The elements are the row's own bytes, not the whole pitch, so a difference names the row and
+/// the byte inside it. Where the pitch is wider, [`Gaps::Compared`] puts the padding in the
+/// comparison as well: a `getBytes:` that wrote where it should not have is a difference here, and
+/// that is the question the row's [`Read::before`] sets up.
+fn read_layout(read: &Read) -> ByteLayout {
+    let pitch = u32::try_from(read.pitch).unwrap_or(u32::MAX).max(1);
+    // A row no wider than the pitch, so the elements of one row never reach into the next.
+    let row = u32::try_from(read.row_bytes)
+        .unwrap_or(u32::MAX)
+        .clamp(1, pitch);
     ByteLayout {
         region: Region::Buffer {
             offset: 0,
-            length: length as u64,
+            length: read.length as u64,
         },
         element: Element::U8,
         row_offset: 0,
         row_elements: row,
-        row_pitch: row,
-        rows: (length as u32).div_ceil(row),
-        image_pitch: length as u32,
+        row_pitch: pitch,
+        rows: u32::try_from(read.region[3]).unwrap_or(1).max(1),
+        image_pitch: read.length as u32,
         images: 1,
-        gaps: Gaps::Ignored,
+        gaps: if row < pitch {
+            Gaps::Compared
+        } else {
+            Gaps::Ignored
+        },
     }
 }
 
@@ -535,13 +609,17 @@ impl Case for CpuAccess {
             steps.extend(row.spec().format.to_le_bytes());
             steps.extend(row.offset.to_le_bytes());
             steps.extend(row.bytes_per_row.to_le_bytes());
-            for &(region, pitch, length) in row.reads {
+            for read in row.reads {
                 steps.extend(b"getBytes");
-                for axis in region {
+                for axis in read.region {
                     steps.extend(axis.to_le_bytes());
                 }
-                steps.extend(pitch.to_le_bytes());
-                steps.extend((length as u64).to_le_bytes());
+                steps.extend(read.pitch.to_le_bytes());
+                steps.extend(read.row_bytes.to_le_bytes());
+                steps.extend((read.length as u64).to_le_bytes());
+                // The byte the destination holds first is part of the answer wherever the pitch
+                // leaves padding, so it is part of what the case asked.
+                steps.push(read.before);
             }
             let (region, pitch, length) = row.write;
             steps.extend(b"replaceRegion");
@@ -561,11 +639,11 @@ impl Case for CpuAccess {
         let done = call(sites, "work", side.work(&bytes_work()), |_| Value::Absent)?;
         let mut at = 0;
         for row in &BYTES_ROWS {
-            for (which, &(_, pitch, length)) in row.reads.iter().enumerate() {
-                let read = done.reads.get(at).cloned().unwrap_or_default();
+            for (which, read) in row.reads.iter().enumerate() {
+                let bytes = done.reads.get(at).cloned().unwrap_or_default();
                 sites.push(Node::leaf(
                     format!("{}/get-bytes/{which}", row.key),
-                    Observed::bytes(read, read_layout(pitch, length)),
+                    Observed::bytes(bytes, read_layout(read)),
                 ));
                 at += 1;
             }
@@ -615,6 +693,81 @@ mod tests {
                  guard refuse shapes Metal takes"
             );
         }
+    }
+
+    /// Every read's layout describes exactly the bytes its case hands the call: the rows of its
+    /// region, at its pitch, with the row's own bytes as the elements.
+    ///
+    /// A read states its row's bytes rather than deriving them from the format, so a wrong number
+    /// here would leave part of the destination outside the comparison and every byte of it would
+    /// pass unread. Its failure mode was exercised while writing it: a row stating 8 bytes instead
+    /// of 12 fails here, naming the read and both counts.
+    #[test]
+    fn every_reads_layout_covers_the_bytes_it_states() {
+        for row in &BYTES_ROWS {
+            for (which, read) in row.reads.iter().enumerate() {
+                let at = format!("{}/get-bytes/{which}", row.key);
+                assert!(
+                    read.row_bytes <= read.pitch,
+                    "{at} reads rows of {} bytes at a pitch of {}, so one row's bytes reach into \
+                     the next",
+                    read.row_bytes,
+                    read.pitch
+                );
+                let rows = read.region[3];
+                let needed = (rows - 1) * read.pitch + read.row_bytes;
+                assert_eq!(
+                    read.length as u64, needed,
+                    "{at} hands the call {} bytes, but {rows} rows of {} at a pitch of {} reach {}",
+                    read.length, read.row_bytes, read.pitch, needed
+                );
+                assert_eq!(
+                    read_layout(read).extent(),
+                    read.length,
+                    "{at}'s layout and its destination are different sizes, so the comparison \
+                     covers the wrong bytes"
+                );
+            }
+        }
+    }
+
+    /// One read lays its region into a destination whose rows lie further apart than the rows are
+    /// wide, and that read's padding is compared, from a byte no stripe of the buffer holds.
+    ///
+    /// Without such a read the case cannot ask whether `getBytes:` leaves the bytes past each
+    /// row's texels alone: a destination whose rows are its pitch has nowhere for the answer to
+    /// show. Its failure mode was exercised while writing it: making [`read_layout`] answer
+    /// [`Gaps::Ignored`] throughout fails here.
+    #[test]
+    fn a_read_at_a_wider_pitch_compares_the_padding_between_its_rows() {
+        let padded: Vec<&Read> = BYTES_ROWS
+            .iter()
+            .flat_map(|row| row.reads.iter())
+            .filter(|read| read.row_bytes < read.pitch && read.region[3] > 1)
+            .collect();
+        assert!(
+            !padded.is_empty(),
+            "no read lays its rows into a wider destination, so nothing asks whether getBytes: \
+             leaves the padding between them alone"
+        );
+        for read in padded {
+            assert_eq!(
+                read_layout(read).gaps,
+                Gaps::Compared,
+                "a read at a pitch of {} with rows of {} leaves padding out of its comparison",
+                read.pitch,
+                read.row_bytes
+            );
+            assert!(
+                !stripes(BUFFER as usize).contains(&read.before),
+                "the destination starts at {:#x}, which the buffer holds somewhere, so a padding \
+                 byte the call copied and one it left alone can read alike",
+                read.before
+            );
+        }
+        // A read at its region's own pitch has no padding, and compares none.
+        let tight = BYTES_ROWS[0].reads.first().expect("a first read");
+        assert_eq!(read_layout(tight).gaps, Gaps::Ignored);
     }
 
     /// Every shape of the recorded table has a row pitch at or above its texture's own row, so no
