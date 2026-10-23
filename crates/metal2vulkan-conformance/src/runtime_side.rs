@@ -38,12 +38,11 @@ use metal2vulkan::pipeline::{
 use metal2vulkan_runtime::{
     BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue,
     ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Heap, HeapDescriptor,
-    HeapType, IndirectCommand,
-    IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane,
-    IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption, PipelineOptions,
-    RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
-    ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor,
-    Viewport,
+    HeapType, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor,
+    IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption,
+    PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState,
+    ResourceOptions, ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture,
+    TextureDescriptor, Viewport,
 };
 use std::time::Duration;
 

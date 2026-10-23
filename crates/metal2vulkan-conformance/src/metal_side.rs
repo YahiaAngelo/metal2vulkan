@@ -53,9 +53,9 @@ use objc2_metal::{
     MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
     MTLSharedEvent, MTLSize, MTLSparsePageSize, MTLStageInputOutputDescriptor,
     MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction,
-    MTLTexture, MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels,
-    MTLTextureType, MTLTextureUsage, MTLTileRenderPipelineDescriptor, MTLVertexDescriptor,
-    MTLVertexFormat, MTLVertexStepFunction, MTLViewport, MTLVisibilityResultMode,
+    MTLTexture, MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType,
+    MTLTextureUsage, MTLTileRenderPipelineDescriptor, MTLVertexDescriptor, MTLVertexFormat,
+    MTLVertexStepFunction, MTLViewport, MTLVisibilityResultMode,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
