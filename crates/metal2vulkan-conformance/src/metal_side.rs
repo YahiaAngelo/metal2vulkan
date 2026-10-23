@@ -3649,6 +3649,73 @@ impl Side for MetalSide {
         })
     }
 
+    fn detach_in_a_completed_handler(
+        &mut self,
+        buffer: Handle,
+        after: std::time::Duration,
+    ) -> Answer<crate::host_detach::DetachedInHandler> {
+        use crate::event_orders::Status;
+        use crate::host_detach::{DetachedInHandler, FILL_BYTE, FILL_BYTES};
+        use std::sync::mpsc;
+        let detaching = self
+            .buffers
+            .get(buffer.0 as usize)
+            .cloned()
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", buffer.0)))?;
+        // Apple SPI: no public header names `detachBacking`, so it is sent by selector and only
+        // after the buffer answered that it responds. A release that stops answering it gives a
+        // typed refusal naming the selector rather than an unrecognised-selector crash.
+        require_selector(&*detaching, objc2::sel!(detachBacking), "detachBacking")?;
+        objc2::rc::autoreleasepool(|_| {
+            let queue = self
+                .device
+                .newCommandQueue()
+                .ok_or_else(|| Failure::named("NewCommandQueue", "returned nil"))?;
+            let command_buffer = queue
+                .commandBuffer()
+                .ok_or_else(|| Failure::named("CommandBuffer", "returned nil"))?;
+            let encoder = command_buffer
+                .blitCommandEncoder()
+                .ok_or_else(|| Failure::named("BlitCommandEncoder", "returned nil"))?;
+            // The command buffer has to *use* the buffer: a submission that named it is the only
+            // thing that can hold it, and a detach asked about a buffer nothing took is a
+            // different question.
+            let length = detaching
+                .length()
+                .min(usize::try_from(FILL_BYTES).unwrap_or(usize::MAX));
+            encoder.fillBuffer_range_value(&detaching, NSRange::new(0, length), FILL_BYTE);
+            encoder.endEncoding();
+            let (sender, answered) = mpsc::channel();
+            let handler = {
+                let detaching = detaching.clone();
+                block2::RcBlock::new(
+                    move |_: std::ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+                        // Past the race between Metal's own release of what the command buffer
+                        // used and this handler's start, which is the region where Metal's answer
+                        // is deterministic (`crate::host_detach`).
+                        std::thread::sleep(after);
+                        let _ = sender.send(detach_backing(&detaching));
+                    },
+                )
+            };
+            // SAFETY: the block is a valid heap block held in `handler` for the rest of this
+            // probe, which does not return before the handler answered or its bound ran out.
+            unsafe { command_buffer.addCompletedHandler(block2::RcBlock::as_ptr(&handler)) };
+            command_buffer.commit();
+            // The handler's own channel, with a bound. `waitUntilCompleted` is deliberately not
+            // called: Metal has no bounded form of it, and an answer that did not arrive is a
+            // recorded fact rather than a hang.
+            let (detached, status) = match answered.recv_timeout(crate::host_detach::WAIT) {
+                Ok(detached) => (
+                    Some(detached),
+                    Status::read(status_word(command_buffer.status())),
+                ),
+                Err(_) => (None, Status::NeverSettled),
+            };
+            Ok(DetachedInHandler { detached, status })
+        })
+    }
+
     fn scheduled_handler_order(
         &mut self,
     ) -> Answer<crate::scheduled_handlers::ScheduledHandlerOrder> {
@@ -6303,6 +6370,18 @@ impl HandlerLog {
             .map(|called| called.clone())
             .unwrap_or_default()
     }
+}
+
+/// `detachBacking` of `buffer` (Apple SPI): whether the buffer now lies in no host pages.
+///
+/// A function rather than a bare `msg_send!` at the call site, for the reason [`conforming`]
+/// states: a selector sent with no receiver type is a call the coverage derivation cannot read.
+/// One place also states why the send is sound.
+fn detach_backing(buffer: &ProtocolObject<dyn MTLBuffer>) -> bool {
+    // SAFETY: the caller asked the buffer for this selector first
+    // (`require_selector`, which every Apple SPI this suite sends goes through); it takes no
+    // argument and answers a `BOOL`.
+    unsafe { objc2::msg_send![buffer, detachBacking] }
 }
 
 /// The word a command buffer's status records as, in the runtime's spelling so the two sides'

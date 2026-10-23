@@ -1392,6 +1392,31 @@ pub trait Side {
         Err(Failure::unavailable("handler_wait"))
     }
 
+    /// `detachBacking` (Metal's private `MTLBuffer` method) of the no-copy buffer `buffer`, called
+    /// from a completed handler of a command buffer whose blit fill named it, `after` into that
+    /// handler: the whole program in one call — the queue, the command buffer, the fill, the
+    /// handler, the commit and this thread's own bounded wait — and what the detach answered
+    /// inside the handler ([`crate::host_detach`]).
+    ///
+    /// One call rather than several, because the fact is a **relation** between a handler and the
+    /// work a command buffer still holds, and a case cannot state "from inside the handler" as
+    /// calls whose order nothing fixes.
+    ///
+    /// `after` is what makes the answer comparable: Metal's release of what the command buffer
+    /// used races the start of its handlers, so the first microseconds of a handler have no
+    /// answer, and this call asks in the region past the race.
+    ///
+    /// Bounded on both legs, and it holds no GPU: the handler sleeps `after` and returns, and a
+    /// command buffer that does not arrive inside the wait is recorded as the negative fact.
+    fn detach_in_a_completed_handler(
+        &mut self,
+        buffer: Handle,
+        after: std::time::Duration,
+    ) -> Answer<crate::host_detach::DetachedInHandler> {
+        let _ = (buffer, after);
+        Err(Failure::unavailable("detachBacking"))
+    }
+
     /// What a shared event's value did, by the rising-value probe ([`crate::shared_events`]):
     /// `newSharedEvent`, its label, the host's sets, two GPU signals, three host waits, and a
     /// signal of `u64::MAX`.

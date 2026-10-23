@@ -704,8 +704,9 @@ pub(super) struct State {
     /// What its batches' commands took of buffers over host pages, held from the submission of
     /// their event group's first batch (`rebind::SubmittedHolds`, `State::event_group`), each with
     /// the batch whose submission takes it ([`State::holds_until`]): let go as that batch's work
-    /// completed, or, for its last batch's, noted complete there and let go once its completed
-    /// handlers ran, as Metal answers a detach `NO` until then (measured on the M3 Max).
+    /// completed, and, for its last batch's, as its completion is processed, before its completed
+    /// handlers run ([`State::keep_holds`], `CommandBufferShared::complete`). A group of its never
+    /// submitted keeps its holds until then too, since nothing of it will run.
     submitted_holds: Vec<(usize, SubmittedHolds)>,
     /// The encoders its commit's failure failed (`commit_failed`'s, Metal's own from a render
     /// pass, or a faulted encoder's: [`State::fail`]): a submission none of whose encoders
@@ -1313,11 +1314,11 @@ impl State {
         now.into_iter().map(|(_, holds)| holds).collect()
     }
 
-    /// The holds of its last batch, whose work completed: kept until its completed handlers ran
-    /// (`State::submitted_holds`).
+    /// The holds of its last batch, whose work completed: kept until its completion is processed,
+    /// which lets go of every hold it still counts before its completed handlers run
+    /// (`State::submitted_holds`, `CommandBufferShared::complete`).
     pub(super) fn keep_holds(&mut self, holds: Vec<SubmittedHolds>) {
-        for mut held in holds {
-            held.ran();
+        for held in holds {
             self.submitted_holds.push((usize::MAX, held));
         }
     }
@@ -4098,6 +4099,9 @@ impl CommandBufferShared {
         let mut settled_pool = None;
         // The heap versions its commands bound, let go of once its completed handlers ran.
         let released_versions;
+        // The holds its batches' commands took of buffers over host pages, let go of here, before
+        // its completed handlers run: dropped without the state's lock (`detach.rs`).
+        let submitted_holds;
         // No rebind encodes it again from here: a group that was never submitted runs nothing.
         self.device.shared().rebinds.no_replays(self);
         {
@@ -4233,11 +4237,12 @@ impl CommandBufferShared {
             // Its heap versions, uploads, pools and descriptor pools go once its completed
             // handlers ran (below).
             released_versions = state.heaps.clear();
-            // Its work ended: a buffer's detach waiting for it answers `false` (`detach.rs`), and
-            // a detach answers so until its completed handlers ran (below), as Metal's does.
-            for (_, held) in &mut state.submitted_holds {
-                held.ran();
-            }
+            // Its work ended, so nothing of it holds a buffer over host pages any longer: every
+            // hold goes as its completion is processed, before its completed handlers run, as
+            // Metal releases what a completion processes (`detach.rs`). A buffer's detach waiting
+            // for its work answers `false`; one made from here on detaches. Dropped below,
+            // without this lock, which no hold may be let go under (`Rebinds::wait_ran`).
+            submitted_holds = state.holds_until(usize::MAX);
             // Its work ended (its fences were signaled, or its queues drained after a failed
             // wait), so nothing of its pools is pending: its command pool goes to the device's
             // spares whatever its status, never released on this thread (`spares.rs`); its
@@ -4266,6 +4271,9 @@ impl CommandBufferShared {
             state.unplaced();
             parked = state.parked > 0;
         }
+        // The holds taken above go here, with no lock of the command buffer's held, before any
+        // handler of its runs: a detach from one of them detaches (`detach.rs`).
+        drop(submitted_holds);
         self.wake_parked(parked);
         if unmeasured_reach {
             self.device
@@ -4291,10 +4299,6 @@ impl CommandBufferShared {
                 exit_guard::program(|| handler(&buffer));
             }
         }
-        // Its holds of what its commands took go once its completed handlers ran: a detach
-        // detaches from now on (`detach.rs`). Let go without the lock.
-        let holds = lock(&self.state).holds_until(usize::MAX);
-        drop(holds);
         let handled = Instant::now();
         drop(buffer);
         // Its queue's slot comes back as its last completed handler returns, as Metal's does: a

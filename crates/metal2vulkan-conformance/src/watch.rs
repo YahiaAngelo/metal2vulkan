@@ -612,6 +612,15 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.handler_wait(wait)
     }
 
+    fn detach_in_a_completed_handler(
+        &mut self,
+        buffer: Handle,
+        after: std::time::Duration,
+    ) -> Answer<crate::host_detach::DetachedInHandler> {
+        let _span = self.watch("detach_in_a_completed_handler");
+        self.inner.detach_in_a_completed_handler(buffer, after)
+    }
+
     fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {
         let _span = self.watch("shared_event_rises");
         self.inner.shared_event_rises(label)
