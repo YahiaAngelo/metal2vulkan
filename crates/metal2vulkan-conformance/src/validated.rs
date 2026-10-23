@@ -512,4 +512,14 @@ impl<S: Side> Side for Announcing<S> {
         self.at("render");
         self.inner.render(work)
     }
+
+    fn handler_wait(&mut self, wait: crate::handler_waits::OwnWait) -> Answer<Value> {
+        self.at("handler_wait");
+        self.inner.handler_wait(wait)
+    }
+
+    fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {
+        self.at("shared_event_rises");
+        self.inner.shared_event_rises(label)
+    }
 }

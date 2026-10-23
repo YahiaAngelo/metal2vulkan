@@ -182,7 +182,7 @@ pub fn replay_against_known(
             venue,
             verdict: Verdict::LacksFeature { needs: lacks },
             allowances: Allowances::default(),
-            measured_on: answer.provenance.measured_elsewhere().map(str::to_owned),
+            measured_on: answer.measured_elsewhere().map(str::to_owned),
             ours,
         });
     }
@@ -193,7 +193,7 @@ pub fn replay_against_known(
         venue,
         verdict,
         allowances,
-        measured_on: answer.provenance.measured_elsewhere().map(str::to_owned),
+        measured_on: answer.measured_elsewhere().map(str::to_owned),
         ours,
     })
 }
