@@ -361,9 +361,29 @@ impl Case for HalfOutputBlends {
         // written from it would be the suite overruling the contract it exists to test. Five of the
         // six formats are therefore left **divergent** on this round's MoltenVK, with the measured
         // counts in the module docs above.
-        vec![crate::replay::notice_allowance(
-            Degradation::HalfOutputFastMathBlend.code(),
-        )]
+        // A half-float attachment also takes the stage's `half` through a 16-bit output on a
+        // device that does not store a 32-bit output's NaN as Metal does, announced as
+        // `shader-half-color-bits` on the three 16-bit formats of this family. It is the case's own
+        // shape again -- a stored `half` output into a half-float attachment -- so its code is
+        // declared, and it loosens no stored code either: the three rows stay divergent on the
+        // texels the module docs above measure, which is the finding and must not be laundered.
+        //
+        // Two more of the same shape are declared from the run that shows them: a device whose own
+        // conversion into the attachment is not Metal's (`device-color-conversion`, lavapipe) and
+        // one whose NaN encoding in a half-float target is its own (`device-nan-encoding`). Both
+        // are declarations at the notices site and neither loosens a stored code -- which matters
+        // most for `device-color-conversion`, whose own definition says validation derives no
+        // tolerance and no explanation from it and a difference stays a mismatch for review. The
+        // rows stay divergent on their texels, on both venues.
+        [
+            Degradation::HalfOutputFastMathBlend,
+            Degradation::ShaderHalfColorBits,
+            Degradation::DeviceColorConversion,
+            Degradation::DeviceNanEncoding,
+        ]
+        .into_iter()
+        .map(|kind| crate::replay::notice_allowance(kind.code()))
+        .collect()
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

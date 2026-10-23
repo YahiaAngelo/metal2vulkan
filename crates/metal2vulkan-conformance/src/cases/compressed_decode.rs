@@ -283,9 +283,15 @@ impl Case for CompressedDecode {
         // this chip: a run that exceeds one ulp is the ledger's claim failing, which is what this
         // allowance exists to catch. Under `TexelConversionPolicy::Exact` the notice does not
         // fire, the justification does not hold, and every texel is compared exactly.
-        let mut all = vec![crate::replay::notice_allowance(
-            Degradation::DecodedBlockTwin.code(),
-        )];
+        // A CPU copy that fills such a texture (`replaceRegion`) is decoded on the CPU into that
+        // twin and copied in, announced as `cpu-block-decode`: the host-copy arm of the very
+        // mechanism the line above names, measured on lavapipe for every format of this family. It
+        // is a declaration and not a tolerance -- every texel the case reads still compares
+        // exactly with Metal.
+        let mut all = vec![
+            crate::replay::notice_allowance(Degradation::DecodedBlockTwin.code()),
+            crate::replay::notice_allowance(Degradation::CpuBlockDecode.code()),
+        ];
         for round in 0..ROUNDS {
             all.push(Allowance::new(
                 format!("case/round/{round}/texels"),

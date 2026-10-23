@@ -252,6 +252,12 @@ const PASS_NOTICES: &[Degradation] = &[
     // whole resolve is emulated; MoltenVK resolves in the store and announces neither.
     Degradation::ShaderResolve,
     Degradation::ShaderColorConversion,
+    // The multisampled attachment of a `MultisampleResolve` store is Vulkan's `DONT_CARE`, which
+    // Apple's GPU is measured to leave at the earlier texels unless its tiler overflows. Announced
+    // on MoltenVK, where that driver fact holds. Nothing of this case reads the multisampled
+    // attachment -- the resolved texel is the whole answer, and it compares exactly -- so naming
+    // the kind declares what our side announced and loosens no byte.
+    Degradation::DontCareStore,
 ];
 
 /// The three vertices of the probe's triangle, which covers what lies left of `edge`.

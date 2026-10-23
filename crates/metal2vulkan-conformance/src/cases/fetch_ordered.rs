@@ -221,9 +221,15 @@ impl Case for FetchOrdered {
         // for this family: if Metal allows it we must allow it, so a byte that differs is a bug and
         // a refusal is a bug, and neither gets a tolerance here. A venue announces one of the two,
         // so the other is reported as having fired on no venue of that run, which is honest.
+        //
+        // An attachment the pass does not store back is Vulkan's `DONT_CARE` where the driver is
+        // measured to leave the earlier texels there, announced as `dont-care-store` (lavapipe
+        // here, on the two sRGB rows). It says nothing about the texels either, and every byte
+        // still compares exactly.
         [
             Degradation::FetchThroughScratch,
             Degradation::ShaderColorConversion,
+            Degradation::DontCareStore,
         ]
         .iter()
         .map(|notice| crate::replay::notice_allowance(notice.code()))

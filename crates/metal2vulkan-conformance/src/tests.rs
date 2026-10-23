@@ -936,6 +936,97 @@ fn a_declared_notice_does_not_excuse_an_undeclared_one() {
     );
 }
 
+/// A case that names two notices separately must see **both** fire. Before the subset check the
+/// walk stopped at the first covering allowance that held, so a case declaring two announced
+/// notices read "3 named, 2 fired, 1 never fired" and its second declaration was permanently dead
+/// -- which a stream met in live use while porting a buffer-backed texture lane. A declaration now
+/// fires on its own code being announced.
+#[test]
+fn two_notice_declarations_both_fire_when_both_notices_are_announced() {
+    let first = Degradation::ALL[0];
+    let second = Degradation::ALL[1];
+    let bytes = words(&[1, 2]);
+    let case = WordsCase {
+        allowances: vec![
+            crate::replay::notice_allowance(first.code()),
+            crate::replay::notice_allowance(second.code()),
+        ],
+        ..WordsCase::new("words", 2)
+    };
+    let recording = recording_of(&case, case.transcript(bytes.clone(), "Completed", &[]), 3);
+    let mut side = StubSide::new(bytes).announcing(&[first, second]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert!(
+        matches!(replayed.verdict, Verdict::Announced { .. }),
+        "{}",
+        replayed.verdict
+    );
+    assert_eq!(replayed.allowances.named, 2);
+    assert_eq!(
+        replayed.allowances.unfired,
+        Vec::new(),
+        "both declarations are the case's own claims and both notices were announced"
+    );
+    assert_eq!(replayed.allowances.fired(), 2);
+}
+
+/// The other half of keeping that counter load-bearing: a **tolerance** justified by a notice fires
+/// only where a value needed it, whatever the notices site did. Announcing the code must not mark a
+/// value tolerance used, or a tolerance nothing checked would read as checked.
+#[test]
+fn a_value_tolerance_does_not_fire_just_because_its_notice_was_announced() {
+    let kind = Degradation::ALL[0];
+    let bytes = words(&[1, 2]);
+    let case = WordsCase {
+        allowances: vec![
+            crate::replay::notice_allowance(kind.code()),
+            Allowance::new(
+                "case/output",
+                Loosening::Unchecked,
+                Justification::notice(kind),
+            ),
+        ],
+        ..WordsCase::new("words", 2)
+    };
+    let recording = recording_of(&case, case.transcript(bytes.clone(), "Completed", &[]), 3);
+    // The notice is announced, and every byte matches, so nothing needed the value tolerance.
+    let mut side = StubSide::new(bytes).announcing(&[kind]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    let unfired: Vec<&str> = replayed
+        .allowances
+        .unfired
+        .iter()
+        .map(|unfired| unfired.path.as_str())
+        .collect();
+    assert_eq!(unfired, vec!["case/output"], "{unfired:?}");
+}
+
+/// And the counter the defect was caught by stays load-bearing: a notice-level allowance whose code
+/// no run announces still reads as never fired.
+#[test]
+fn a_notice_declaration_whose_notice_is_quiet_still_reads_as_never_fired() {
+    let fired = Degradation::ALL[0];
+    let quiet = Degradation::ALL[1];
+    let bytes = words(&[1, 2]);
+    let case = WordsCase {
+        allowances: vec![
+            crate::replay::notice_allowance(fired.code()),
+            crate::replay::notice_allowance(quiet.code()),
+        ],
+        ..WordsCase::new("words", 2)
+    };
+    let recording = recording_of(&case, case.transcript(bytes.clone(), "Completed", &[]), 3);
+    let mut side = StubSide::new(bytes).announcing(&[fired]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert_eq!(replayed.allowances.fired(), 1);
+    let unfired = &replayed.allowances.unfired;
+    assert_eq!(unfired.len(), 1, "{unfired:?}");
+    assert!(
+        unfired[0].justified_by.contains(quiet.code()),
+        "{unfired:?}"
+    );
+}
+
 /// `announced_notices` is `announced_at` totalled, so the rule is read in one place: the comparison
 /// needs each notice's **site** to say where an undeclared one was announced, and the notice census
 /// needs the totals. Worth its own test because blinding that walk fails nothing else in the crate's

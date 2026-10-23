@@ -738,7 +738,15 @@ impl Case for ChromaTexels {
         // nothing, so the notices site differs and that notice is what justifies it; every texel
         // still compares exactly. On a device that needs no twin the allowance simply does not
         // fire, which the report counts.
-        vec![notice_allowance(Degradation::CarriedDecodedTwin.code())]
+        //
+        // The host copy that fills the texture (`replaceRegion`) is decoded on the CPU into that
+        // twin, which announces `cpu-block-decode` -- the same kind, for the same reason, that
+        // this file's blit case names. It is a declaration and not a tolerance: every texel the
+        // case reads still compares exactly.
+        [Degradation::CarriedDecodedTwin, Degradation::CpuBlockDecode]
+            .into_iter()
+            .map(|kind| notice_allowance(kind.code()))
+            .collect()
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {

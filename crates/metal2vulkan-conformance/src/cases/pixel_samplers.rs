@@ -468,9 +468,17 @@ impl Case for PixelSamplers {
         // float its own way. A venue that announces another kind — `pixel-sampler-scaling`, which
         // neither venue here provoked — reads as divergent at that site until whoever adds the
         // venue names it with a run behind it.
+        //
+        // Two more are named from the run that shows them, which is what the paragraph above asks
+        // for: on lavapipe the device's texel decode keeps a denormal where Metal flushes it
+        // (`device-texel-denormals`) and decodes an sRGB code its own way (`srgb-texel-decode`).
+        // Both are declarations and loosen nothing: every texel of these cases compares exactly
+        // with Metal on both venues.
         [
             Degradation::ArgumentPixelSamplerScaling,
             Degradation::FloatSampleFilter,
+            Degradation::DeviceTexelDenormals,
+            Degradation::SrgbTexelDecode,
         ]
         .iter()
         .map(|kind| notice_allowance(kind.code()))
