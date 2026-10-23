@@ -69,14 +69,19 @@
 //!   The exact row announces nothing and reads exact.
 //! - lavapipe: every row announces `shader-color-conversion`, for the normalized store our side
 //!   rounds in the shader where the device's own conversion is not Metal's. Beside it, the
-//!   `tgp_composite` rows announce `half-output-fast-math-blend` there as well, and the exact row
-//!   announces `device-arithmetic` for the division `tob_sample` does.
+//!   `tgp_composite` rows announce `half-output-fast-math-blend` and `device-interpolation`, the
+//!   second for the texture coordinate `tgp_rect` hands across the rectangle on a device not
+//!   measured to interpolate as Metal does, and the exact row announces `device-arithmetic` for
+//!   the division `tob_sample` does.
 //!
 //! Each row **declares every code it can announce**, one declaration a code, because the
 //! comparison reads a declaration per code: a code a row announces and declares nowhere is a
 //! divergence for an undeclared notice, so two rows declare three codes between the venues and the
 //! exact row declares two. A declaration loosens no value; what it says is that the row's shape
-//! can reach that note, which this table is the measurement of.
+//! can reach that note, which this table is the measurement of. The interpolation note is worth
+//! reading twice over: lavapipe interpolates a varying otherwise than Metal, and these rows'
+//! sampled texels still came back exactly Metal's, so what the row declares is the note and not a
+//! difference in any value.
 //!
 //! Nothing here can fault a GPU: two passes, four and one draws, targets of at most 16 by 16, and
 //! no loop in any function either pass runs.
@@ -152,6 +157,7 @@ const FILL: Functions = Functions {
     vertex: "tob_rect",
     fragment: "tob_solid",
     divides_a_float: false,
+    interpolates_a_varying: false,
     half_output: false,
 };
 
@@ -166,6 +172,13 @@ struct Functions {
     ///
     /// This is the shape that decides the row's `device-arithmetic` declaration, and nothing else.
     divides_a_float: bool,
+    /// Whether the fragment function reads a varying the device interpolates: `tgp_layer` reads
+    /// the texture coordinate `tgp_rect` hands across the rectangle, while `tob_sample` derives
+    /// its coordinate from the pixel's own position and reads no interpolated varying.
+    ///
+    /// This is the shape that decides the row's `device-interpolation` declaration, and nothing
+    /// else.
+    interpolates_a_varying: bool,
     /// Whether the fragment function returns a `half` colour output rather than a `float` one.
     ///
     /// This is the shape that decides one of the row's notice declarations and nothing else: our
@@ -201,6 +214,7 @@ const SUBJECTS: &[Subject] = &[
             vertex: "tob_rect",
             fragment: "tob_sample",
             divides_a_float: true,
+            interpolates_a_varying: false,
             half_output: false,
         },
         filter: SamplerMinMagFilter::Nearest,
@@ -214,6 +228,7 @@ const SUBJECTS: &[Subject] = &[
             vertex: "tgp_rect",
             fragment: "tgp_layer",
             divides_a_float: false,
+            interpolates_a_varying: true,
             half_output: true,
         },
         filter: SamplerMinMagFilter::Nearest,
@@ -227,6 +242,7 @@ const SUBJECTS: &[Subject] = &[
             vertex: "tgp_rect",
             fragment: "tgp_layer",
             divides_a_float: false,
+            interpolates_a_varying: true,
             half_output: true,
         },
         filter: SamplerMinMagFilter::Linear,
@@ -392,6 +408,12 @@ impl Case for RenderChain {
         //   sampled texture's extent, and our side records the note where such arithmetic takes
         //   Vulkan's precision bounds rather than correct rounding. Measured announced by that row
         //   on lavapipe.
+        // - `device-interpolation`, for the two rows whose fragment stage reads a varying the
+        //   device interpolates ([`Functions::interpolates_a_varying`]): `tgp_rect` hands the
+        //   texture coordinate across the rectangle, and our side records the note on a device not
+        //   measured to interpolate as Metal does. Measured announced by those two rows on
+        //   lavapipe, where their texels still compared exactly: the interpolation the note covers
+        //   did not move a sampled texel of this geometry.
         //
         // Every value of every row compared **exactly** on both venues, which is the evidence that
         // these declarations loosen nothing: the whole difference they cover is the announcement.
@@ -406,6 +428,11 @@ impl Case for RenderChain {
         if self.subject.sample.divides_a_float {
             named.push(crate::replay::notice_allowance(
                 Degradation::DeviceArithmetic.code(),
+            ));
+        }
+        if self.subject.sample.interpolates_a_varying {
+            named.push(crate::replay::notice_allowance(
+                Degradation::DeviceInterpolation.code(),
             ));
         }
         named
@@ -780,6 +807,9 @@ mod tests {
             }
             if case.subject.sample.divides_a_float {
                 wanted.push(Degradation::DeviceArithmetic.code().to_owned());
+            }
+            if case.subject.sample.interpolates_a_varying {
+                wanted.push(Degradation::DeviceInterpolation.code().to_owned());
             }
             assert_eq!(
                 codes,
