@@ -68,9 +68,9 @@
 //! recording holds nothing host-specific: the prefix carries this run's process id.
 
 use crate::case::{
-    Answer, Bindings, Fill, Handle, IndirectReadBack, MeshCommand, MeshFunctions, MeshStep,
-    PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side,
-    StageInRegion, StageInput, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
+    Answer, ArgumentSlot, Bindings, Fill, Handle, IndirectReadBack, MeshCommand, MeshFunctions,
+    MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource,
+    Side, StageInRegion, StageInput, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
 use crate::recording::Validated;
 use crate::transcript::Value;
@@ -294,6 +294,11 @@ impl<S: Side> Side for Announcing<S> {
     fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
         self.at("sampler");
         self.inner.sampler(spec)
+    }
+
+    fn argument_buffer(&mut self, slots: &[ArgumentSlot]) -> Answer<Handle> {
+        self.at("argument_buffer");
+        self.inner.argument_buffer(slots)
     }
 
     fn dispatch(

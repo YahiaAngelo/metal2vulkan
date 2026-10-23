@@ -126,12 +126,15 @@ edits one.
 | `extended_range_planes` | A two-plane extended-range texture joined into one and split back again | run on Metal |
 | `texture_buffer_fills` | Which bytes a fill changed over a texture made on a buffer | carried; `fillTexture:` is Apple SPI |
 | `texture_fills`, `sample_fills` | Which bytes a texture fill, and a multisample sample fill, changed | carried; `fillTexture:` is Apple SPI |
-| `two_plane_heap_blits`, `two_plane_copies` | What a blit or a copy moved across a two-plane surface | carried; the surface calls are Apple SPI |
+| `two_plane_heap_blits` | What a blit moved between two-plane textures placed in a heap | run on Metal |
+| `two_plane_copies` | What a blit or a fill moved across a two-plane surface's rows | run on Metal where the case fills nothing; carried where it does (`fillTexture:` is Apple SPI) |
 | `mesh_draws` | The texels each mesh threadgroup's primitive drew, and the grids Metal draws nothing for | run on Metal |
 | `mesh_barriers` | Whether a reader draw sees a writer draw's words across a memory barrier | run on Metal |
 | `mesh_commands` | What an indirect command buffer's own-state mesh commands drew, and what two commands with no barrier between them determine | run on Metal |
 | `surface_fills` | Which bytes one private texture fill changed over a surface's plane or a buffer | carried; `fillTexture:` is Apple SPI |
 | `indirect_private_types` | An indirect render command's read-back for each primitive type | carried; the getters are private |
+| `pixel_samplers` | A pixel-coordinate sampler's samples, through a slot, an argument buffer, a normalized control and a constexpr sampler | run on Metal |
+| `pixel_downscales` | A linear downscale by eight through a pixel-coordinate sampler, at seven texture sizes | run on Metal |
 
 A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
 case forbids re-recording with the reason why. Record mode refuses such a case rather than
