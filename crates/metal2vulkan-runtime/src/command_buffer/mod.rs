@@ -4206,6 +4206,11 @@ impl CommandBufferShared {
             // at the second, from before its status reads final (`revocation.rs`); a relayed one
             // is the driver's queue's.
             self.queue.errors().completed(state.failure);
+            // An injected page fault or hang stands for it: the GPU recovers from it now, which
+            // ends a predicated loop running meanwhile (`recovery.rs`).
+            if let Some(recovered) = state.failure.and_then(recovery::injected) {
+                self.device.shared().recoveries.raise(recovered);
+            }
             // The final status, with its error, once: a read sees no `Completed` that a decoded
             // failure turns to `Error`.
             self.answer(&state);

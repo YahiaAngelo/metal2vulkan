@@ -18,8 +18,11 @@
 //! The runtime answers so: each hold (`hang.rs`) raises the device's recovery from what it holds
 //! for as its wait goes, the GPU's recovery ([`Recoveries::raise`]). A fault's hold that later
 //! failures follow raises the fault's once it read `Scheduled`, and the later ones' as its wait
-//! goes. Before each run again a loop asks for the first recovery since its command buffer's
-//! first submission ([`Recoveries::since`]):
+//! goes. A command buffer a program commits as failed with Metal's code of a page fault or a hang
+//! (`CommandBuffer::commit_failed`, `CommandBufferError::Injected` of 3 or 2) stands for that
+//! error: the recovery from it is raised as it completes, beside its queue's count
+//! (`revocation.rs`, [`injected`]). Before each run again a loop asks for the first recovery
+//! since its command buffer's first submission ([`Recoveries::since`]):
 //! - after a fault's, it fails as a victim;
 //! - after a hang's, it stops with no error ([`cut`]): from the check's part on, nothing of the
 //!   command buffer runs, and it completes cleanly. Whether its later event signals fire is not
@@ -34,6 +37,7 @@ use super::rerun::LoopCheck;
 use super::{lock, CommandBufferShared, State};
 use crate::deferred::Deferred;
 use crate::encoder::Recorded;
+use crate::error::CommandBufferError;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A device's GPU recoveries (the module docs): when the last from a fault and the last from a
@@ -74,6 +78,21 @@ impl Recoveries {
             (None, Some(_)) => Some(Recovery::Hang),
             (None, None) => None,
         }
+    }
+}
+
+/// What the GPU recovers from as a command buffer that failed with `error` completes: a page
+/// fault or a hang a program committed as failed in its place by its Metal code (the module
+/// docs); `None` for every other error. The runtime's own raise theirs at their hold's release
+/// (`hang.rs`).
+pub(super) fn injected(error: CommandBufferError) -> Option<Recovery> {
+    let CommandBufferError::Injected(code) = error else {
+        return None;
+    };
+    match code {
+        _ if code == CommandBufferError::PageFault.metal_code() => Some(Recovery::Fault),
+        _ if code == CommandBufferError::GpuHang.metal_code() => Some(Recovery::Hang),
+        _ => None,
     }
 }
 
