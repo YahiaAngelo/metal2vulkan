@@ -1,0 +1,479 @@
+{
+  "format": 1,
+  "case": "denormal-word-fetches",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "denormal_texels.ll",
+      "entry": "denormal_texels",
+      "source_sha256": "0076eb09c1cfe18077565363fbd58191434f51f354dc5ca17af0d0840818a32a"
+    },
+    {
+      "fixture": "denormal_texels.air.ll",
+      "entry": "denormal_texels",
+      "source_sha256": "78861bab0f1c4d78e6fea023415f5a9b7fd1b6a757948863e605fcff95231659"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "0076eb09c1cfe18077565363fbd58191434f51f354dc5ca17af0d0840818a32a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "78861bab0f1c4d78e6fea023415f5a9b7fd1b6a757948863e605fcff95231659"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:red",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d43b18b33e5076a9206cf8b35567b14c3664b9aec7873bde9e6c8fe54881fc61"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:rgba",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b65f608b3c8b52be83ea349b4018d9f4a3e152c7d736678fa05bd51a0c88707d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:array",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4767b53bab6958461d3e25b6abed7a774cd322a726def0ec6830544c9179f532"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:coordinates",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ae6998b95c28184b1414d2c865e47f53920b0e778bdf8fc013d4302599e4d118"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:blank",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "224a683f40ad726df67ea7fda26fe77716704197f55d7237628b08c1444fa700"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture/red",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture/rgba",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture/array",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/coordinates",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/out",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "words",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "gather-r-edge",
+                      "observed": {
+                        "value": {
+                          "bytes": "AABAAAAAAIACAACAAQAAAAAAAIAAAAAA//9/AAIAAIAAAAAAAACAAP//f4D//38AAACAPwAAAL8AAACAAABAAAAAAL9WNBIAAAAAAAAAAIBWNBIAIUNlgAAAgAAAAAAAAAAgQQABAAAAAAC/AACAPwABAAABAACAVjQSAAAAAL8BAACAAACAPiFDZYBWNBIAAABAAAAAAIACAACAAQAAAAAAAIAAAAAA//9/AAIAAIAAAAAAAACAAP//f4D//38AAACAAAAAgAD//3+A//9/gAAAgD8AAAC/AAAAgAAAQAAAAAC/VjQSAAAAAAAAAACAVjQSACFDZYAAAIAAAAAAACFDZYAhQ2WAAACAAAAAgAAAACBBAAEAAAAAAL8AAIA/AAEAAAEAAIBWNBIAAAAAvwEAAIAAAIA+IUNlgFY0EgAAAIA+AACAPiFDZYAhQ2WAAAAgQQABAAAAAQAAAAAgQQABAAABAACAAQAAgAABAAABAACAAACAPgAAgD4BAACAAACAPgAAgD4AAIA+AACAPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 400
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 25,
+                            "image_pitch": 400,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample-r-edge",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAgAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAIAAAAAAAAAAAAAAAIA/AAAAvwAAAAAAAAAAAACAP1Y0EgAAAAAAAAAAAAAAgD8hQ2WAAAAAAAAAAAAAAIA/AAEAAAAAAAAAAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA+AAAAAAAAAAAAAIA/AQAAAAAAAAAAAAAAAACAPwIAAIAAAAAAAAAAAAAAgD///38AAAAAAAAAAAAAAIA///9/gAAAAAAAAAAAAACAPwAAQAAAAAAAAAAAAAAAgD8AAACAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAgAAAAAAAAAAAAAAAgD8AAIA/AAAAAAAAAAAAAIA/AAAAvwAAAAAAAAAAAACAP1Y0EgAAAAAAAAAAAAAAgD8hQ2WAAAAAAAAAAAAAAIA/AAAgQQAAAAAAAAAAAACAPwABAAAAAAAAAAAAAAAAgD8BAACAAAAAAAAAAAAAAIA/AACAPgAAAAAAAAAAAACAPw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 400
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 25,
+                            "image_pitch": 400,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "gather-rgba-edge-y",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAv1Y0EgAAAAAAAAAAgFY0EgAhQ2WAAACAAAAAAAAhQ2WAAAAgQQAAgD8AAIAAAAEAAAEAAIBWNBIAAAAAvwEAAIAAAIA+IUNlgFY0EgAAAIA+AQAAAAAAIEEhQ2WAAgAAgP//fwABAACAAAEAAP//fwD//3+AAACAPgEAAID//3+AAABAAAEAAAAAAIA+AAAAv1Y0EgAAAAAAAAAAgFY0EgAhQ2WAAACAAAAAAAAhQ2WAAAAgQQAAgD8AAIAAAAAgQQAAIEEAAIA/AACAPwABAAABAACAVjQSAAAAAL8BAACAAACAPiFDZYBWNBIAAACAPgEAAAAAACBBIUNlgAEAAAABAAAAAAAgQQAAIEECAACA//9/AAEAAIAAAQAA//9/AP//f4AAAIA+AQAAgP//f4AAAEAAAQAAAAAAgD4AAEAAAABAAAEAAAABAAAAAgAAgP//fwD//38AAgAAgP//fwD//3+A//9/gP//fwD//3+AAABAAAAAQAD//3+AAABAAAAAQAAAAEAAAABAAA=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 400
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 25,
+                            "image_pitch": 400,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "gather-rgba-repeat-w",
+                      "observed": {
+                        "value": {
+                          "bytes": "//9/gAAAQAABAAAAAACAPgAAQAAAAACAAgAAgAEAAAAAAACAAAAAAP//fwACAACAAACAAAAAgD8AAEAA//9/gAAAgD8AAAC/AAAAgAAAQAAAAAC/VjQSAAAAAAAAAACAIUNlgAAAIEEAAIA/AACAAAAAIEEAAQAAAAAAvwAAgD8AAQAAAQAAgFY0EgAAAAC///9/gAAAQAABAAAAAACAPgAAQAAAAACAAgAAgAEAAAAAAACAAAAAAP//fwACAACAAAAAAP//f4AAAIA+//9/AAAAgAAAAIA/AABAAP//f4AAAIA/AAAAvwAAAIAAAEAAAAAAv1Y0EgAAAAAAAAAAgFY0EgAAAIAA//9/gAAAAAAhQ2WAAAAgQQAAgD8AAIAAAAAgQQABAAAAAAC/AACAPwABAAABAACAVjQSAAAAAL8BAACAIUNlgAAAgABWNBIAAACAPgEAAAAAACBBIUNlgAEAAAACAACAAAEAAAAAIEECAACA//9/AAEAAIAAAQAA//9/AAAAgD4hQ2WAAQAAgA=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 400
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 25,
+                            "image_pitch": 400,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample-rgba-edge",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAgFY0EgAAAIA+AABAAAAAAAAhQ2WAAQAAAAAAAIAAAIAAAAAgQQIAAIAAAAAAAAAAvwEAAID//3+AAACAP1Y0EgAAAIA+AABAAAAAAL8hQ2WAAQAAAAAAAIBWNBIAAAEAAP//fwAAAIAAAAAgQQEAAID//3+AAACAPwABAAAAAIA+AABAAAAAAL8BAACAAQAAAAAAAIBWNBIAAACAPgIAAIAAAAAAIUNlgAEAAAD//38AAACAAAAAIEECAACA//9/gAAAgD8AAQAA//9/AAAAQAAAAAC/AQAAgP//f4AAAACAVjQSAAAAgD4AAEAAAAAAACFDZYABAAAAAAAAgAAAgAAAACBBAgAAgAAAAAAAAIA/AAEAAP//fwAAAIAAAAAAvwEAAID//3+AAACAP1Y0EgAAAIA+AABAAAAAAL8hQ2WAAQAAAAAAAIBWNBIAAAAgQQIAAIAAAAAAIUNlgAABAAD//38AAACAAAAAIEEBAACA//9/gAAAgD8AAQAAAACAPgAAQAAAAAC/AQAAgA=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 400
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 25,
+                            "image_pitch": 400,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "gather-r-repeat",
+                      "observed": {
+                        "value": {
+                          "bytes": "AABAAAAAAIACAACAAQAAAAAAAIAAAAAA//9/AAIAAIAAAAAAAACAAP//f4D//38AAACAPwAAAL8AAACAAABAAAAAAL9WNBIAAAAAAAAAAIBWNBIAIUNlgAAAgAAAAAAAAAAgQQABAAAAAAC/AACAPwABAAABAACAVjQSAAAAAL8BAACAAACAPiFDZYBWNBIAAABAAAAAAIACAACAAQAAAAAAAIAAAAAA//9/AAIAAIAAAAAAAACAAP//f4D//38AAACAAAAAQAABAAAA//9/gAAAgD8AAAC/AAAAgAAAQAAAAAC/VjQSAAAAAAAAAACAVjQSACFDZYAAAIAAAAAAACFDZYAAAIA/AABAAAAAgAAAACBBAAEAAAAAAL8AAIA/AAEAAAEAAIBWNBIAAAAAvwEAAIAAAIA+IUNlgFY0EgAAAIA+AAAgQQAAgD8hQ2WAAQAAAAIAAIAAAQAAAAAgQQIAAID//38AAQAAgAABAAD//38A//9/gAAAgD4BAACA//9/gAEAAAAAACBBAACAPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 400
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 25,
+                            "image_pitch": 400,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample-rgba-repeat-offset",
+                      "observed": {
+                        "value": {
+                          "bytes": "//9/AAAAgAAAACBBAgAAgP//f4AAAIA/AAEAAP//fwABAAAAAAAAgFY0EgAAAIA+AAAAACFDZYABAAAAAAAAgAAAgAAAACBBAgAAgAAAAAAAAEAAAAAAvwEAAID//3+AVjQSAAAAgD4AAEAAAAAAvyFDZYABAAAAAAAAgFY0EgAAAIA/AAEAAP//fwAAAIAAAAEAAP//fwAAAIAAAAAgQQEAAID//3+AAACAPwABAAAAAIA+AABAAAAAAL8BAACAAAAgQQIAAIAAAAAAIUNlgAIAAIAAAAAAIUNlgAEAAAD//38AAACAAAAAIEECAACA//9/gAAAgD8AAQAA//9/AAEAAAAAAACAVjQSAAAAgD4AAACAVjQSAAAAgD4AAEAAAAAAACFDZYABAAAAAAAAgAAAgAAAACBBAgAAgAAAAAAAAEAAAAAAvwEAAID//3+AAAAAvwEAAID//3+AAACAP1Y0EgAAAIA+AABAAAAAAL8hQ2WAAQAAAAAAAIBWNBIAAACAPwABAAD//38AAACAAA=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 400
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 25,
+                            "image_pitch": 400,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample-array-layer1-edge",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAgQQAAAAAAAAAAAACAPwABAAAAAAAAAAAAAAAAgD8BAACAAAAAAAAAAAAAAIA/AQAAAAAAAAAAAAAAAACAPwIAAIAAAAAAAAAAAAAAgD///38AAAAAAAAAAAAAAIA/AABAAAAAAAAAAAAAAACAPwAAAIAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AACAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAAC/AAAAAAAAAAAAAIA/VjQSAAAAAAAAAAAAAACAPyFDZYAAAAAAAAAAAAAAgD8AACBBAAAAAAAAAAAAAIA/AAEAAAAAAAAAAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA+AAAAAAAAAAAAAIA/AQAAAAAAAAAAAAAAAACAPwIAAIAAAAAAAAAAAAAAgD///38AAAAAAAAAAAAAAIA///9/gAAAAAAAAAAAAACAPwAAQAAAAAAAAAAAAAAAgD8AAACAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 400
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 25,
+                            "image_pitch": 400,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

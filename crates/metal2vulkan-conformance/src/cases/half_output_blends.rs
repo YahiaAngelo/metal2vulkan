@@ -1,0 +1,676 @@
+//! What a device's blend stores for a fragment function's `half` output, into a 16- and a 32-bit
+//! float attachment.
+//!
+//! `runtime_lane::half_output_blends` is a **measurement** lane rather than a check: it prints
+//! `HALF-BLEND` lines, fits a rule to them, and asserts only that each draw completes and that a
+//! pipeline announcing nothing stores the fitted rule's value. The rule it fitted is worth having —
+//! into a 16-bit float format Metal blends the `half` the function returns with each factor (`1 - x`
+//! included), each product and the sum rounded to `half`, nearest even, and `Min` and `Max` read no
+//! factor; into a 32-bit float format it is a multiply-add in `float` — but the numbers behind it
+//! were printed to a terminal and are gone.
+//!
+//! **So the recorded answer here is the blended attachment's stored codes, compared exactly**, and
+//! the fitted rule becomes a cross-check over Metal's own measurement instead of the thing the
+//! suite believes. That is the design call this family needed, stated rather than guessed: a rule a
+//! fit pins is only as good as the fit, and a release that changes Metal's blend should show as the
+//! pixel that moved.
+//!
+//! One case per attachment format, with each blend a site of its own, so a format a venue honestly
+//! lacks as a blendable render target is that venue's gap
+//! ([`crate::verdict::Verdict::LacksFeature`]) at one row rather than seventeen.
+//!
+//! **What each case runs.** A 16 by 16 target of the format, of shared storage because the
+//! destination codes are arbitrary and reach a texture only through `replaceRegion:`. Seventeen
+//! render pipelines over the owned fixture `rt6_samples` — its full-screen triangle and its
+//! `rt6_fill_rgba16float`, which returns the `half4` of buffer 0 at the pixel — one per blend, and
+//! seventeen passes under a `Load` load action, each into its own target and each blitted out, all
+//! in one command buffer.
+//!
+//! The `one-zero` site is also the **source** read back: a source factor of one and a destination
+//! factor of zero writes the `half4` the function returned through the attachment's own conversion
+//! and nothing else, so the case does not need a separate unblended draw to know what the device
+//! computed for the source — which is the property the lane's own extra draw was there for.
+//!
+//! **The five blends of the lane's twenty-two that are not here** are the ones whose factors read
+//! the blend color (`BlendColor`, `OneMinusBlendColor`, `BlendAlpha`, `OneMinusBlendAlpha`):
+//! `setBlendColorRed:green:blue:alpha:` has no step in the render vocabulary, so there is nowhere
+//! for a case to say it. They are the blends behind the lane's finding that Metal reads the blend
+//! color's `half` **before** its one minus (`h(1 - h(c))`), and porting them wants one new
+//! [`crate::render::RenderStep`]. The module docs of `runtime_lane::half_output_blends` keep that
+//! finding until then.
+//!
+//! **Where our side differs from Metal, measured over every word.** On this round's MoltenVK
+//! (Apple M3 Max, API 1.2) `half-output-blends-r32f` is `announced` -- every code of all seventeen
+//! blends identical to Metal's -- and the other five are `divergent`. Measured with a temporary
+//! tolerance wide enough to pass, then read off the per-site counts and the tolerance dropped, so
+//! these are counts over every byte of the site rather than the first mismatch:
+//!
+//! | case | site | differing words of the site | largest raw-code distance |
+//! |---|---|---|---|
+//! | `r16f` | `sc-dc` | 21 of 256 | 1 |
+//! | `rg16f` | `sc-dc` | 40 of 512 | 1 |
+//! | `rg16f` | `sas-1msa` | 47 of 512 | 80 |
+//! | `rgba16f` | `sc-dc` | 90 of 1024 | 1 |
+//! | `rgba16f` | `da-1mda` | 256 of 1024 | 432 |
+//! | `rg32f` | `sc-dc` | 41 of 512 | 1 |
+//! | `rgba32f` | `sc-dc` | 77 of 1024 | 1 |
+//! | `rgba32f` | `da-1mda` | 146 of 1024 | 97 |
+//!
+//! Three of the seventeen blends move at all, and the other fourteen -- including every one whose
+//! factor is `One`, `Zero`, a source factor, `Min` or `Max` -- are code-identical in every format.
+//! `sc-dc` is one code at its worst. The two large distances are both alpha-channel blends whose
+//! result sits near zero, where a raw-code distance is many steps of a small value: `da-1mda` on
+//! `rgba16f` moves exactly one channel of every one of the 256 pixels.
+//!
+//! That stays `divergent` rather than being loosened: `half-output-fast-math-blend`'s own
+//! definition says validation derives no tolerance from it.
+//!
+//! Nothing here can fault a GPU: single-sampled 16 by 16 targets, one full-screen triangle a pass,
+//! no loop, and every fetch inside its buffer.
+
+use crate::allowance::Allowance;
+use crate::case::{call, made, Abort, Case, Input, MetalSource, Side};
+use crate::recording::ShaderRef;
+use crate::render::{
+    Blend, ColorState, PassColor, RenderPass, RenderPipelineSpec, RenderStep, RenderWork,
+    TargetSpec,
+};
+use crate::transcript::{Aspect, ByteLayout, Element, Gaps, Node, Observed, Region, Sites, Value};
+use metal2vulkan::metal::{BlendFactor as F, BlendOperation as O, PixelFormat};
+use metal2vulkan_runtime::Degradation;
+
+use super::extended_range_targets::{
+    fixture, fixture_inputs, not_read, program, shader_refs, shape, FILLS, FILL_HALF, VERTEX,
+};
+
+/// The target's extent: 256 pixels, one per source value of the sweep.
+const WIDTH: u32 = 16;
+const HEIGHT: u32 = 16;
+
+/// The pixels one draw covers.
+const PIXELS: usize = (WIDTH * HEIGHT) as usize;
+
+/// The source halves, as exact codes: `k / 16 - 2` for `k` in 0 to 63, which is every sixteenth
+/// between -2 and 2 and is exact in `half` at every one of them.
+///
+/// It holds both of the lane's sweeps between them: its -0.25 to 1.25 and its -2 to 2, with 0, both
+/// unit values and the values past one that a `1 - x` factor turns negative.
+const SOURCES: usize = 64;
+
+/// How far apart two channels of one pixel are in the sweep, so each source value lands at every
+/// channel position across the pixels and a blend that treated one channel differently from another
+/// shows as a pixel rather than as a hash.
+const STRIDE: usize = 7;
+
+/// Source value `index` of the sweep, as an `f32`: exact in `half`, so the function's `half4`
+/// carries it unrounded and the blend's own rounding is the only rounding in the answer.
+fn source(index: usize) -> f32 {
+    index as f32 / 16.0 - 2.0
+}
+
+/// The `half` code of `value`, which is exact for every value the sweep and the destinations hold.
+fn half_code(value: f32) -> u16 {
+    let sign = u16::from(value.is_sign_negative()) << 15;
+    let size = value.abs();
+    if size == 0.0 {
+        return sign;
+    }
+    let bits = size.to_bits();
+    let exponent = ((bits >> 23) & 0xff) as i32 - 127;
+    // Every value here is a normal half, so there is no denormal or overflow arm to get wrong; the
+    // guard below is what says so.
+    assert!(
+        (-14..=15).contains(&exponent),
+        "{value} is not a normal half"
+    );
+    let mantissa = ((bits >> 13) & 0x3ff) as u16;
+    assert_eq!(bits & 0x1fff, 0, "{value} is not exact in half");
+    sign | (((exponent + 15) as u16) << 10) | mantissa
+}
+
+/// Buffer 0's bytes: one `half4` a pixel, each channel its own value of the sweep.
+fn source_bytes() -> Vec<u8> {
+    (0..PIXELS)
+        .flat_map(|pixel| (0..4).map(move |channel| (pixel, channel)))
+        .flat_map(|(pixel, channel)| {
+            half_code(source((pixel + STRIDE * channel) % SOURCES)).to_le_bytes()
+        })
+        .collect()
+}
+
+/// The generator the destination codes come from: xorshift64\*, seeded from the format so each
+/// format's destination is its own and none of them is all one value.
+///
+/// Written out here rather than taken from a probe, because this family's probe printed its
+/// destinations as lines and kept none: the generator **is** the statement of what the destinations
+/// are, and the case's input fingerprint covers the bytes it produces.
+struct Rng(u64);
+
+impl Rng {
+    fn new(seed: u64) -> Self {
+        let mut state = seed
+            .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            .wrapping_add(0x632b_e59b_d9b4_e019);
+        if state == 0 {
+            state = 1;
+        }
+        let mut generator = Self(state);
+        for _ in 0..8 {
+            generator.next();
+        }
+        generator
+    }
+
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(2_685_821_657_736_338_717)
+    }
+
+    fn below(&mut self, bound: u64) -> u64 {
+        self.next() % bound
+    }
+}
+
+/// A blend the case sweeps: the word its site is named by, and the six fields.
+struct Sweep {
+    name: &'static str,
+    blend: Blend,
+}
+
+/// The seventeen blends of the lane's twenty-two whose factors read no blend color.
+fn blends() -> Vec<Sweep> {
+    let added = |name, source, destination| Sweep {
+        name,
+        blend: Blend::added(source, destination),
+    };
+    let under = |name, source, destination, operation| Sweep {
+        name,
+        blend: Blend::separate(
+            (source, destination, operation),
+            (source, destination, operation),
+        ),
+    };
+    vec![
+        added("one-zero", F::One, F::Zero),
+        added("one-one", F::One, F::One),
+        added("one-1msa", F::One, F::OneMinusSourceAlpha),
+        added("sa-1msa", F::SourceAlpha, F::OneMinusSourceAlpha),
+        added("zero-1msa", F::Zero, F::OneMinusSourceAlpha),
+        added("dc-1mdc", F::DestinationColor, F::OneMinusDestinationColor),
+        added("1msc-1msc", F::OneMinusSourceColor, F::OneMinusSourceColor),
+        added("sc-dc", F::SourceColor, F::DestinationColor),
+        added("da-1mda", F::DestinationAlpha, F::OneMinusDestinationAlpha),
+        added("sas-1msa", F::SourceAlphaSaturated, F::OneMinusSourceAlpha),
+        added("1mdc-one", F::OneMinusDestinationColor, F::One),
+        added("dc-zero", F::DestinationColor, F::Zero),
+        under("min", F::SourceAlpha, F::OneMinusSourceAlpha, O::Min),
+        under("max", F::SourceAlpha, F::OneMinusSourceAlpha, O::Max),
+        under("one-1msa-sub", F::One, F::OneMinusSourceAlpha, O::Subtract),
+        under(
+            "sa-1msa-rsub",
+            F::SourceAlpha,
+            F::OneMinusSourceAlpha,
+            O::ReverseSubtract,
+        ),
+        under("one-one-sub", F::One, F::One, O::Subtract),
+    ]
+}
+
+/// The case: one attachment format, blended seventeen ways.
+pub struct HalfOutputBlends {
+    name: &'static str,
+    format: PixelFormat,
+    /// The channels the format's texel holds, which is how many of the `half4` reach it.
+    channels: u32,
+    /// Whether a channel is a 32-bit float, where the lane fitted a multiply-add in `float`
+    /// rather than a blend in `half`.
+    wide: bool,
+}
+
+/// Every format the lane blends into.
+pub fn all() -> Vec<HalfOutputBlends> {
+    let case = |name, format, channels, wide| HalfOutputBlends {
+        name,
+        format,
+        channels,
+        wide,
+    };
+    vec![
+        case("half-output-blends-r16f", PixelFormat::R16Float, 1, false),
+        case("half-output-blends-rg16f", PixelFormat::RG16Float, 2, false),
+        case(
+            "half-output-blends-rgba16f",
+            PixelFormat::RGBA16Float,
+            4,
+            false,
+        ),
+        case("half-output-blends-r32f", PixelFormat::R32Float, 1, true),
+        case("half-output-blends-rg32f", PixelFormat::RG32Float, 2, true),
+        case(
+            "half-output-blends-rgba32f",
+            PixelFormat::RGBA32Float,
+            4,
+            true,
+        ),
+    ]
+}
+
+impl HalfOutputBlends {
+    /// The bytes one texel takes.
+    fn texel_bytes(&self) -> u32 {
+        self.channels * if self.wide { 4 } else { 2 }
+    }
+
+    /// The bytes one target's level takes.
+    fn level_bytes(&self) -> usize {
+        PIXELS * self.texel_bytes() as usize
+    }
+
+    /// The destination value of channel `channel` of pixel `pixel`, as the format stores it: a
+    /// value in `[0, 1]` off the generator, exact in the format's own channel.
+    ///
+    /// The lane's destinations were random halves and random `float`s in `[0, 1]`; these are the
+    /// same shape from a generator the case states, so a host with no Metal builds the same bytes.
+    fn destination_bytes(&self) -> Vec<u8> {
+        let mut generator = Rng::new(u64::from(self.format.as_raw()));
+        let mut bytes = Vec::with_capacity(self.level_bytes());
+        for _ in 0..PIXELS {
+            for _ in 0..self.channels {
+                match self.wide {
+                    // A multiple of 2^-20, exact in `f32`.
+                    true => {
+                        let value = generator.below(1 << 20) as f32 / (1u32 << 20) as f32;
+                        bytes.extend(value.to_bits().to_le_bytes());
+                    }
+                    // A multiple of 2^-10, exact in `half`.
+                    false => {
+                        let value = generator.below(1025) as f32 / 1024.0;
+                        bytes.extend(half_code(value).to_le_bytes());
+                    }
+                }
+            }
+        }
+        bytes
+    }
+
+    /// The target each pass blends into: shared, so the destination codes go in through
+    /// `replaceRegion:`, and shader-read beside its render-target usage, as the lane's were.
+    fn target(&self) -> TargetSpec {
+        TargetSpec::read(self.format, [WIDTH, HEIGHT]).shared()
+    }
+
+    /// The attachment state of one blend.
+    fn colors(&self, blend: Blend) -> [Option<ColorState>; 1] {
+        [Some(ColorState::new(self.format).blended(blend))]
+    }
+
+    /// The layout a stored target is compared under: one row a pixel, a channel an element, so the
+    /// element a diff names is the pixel and the channel inside it.
+    fn layout(&self) -> ByteLayout {
+        let pitch = self.texel_bytes();
+        let length = pitch * PIXELS as u32;
+        ByteLayout {
+            region: Region::Texture {
+                level: 0,
+                slice: 0,
+                aspect: Aspect::Color,
+                sample: 0,
+                origin: [0, 0, 0],
+                size: [WIDTH, HEIGHT, 1],
+            },
+            element: if self.wide {
+                Element::U32
+            } else {
+                Element::U16
+            },
+            row_offset: 0,
+            row_elements: self.channels,
+            row_pitch: pitch,
+            rows: PIXELS as u32,
+            image_pitch: length,
+            images: 1,
+            // A row is one pixel's channels and the pixels abut, so there is no byte outside one.
+            gaps: Gaps::Ignored,
+        }
+    }
+}
+
+impl Case for HalfOutputBlends {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::Run
+    }
+
+    fn allowances(&self) -> Vec<Allowance> {
+        // `rt6_samples` is a fast-math module, so a pipeline that stores its `half4` fill into a
+        // color attachment announces that the half output's rounding into the attachment may not be
+        // Metal's. This declares the notice so the case can be read at all beside Metal, which
+        // announces none; it loosens **no stored code**. A device that blends as Metal does reads as
+        // announced with nothing differing, and one that does not shows the pixel. The declaration
+        // fails the case if the notice stops firing, so it cannot outlive its reason, and it is
+        // chosen from the case's own shape -- a stored `half` output under fast math -- never from
+        // the device.
+        //
+        // Nothing loosens a stored code and nothing may: the note's own definition in
+        // `pipeline/artifact.rs` ends "Validation derives no tolerance from it", so a tolerance
+        // written from it would be the suite overruling the contract it exists to test. Five of the
+        // six formats are therefore left **divergent** on this round's MoltenVK, with the measured
+        // counts in the module docs above.
+        vec![crate::replay::notice_allowance(
+            Degradation::HalfOutputFastMathBlend.code(),
+        )]
+    }
+
+    fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
+        shader_refs(FILLS, &[VERTEX, FILL_HALF])
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        let mut inputs = fixture_inputs("fills", FILLS)?;
+        inputs.extend([
+            Input::bytes("format", &self.format.as_raw().to_le_bytes()),
+            Input::bytes("target", &self.target().words()),
+            Input::bytes("buffer:values", &source_bytes()),
+            Input::bytes("buffer:shape", &shape(WIDTH, 1)),
+            // The destination the blends read, which is half of what every answer depends on.
+            Input::bytes("texture:destination", &self.destination_bytes()),
+        ]);
+        // Each blend's own six fields, keyed by its name, so a case whose blend table moved is
+        // unrecorded rather than compared against the old table's codes.
+        for sweep in blends() {
+            let mut bytes = sweep.name.as_bytes().to_vec();
+            bytes.push(0);
+            bytes.extend(self.colors(sweep.blend)[0].unwrap().words());
+            inputs.push(Input::bytes(format!("blend:{}", sweep.name), &bytes));
+        }
+        Ok(inputs)
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        let fills = fixture(FILLS, VERTEX)
+            .loaded()
+            .map_err(|why| not_read("library", why))?;
+        let library = made(sites, "library", side.library(&fills.source()))?;
+        let values = made(sites, "buffer/values", side.buffer(&source_bytes()))?;
+        let extent = made(sites, "buffer/shape", side.buffer(&shape(WIDTH, 1)))?;
+        let destination = self.destination_bytes();
+        let pitch = WIDTH * self.texel_bytes();
+
+        let sweeps = blends();
+        let mut work = Vec::new();
+        let mut reads = Vec::new();
+        for sweep in &sweeps {
+            let colors = self.colors(sweep.blend);
+            let pipeline = made(
+                sites,
+                &format!("pipeline/{}", sweep.name),
+                side.render_pipeline(
+                    library,
+                    &RenderPipelineSpec::new(VERTEX, FILL_HALF, &colors),
+                ),
+            )?;
+            let target = made(
+                sites,
+                &format!("target/{}", sweep.name),
+                side.target(&self.target()),
+            )?;
+            // The destination codes go in before the pass, as the lane's probe put them there: a
+            // blend's answer depends on them, and no clear or kernel write can set an arbitrary
+            // code.
+            call(
+                sites,
+                &format!("replace-region/{}", sweep.name),
+                side.replace_region(target, [WIDTH, HEIGHT], pitch, &destination),
+                |_| Value::Absent,
+            )?;
+            let into = made(
+                sites,
+                &format!("buffer/texels/{}", sweep.name),
+                side.zeroed_buffer(self.level_bytes()),
+            )?;
+            work.push(RenderWork::Pass(
+                RenderPass::clearing(vec![PassColor::loaded(target)]).drawing(vec![
+                    RenderStep::Pipeline(pipeline),
+                    RenderStep::FragmentBuffer {
+                        buffer: values,
+                        offset: 0,
+                        index: 0,
+                    },
+                    RenderStep::FragmentBuffer {
+                        buffer: extent,
+                        offset: 0,
+                        index: 1,
+                    },
+                    RenderStep::triangle(),
+                ]),
+            ));
+            work.push(RenderWork::ReadTexture {
+                texture: target,
+                into,
+                offset: 0,
+                row_pitch: pitch,
+                size: [WIDTH, HEIGHT],
+            });
+            reads.push((sweep.name, into));
+        }
+        let outcome = call(sites, "render", side.render(&work), |_| Value::Absent)?;
+        program(sites, "program", &outcome, &work);
+
+        let mut stored = Node::branch("blended", Vec::new());
+        for (name, buffer) in reads {
+            let bytes = call(
+                sites,
+                &format!("read-back/{name}"),
+                side.read_buffer(buffer, 0, self.level_bytes()),
+                |_| Value::Absent,
+            )?;
+            stored = stored.with(Node::leaf(name, Observed::bytes(bytes, self.layout())));
+        }
+        sites.push(stored);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    /// The `half` value of code `code`, for the cross-check's arithmetic.
+    fn half_value(code: u16) -> f32 {
+        let sign = if code >> 15 == 1 { -1.0f32 } else { 1.0 };
+        let exponent = i32::from((code >> 10) & 0x1f);
+        let mantissa = f32::from(code & 0x3ff);
+        sign * match exponent {
+            0 => mantissa * 2f32.powi(-24),
+            31 => f32::INFINITY,
+            raised => (1024.0 + mantissa) * 2f32.powi(raised - 25),
+        }
+    }
+
+    /// Every source value is exact in `half` and the sweep spans both of the lane's ranges, so the
+    /// function's `half4` carries the case's own numbers and the blend's rounding is the only
+    /// rounding in the answer.
+    #[test]
+    fn the_sweep_is_exact_in_half_and_spans_the_lanes_ranges() {
+        for index in 0..SOURCES {
+            let value = source(index);
+            // Round-trips through the code, which `half_code` asserts is exact anyway.
+            assert_eq!(half_value(half_code(value)), value, "source {index}");
+        }
+        let values: Vec<f32> = (0..SOURCES).map(source).collect();
+        assert!(values.contains(&-2.0) && values.contains(&0.0));
+        assert!(values.contains(&-0.25) && values.contains(&1.25));
+        assert!(values.contains(&1.0) && values.contains(&-1.0));
+        // Values past one, which a `1 - x` factor turns negative: the inputs that separate a
+        // clamped blend from an unclamped one.
+        assert!(values.iter().any(|value| *value > 1.0));
+        assert_eq!(source_bytes().len(), PIXELS * 8);
+    }
+
+    /// Every case's destination covers its whole level, is its own, and holds values in `[0, 1]`
+    /// exactly as the format stores them.
+    #[test]
+    fn every_destination_is_its_own_and_covers_its_level() {
+        let mut seen: BTreeSet<Vec<u8>> = BTreeSet::new();
+        for case in all() {
+            let bytes = case.destination_bytes();
+            assert_eq!(bytes.len(), case.level_bytes(), "{}", case.name);
+            assert_eq!(case.layout().extent(), case.level_bytes(), "{}", case.name);
+            assert!(seen.insert(bytes.clone()), "{} repeats", case.name);
+            // Every channel decodes to a value inside the unit range.
+            match case.wide {
+                true => {
+                    for word in bytes.as_chunks::<4>().0 {
+                        let value = f32::from_bits(u32::from_le_bytes(*word));
+                        assert!((0.0..=1.0).contains(&value), "{value}");
+                    }
+                }
+                false => {
+                    for code in bytes.as_chunks::<2>().0 {
+                        let value = half_value(u16::from_le_bytes(*code));
+                        assert!((0.0..=1.0).contains(&value), "{value}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The blends name distinct sites and distinct six-field states: a table with two names for one
+    /// blend, or one name for two, would record two answers to one question.
+    #[test]
+    fn the_blends_are_distinct_by_name_and_by_state() {
+        let sweeps = blends();
+        assert_eq!(sweeps.len(), 17);
+        let named: BTreeSet<&str> = sweeps.iter().map(|sweep| sweep.name).collect();
+        assert_eq!(named.len(), sweeps.len());
+        let states: BTreeSet<Vec<u8>> = sweeps.iter().map(|sweep| sweep.blend.words()).collect();
+        assert_eq!(states.len(), sweeps.len());
+        // No blend here reads the blend color, which is what makes the set portable without a
+        // `setBlendColorRed:green:blue:alpha:` step.
+        for sweep in &sweeps {
+            for factor in [
+                sweep.blend.source_rgb,
+                sweep.blend.destination_rgb,
+                sweep.blend.source_alpha,
+                sweep.blend.destination_alpha,
+            ] {
+                assert!(
+                    !matches!(
+                        factor,
+                        F::BlendColor
+                            | F::OneMinusBlendColor
+                            | F::BlendAlpha
+                            | F::OneMinusBlendAlpha
+                    ),
+                    "{} reads the blend color",
+                    sweep.name
+                );
+            }
+        }
+    }
+
+    /// The cases name distinct rows and distinct formats.
+    #[test]
+    fn the_cases_name_distinct_formats() {
+        let named: BTreeSet<&str> = all().iter().map(|case| case.name).collect();
+        let formats: BTreeSet<u32> = all().iter().map(|case| case.format.as_raw()).collect();
+        assert_eq!(named.len(), all().len());
+        assert_eq!(formats.len(), all().len());
+    }
+
+    /// The three blends whose answer the lane's rule pins with no rounding to argue about, held
+    /// against Metal's own recorded codes for every pixel and every channel of every format:
+    ///
+    /// - `one-zero` stores the source through the attachment's conversion and nothing else;
+    /// - `min` and `max` read **no factor**, so the stored channel is the smaller or the larger of
+    ///   the source's and the destination's own values.
+    ///
+    /// The other fourteen blends involve a product and a sum whose rounding is the subject, so
+    /// their answer is Metal's recording and not a model. This is the part of the fit that can be
+    /// checked rather than believed, and it is the strongest thing the port can say without
+    /// restating the lane's whole model.
+    #[test]
+    fn metals_recorded_codes_hold_the_three_blends_the_rule_pins() {
+        use metal2vulkan_runtime::MetalLevel;
+        for case in all() {
+            let Ok(recording) = crate::recording::read(case.name()) else {
+                // Recorded in a later commit of this batch.
+                continue;
+            };
+            let answer = recording
+                .answer(MetalLevel::NEWEST)
+                .unwrap_or_else(|why| panic!("{}: {why}", case.name));
+            let taken = answer
+                .deterministic()
+                .unwrap_or_else(|| panic!("{}: one outcome", case.name));
+            let blended = taken
+                .root
+                .child("blended")
+                .unwrap_or_else(|| panic!("{}: no blended site", case.name));
+            let layout = case.layout();
+            let destination = case.destination_bytes();
+            let read = |name: &str| -> Vec<u8> {
+                let site = blended
+                    .child(name)
+                    .unwrap_or_else(|| panic!("{}: no {name} site", case.name));
+                match &site.observed.value {
+                    Value::Bytes(bytes) => bytes.clone(),
+                    other => panic!("{}: {name} holds {}", case.name, other.kind()),
+                }
+            };
+            // A channel's own value, out of the format's stored bytes.
+            let channel_of = |bytes: &[u8], pixel: usize, channel: u32| -> f32 {
+                let at = layout.at(0, pixel as u32, channel);
+                match case.wide {
+                    true => {
+                        f32::from_bits(u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()))
+                    }
+                    false => half_value(u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap())),
+                }
+            };
+            let one_zero = read("one-zero");
+            let smallest = read("min");
+            let largest = read("max");
+            for bytes in [&one_zero, &smallest, &largest] {
+                assert_eq!(bytes.len(), case.level_bytes(), "{}", case.name);
+            }
+            for pixel in 0..PIXELS {
+                for channel in 0..case.channels {
+                    let stored = channel_of(&one_zero, pixel, channel);
+                    let destination_value = channel_of(&destination, pixel, channel);
+                    // The source the device computed, read out of the `one-zero` site.
+                    let source_value = stored;
+                    // A `half` source stored into a 16-bit float channel keeps its own value; a
+                    // 32-bit float channel holds the widening, which is exact.
+                    let want = half_value(half_code(source(
+                        (pixel + STRIDE * channel as usize) % SOURCES,
+                    )));
+                    assert_eq!(
+                        stored, want,
+                        "{} one-zero pixel {pixel} channel {channel}: Metal stored {stored}, the \
+                         source is {want}",
+                        case.name
+                    );
+                    assert_eq!(
+                        channel_of(&smallest, pixel, channel),
+                        source_value.min(destination_value),
+                        "{} min pixel {pixel} channel {channel}",
+                        case.name
+                    );
+                    assert_eq!(
+                        channel_of(&largest, pixel, channel),
+                        source_value.max(destination_value),
+                        "{} max pixel {pixel} channel {channel}",
+                        case.name
+                    );
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,361 @@
+{
+  "format": 1,
+  "case": "half-read-nans-rgba32f",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "format_scout.ll",
+      "entry": "scout_read_f",
+      "source_sha256": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+    },
+    {
+      "fixture": "format_scout.air.ll",
+      "entry": "scout_read_f",
+      "source_sha256": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+    },
+    {
+      "fixture": "format_scout.ll",
+      "entry": "scout_sample_f",
+      "source_sha256": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+    },
+    {
+      "fixture": "format_scout.air.ll",
+      "entry": "scout_sample_f",
+      "source_sha256": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+                        }
+                      }
+                    },
+                    {
+                      "name": "format",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "dd5e8ff17033e3d207902e855fc1f6d5ff1b0b34c5edfb94234d9e86078aca5a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:texels",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "bf6a39c7fda82698527801323b23dbe519c09832e5c25dd3ed4f3e472c358348"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:blank",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8166470a6833d390ca63c4171241090ea15de8a28fd47551b01af9602d136934"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "640e494dd31edb66b0748239aa90547d77e8ab37843b5bc8352a5f39e5296f06"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/nearest-sample",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "nearest-sample/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "nearest-sample/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "nearest-sample/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "nearest-sample/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "words",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "read",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 4096
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 256,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "nearest-sample",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfwAgwH+rqqo+//+/f/////8AAKB/AADQfwEAwP8AAIB/AACA/wAA8P8BAID/AQAAAAAAAIAAAMB/////fwEAAID//39/AQCAf0UjwX8AAIA/q6qqPv//v3//////AADgfwAA0H8BAMD/AACAfwAAwP8AAPD/AQCA/wEAAAAAIIB/AADAf////38BAACAAAAAAAEAgH9FI8F/AACAPwAgwH///79//////wAA4H8AAKB/AQDA/wAAgH8AAMD/AACA/wEAgP8BAAAAACCAfwAAAID///9/AQAAgAAAAAD//39/RSPBfwAAgD8AIMB/q6qqPv////8AAOB/AACgfwAA0H8AAIB/AADA/wAAgP8AAPD/AQAAAAAggH8AAACAAADAfwEAAIAAAAAA//9/fwEAgH8AAIA/ACDAf6uqqj7//79/AADgfwAAoH8AANB/AQDA/wAAwP8AAID/AADw/wEAgP8AIIB/AAAAgAAAwH////9/AAAAAP//f38BAIB/RSPBfw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 4096
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 256,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}
