@@ -570,6 +570,14 @@ impl PassColor {
         }
     }
 
+    /// The attachment with `storeAction` set to `store`: a multisampled attachment a pass does
+    /// not keep says `DontCare` here, since Metal stores no multisample texture a host reads.
+    #[must_use]
+    pub const fn stored(mut self, store: StoreAction) -> Self {
+        self.store = store;
+        self
+    }
+
     /// The attachment with `resolve` as its resolve texture, stored and resolved.
     #[must_use]
     pub const fn resolving(mut self, resolve: Handle) -> Self {
