@@ -111,6 +111,10 @@ pub enum TextureRole {
     Write,
     /// Both, as [`Side::texture_2d`] makes one.
     ReadWrite,
+    /// `MTLTextureUsageRenderTarget`: a texture a pass renders into, and nothing else. A tile
+    /// function's implicit imageblock is its pass's attachments, so a tile case's targets carry
+    /// this usage alone, as its probe made them.
+    RenderTarget,
 }
 
 /// A 2D texture a case makes: `MTLTextureDescriptor`'s facts as the cases need them.
@@ -634,6 +638,174 @@ pub trait Side {
     fn copy_rate_map_parameters(&mut self, map: Handle, into: Handle, offset: u64) -> Answer<()> {
         let _ = (map, into, offset);
         Err(Failure::unavailable("copy_rate_map_parameters"))
+    }
+
+    /// `newRenderPipelineStateWithTileDescriptor:options:reflection:error:` of the library's tile
+    /// function, over the color attachments `spec` names ([`TilePipelineSpec`]).
+    ///
+    /// The state joins the same handle space as [`mesh_pipeline`](Side::mesh_pipeline): a tile
+    /// state and a mesh state are one Metal object kind (`MTLRenderPipelineState`), made from two
+    /// descriptors.
+    fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
+        let _ = (library, spec);
+        Err(Failure::unavailable("tile_pipeline"))
+    }
+
+    /// What a tile render pipeline state answers ([`TileFacts`]).
+    fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
+        let _ = state;
+        Err(Failure::unavailable("tile_facts"))
+    }
+
+    /// One command buffer with one render pass over `targets` in `tile`-sized tiles, each
+    /// attachment **loaded and stored**, whose commands are `steps` in order, then `endEncoding`,
+    /// `commit` and a bounded wait.
+    ///
+    /// Loaded, not cleared, because a tile function reads the cells it writes: a case states what
+    /// the attachment held by writing it before the pass, and the pass's answer is what the tile
+    /// function left there.
+    ///
+    /// Every step is encoded, whatever an earlier one answered, as [`Side::mesh_pass`] does, and
+    /// the answer names which step refused ([`PassOutcome::refused`]).
+    fn tile_pass(
+        &mut self,
+        targets: &[Handle],
+        tile: [u32; 2],
+        steps: &[TileStep],
+    ) -> Answer<PassOutcome> {
+        let _ = (targets, tile, steps);
+        Err(Failure::unavailable("tile_pass"))
+    }
+}
+
+/// A tile render pipeline a case makes: `MTLTileRenderPipelineDescriptor`'s facts the cases state.
+///
+/// The attachment formats are the case's own rather than one fixed format, because a tile
+/// function's implicit imageblock **is** the pass's attachments: their formats decide the
+/// imageblock's layout, and so what the function reads and writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TilePipelineSpec<'a> {
+    /// The tile function, by its name in the library.
+    pub entry: &'a str,
+    /// The color attachment formats, at attachment index 0 up in this order.
+    pub attachments: &'a [PixelFormat],
+    /// `maxTotalThreadsPerThreadgroup`: `None` is Metal's 0, the pipeline's own maximum.
+    pub max_total_threads_per_threadgroup: Option<u32>,
+    /// `threadgroupSizeMatchesTileSize`.
+    pub threadgroup_size_matches_tile_size: bool,
+}
+
+impl<'a> TilePipelineSpec<'a> {
+    /// The tile function `entry` over `attachments`, with Metal's defaults for the rest.
+    pub const fn new(entry: &'a str, attachments: &'a [PixelFormat]) -> Self {
+        Self {
+            entry,
+            attachments,
+            max_total_threads_per_threadgroup: None,
+            threadgroup_size_matches_tile_size: false,
+        }
+    }
+
+    /// The descriptor with `maxTotalThreadsPerThreadgroup` set to `limit`.
+    #[must_use]
+    pub const fn limited(mut self, limit: u32) -> Self {
+        self.max_total_threads_per_threadgroup = Some(limit);
+        self
+    }
+
+    /// The descriptor with `threadgroupSizeMatchesTileSize` set.
+    #[must_use]
+    pub const fn tile_sized(mut self) -> Self {
+        self.threadgroup_size_matches_tile_size = true;
+        self
+    }
+
+    /// The words the case's input fingerprint covers: every field of the descriptor, so a tile
+    /// pipeline that moves is a change to the case's inputs.
+    pub fn words(&self) -> Vec<u8> {
+        let mut out = self.entry.as_bytes().to_vec();
+        for format in self.attachments {
+            out.extend(format.as_raw().to_le_bytes());
+        }
+        out.extend(
+            self.max_total_threads_per_threadgroup
+                .unwrap_or(0)
+                .to_le_bytes(),
+        );
+        out.push(u8::from(self.threadgroup_size_matches_tile_size));
+        out
+    }
+}
+
+/// What a tile render pipeline state answers. Each field is a Metal getter's answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TileFacts {
+    /// `maxTotalThreadsPerThreadgroup`: Metal's 1024 where the device runs a threadgroup of 1024
+    /// threads, lowered by the descriptor's own limit to the largest threadgroup of even sides
+    /// within it.
+    pub max_total_threads_per_threadgroup: u64,
+    /// `threadgroupSizeMatchesTileSize`, which the state echoes from its descriptor.
+    pub threadgroup_size_matches_tile_size: bool,
+    /// `imageblockSampleLength`: the attachments' texels packed. `None` where the side answered a
+    /// typed error for it rather than a length.
+    pub imageblock_sample_length: Option<u64>,
+}
+
+impl TileFacts {
+    /// The facts as the sites a case emits under one node, so both sides emit one shape.
+    pub fn node(&self, name: impl Into<NodeName>) -> Node {
+        Node::branch(name, Vec::new())
+            .with(Node::leaf(
+                "max_total_threads_per_threadgroup",
+                Observed::value(Value::Uint(self.max_total_threads_per_threadgroup)),
+            ))
+            .with(Node::leaf(
+                "threadgroup_size_matches_tile_size",
+                Observed::value(Value::Bool(self.threadgroup_size_matches_tile_size)),
+            ))
+            .with(Node::leaf(
+                "imageblock_sample_length",
+                Observed::value(match self.imageblock_sample_length {
+                    Some(length) => Value::Variant {
+                        name: "Some".to_owned(),
+                        payload: Box::new(Value::Uint(length)),
+                    },
+                    None => Value::unit_variant("None"),
+                }),
+            ))
+    }
+}
+
+/// One command a case encodes into a tile render pass.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TileStep {
+    /// `setRenderPipelineState:` of a tile state.
+    Pipeline(Handle),
+    /// `setTileBuffer:offset:atIndex:`.
+    TileBuffer {
+        buffer: Handle,
+        offset: u64,
+        index: u32,
+    },
+    /// `setTileBytes:length:atIndex:`.
+    TileBytes { bytes: Vec<u8>, index: u32 },
+    /// `setTileTexture:atIndex:`.
+    TileTexture { texture: Handle, index: u32 },
+    /// `dispatchThreadsPerTile:`.
+    DispatchThreadsPerTile([u32; 3]),
+}
+
+impl TileStep {
+    /// The site name the step's answer is emitted at: the call it makes, so a refusal reads as the
+    /// Metal call we refused.
+    pub fn call(&self) -> &'static str {
+        match self {
+            TileStep::Pipeline(_) => "setRenderPipelineState",
+            TileStep::TileBuffer { .. } => "setTileBuffer",
+            TileStep::TileBytes { .. } => "setTileBytes",
+            TileStep::TileTexture { .. } => "setTileTexture",
+            TileStep::DispatchThreadsPerTile(_) => "dispatchThreadsPerTile",
+        }
     }
 }
 

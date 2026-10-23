@@ -15,7 +15,7 @@
 use crate::case::{
     Answer, Bindings, CommandDraw, Failure, Handle, MeshCommand, MeshFunctions, MeshStep,
     PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion,
-    StageInput, TextureRole, TextureSpec, Venue,
+    StageInput, TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
 use crate::transcript::Value;
 use metal2vulkan::metal::PixelFormat;
@@ -36,6 +36,7 @@ use objc2_metal::{
     MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
     MTLSamplerState, MTLSize, MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode,
     MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+    MTLTileRenderPipelineDescriptor,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -54,8 +55,9 @@ pub struct MetalSide {
     /// object, not another name for one of the pools above.
     samplers: Vec<Retained<ProtocolObject<dyn MTLSamplerState>>>,
     command_buffers: Vec<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
-    /// The mesh render pipeline states the case has made.
-    mesh_pipelines: Vec<Retained<ProtocolObject<dyn MTLRenderPipelineState>>>,
+    /// The render pipeline states the case has made. One pool, because a mesh state and a tile
+    /// state are one Metal object (`MTLRenderPipelineState`) made from two descriptors.
+    render_pipelines: Vec<Retained<ProtocolObject<dyn MTLRenderPipelineState>>>,
     /// The indirect command buffers the case has made.
     command_buffers_indirect: Vec<Retained<ProtocolObject<dyn MTLIndirectCommandBuffer>>>,
     /// The rasterization-rate maps the case has made. Its own pool: a rate map is its own
@@ -82,7 +84,7 @@ impl MetalSide {
             textures: Vec::new(),
             samplers: Vec::new(),
             command_buffers: Vec::new(),
-            mesh_pipelines: Vec::new(),
+            render_pipelines: Vec::new(),
             command_buffers_indirect: Vec::new(),
             rate_maps: Vec::new(),
             scratch: Scratch::new()?,
@@ -478,6 +480,7 @@ impl Side for MetalSide {
             TextureRole::Read => MTLTextureUsage::ShaderRead,
             TextureRole::Write => MTLTextureUsage::ShaderWrite,
             TextureRole::ReadWrite => MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
+            TextureRole::RenderTarget => MTLTextureUsage::RenderTarget,
         });
         descriptor.setStorageMode(MTLStorageMode::Shared);
         let texture = self
@@ -735,7 +738,7 @@ impl Side for MetalSide {
             // SAFETY: `at` is below the buffer's command count, just set to `commands.len()`.
             let encoded = unsafe { made.indirectRenderCommandAtIndex(at) };
             let state = self
-                .mesh_pipelines
+                .render_pipelines
                 .get(command.pipeline.0 as usize)
                 .ok_or_else(|| {
                     Failure::named(
@@ -975,6 +978,80 @@ impl Side for MetalSide {
         unsafe { map.copyParameterDataToBuffer_offset(&buffer, offset as usize) };
         Ok(())
     }
+
+    fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .newFunctionWithName(&NSString::from_str(spec.entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", spec.entry.to_owned()))?;
+        let descriptor = MTLTileRenderPipelineDescriptor::new();
+        // SAFETY: the function is of this library, and the descriptor is this call's own.
+        unsafe { descriptor.setTileFunction(&function) };
+        for (at, format) in spec.attachments.iter().enumerate() {
+            // SAFETY: `at` is below the eight attachments the descriptor's array holds.
+            unsafe {
+                descriptor
+                    .colorAttachments()
+                    .objectAtIndexedSubscript(at)
+                    .setPixelFormat(MTLPixelFormat(format.as_raw() as usize));
+            }
+        }
+        if let Some(limit) = spec.max_total_threads_per_threadgroup {
+            descriptor.setMaxTotalThreadsPerThreadgroup(limit as usize);
+        }
+        descriptor.setThreadgroupSizeMatchesTileSize(spec.threadgroup_size_matches_tile_size);
+        let state = self
+            .device
+            .newRenderPipelineStateWithTileDescriptor_options_reflection_error(
+                &descriptor,
+                MTLPipelineOption::None,
+                None,
+            )
+            .map_err(|error| Failure::named("NewTileRenderPipelineState", error.to_string()))?;
+        Ok(keep(&mut self.render_pipelines, state))
+    }
+
+    fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
+        let state = self
+            .render_pipelines
+            .get(state.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0)))?;
+        Ok(TileFacts {
+            max_total_threads_per_threadgroup: state.maxTotalThreadsPerThreadgroup() as u64,
+            threadgroup_size_matches_tile_size: state.threadgroupSizeMatchesTileSize(),
+            imageblock_sample_length: Some(state.imageblockSampleLength() as u64),
+        })
+    }
+
+    fn tile_pass(
+        &mut self,
+        targets: &[Handle],
+        tile: [u32; 2],
+        steps: &[TileStep],
+    ) -> Answer<PassOutcome> {
+        let (command_buffer, encoder) = self.loading_pass(targets, tile)?;
+        // Metal's encoder methods answer nothing, so no step of this side can refuse.
+        let refused = vec![None; steps.len()];
+        for step in steps {
+            self.encode_tile_step(&encoder, step)?;
+        }
+        encoder.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        let error = command_buffer
+            .error()
+            .map(|error| Value::unit_variant(format!("code {}", error.code())));
+        let status = Value::unit_variant(status_word(command_buffer.status()));
+        keep(&mut self.command_buffers, command_buffer);
+        Ok(PassOutcome {
+            refused,
+            status,
+            error,
+        })
+    }
 }
 
 /// The pixel format [`crate::case::TARGET_FORMAT`] names, as Metal spells it.
@@ -1027,7 +1104,7 @@ impl MetalSide {
                 None,
             )
             .map_err(|error| Failure::named("NewMeshRenderPipelineState", error.to_string()))?;
-        Ok(keep(&mut self.mesh_pipelines, state))
+        Ok(keep(&mut self.render_pipelines, state))
     }
 
     /// One command buffer and one render encoder over `targets`, each attachment cleared to zero
@@ -1068,6 +1145,96 @@ impl MetalSide {
         Ok((command_buffer, encoder))
     }
 
+    /// One command buffer and one render encoder over `targets` in `tile`-sized tiles, each
+    /// attachment loaded and stored.
+    #[allow(clippy::type_complexity)]
+    fn loading_pass(
+        &self,
+        targets: &[Handle],
+        tile: [u32; 2],
+    ) -> Answer<(
+        Retained<ProtocolObject<dyn MTLCommandBuffer>>,
+        Retained<ProtocolObject<dyn MTLRenderCommandEncoder>>,
+    )> {
+        let attachments: Vec<Retained<ProtocolObject<dyn MTLTexture>>> = targets
+            .iter()
+            .map(|handle| self.held_texture(*handle).map(Retained::from))
+            .collect::<Answer<Vec<_>>>()?;
+        let pass = MTLRenderPassDescriptor::renderPassDescriptor();
+        for (at, target) in attachments.iter().enumerate() {
+            // SAFETY: `at` is below the eight attachments every Metal pass holds.
+            let attachment = unsafe { pass.colorAttachments().objectAtIndexedSubscript(at) };
+            attachment.setTexture(Some(target));
+            attachment.setLoadAction(MTLLoadAction::Load);
+            attachment.setStoreAction(MTLStoreAction::Store);
+        }
+        pass.setTileWidth(tile[0] as usize);
+        pass.setTileHeight(tile[1] as usize);
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&pass)
+            .ok_or_else(|| Failure::named("RenderCommandEncoder", "returned nil".to_owned()))?;
+        Ok((command_buffer, encoder))
+    }
+
+    /// Encode one of a case's tile-pass steps into `encoder`.
+    fn encode_tile_step(
+        &self,
+        encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
+        step: &TileStep,
+    ) -> Answer<()> {
+        match step {
+            TileStep::Pipeline(state) => {
+                let state = self.render_pipelines.get(state.0 as usize).ok_or_else(|| {
+                    Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0))
+                })?;
+                encoder.setRenderPipelineState(state);
+            }
+            TileStep::TileBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let buffer = self.held(*buffer)?;
+                // SAFETY: the buffer is at least as long as the function's binding, and the
+                // encoder outlives the call.
+                unsafe {
+                    encoder.setTileBuffer_offset_atIndex(
+                        Some(buffer),
+                        *offset as usize,
+                        *index as usize,
+                    )
+                };
+            }
+            TileStep::TileBytes { bytes, index } => {
+                let pointer =
+                    std::ptr::NonNull::new(bytes.as_ptr().cast::<std::ffi::c_void>().cast_mut())
+                        .ok_or_else(|| Failure::named("NoBytes", "an empty inline binding"))?;
+                // SAFETY: `bytes` lives for the call, which copies them.
+                unsafe {
+                    encoder.setTileBytes_length_atIndex(pointer, bytes.len(), *index as usize)
+                };
+            }
+            TileStep::TileTexture { texture, index } => {
+                let texture = self.held_texture(*texture)?;
+                // SAFETY: the texture is kept alive by `self.textures`, and the encoder outlives
+                // the call.
+                unsafe { encoder.setTileTexture_atIndex(Some(texture), *index as usize) };
+            }
+            TileStep::DispatchThreadsPerTile(threads) => {
+                encoder.dispatchThreadsPerTile(MTLSize {
+                    width: threads[0] as usize,
+                    height: threads[1] as usize,
+                    depth: threads[2] as usize,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Encode one of a case's render-pass steps into `encoder`.
     fn encode_step(
         &self,
@@ -1081,7 +1248,7 @@ impl MetalSide {
         };
         match step {
             MeshStep::Pipeline(state) => {
-                let state = self.mesh_pipelines.get(state.0 as usize).ok_or_else(|| {
+                let state = self.render_pipelines.get(state.0 as usize).ok_or_else(|| {
                     Failure::named("NoSuchHandle", format!("mesh pipeline {}", state.0))
                 })?;
                 encoder.setRenderPipelineState(state);
