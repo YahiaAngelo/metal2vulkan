@@ -107,6 +107,7 @@ impl Gpu for Runtime {
     type Listener = rt::SharedEventListener;
     type Pass = rt::RenderPassDescriptor;
     type BlitEncoder = rt::BlitCommandEncoder;
+    type Fence = rt::Fence;
 
     fn label(&self) -> String {
         format!("runtime on {}", self.device.name())
@@ -943,6 +944,18 @@ impl Gpu for Runtime {
             .expect("use_resource");
     }
 
+    fn use_heap(&self, encoder: &mut rt::ComputeCommandEncoder, heap: &rt::Heap) {
+        encoder.use_heap(heap).expect("use_heap");
+    }
+
+    fn update_fence(&self, encoder: &mut rt::ComputeCommandEncoder, fence: &rt::Fence) {
+        encoder.update_fence(fence).expect("update_fence");
+    }
+
+    fn wait_for_fence(&self, encoder: &mut rt::ComputeCommandEncoder, fence: &rt::Fence) {
+        encoder.wait_for_fence(fence).expect("wait_for_fence");
+    }
+
     fn use_buffers_read(&self, encoder: &mut rt::ComputeCommandEncoder, buffers: &[&rt::Buffer]) {
         let resources: Vec<rt::ResourceRef> = buffers.iter().map(|b| b.as_resource()).collect();
         encoder
@@ -1022,6 +1035,42 @@ impl Gpu for Runtime {
             .expect("copy_from_buffer_to_buffer");
     }
 
+    fn fill_buffer_in(
+        &self,
+        encoder: &mut rt::BlitCommandEncoder,
+        buffer: &rt::Buffer,
+        offset: usize,
+        length: usize,
+    ) {
+        encoder
+            .fill_buffer(buffer, offset as u64..(offset + length) as u64, 0x5a)
+            .expect("fill_buffer");
+    }
+
+    fn copy_to_texture(
+        &self,
+        encoder: &mut rt::BlitCommandEncoder,
+        source: &rt::Buffer,
+        texture: &rt::Texture,
+        (width, height): (usize, usize),
+        bytes_per_row: usize,
+    ) {
+        encoder
+            .copy_from_buffer_to_texture(
+                source,
+                0,
+                bytes_per_row as u64,
+                (bytes_per_row * height) as u64,
+                rt::Size::new(width as u64, height as u64, 1),
+                texture,
+                0,
+                0,
+                rt::Origin::new(0, 0, 0),
+                rt::BlitOption::None,
+            )
+            .expect("copy_from_buffer_to_texture");
+    }
+
     fn end_blit(&self, encoder: rt::BlitCommandEncoder) {
         encoder.end_encoding().expect("end_encoding");
     }
@@ -1047,19 +1096,7 @@ impl Gpu for Runtime {
             .blit_command_encoder()
             .expect("blit_command_encoder");
         for texture in textures {
-            blit.copy_from_buffer_to_texture(
-                source,
-                0,
-                bytes_per_row as u64,
-                (bytes_per_row * height) as u64,
-                rt::Size::new(width as u64, height as u64, 1),
-                texture,
-                0,
-                0,
-                rt::Origin::new(0, 0, 0),
-                rt::BlitOption::None,
-            )
-            .expect("copy_from_buffer_to_texture");
+            self.copy_to_texture(&mut blit, source, texture, (width, height), bytes_per_row);
         }
         blit.end_encoding().expect("end_encoding");
     }
@@ -1081,12 +1118,30 @@ impl Gpu for Runtime {
         );
     }
 
+    fn wait_only(&self, command_buffer: &rt::CommandBuffer) {
+        command_buffer
+            .wait_until_completed()
+            .expect("wait_until_completed");
+    }
+
+    fn status(&self, command_buffer: &rt::CommandBuffer) -> u64 {
+        command_buffer.status().raw() as u64
+    }
+
+    fn fence(&self) -> rt::Fence {
+        self.device.new_fence()
+    }
+
     fn shared_event(&self) -> rt::SharedEvent {
         self.device.new_shared_event().expect("new_shared_event")
     }
 
     fn event_value(&self, event: &rt::SharedEvent) -> u64 {
         event.signaled_value()
+    }
+
+    fn set_event_value(&self, event: &rt::SharedEvent, value: u64) {
+        event.set_signaled_value(value);
     }
 
     fn set_when_scheduled(
