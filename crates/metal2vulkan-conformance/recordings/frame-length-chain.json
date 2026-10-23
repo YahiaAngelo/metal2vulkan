@@ -1,0 +1,462 @@
+{
+  "format": 1,
+  "case": "frame-length-chain",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "tob_renders.ll",
+      "entry": "tob_rect+tob_solid+tob_sample",
+      "source_sha256": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+    },
+    {
+      "fixture": "tob_renders.air.ll",
+      "entry": "tob_rect+tob_solid+tob_sample",
+      "source_sha256": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+    },
+    {
+      "fixture": "format_scout.ll",
+      "entry": "scout_read_write_f+scout_read_f",
+      "source_sha256": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+    },
+    {
+      "fixture": "format_scout.air.ll",
+      "entry": "scout_read_write_f+scout_read_f",
+      "source_sha256": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air:tob_renders",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed:tob_renders",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air:format_scout",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed:format_scout",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+                        }
+                      }
+                    },
+                    {
+                      "name": "fill-pipeline",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3f17e0536057ade794ad4f34e42dfeea917b30c2d490c0c41a6e08776d8a9602"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample-pipeline",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "fb38f58d38325d77769d8fbcc026e78f474cae8c4034eab645e4426a7b214957"
+                        }
+                      }
+                    },
+                    {
+                      "name": "kernels",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "810da911248a473ad0fad144982410fa1997d352a501635f49964fd8bdebca5f"
+                        }
+                      }
+                    },
+                    {
+                      "name": "first-texture",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "01ce403a3875da199cadf8bbe7e91b4635c363639b51ee9d605ed72efd96e9f1"
+                        }
+                      }
+                    },
+                    {
+                      "name": "second-texture",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "aa0250e54ef44b2e08bb4963e1d4c0739a6d8d05dcef5c64196af733b23c8996"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "640e494dd31edb66b0748239aa90547d77e8ab37843b5bc8352a5f39e5296f06"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:colors",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4c45d668bdb9d99ca18ff7c6cb427d9011a5267fbba13331415c86c7babc3637"
+                        }
+                      }
+                    },
+                    {
+                      "name": "rects",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "26757c4f6e12c7a12116bd9ce20d5b48d9e17228e71f4d073f66c1e1b5f402bb"
+                        }
+                      }
+                    },
+                    {
+                      "name": "clear",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "7e66234cd745b3e9b22f591477558fb610f17f820abbf0aa5aaf6759da6e1701"
+                        }
+                      }
+                    },
+                    {
+                      "name": "grid",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "67f6e29b66fbf2707a705a7b0f515af11967d951daf158ee1b8c31c74474508e"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library:tob_renders",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "library:format_scout",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill-pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "sample-pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "kernel:swap",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "kernel:read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "first-texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "second-texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:colors",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pieces",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "fill-pass",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "swap-dispatch",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample-pass",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "read-dispatch",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "chain",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "values",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AAAAPwAAgD4AAIA/AABAPwAAAD8AAIA+AACAPwAAQD8AAAA/AACAPgAAgD8AAEA/AAAAPwAAgD4AAIA/AABAPwAAwD4AAAA+AABgPwAAID8AAMA+AAAAPgAAYD8AACA/AADAPgAAAD4AAGA/AAAgPwAAwD4AAAA+AABgPwAAID8AAKC/AAAgQAAAwD8AAAAAAACgvwAAIEAAAMA/AAAAAAAAoL8AACBAAADAPwAAAAAAAKC/AAAgQAAAwD8AAAAAAABwQAAAAL8AACA/AACAPgAAcEAAAAC/AAAgPwAAgD4AAHBAAAAAvwAAID8AAIA+AABwQAAAAL8AACA/AACAPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 4096
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 256,
+                            "rows": 16,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}
