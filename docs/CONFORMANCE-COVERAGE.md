@@ -10,7 +10,7 @@ The suite reaches Metal through `objc2-metal`, whose Rust name for a binding is 
 
 Its limits, measured rather than asserted:
 
-- **618 of 724 call sites** in the Metal leg resolve to an item of the SDK. 33 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
+- **617 of 723 call sites** in the Metal leg resolve to an item of the SDK. 33 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
 - **106 call sites' receivers did not type.** They cost the count 6 selectors, which the suite calls and which this attributes to no item:
   - `count`, bound by `MTL4CounterHeap`, `MTL4CounterHeapDescriptor`
   - `executeCommandsInBuffer:withRange:`, bound by `MTL4ComputeCommandEncoder`, `MTL4RenderCommandEncoder`, `MTLComputeCommandEncoder`, `MTLRenderCommandEncoder`
@@ -258,7 +258,7 @@ An implemented container no case's Metal leg touches. These are the families of 
 | `Side` methods the Metal leg reaches an SDK item through | 56 |
 | SDK items a case's Metal leg reaches, median | 34 |
 | the same, least and most | 0 and 87 |
-| Metal call sites in the leg | 724 |
+| Metal call sites in the leg | 723 |
 | distinct selectors the leg sends | 311 |
 | of those, resolved to an item of the coverage map | 305 |
 | oracles the recordings name | `apple-m3-max` ×739 |
@@ -285,7 +285,7 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `compressed_decode` | 10 | 10 | 1 tolerance(s): `Degradation` | 22 |
 | `compressed_moves` | 14 | 14 | every field | 16 |
 | `compressed_views` | 14 | 14 | every field | 30 |
-| `compute_encoder_commands` | 8 | 8 | every field | 45 |
+| `compute_encoder_commands` | 8 | 8 | every field | 44 |
 | `compute_render_chains` | 3 | 3 | every field | 86 |
 | `compute_threadgroups` | 2 | 1 | every field | 8 |
 | `denormal_word_fetches` | 1 | 1 | every field | 22 |
@@ -659,7 +659,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `setStageInRegionWithIndirectBuffer:indirectBufferOffset:` | no | — | — |
 | `dispatchThreadgroups:threadsPerThreadgroup:` | yes | `compute_encoder_commands` | 8 |
 | `dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:` | yes | `compute_encoder_commands` | 8 |
-| `dispatchThreads:threadsPerThreadgroup:` | yes | `compute_encoder_commands`, `compute_render_chains`, `extended_range_blends`, `extended_range_targets`, `frame_chains` | 52 |
+| `dispatchThreads:threadsPerThreadgroup:` | yes | `compute_render_chains`, `extended_range_blends`, `extended_range_targets`, `frame_chains` | 44 |
 | `updateFence:` | no | — | — |
 | `waitForFence:` | no | — | — |
 | `useResource:usage:` | yes | `compute_encoder_commands` | 8 |

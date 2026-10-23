@@ -4,11 +4,11 @@
 //!
 //! `MTLBlitCommandEncoder` has twenty-two implemented items and the suite reached five of them: a
 //! region copy each way, a texture-to-texture region copy, a buffer fill and a buffer copy. The
-//! thirteen cases here drive eleven more. Each is read the same way the family's existing cases
-//! are read: **every byte of the read-back, the bytes a copy must not touch included**. A
-//! destination buffer is made holding [`GUARD`] and each copy is given a slot wider than its
+//! nine cases here drive thirteen more. Each is read the same way the family's existing cases are
+//! read: **every byte of the read-back, the bytes a copy must not touch included**. A destination
+//! buffer is made holding one guard byte, `0x7e`, and each copy is given a slot wider than its
 //! region, so a copy that ran long, landed at the wrong offset or wrote a row's padding shows up
-//! as a `0x7e` that moved rather than as a value nobody looked at.
+//! as a guard byte that moved rather than as a value nobody looked at.
 //!
 //! - [`whole_texture_copy`]: `copyFromTexture:toTexture:` between two 4 by 4 `R32Uint` arrays of
 //!   three levels and two slices, the destination written first so every byte compared is a byte
@@ -36,7 +36,8 @@
 //!   nothing but this call copies the device's writes back into it. The buffer is given a known
 //!   byte and synchronized once before the fill the case is about, so the bytes outside that fill
 //!   are bytes the case wrote. It is the one case of the family that **announces** anything, and
-//!   the only one that declares a notice: see [`SPLIT_FILL`] for the run that measured it.
+//!   the only one that declares a notice, and the run that measured it is written at the
+//!   declaration's own constant.
 //! - [`synchronized_managed_texture`]: `synchronizeTexture:slice:level:` of a `Managed` texture,
 //!   read by the host with `getBytes:` at a pitch six times its row — so the answer holds the
 //!   padding between the rows and after the last one, which no device write may touch.

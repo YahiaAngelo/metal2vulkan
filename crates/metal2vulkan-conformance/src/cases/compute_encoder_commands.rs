@@ -10,7 +10,7 @@
 //! # How each case is read
 //!
 //! Every case writes its answers into **one** output buffer, in slots, and compares every byte of
-//! it — the [`GUARD`] bytes past the last slot included. Most of them run the same dispatch twice
+//! it — the guard bytes past the last slot included. Most of them run the same dispatch twice
 //! or four times, through a different set of binding calls each time, into a slot each:
 //!
 //! | case | what it holds |
@@ -1004,7 +1004,6 @@ mod tests {
                     ComputeStep::DispatchThreadgroups { groups, threads } => (*groups, *threads),
                     // The indirect grid's own three words are the case's, checked below.
                     ComputeStep::DispatchThreadgroupsIndirect { threads, .. } => (GRID, *threads),
-                    ComputeStep::DispatchThreads { threads, per_group } => (*threads, *per_group),
                     _ => continue,
                 };
                 assert_eq!(groups, [1, 1, 1], "{}: {groups:?} threadgroups", row.case);

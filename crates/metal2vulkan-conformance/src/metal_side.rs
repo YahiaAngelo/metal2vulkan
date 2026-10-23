@@ -4777,9 +4777,6 @@ impl MetalSide {
                         );
                 }
             }
-            ComputeStep::DispatchThreads { threads, per_group } => {
-                encoder.dispatchThreads_threadsPerThreadgroup(size(*threads), size(*per_group));
-            }
         }
         Ok(())
     }

@@ -82,9 +82,6 @@ pub const USAGE_WRITE: u64 = 1 << 1;
 /// `MTLBarrierScopeBuffers`.
 pub const SCOPE_BUFFERS: u64 = 1 << 0;
 
-/// `MTLBarrierScopeTextures`.
-pub const SCOPE_TEXTURES: u64 = 1 << 1;
-
 /// One command a case encodes into a compute pass, in the order it lists them.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ComputeStep {
@@ -154,11 +151,6 @@ pub enum ComputeStep {
         offset: u64,
         threads: [u32; 3],
     },
-    /// `dispatchThreads:threadsPerThreadgroup:`.
-    DispatchThreads {
-        threads: [u32; 3],
-        per_group: [u32; 3],
-    },
 }
 
 impl ComputeStep {
@@ -186,7 +178,6 @@ impl ComputeStep {
             ComputeStep::DispatchThreadgroupsIndirect { .. } => {
                 "dispatchThreadgroupsWithIndirectBuffer"
             }
-            ComputeStep::DispatchThreads { .. } => "dispatchThreads",
         }
     }
 
@@ -272,11 +263,6 @@ impl ComputeStep {
                     words.extend(axis.to_le_bytes());
                 }
             }
-            ComputeStep::DispatchThreads { threads, per_group } => {
-                for axis in threads.iter().chain(per_group) {
-                    words.extend(axis.to_le_bytes());
-                }
-            }
         }
         words
     }
@@ -287,7 +273,6 @@ impl ComputeStep {
             self,
             ComputeStep::DispatchThreadgroups { .. }
                 | ComputeStep::DispatchThreadgroupsIndirect { .. }
-                | ComputeStep::DispatchThreads { .. }
         )
     }
 }
@@ -299,23 +284,7 @@ pub struct ComputePass<'a> {
     pub steps: &'a [ComputeStep],
 }
 
-impl<'a> ComputePass<'a> {
-    /// A serial pass of `steps`, which is the encoder `computeCommandEncoder` makes.
-    pub const fn serial(steps: &'a [ComputeStep]) -> Self {
-        Self {
-            dispatching: Dispatching::Serial,
-            steps,
-        }
-    }
-
-    /// A concurrent pass of `steps`.
-    pub const fn concurrent(steps: &'a [ComputeStep]) -> Self {
-        Self {
-            dispatching: Dispatching::Concurrent,
-            steps,
-        }
-    }
-
+impl ComputePass<'_> {
     /// The words a case's input fingerprint covers: the dispatch type, then every step's own
     /// parameters, so a pass whose commands or whose order moved is a change to the case's inputs.
     pub fn words(&self) -> Vec<u8> {
@@ -473,11 +442,12 @@ mod tests {
                 offset: 0,
                 threads: [8, 1, 1],
             },
-            ComputeStep::DispatchThreads {
-                threads: [8, 1, 1],
-                per_group: [8, 1, 1],
-            },
         ]
+    }
+
+    /// One pass of `steps`, the way a case states one.
+    fn pass<'a>(dispatching: Dispatching, steps: &'a [ComputeStep]) -> ComputePass<'a> {
+        ComputePass { dispatching, steps }
     }
 
     /// Every step names a Metal call no other step names, so a refusal reads as the call we
@@ -497,9 +467,9 @@ mod tests {
     #[test]
     fn repeated_steps_hold_sites_of_their_own() {
         let steps = vec![
-            ComputeStep::DispatchThreads {
+            ComputeStep::DispatchThreadgroups {
+                groups: [1, 1, 1],
                 threads: [8, 1, 1],
-                per_group: [8, 1, 1],
             };
             4
         ];
@@ -531,12 +501,12 @@ mod tests {
     fn a_pass_fingerprints_by_its_calls() {
         let steps = one_of_each();
         assert_eq!(
-            ComputePass::serial(&steps).words(),
-            ComputePass::serial(&steps).words()
+            pass(Dispatching::Serial, &steps).words(),
+            pass(Dispatching::Serial, &steps).words()
         );
         assert_ne!(
-            ComputePass::serial(&steps).words(),
-            ComputePass::concurrent(&steps).words(),
+            pass(Dispatching::Serial, &steps).words(),
+            pass(Dispatching::Concurrent, &steps).words(),
             "the dispatch type does not reach the fingerprint"
         );
         let mut moved = steps.clone();
@@ -545,20 +515,20 @@ mod tests {
             index: 0,
         };
         assert_ne!(
-            ComputePass::serial(&steps).words(),
-            ComputePass::serial(&moved).words(),
+            pass(Dispatching::Serial, &steps).words(),
+            pass(Dispatching::Serial, &moved).words(),
             "a buffer offset does not reach the fingerprint"
         );
         // The steps' order is part of the pass, so reversing them is a different program.
         let mut reversed = steps.clone();
         reversed.reverse();
         assert_ne!(
-            ComputePass::serial(&steps).words(),
-            ComputePass::serial(&reversed).words()
+            pass(Dispatching::Serial, &steps).words(),
+            pass(Dispatching::Serial, &reversed).words()
         );
     }
 
-    /// The three dispatch steps say they dispatch and no other step does, so a guard that bounds a
+    /// Both dispatch steps say they dispatch and no other step does, so a guard that bounds a
     /// case's grids reads every dispatch and nothing else.
     #[test]
     fn only_the_dispatch_steps_dispatch() {
@@ -571,8 +541,7 @@ mod tests {
             dispatching,
             [
                 "dispatchThreadgroups",
-                "dispatchThreadgroupsWithIndirectBuffer",
-                "dispatchThreads"
+                "dispatchThreadgroupsWithIndirectBuffer"
             ]
         );
     }

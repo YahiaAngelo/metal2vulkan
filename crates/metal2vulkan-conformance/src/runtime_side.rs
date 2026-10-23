@@ -2521,9 +2521,6 @@ impl Side for RuntimeSide<'_> {
                         .dispatch_threadgroups_indirect(held, *offset, size(*threads))
                         .map_err(Failure::from_error)
                 }),
-                ComputeStep::DispatchThreads { threads, per_group } => encoder
-                    .dispatch_threads(size(*threads), size(*per_group))
-                    .map_err(Failure::from_error),
             };
             refused.push(answered.err());
         }
