@@ -25,7 +25,31 @@
 //! - The same questions counted, and the fullscreen triangle's count at **4x**, which is the one
 //!   shape here with a multisampled attachment.
 //!
-//! Nothing here can fault a GPU: one 4 by 4 target a pass, three vertices a draw, no loop.
+//! # How this family's inputs are keyed, and the one key the compiler cannot guard
+//!
+//! Every input fingerprint here is **the name of the Metal call and the values handed it**, never
+//! `Debug` text. Three of them were `format!("{:?}")`, and one was the worst instance of that trap
+//! in the suite: the depth/stencil state keyed on
+//! [`metal2vulkan::metal::state::DepthStencilDescriptor`], a public type of the **published**
+//! translator crate, so a field added to that struct in another crate staled these recordings and
+//! nothing in either crate connected the two.
+//!
+//! `Act` and `Depth` are this module's own types, so they are matched and destructured with
+//! **no `..`**: a field added to either is a compile error here, which is where the decision
+//! belongs.
+//!
+//! **The depth/stencil key cannot have that protection, and the substitute is not a fallback.**
+//! `DepthStencilDescriptor` and `StencilDescriptor` are `#[non_exhaustive]`, so this crate cannot
+//! destructure them field by field — the compiler *requires* a `..` — and there is no compile
+//! error to be had across that boundary. So `depth_state_words` states the one field this family
+//! sets and **refuses rather than keys** a descriptor that differs from
+//! `DepthStencilDescriptor::default()` anywhere else. That gives both halves of what is wanted,
+//! and it holds without any help from the compiler: a field this family starts setting surfaces as
+//! an error out of `inputs()` instead of a key quietly missing it, while a field left at its
+//! default writes nothing — which is the property that actually stops a widened descriptor from
+//! staling these recordings.
+//!
+//! //! Nothing here can fault a GPU: one 4 by 4 target a pass, three vertices a draw, no loop.
 
 use crate::allowance::{Allowance, Justification, Loosening};
 use crate::case::{Abort, Case, Failure, Handle, Input, MetalSource, Side};
