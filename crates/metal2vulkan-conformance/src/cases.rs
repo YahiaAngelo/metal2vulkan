@@ -48,6 +48,7 @@ pub mod rate_maps;
 pub mod rgb10a2_srgb;
 pub mod sample_fills;
 pub mod shared_events;
+pub mod simdgroup_lockstep;
 pub mod stage_in_regions;
 pub mod surface_fills;
 pub mod texture_accesses;
@@ -151,6 +152,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.extend(compute_threadgroups::all());
     cases.extend(buffer_blits::all());
+    cases.extend(simdgroup_lockstep::all());
     cases
 }
 
