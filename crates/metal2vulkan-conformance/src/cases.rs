@@ -26,6 +26,7 @@
 
 pub mod command_queues;
 pub mod depth_texel_reads;
+pub mod extended_range_blends;
 pub mod extended_range_planes;
 pub mod extended_range_targets;
 pub mod extended_range_two_planes;
@@ -91,6 +92,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.extend(extended_range_targets::all());
+    for case in extended_range_blends::all() {
+        cases.push(Box::new(case));
+    }
     cases.push(Box::new(texture_buffer_fills::streams()));
     cases.push(Box::new(texture_buffer_fills::groups()));
     cases.push(Box::new(texture_buffer_fills::long_fills()));

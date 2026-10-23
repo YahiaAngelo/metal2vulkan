@@ -1282,7 +1282,10 @@ impl Side for RuntimeSide<'_> {
             usage |= TextureUsage::SHADER_WRITE;
         }
         descriptor.usage = usage;
-        descriptor.resource_options = ResourceOptions::private();
+        descriptor.resource_options = match spec.shared {
+            true => ResourceOptions::shared(),
+            false => ResourceOptions::private(),
+        };
         if spec.samples > 1 {
             descriptor.texture_type = TextureType::Type2DMultisample;
             descriptor.sample_count = u64::from(spec.samples);

@@ -48,22 +48,22 @@ use metal2vulkan::metal::PixelFormat;
 use metal2vulkan_runtime::Degradation;
 
 /// The fixture whose full-screen triangle and fills every draw here runs.
-const FILLS: &str = "rt6_samples";
+pub(super) const FILLS: &str = "rt6_samples";
 
 /// Its vertex function: the full-screen triangle (-1, -1), (3, -1), (-1, 3).
-const VERTEX: &str = "rt6_fill_vertex";
+pub(super) const VERTEX: &str = "rt6_fill_vertex";
 
 /// Its `half4` fill and its `float4` fill.
-const FILL_HALF: &str = "rt6_fill_rgba16float";
-const FILL_FLOAT: &str = "rt6_fill_rgba32float";
+pub(super) const FILL_HALF: &str = "rt6_fill_rgba16float";
+pub(super) const FILL_FLOAT: &str = "rt6_fill_rgba32float";
 
 /// The fixture whose kernel reads a texel of a two-plane extended-range texture as a `float4`,
 /// which is the only way such a target's texels reach the host: Metal copies no two-plane
 /// extended-range texture.
-const PLANES: &str = "xr_two_planes";
+pub(super) const PLANES: &str = "xr_two_planes";
 
 /// Its reading kernel.
-const READ_FLOAT: &str = "xr2p_read_float";
+pub(super) const READ_FLOAT: &str = "xr2p_read_float";
 
 /// The draws' target: 128 x 64 texels, one output each.
 pub(super) const WIDTH: u32 = 128;
@@ -411,7 +411,7 @@ pub(super) const FORMATS: [Format; 6] = [
 
 /// The layout a copied target's texels are read under: one row of the layout per row of texels, so
 /// a diff names the texel by its position and prints the code it stored.
-fn texel_layout(format: &Format, size: [u32; 2]) -> ByteLayout {
+pub(super) fn texel_layout(format: &Format, size: [u32; 2]) -> ByteLayout {
     let pitch = size[0] * format.texel;
     ByteLayout {
         region: Region::Texture {
@@ -435,7 +435,7 @@ fn texel_layout(format: &Format, size: [u32; 2]) -> ByteLayout {
 }
 
 /// The layout a `float4` read-back of `rows` rows of `per_row` texels is read under.
-fn read_layout(per_row: u32, rows: u32) -> ByteLayout {
+pub(super) fn read_layout(per_row: u32, rows: u32) -> ByteLayout {
     let pitch = per_row * READ_BYTES;
     ByteLayout {
         region: Region::Buffer {
@@ -454,12 +454,15 @@ fn read_layout(per_row: u32, rows: u32) -> ByteLayout {
 }
 
 /// The two fixtures, under the entry points a case runs.
-fn fixture(name: &'static str, entry: &'static str) -> Fixture {
+pub(super) fn fixture(name: &'static str, entry: &'static str) -> Fixture {
     Fixture { name, entry }
 }
 
 /// Both committed texts of each of `entries`, as a case's shader list.
-fn shader_refs(name: &'static str, entries: &[&'static str]) -> Result<Vec<ShaderRef>, String> {
+pub(super) fn shader_refs(
+    name: &'static str,
+    entries: &[&'static str],
+) -> Result<Vec<ShaderRef>, String> {
     let mut shaders = Vec::new();
     for entry in entries {
         for extension in [RUNTIME_TEXT, METAL_TEXT] {
@@ -474,7 +477,7 @@ fn shader_refs(name: &'static str, entries: &[&'static str]) -> Result<Vec<Shade
 }
 
 /// The two digests a fixture contributes to a case's input fingerprint.
-fn fixture_inputs(label: &str, name: &'static str) -> Result<Vec<Input>, String> {
+pub(super) fn fixture_inputs(label: &str, name: &'static str) -> Result<Vec<Input>, String> {
     let held = fixture(name, VERTEX);
     Ok(vec![
         Input {
@@ -489,7 +492,7 @@ fn fixture_inputs(label: &str, name: &'static str) -> Result<Vec<Input>, String>
 }
 
 /// Stop the run because a fixture could not be read.
-fn not_read(at: &str, why: String) -> Abort {
+pub(super) fn not_read(at: &str, why: String) -> Abort {
     Abort {
         at: at.to_owned(),
         failure: Failure::named("FixtureNotRead", why),
@@ -498,7 +501,12 @@ fn not_read(at: &str, why: String) -> Abort {
 
 /// The site a render program's outcome is emitted at, so a refused draw reads as the call we
 /// refused rather than as bytes that moved.
-fn program(sites: &mut Sites, at: &str, outcome: &crate::case::PassOutcome, work: &[RenderWork]) {
+pub(super) fn program(
+    sites: &mut Sites,
+    at: &str,
+    outcome: &crate::case::PassOutcome,
+    work: &[RenderWork],
+) {
     let mut node = Node::branch(at, Vec::new()).with(Node::leaf(
         "status",
         Observed::value(outcome.status.clone()),

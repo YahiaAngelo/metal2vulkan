@@ -1317,7 +1317,10 @@ impl Side for MetalSide {
             usage |= MTLTextureUsage::ShaderWrite;
         }
         descriptor.setUsage(usage);
-        descriptor.setStorageMode(MTLStorageMode::Private);
+        descriptor.setStorageMode(match spec.shared {
+            true => MTLStorageMode::Shared,
+            false => MTLStorageMode::Private,
+        });
         if spec.samples > 1 {
             descriptor.setTextureType(MTLTextureType::Type2DMultisample);
             // SAFETY: the count is 2 or 4, which the case's own guard keeps it to, and Metal takes

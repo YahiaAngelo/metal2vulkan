@@ -47,6 +47,14 @@ pub struct TargetSpec {
     pub shader_read: bool,
     /// `MTLTextureUsageShaderWrite` beside `MTLTextureUsageRenderTarget`.
     pub shader_write: bool,
+    /// Whether the target is of shared storage rather than private.
+    ///
+    /// Private is the default and what an extended-range target is normally made with. A case says
+    /// shared when the host has to put **arbitrary raw codes** into the target before the pass:
+    /// a blend's destination texels are random codes, and neither a clear nor a kernel write can
+    /// set an arbitrary code, so they go in through `replaceRegion:`, which no private texture
+    /// takes.
+    pub shared: bool,
 }
 
 impl TargetSpec {
@@ -58,7 +66,15 @@ impl TargetSpec {
             samples: 1,
             shader_read: true,
             shader_write: false,
+            shared: false,
         }
+    }
+
+    /// The target of shared storage, so the host may write its texels with `replaceRegion:`.
+    #[must_use]
+    pub const fn shared(mut self) -> Self {
+        self.shared = true;
+        self
     }
 
     /// The target at `samples` samples.
@@ -85,6 +101,7 @@ impl TargetSpec {
         bytes.extend(self.samples.to_le_bytes());
         bytes.push(u8::from(self.shader_read));
         bytes.push(u8::from(self.shader_write));
+        bytes.push(u8::from(self.shared));
         bytes
     }
 }
