@@ -22,6 +22,7 @@ use crate::case::{
 use crate::compute_pass::{
     ComputePass, ComputePassOutcome, ComputeStep, Dispatching, PassResource,
 };
+use crate::device_queries::{Box6, HeapBufferQuery, RegionQuery};
 use crate::function_bindings::{
     ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
     TextureFacts, ThreadgroupFacts, TypeFacts,
@@ -126,6 +127,7 @@ use objc2_metal::{
     MTLSharedEvent,
     MTLSize,
     MTLSparsePageSize,
+    MTLSparseTextureRegionAlignmentMode,
     MTLStageInputOutputDescriptor,
     MTLStencilDescriptor,
     MTLStencilOperation,
@@ -924,6 +926,34 @@ fn size(axes: [u32; 3]) -> MTLSize {
         height: axes[1] as usize,
         depth: axes[2] as usize,
     }
+}
+
+/// Metal's region for a case's six numbers.
+fn metal_region(held: &Box6) -> MTLRegion {
+    MTLRegion {
+        origin: MTLOrigin {
+            x: held[0] as usize,
+            y: held[1] as usize,
+            z: held[2] as usize,
+        },
+        size: MTLSize {
+            width: held[3] as usize,
+            height: held[4] as usize,
+            depth: held[5] as usize,
+        },
+    }
+}
+
+/// A case's six numbers for Metal's region.
+fn our_region(held: &MTLRegion) -> Box6 {
+    [
+        held.origin.x as u64,
+        held.origin.y as u64,
+        held.origin.z as u64,
+        held.size.width as u64,
+        held.size.height as u64,
+        held.size.depth as u64,
+    ]
 }
 
 /// `MTLBufferLayoutStrideDynamic`, the stride a layout takes from the encoder's binding.
@@ -3664,6 +3694,102 @@ impl Side for MetalSide {
             size: answered.size as u64,
             align: answered.align as u64,
         })
+    }
+
+    fn heap_buffer_size_and_align(&mut self, query: &HeapBufferQuery) -> Answer<SizeAndAlign> {
+        let answered = self.device.heapBufferSizeAndAlignWithLength_options(
+            query.length as usize,
+            MTLResourceOptions(query.options as usize),
+        );
+        Ok(SizeAndAlign {
+            size: answered.size as u64,
+            align: answered.align as u64,
+        })
+    }
+
+    fn supports_vertex_amplification_count(&mut self, count: u64) -> Answer<bool> {
+        Ok(self.device.supportsVertexAmplificationCount(count as usize))
+    }
+
+    fn supports_rasterization_rate_map_layers(&mut self, layers: u64) -> Answer<bool> {
+        // SAFETY: the layer count is the case's own small positive number, which the sweep keeps
+        // between 1 and 4; the query allocates nothing and makes no map.
+        Ok(unsafe {
+            self.device
+                .supportsRasterizationRateMapWithLayerCount(layers as usize)
+        })
+    }
+
+    fn minimum_linear_texture_alignment(&mut self, format: PixelFormat) -> Answer<u64> {
+        Ok(self
+            .device
+            .minimumLinearTextureAlignmentForPixelFormat(MTLPixelFormat(format.as_raw() as usize))
+            as u64)
+    }
+
+    fn convert_sparse_pixel_regions(&mut self, query: &RegionQuery) -> Answer<Vec<Box6>> {
+        let mut pixels: Vec<MTLRegion> = query.regions.iter().map(metal_region).collect();
+        let mut tiles: Vec<MTLRegion> = pixels.clone();
+        let mode = match query.inward {
+            true => MTLSparseTextureRegionAlignmentMode::Inward,
+            false => MTLSparseTextureRegionAlignmentMode::Outward,
+        };
+        let (Some(from), Some(into)) = (
+            std::ptr::NonNull::new(pixels.as_mut_ptr()),
+            std::ptr::NonNull::new(tiles.as_mut_ptr()),
+        ) else {
+            return Err(Failure::named(
+                "NoRegions",
+                "the query states none".to_owned(),
+            ));
+        };
+        // SAFETY: both pointers are to `query.regions.len()` elements of a `Vec` this call owns,
+        // which is the count handed as `numRegions`; the tile size is the case's own, inside the
+        // shapes the family's prose names.
+        unsafe {
+            self.device
+                .convertSparsePixelRegions_toTileRegions_withTileSize_alignmentMode_numRegions(
+                    from,
+                    into,
+                    size([
+                        query.tile[0] as u32,
+                        query.tile[1] as u32,
+                        query.tile[2] as u32,
+                    ]),
+                    mode,
+                    query.regions.len(),
+                );
+        }
+        Ok(tiles.iter().map(our_region).collect())
+    }
+
+    fn convert_sparse_tile_regions(&mut self, query: &RegionQuery) -> Answer<Vec<Box6>> {
+        let mut tiles: Vec<MTLRegion> = query.regions.iter().map(metal_region).collect();
+        let mut pixels: Vec<MTLRegion> = tiles.clone();
+        let (Some(from), Some(into)) = (
+            std::ptr::NonNull::new(tiles.as_mut_ptr()),
+            std::ptr::NonNull::new(pixels.as_mut_ptr()),
+        ) else {
+            return Err(Failure::named(
+                "NoRegions",
+                "the query states none".to_owned(),
+            ));
+        };
+        // SAFETY: as the other direction's.
+        unsafe {
+            self.device
+                .convertSparseTileRegions_toPixelRegions_withTileSize_numRegions(
+                    from,
+                    into,
+                    size([
+                        query.tile[0] as u32,
+                        query.tile[1] as u32,
+                        query.tile[2] as u32,
+                    ]),
+                    query.regions.len(),
+                );
+        }
+        Ok(pixels.iter().map(our_region).collect())
     }
 
     fn queue_slots(&mut self, max: Option<u32>, cap: u32) -> Answer<QueueSlots> {

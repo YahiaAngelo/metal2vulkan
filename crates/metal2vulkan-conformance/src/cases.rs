@@ -63,6 +63,7 @@ pub mod compute_render_chains;
 pub mod compute_threadgroups;
 pub mod denormal_word_fetches;
 pub mod depth_texel_reads;
+pub mod device_queries;
 pub mod discard_hoist;
 pub mod draw_state_changes;
 pub mod etc_textures;
@@ -290,6 +291,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(command_queues::queue_slots()));
+    for case in device_queries::all() {
+        cases.push(Box::new(case));
+    }
     for case in texture_accesses::all() {
         cases.push(Box::new(case));
     }

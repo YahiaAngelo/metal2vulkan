@@ -17,6 +17,7 @@ use crate::case::{
 use crate::compute_pass::{
     ComputePass, ComputePassOutcome, ComputeStep, Dispatching, PassResource,
 };
+use crate::device_queries::{Box6, HeapBufferQuery, RegionQuery};
 use crate::function_bindings::{
     ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
     TextureFacts, ThreadgroupFacts, TypeFacts, DEPTH,
@@ -65,7 +66,14 @@ use metal2vulkan_runtime::{
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
     LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
     RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState,
-    SamplerStateOptions, ScissorRect, Size, StoreAction, Texture, TextureDescriptor, Viewport,
+    SamplerStateOptions,
+    ScissorRect,
+    Size,
+    SparseTextureRegionAlignmentMode,
+    StoreAction,
+    Texture,
+    TextureDescriptor,
+    Viewport,
 };
 use std::time::Duration;
 
@@ -92,6 +100,28 @@ fn barrier_scope(bits: u64) -> Answer<BarrierScope> {
 
 /// The longest the side waits for a command buffer. A wait that runs out is recorded, not retried.
 const WAIT: Duration = Duration::from_secs(60);
+
+/// The runtime's region for a case's six numbers.
+fn our_region(held: &Box6) -> Region {
+    Region::new_3d(held[0], held[1], held[2], held[3], held[4], held[5])
+}
+
+/// A case's six numbers for the runtime's region.
+fn their_region(held: &Region) -> Box6 {
+    [
+        held.origin.x,
+        held.origin.y,
+        held.origin.z,
+        held.size.width,
+        held.size.height,
+        held.size.depth,
+    ]
+}
+
+/// The runtime's size for a case's three axes.
+fn our_size(axes: [u64; 3]) -> Size {
+    Size::new(axes[0], axes[1], axes[2])
+}
 
 /// Set every field [`AWAY`] states on `descriptor` and `options`, each away from Metal's own
 /// default.
@@ -3498,6 +3528,59 @@ impl Side for RuntimeSide<'_> {
             size: answered.size,
             align: answered.align,
         })
+    }
+
+    fn heap_buffer_size_and_align(&mut self, query: &HeapBufferQuery) -> Answer<SizeAndAlign> {
+        let options = ResourceOptions::from_raw(query.options).map_err(Failure::from_error)?;
+        let answered = self
+            .device
+            .heap_buffer_size_and_align(query.length, options);
+        Ok(SizeAndAlign {
+            size: answered.size,
+            align: answered.align,
+        })
+    }
+
+    fn supports_vertex_amplification_count(&mut self, count: u64) -> Answer<bool> {
+        self.device
+            .properties()
+            .supports_vertex_amplification_count(count)
+            .map_err(|gap| Failure::named("RuntimeGap", format!("{gap:?}")))
+    }
+
+    fn supports_rasterization_rate_map_layers(&mut self, layers: u64) -> Answer<bool> {
+        self.device
+            .properties()
+            .supports_rasterization_rate_map_with_layer_count(layers)
+            .map_err(|gap| Failure::named("RuntimeGap", format!("{gap:?}")))
+    }
+
+    fn minimum_linear_texture_alignment(&mut self, format: PixelFormat) -> Answer<u64> {
+        self.device
+            .properties()
+            .minimum_linear_texture_alignment_for_pixel_format(format)
+            .map_err(Failure::from_error)
+    }
+
+    fn convert_sparse_pixel_regions(&mut self, query: &RegionQuery) -> Answer<Vec<Box6>> {
+        let pixels: Vec<Region> = query.regions.iter().map(our_region).collect();
+        let mut tiles: Vec<Region> = pixels.clone();
+        let mode = match query.inward {
+            true => SparseTextureRegionAlignmentMode::Inward,
+            false => SparseTextureRegionAlignmentMode::Outward,
+        };
+        self.device
+            .convert_sparse_pixel_regions(&pixels, &mut tiles, our_size(query.tile), mode)
+            .map_err(Failure::from_error)?;
+        Ok(tiles.iter().map(their_region).collect())
+    }
+
+    fn convert_sparse_tile_regions(&mut self, query: &RegionQuery) -> Answer<Vec<Box6>> {
+        let tiles: Vec<Region> = query.regions.iter().map(our_region).collect();
+        let pixels = self
+            .device
+            .convert_sparse_tile_regions(&tiles, our_size(query.tile));
+        Ok(pixels.iter().map(their_region).collect())
     }
 
     fn queue_slots(&mut self, max: Option<u32>, cap: u32) -> Answer<QueueSlots> {

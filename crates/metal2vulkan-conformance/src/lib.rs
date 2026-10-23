@@ -53,6 +53,7 @@ pub mod compute_pass;
 pub mod cost;
 pub mod coverage;
 pub mod device;
+pub mod device_queries;
 pub mod diff;
 pub mod event_orders;
 pub mod fixture;

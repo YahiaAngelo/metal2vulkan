@@ -1198,6 +1198,80 @@ pub trait Side {
         Err(Failure::unavailable("heap_texture_size_and_align"))
     }
 
+    /// `heapBufferSizeAndAlignWithLength:options:` of the length and the raw `MTLResourceOptions`
+    /// bits `query` names ([`crate::device_queries::HeapBufferQuery`]).
+    ///
+    /// A pure getter, as [`Side::heap_texture_size_and_align`] is: arithmetic over a length, with
+    /// nothing allocated and no heap made.
+    fn heap_buffer_size_and_align(
+        &mut self,
+        query: &crate::device_queries::HeapBufferQuery,
+    ) -> Answer<crate::texture_query::SizeAndAlign> {
+        let _ = query;
+        Err(Failure::unavailable("heap_buffer_size_and_align"))
+    }
+
+    /// `supportsVertexAmplificationCount:` of `count`.
+    ///
+    /// A device query whose answer is a **model**: the runtime answers yes up to a constant its own
+    /// documentation attributes to a Metal probe on this chip and on an M4, so it is the same on
+    /// every device that enables multiview and is a contract with Metal rather than a reading of
+    /// the device ([`crate::device_queries`] says which queries pass that test and which do not).
+    fn supports_vertex_amplification_count(&mut self, count: u64) -> Answer<bool> {
+        let _ = count;
+        Err(Failure::unavailable("supports_vertex_amplification_count"))
+    }
+
+    /// `supportsRasterizationRateMapWithLayerCount:` of `layers`.
+    ///
+    /// A model as [`Side::supports_vertex_amplification_count`] is: the runtime answers yes for the
+    /// layer counts Apple's map compile was measured with and reproduces on every device.
+    fn supports_rasterization_rate_map_layers(&mut self, layers: u64) -> Answer<bool> {
+        let _ = layers;
+        Err(Failure::unavailable(
+            "supports_rasterization_rate_map_layers",
+        ))
+    }
+
+    /// `minimumLinearTextureAlignmentForPixelFormat:` of `format`.
+    ///
+    /// A model as the two above are: the runtime answers one alignment for every format a buffer
+    /// can back, on every device, and refuses the formats Metal's own query asserts on. A case asks
+    /// only formats the runtime answers a number for, which is what keeps Metal's assertion out of
+    /// reach ([`crate::device_queries`]).
+    fn minimum_linear_texture_alignment(
+        &mut self,
+        format: metal2vulkan::metal::PixelFormat,
+    ) -> Answer<u64> {
+        let _ = format;
+        Err(Failure::unavailable("minimum_linear_texture_alignment"))
+    }
+
+    /// `convertSparsePixelRegions:toTileRegions:withTileSize:alignmentMode:numRegions:` of the
+    /// regions, tile size and alignment mode `query` names, as the tile boxes it wrote.
+    ///
+    /// Arithmetic over the case's own numbers: nothing is allocated, no texture is sparse and no
+    /// device memory is bound. Metal's one `numRegions` is the slices' single length, so the case
+    /// hands one list and reads one back.
+    fn convert_sparse_pixel_regions(
+        &mut self,
+        query: &crate::device_queries::RegionQuery,
+    ) -> Answer<Vec<crate::device_queries::Box6>> {
+        let _ = query;
+        Err(Failure::unavailable("convert_sparse_pixel_regions"))
+    }
+
+    /// `convertSparseTileRegions:toPixelRegions:withTileSize:numRegions:` of the regions and tile
+    /// size `query` names, as the texel boxes it wrote. The mode is not read: this direction takes
+    /// none.
+    fn convert_sparse_tile_regions(
+        &mut self,
+        query: &crate::device_queries::RegionQuery,
+    ) -> Answer<Vec<crate::device_queries::Box6>> {
+        let _ = query;
+        Err(Failure::unavailable("convert_sparse_tile_regions"))
+    }
+
     /// Whether `newTextureWithDescriptor:` of the descriptor `query` names answers a texture.
     ///
     /// The answer is a **fact about the descriptor**, not about the object: Metal answers nil for a
