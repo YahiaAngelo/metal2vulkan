@@ -379,6 +379,118 @@ pub trait Side {
         let _ = (targets, steps);
         Err(Failure::unavailable("mesh_pass"))
     }
+
+    /// A texture over `buffer`: over one plane of the surface the buffer stands for, or over the
+    /// buffer itself ([`PlaneTexture`]).
+    ///
+    /// The buffer stands for the surface with its planes where the surface's lie, which is how the
+    /// probe wrote these cases: a host without CoreVideo then runs them unchanged, and the bytes a
+    /// fill wrote are the buffer's own.
+    fn plane_texture(&mut self, buffer: Handle, over: &PlaneTexture) -> Answer<Handle> {
+        let _ = (buffer, over);
+        Err(Failure::unavailable("plane_texture"))
+    }
+
+    /// One command buffer with one blit encoder holding one fill of `texture` ([`Fill`]),
+    /// committed and waited for.
+    ///
+    /// Metal's texture fills are private selectors, so Metal's own side answers
+    /// [`Failure::unavailable`] here and a case that uses this carries its Metal answer.
+    fn fill_texture(&mut self, texture: Handle, fill: &Fill) -> Answer<Value> {
+        let _ = (texture, fill);
+        Err(Failure::unavailable("fill_texture"))
+    }
+}
+
+/// A texture a case makes over a buffer: over one plane of the surface the buffer stands for, or
+/// over the buffer itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaneTexture {
+    /// The surface's four-character OSType, `None` for a texture over the buffer itself.
+    pub ostype: Option<[u8; 4]>,
+    /// The texture's raw `MTLPixelFormat`.
+    pub format: u32,
+    /// The texture's extent in texels.
+    pub size: [u32; 2],
+    /// The plane of the surface the texture covers.
+    pub plane: u32,
+    /// Each of the surface's two planes: its first byte in the buffer and its `bytesPerRow`. A
+    /// texture over the buffer itself uses the first alone.
+    pub planes: [(u64, u64); 2],
+}
+
+/// One fill of a texture, as the probe encoded it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Fill {
+    /// `fillTexture:level:slice:region:pattern:` (Apple SPI) of these pattern bytes.
+    Pattern {
+        level: u32,
+        slice: u32,
+        /// The region as `x`, `y`, `width`, `height`.
+        region: [u32; 4],
+        pattern: Vec<u8>,
+    },
+    /// `fillTexture:level:slice:region:color:pixelFormat:` (Apple SPI) of this color packed in
+    /// this raw `MTLPixelFormat`.
+    Color {
+        level: u32,
+        slice: u32,
+        region: [u32; 4],
+        /// The color's four channels.
+        color: [f64; 4],
+        /// The raw `MTLPixelFormat` the color packs in.
+        packed_into: u32,
+    },
+}
+
+impl Fill {
+    /// The site name the fill's answer is emitted at: the call it makes.
+    pub fn call(&self) -> &'static str {
+        match self {
+            Fill::Pattern { .. } => "fillTexture",
+            Fill::Color { .. } => "fillTextureColor",
+        }
+    }
+
+    /// The words the fill's parameters fingerprint as.
+    pub fn words(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        match self {
+            Fill::Pattern {
+                level,
+                slice,
+                region,
+                pattern,
+            } => {
+                out.extend(b"pattern");
+                out.extend(level.to_le_bytes());
+                out.extend(slice.to_le_bytes());
+                for axis in region {
+                    out.extend(axis.to_le_bytes());
+                }
+                out.extend(pattern);
+            }
+            Fill::Color {
+                level,
+                slice,
+                region,
+                color,
+                packed_into,
+            } => {
+                out.extend(b"color");
+                out.extend(level.to_le_bytes());
+                out.extend(slice.to_le_bytes());
+                for axis in region {
+                    out.extend(axis.to_le_bytes());
+                }
+                for channel in color {
+                    out.extend(channel.to_le_bytes());
+                }
+                out.extend(packed_into.to_le_bytes());
+            }
+        }
+        out
+    }
 }
 
 /// The color format every mesh case's attachments take: `MTLPixelFormatRGBA32Uint`, whose texel is

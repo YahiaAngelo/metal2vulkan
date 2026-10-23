@@ -365,7 +365,7 @@ impl MeshBarriers {
         ));
 
         let texels = side
-            .read_target(target)
+            .read_texture(target, [SIDE, SIDE], SIDE * TARGET_TEXEL)
             .map_err(|failure| stop(format!("{at}/attachment"), failure))?;
         node = node.with(Node::leaf(
             "attachment",

@@ -12,6 +12,7 @@ pub mod mesh_draws;
 pub mod pass_bytes;
 pub mod sample_fills;
 pub mod stage_in_regions;
+pub mod surface_fills;
 pub mod texture_buffer_fills;
 pub mod texture_fills;
 pub mod two_plane_copies;
@@ -52,6 +53,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in mesh_barriers::all() {
         cases.push(Box::new(case));
     }
+    cases.push(Box::new(surface_fills::over_planes_and_buffers()));
     cases
 }
 

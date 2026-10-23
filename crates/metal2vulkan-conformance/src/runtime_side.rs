@@ -8,8 +8,8 @@
 //! answers `NeverReturned` as a recorded fact rather than blocking the suite.
 
 use crate::case::{
-    Answer, Bindings, Failure, Handle, IndirectReadBack, MeshFunctions, MeshStep, PassOutcome,
-    ShaderSource, Side, StageInRegion, StageInput, Venue,
+    Answer, Bindings, Failure, Fill, Handle, IndirectReadBack, MeshFunctions, MeshStep,
+    PassOutcome, PlaneTexture, ShaderSource, Side, StageInRegion, StageInput, Venue,
 };
 use crate::transcript::{Negative, Value};
 use metal2vulkan::metal::{
@@ -22,9 +22,9 @@ use metal2vulkan::pipeline::{
 };
 use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue, ComputePipelineState,
-    Device, DrawPrimitiveType, IndirectCommand, IndirectDraw, Library, LoadAction, PipelineOptions,
-    Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, Size,
-    StoreAction, Texture, TextureDescriptor,
+    Device, DrawPrimitiveType, IndirectCommand, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr,
+    Library, LoadAction, PipelineOptions, Region, RenderPassDescriptor, RenderPipelineState,
+    ResourceOptions, ResourceRef, Size, StoreAction, Texture, TextureDescriptor,
 };
 use std::time::Duration;
 
@@ -676,6 +676,103 @@ impl Side for RuntimeSide<'_> {
                 .error()
                 .map(|error| Value::unit_variant(format!("{error:?}"))),
         })
+    }
+
+    fn plane_texture(&mut self, buffer: Handle, over: &PlaneTexture) -> Answer<Handle> {
+        let format = PixelFormat::try_from(over.format).map_err(|problem| {
+            Failure::named("NoSuchPixelFormat", format!("{}: {problem}", over.format))
+        })?;
+        let [width, height] = over.size;
+        let mut descriptor =
+            TextureDescriptor::texture_2d(format, u64::from(width), u64::from(height), false);
+        descriptor.resource_options = ResourceOptions::shared();
+        let buffer = self.held(buffer)?.clone();
+        let texture = match over.ostype {
+            Some(ostype) => {
+                descriptor.usage = TextureUsage::SHADER_READ;
+                let (offset, row) = over.planes[over.plane as usize];
+                let (chroma_offset, chroma_row) = over.planes[1];
+                let facts = IoSurfaceYCbCr::new(
+                    u32::from_be_bytes(ostype),
+                    u64::from(over.plane),
+                    [u64::from(width), u64::from(height)],
+                    chroma_offset,
+                    chroma_row,
+                );
+                let plane = IoSurfacePlane::new(offset, row, true).with_ycbcr(facts);
+                buffer.new_texture_with_iosurface_plane(&descriptor, plane)
+            }
+            None => {
+                descriptor.usage = TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE;
+                buffer.new_texture(&descriptor, over.planes[0].0, over.planes[0].1)
+            }
+        }
+        .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn fill_texture(&mut self, texture: Handle, fill: &Fill) -> Answer<Value> {
+        let texture = self.held_texture(texture)?.clone();
+        let command_buffer = self
+            .queue()?
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        let mut blit = command_buffer
+            .blit_command_encoder()
+            .map_err(Failure::from_error)?;
+        let region = |[x, y, width, height]: [u32; 4]| {
+            Region::new_2d(
+                u64::from(x),
+                u64::from(y),
+                u64::from(width),
+                u64::from(height),
+            )
+        };
+        let filled = match fill {
+            Fill::Pattern {
+                level,
+                slice,
+                region: at,
+                pattern,
+            } => blit.fill_texture(
+                &texture,
+                u64::from(*level),
+                u64::from(*slice),
+                region(*at),
+                pattern,
+            ),
+            Fill::Color {
+                level,
+                slice,
+                region: at,
+                color,
+                packed_into,
+            } => PixelFormat::try_from(*packed_into)
+                .map_err(metal2vulkan_runtime::Error::Compile)
+                .and_then(|packed_into| {
+                    blit.fill_texture_color(
+                        &texture,
+                        u64::from(*level),
+                        u64::from(*slice),
+                        region(*at),
+                        ClearColor::new(color[0], color[1], color[2], color[3]),
+                        Some(packed_into),
+                    )
+                }),
+        };
+        blit.end_encoding().map_err(Failure::from_error)?;
+        command_buffer.commit().map_err(Failure::from_error)?;
+        // The fill's own answer is the case's subject, so a refusal is reported as the call's
+        // typed error rather than aborting the encoding: the command buffer still ends and is
+        // waited for, as the probe's did, so the bytes it did or did not write are readable.
+        let refused = filled.err().map(|error| Failure::of(&error));
+        if command_buffer.wait_until_completed_for(WAIT).is_err() {
+            return Ok(Value::Nothing(Negative::NeverReturned));
+        }
+        match refused {
+            Some(failure) => Err(failure),
+            None => Ok(status_value(command_buffer.status())),
+        }
     }
 }
 
