@@ -3087,6 +3087,7 @@
         "command_buffers_begun_segments": 64,
         "command_buffers_deferred": 832,
         "command_buffers_replayed": 832,
+        "command_buffers_replayed_inline": 2,
         "command_buffers_submitted": 256,
         "commands_replayed.begin_command_buffer": 832,
         "commands_replayed.cmd_begin_render_pass": 64,
@@ -3137,11 +3138,11 @@
         "render_passes_begun_instances": 64,
         "render_passes_made": 1,
         "scheduled_where_submitted": 1,
-        "scheduler_passes": 61,
-        "scheduler_sleep_slices": 1,
-        "scheduler_sleeps": 61,
+        "scheduler_passes": 59,
+        "scheduler_sleep_slices": 4,
+        "scheduler_sleeps": 59,
         "scheduler_wakes_commit": 1,
-        "scheduler_wakes_host": 262,
+        "scheduler_wakes_host": 269,
         "shader_modules_made": 34,
         "shader_modules_shared": 30,
         "slot_returns": 1,
@@ -3152,7 +3153,7 @@
         "variant_pipelines_made": 128,
         "wakes_completion_waiters": 1,
         "wakes_handler_threads": 1,
-        "wakes_spared": 14
+        "wakes_spared": 8
       },
       "moving": {
         "flights_followed": 22

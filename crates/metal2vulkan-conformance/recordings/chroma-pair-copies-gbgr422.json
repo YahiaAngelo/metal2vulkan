@@ -1253,15 +1253,15 @@
         "row_copies": 1,
         "row_copy_regions": 2,
         "scheduled_where_submitted": 21,
-        "scheduler_passes": 30,
-        "scheduler_sleeps": 30,
+        "scheduler_passes": 32,
+        "scheduler_sleeps": 32,
         "scheduler_wakes_commit": 21,
         "scheduler_wakes_host": 11,
         "slot_returns": 21,
         "spare_command_pools_taken": 42,
         "submit_infos": 21,
         "wakes_completion_waiters": 21,
-        "wakes_spared": 128
+        "wakes_spared": 126
       },
       "moving": {
         "commands_replayed.begin_command_buffer": 19

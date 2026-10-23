@@ -766,8 +766,7 @@
         "metal2vulkan-degrade-carried-decoded-twin"
       ],
       "bounds": {
-        "addressable_buffers_made": 2,
-        "arena_pools_made": 1,
+        "addressable_buffers_made": 1,
         "bare_starts": 24,
         "batches_with_none_pending": 24,
         "block_decode_passes": 24,
@@ -812,7 +811,7 @@
         "object_churn.vk_images_made": 2,
         "object_churn.vk_memory_allocations": 1,
         "owned_descriptor_pools": 24,
-        "pooled_memory_blocks_made": 3,
+        "pooled_memory_blocks_made": 1,
         "queue_submissions": 48,
         "scheduled_where_submitted": 24,
         "scheduler_passes": 24,

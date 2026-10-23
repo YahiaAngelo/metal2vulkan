@@ -18,8 +18,10 @@ pub struct CostRow {
     pub verdict: CostVerdict,
     /// The counts the case's run moved, which the verdict was taken over.
     pub counts: Counts,
-    /// How long the case's run took, in nanoseconds. **Advisory**: this half gates on counts, and
-    /// a time is reported so a reader can see where the counts are large.
+    /// How long the case's run took, in nanoseconds. **Advisory**: gate on counters, report on
+    /// times — a time is not assertable on any host under any load, so none is ever a verdict
+    /// here. Reported so a reader can see where the counts are large
+    /// ([`cost::CaseCost::nanos`]).
     pub nanos: u64,
     /// How many of the case's bounds are reported rather than gated, and why, in three groups: the
     /// race rule's, the ones whose readings moved between runs, and the ones the selection decides

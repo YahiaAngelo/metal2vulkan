@@ -762,7 +762,6 @@
       "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
       "bounds": {
-        "addressable_buffers_made": 2,
         "bare_starts": 12,
         "batches_with_none_pending": 12,
         "command_barriers": 20,
@@ -798,7 +797,6 @@
         "object_churn.vk_image_bindings": 14,
         "object_churn.vk_images_destroyed": 14,
         "object_churn.vk_images_made": 14,
-        "pooled_memory_blocks_made": 3,
         "queue_submissions": 12,
         "scheduled_where_submitted": 12,
         "scheduler_passes": 12,

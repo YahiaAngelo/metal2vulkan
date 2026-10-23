@@ -973,9 +973,17 @@ pub struct CaseCost {
     /// The degrade-notice codes the runs announced, sorted: what the device could not do exactly,
     /// and so how much of the case the counts are of.
     pub degraded: Vec<String>,
-    /// How long the longest run took, in nanoseconds. **Advisory**: a time is not a fact this
-    /// gate holds, and per-call timing against Metal is its own step. It is printed so a reader
-    /// can see which cases the counts are large for.
+    /// How long the longest run took, in nanoseconds. **Advisory, and it stays advisory.**
+    ///
+    /// *Gate on counters, report on times.* A count is deterministic, so it is assertable on any
+    /// host under any load; a time is not, and that asymmetry is the whole reason the counts carry
+    /// this gate. So no time is stored in a [`CostRecord`], [`judge`] reads none, and
+    /// [`CostVerdict`] has no variant for one. This number is printed so a reader can see which
+    /// cases the counts are large for, and that is all it is for.
+    ///
+    /// A case's recorded timings are a separate half with its own storage on the recording, taken
+    /// by its own leg. Nothing there feeds this gate either. A proposal to make a time fail a run
+    /// is a change to the round's rules and not to this field.
     pub nanos: u64,
 }
 

@@ -221,6 +221,7 @@
         "completed_where_seen": 3,
         "device_memory_allocated": 201326592,
         "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 3,
         "scheduled_where_submitted": 3,
         "scheduler_passes": 4,
@@ -231,7 +232,7 @@
         "spare_command_pools_taken": 3,
         "submit_infos": 3,
         "wakes_completion_waiters": 3,
-        "wakes_spared": 20
+        "wakes_spared": 21
       },
       "composed": {
         "addressable_buffers_made": 2,

@@ -5259,7 +5259,7 @@
         "command_buffers_begun_secondaries": 882,
         "command_buffers_begun_segments": 294,
         "command_buffers_deferred": 2058,
-        "command_buffers_replayed_inline": 938,
+        "command_buffers_replayed_inline": 1428,
         "command_buffers_submitted": 1765,
         "commands_replayed.begin_command_buffer": 2058,
         "commands_replayed.cmd_begin_render_pass": 294,
