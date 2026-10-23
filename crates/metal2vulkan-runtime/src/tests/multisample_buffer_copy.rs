@@ -316,13 +316,10 @@ fn aspect_round_trip(
         Err(Error::NotImplemented(RuntimeGap::MultisampledBufferCopy)) => return Outcome::Refused,
         Err(other) => panic!("{pixel_format:?} {samples} into: {other}"),
     }
-    blit.end_encoding().unwrap();
-    command_buffer.commit().unwrap();
-    command_buffer.wait_until_completed_for(WAIT).unwrap();
-    assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
-
-    let command_buffer = queue.command_buffer().unwrap();
-    let mut blit = command_buffer.blit_command_encoder().unwrap();
+    // Both copies in ONE command buffer and one encoder, as a Metal program writes them and as
+    // the conformance family's own program does. Committing between them is what made an earlier
+    // version of this test pass over a broken copy out: each copy then got its own scratch
+    // images, and the second read what the first had left rather than what the draws wrote.
     blit.copy_from_texture_to_buffer(
         &texture,
         0,
