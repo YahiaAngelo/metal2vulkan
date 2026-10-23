@@ -32,6 +32,8 @@ pub mod compressed_blits;
 pub mod compressed_decode;
 pub mod compute_threadgroups;
 pub mod depth_texel_reads;
+pub mod discard_hoist;
+pub mod event_orders;
 pub mod extended_range_blends;
 pub mod extended_range_planes;
 pub mod extended_range_targets;
@@ -46,12 +48,14 @@ pub mod math_routines;
 pub mod mesh_barriers;
 pub mod mesh_commands;
 pub mod mesh_draws;
+pub mod nearest_positions;
 pub mod pass_bytes;
 pub mod pixel_downscales;
 pub mod pixel_samplers;
 pub mod rate_maps;
 pub mod rgb10a2_srgb;
 pub mod sample_fills;
+pub mod scheduled_handlers;
 pub mod shared_events;
 pub mod simdgroup_lockstep;
 pub mod snorm_tile_store;
@@ -66,6 +70,7 @@ pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
 pub mod two_plane_samples;
 pub mod visibility;
+pub mod wide_points;
 pub mod ycbcr_minify;
 pub mod ycbcr_textures;
 
@@ -95,6 +100,15 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in format_copies::all() {
+        cases.push(Box::new(case));
+    }
+    for case in nearest_positions::all() {
+        cases.push(Box::new(case));
+    }
+    for case in wide_points::all() {
+        cases.push(Box::new(case));
+    }
+    for case in discard_hoist::all() {
         cases.push(Box::new(case));
     }
     for case in extended_range_planes::all() {
@@ -176,6 +190,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(shared_events::rising_value()));
+    cases.extend(
+        event_orders::all()
+            .into_iter()
+            .map(|case| Box::new(case) as Box<dyn Case>),
+    );
+    cases.push(Box::new(scheduled_handlers::handler_order()));
     cases.extend(chroma_pairs::all());
     cases.extend(ycbcr_textures::all());
     for case in ycbcr_minify::all() {
