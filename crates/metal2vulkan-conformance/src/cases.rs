@@ -28,6 +28,7 @@ pub mod mesh_barriers;
 pub mod mesh_commands;
 pub mod mesh_draws;
 pub mod pass_bytes;
+pub mod pixel_downscales;
 pub mod pixel_samplers;
 pub mod rate_maps;
 pub mod rgb10a2_srgb;
@@ -70,6 +71,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in pixel_samplers::all() {
+        cases.push(Box::new(case));
+    }
+    for case in pixel_downscales::all() {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(texture_buffer_fills::streams()));
