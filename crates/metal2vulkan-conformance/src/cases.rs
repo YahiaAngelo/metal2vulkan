@@ -54,6 +54,7 @@ pub mod rgb10a2_srgb;
 pub mod sample_fills;
 pub mod shared_events;
 pub mod simdgroup_lockstep;
+pub mod snorm_tile_store;
 pub mod stage_in_regions;
 pub mod surface_fills;
 pub mod texture_accesses;
@@ -64,6 +65,7 @@ pub mod tile_threadgroups;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
 pub mod two_plane_samples;
+pub mod visibility;
 pub mod ycbcr_minify;
 pub mod ycbcr_textures;
 
@@ -156,6 +158,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.push(Box::new(command_queues::queue_slots()));
     for case in texture_accesses::all() {
+        cases.push(Box::new(case));
+    }
+    for case in snorm_tile_store::all() {
+        cases.push(Box::new(case));
+    }
+    for case in visibility::all() {
         cases.push(Box::new(case));
     }
     for case in textures::all() {

@@ -74,6 +74,7 @@ use crate::case::{
 };
 use crate::recording::Validated;
 use crate::transcript::Value;
+use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
 
 /// `MTL_DEBUG_LAYER`: Metal's API validation layer.
@@ -516,6 +517,11 @@ impl<S: Side> Side for Announcing<S> {
     ) -> Answer<Handle> {
         self.at("render_pipeline");
         self.inner.render_pipeline(library, spec)
+    }
+
+    fn depth_stencil_state(&mut self, spec: &DepthStencilDescriptor) -> Answer<Handle> {
+        self.at("depth_stencil_state");
+        self.inner.depth_stencil_state(spec)
     }
 
     fn render(&mut self, work: &[crate::render::RenderWork]) -> Answer<PassOutcome> {
