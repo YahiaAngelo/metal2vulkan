@@ -301,9 +301,12 @@ driver's. Each is open work.
 - **An indirect render command's draw of primitive type 9 that its execution's call cannot see**:
   one the CPU wrote after the call, or among a range the execution reads from a buffer. It runs
   nothing, counted as a record fault in the execution report (`RECORD`), where Metal's GPU hangs
-  or faults the command buffer at it. One among a range given at the call, as the records stand
-  then, fails the command buffer as the encoder's draw does (`render/executions.rs`); failing it
-  from inside the host step that meets the record, its earlier encoders run, is not built.
+  or faults the command buffer at it (the M3 Max, macOS 27.0.1: one written after the call, after
+  the commit, or among a range read from a buffer failed as one the call sees, a direct one hung
+  27.6 to 28.7 ms after `Scheduled`, an indexed one faulted 8.7 to 10.6 ms after it). One among a
+  range given at the call, as the records stand then, fails the command buffer as the encoder's
+  draw does (`render/executions.rs`); failing it from inside the host step that meets the record,
+  its earlier encoders run, is not built.
 
 - **A command buffer committed behind a running predicated loop on the loop's own queue waits for
   the loop to end**, as every batch of a queue waits for the ones before it, where Metal's GPU
