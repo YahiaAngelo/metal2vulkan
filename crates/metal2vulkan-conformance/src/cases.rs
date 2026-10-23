@@ -15,6 +15,13 @@
 //! [`rate_maps`] is the family where Metal's own API validation layer and plain Metal disagree,
 //! and it is what exercises the recording's second oracle ([`crate::validated`]).
 //!
+//! Two families are ports of lanes that held **no Metal value at all** — a rule, or a list in a
+//! module's prose — and whose values this round measured on the oracle for the first time:
+//! [`texture_accesses`], where Metal's render-pipeline reflection states each texture slot's
+//! access, and [`textures`], where every uncompressed colour format's texture answers what a fresh
+//! level 0 reads, what a host round trip gives back, and whether the bytes between the rows stayed
+//! as they were.
+//!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
 pub mod command_queues;
@@ -35,8 +42,10 @@ pub mod rgb10a2_srgb;
 pub mod sample_fills;
 pub mod stage_in_regions;
 pub mod surface_fills;
+pub mod texture_accesses;
 pub mod texture_buffer_fills;
 pub mod texture_fills;
+pub mod textures;
 pub mod tile_threadgroups;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
@@ -108,6 +117,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(command_queues::queue_slots()));
+    for case in texture_accesses::all() {
+        cases.push(Box::new(case));
+    }
+    for case in textures::all() {
+        cases.push(Box::new(case));
+    }
     cases
 }
 

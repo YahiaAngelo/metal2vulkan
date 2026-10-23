@@ -21,25 +21,25 @@ use crate::case::{
 use crate::queue_slots::QueueSlots;
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
-use metal2vulkan::metal::PixelFormat;
+use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::AnyThread;
 use objc2_foundation::{NSString, NSURL};
 use objc2_metal::{
-    MTLAttributeFormat, MTLBarrierScope, MTLBuffer, MTLClearColor, MTLCommandBuffer,
-    MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
-    MTLComputePipelineDescriptor, MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDevice,
-    MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
-    MTLIndirectCommandType, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction,
-    MTLMeshRenderPipelineDescriptor, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
-    MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
+    MTLAttributeFormat, MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType, MTLBuffer,
+    MTLClearColor, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
+    MTLComputeCommandEncoder, MTLComputePipelineDescriptor, MTLComputePipelineState,
+    MTLCreateSystemDefaultDevice, MTLDevice, MTLFunction, MTLIndexType, MTLIndirectCommandBuffer,
+    MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand,
+    MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLOrigin, MTLPipelineOption,
+    MTLPixelFormat, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage,
-    MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
-    MTLSamplerState, MTLSize, MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode,
-    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
-    MTLTileRenderPipelineDescriptor,
+    MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
+    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerAddressMode,
+    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLSize,
+    MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture,
+    MTLTextureDescriptor, MTLTextureType, MTLTextureUsage, MTLTileRenderPipelineDescriptor,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -58,9 +58,10 @@ pub struct MetalSide {
     /// object, not another name for one of the pools above.
     samplers: Vec<Retained<ProtocolObject<dyn MTLSamplerState>>>,
     command_buffers: Vec<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
-    /// The render pipeline states the case has made. One pool, because a mesh state and a tile
-    /// state are one Metal object (`MTLRenderPipelineState`) made from two descriptors.
-    render_pipelines: Vec<Retained<ProtocolObject<dyn MTLRenderPipelineState>>>,
+    /// The render pipeline states the case has made, each with the reflection its creation
+    /// answered where the case asked for one. One pool, because a mesh state, a tile state and a
+    /// graphics state are one Metal object (`MTLRenderPipelineState`) made from three descriptors.
+    render_pipelines: Vec<RenderPipeline>,
     /// The indirect command buffers the case has made.
     command_buffers_indirect: Vec<Retained<ProtocolObject<dyn MTLIndirectCommandBuffer>>>,
     /// The rasterization-rate maps the case has made. Its own pool: a rate map is its own
@@ -72,6 +73,29 @@ pub struct MetalSide {
     argument_residents: Vec<(Handle, Vec<Handle>)>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
+}
+
+/// One render pipeline state of the case's, with the reflection its creation answered.
+///
+/// The reflection lives here, beside the state, rather than in a pool of its own, because **Metal
+/// answers a reflection only at the state's creation**: `MTLRenderPipelineState`'s own
+/// `reflection` property is nil for a state an `MTLDevice` made. So a handle has to stand for the
+/// pair, and the state is kept so it outlives its own reflection. It is `None` for a state whose
+/// creation was not asked for one, which is every state but
+/// [`Side::render_pipeline_with_reflection`]'s.
+struct RenderPipeline {
+    state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    reflection: Option<Retained<MTLRenderPipelineReflection>>,
+}
+
+impl RenderPipeline {
+    /// A state whose creation was not asked for a reflection.
+    fn unreflected(state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>) -> Self {
+        Self {
+            state,
+            reflection: None,
+        }
+    }
 }
 
 impl MetalSide {
@@ -784,7 +808,7 @@ impl Side for MetalSide {
         for (at, command) in commands.iter().enumerate() {
             // SAFETY: `at` is below the buffer's command count, just set to `commands.len()`.
             let encoded = unsafe { made.indirectRenderCommandAtIndex(at) };
-            let state = self
+            let state = &self
                 .render_pipelines
                 .get(command.pipeline.0 as usize)
                 .ok_or_else(|| {
@@ -792,7 +816,8 @@ impl Side for MetalSide {
                         "NoSuchHandle",
                         format!("mesh pipeline {}", command.pipeline.0),
                     )
-                })?;
+                })?
+                .state;
             encoded.setRenderPipelineState(state);
             for (buffer, index) in &command.object_buffers {
                 let buffer = self.held(*buffer)?;
@@ -1026,6 +1051,174 @@ impl Side for MetalSide {
         Ok(())
     }
 
+    fn read_texture_over(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        before: &[u8],
+    ) -> Answer<Vec<u8>> {
+        let wanted = row_pitch as usize * size[1] as usize;
+        if before.len() != wanted {
+            return Err(Failure::named(
+                "TooFewBytes",
+                format!(
+                    "{} bytes before the read, and it reads {wanted}",
+                    before.len()
+                ),
+            ));
+        }
+        let texture = self.held_texture(texture)?;
+        let mut bytes = before.to_vec();
+        let region = MTLRegion {
+            origin: MTLOrigin { x: 0, y: 0, z: 0 },
+            size: MTLSize {
+                width: size[0] as usize,
+                height: size[1] as usize,
+                depth: 1,
+            },
+        };
+        // SAFETY: `bytes` is `size[1]` rows of `row_pitch` bytes, checked just above, which is the
+        // region the call reads, and no command buffer of this case is in flight.
+        unsafe {
+            texture.getBytes_bytesPerRow_fromRegion_mipmapLevel(
+                std::ptr::NonNull::from(bytes.as_mut_slice()).cast(),
+                row_pitch as usize,
+                region,
+                0,
+            );
+        }
+        Ok(bytes)
+    }
+
+    fn render_pipeline_with_reflection(
+        &mut self,
+        library: Handle,
+        vertex: &str,
+        fragment: &str,
+        attachment: PixelFormat,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = |name: &str| -> Answer<Retained<ProtocolObject<dyn MTLFunction>>> {
+            library
+                .newFunctionWithName(&NSString::from_str(name))
+                .ok_or_else(|| Failure::named("NewFunctionWithName", name.to_owned()))
+        };
+        let descriptor = MTLRenderPipelineDescriptor::new();
+        let (vertex, fragment) = (function(vertex)?, function(fragment)?);
+        descriptor.setVertexFunction(Some(&vertex));
+        descriptor.setFragmentFunction(Some(&fragment));
+        let attachments = descriptor.colorAttachments();
+        // SAFETY: attachment 0 is inside the fixed-size array every descriptor holds.
+        let first = unsafe { attachments.objectAtIndexedSubscript(0) };
+        first.setPixelFormat(MTLPixelFormat(attachment.as_raw() as usize));
+        let mut reflection = None;
+        let state = self
+            .device
+            .newRenderPipelineStateWithDescriptor_options_reflection_error(
+                &descriptor,
+                MTLPipelineOption::BindingInfo,
+                Some(&mut reflection),
+            )
+            .map_err(|error| {
+                Failure::named(
+                    "NewRenderPipelineState",
+                    error.localizedDescription().to_string(),
+                )
+            })?;
+        let reflection = reflection.ok_or_else(|| {
+            Failure::named(
+                "NoReflection",
+                "the creation answered no reflection".to_owned(),
+            )
+        })?;
+        Ok(keep(
+            &mut self.render_pipelines,
+            RenderPipeline {
+                state,
+                reflection: Some(reflection),
+            },
+        ))
+    }
+
+    fn texture_accesses(
+        &mut self,
+        pipeline: Handle,
+        stage: RenderStages,
+        indices: &[u64],
+    ) -> Answer<Vec<Option<BindingAccess>>> {
+        let reflection = self
+            .render_pipelines
+            .get(pipeline.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", pipeline.0)))?
+            .reflection
+            .as_ref()
+            .ok_or_else(|| {
+                // Not a Metal gap and not a venue's: the case asked a state whose creation never
+                // asked Metal for a reflection, and Metal cannot be asked afterwards.
+                Failure::named(
+                    "NoReflection",
+                    format!("pipeline {} was not created with one", pipeline.0),
+                )
+            })?;
+        // One stage, because that is how Metal states it: a binding list a stage. A union has no
+        // Metal answer, only a composition rule of ours.
+        let bindings = match stage.as_raw() {
+            raw if raw == RenderStages::VERTEX.as_raw() => reflection.vertexBindings(),
+            raw if raw == RenderStages::FRAGMENT.as_raw() => reflection.fragmentBindings(),
+            raw if raw == RenderStages::TILE.as_raw() => reflection.tileBindings(),
+            raw if raw == RenderStages::OBJECT.as_raw() => reflection.objectBindings(),
+            raw if raw == RenderStages::MESH.as_raw() => reflection.meshBindings(),
+            raw => {
+                return Err(Failure::unavailable(&format!(
+                    "texture_accesses of MTLRenderStages({raw:#x}), which Metal's reflection \
+                     states no binding list for"
+                )))
+            }
+        };
+        // Each texture binding covers `arrayLength` slots from its own index, and an argument the
+        // function never references is listed with `isUsed` false.
+        let mut covered: Vec<(u64, u64, BindingAccess, bool)> = Vec::new();
+        for binding in &bindings {
+            if binding.r#type() != MTLBindingType::Texture {
+                continue;
+            }
+            let access = match binding.access() {
+                MTLBindingAccess::ReadOnly => BindingAccess::ReadOnly,
+                MTLBindingAccess::ReadWrite => BindingAccess::ReadWrite,
+                MTLBindingAccess::WriteOnly => BindingAccess::WriteOnly,
+                other => {
+                    return Err(Failure::named(
+                        "UnknownBindingAccess",
+                        format!("MTLBindingAccess({})", other.0),
+                    ))
+                }
+            };
+            // SAFETY: `MTLTextureBinding` extends `MTLBinding` with `arrayLength`, and the
+            // binding answered `MTLBindingTypeTexture` just above, so it conforms to it. objc2
+            // offers no safe cast between two protocol objects, so the selector is sent directly.
+            let length: usize = unsafe { objc2::msg_send![&*binding, arrayLength] };
+            covered.push((
+                binding.index() as u64,
+                length as u64,
+                access,
+                binding.isUsed(),
+            ));
+        }
+        Ok(indices
+            .iter()
+            .map(|index| {
+                covered
+                    .iter()
+                    .find(|(first, length, _, _)| *index >= *first && *index < *first + *length)
+                    .and_then(|(_, _, access, used)| used.then_some(*access))
+            })
+            .collect())
+    }
+
     fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
         let library = self
             .libraries
@@ -1058,14 +1251,18 @@ impl Side for MetalSide {
                 None,
             )
             .map_err(|error| Failure::named("NewTileRenderPipelineState", error.to_string()))?;
-        Ok(keep(&mut self.render_pipelines, state))
+        Ok(keep(
+            &mut self.render_pipelines,
+            RenderPipeline::unreflected(state),
+        ))
     }
 
     fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
-        let state = self
+        let state = &self
             .render_pipelines
             .get(state.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0)))?;
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0)))?
+            .state;
         Ok(TileFacts {
             max_total_threads_per_threadgroup: state.maxTotalThreadsPerThreadgroup() as u64,
             threadgroup_size_matches_tile_size: state.threadgroupSizeMatchesTileSize(),
@@ -1239,7 +1436,10 @@ impl MetalSide {
                 None,
             )
             .map_err(|error| Failure::named("NewMeshRenderPipelineState", error.to_string()))?;
-        Ok(keep(&mut self.render_pipelines, state))
+        Ok(keep(
+            &mut self.render_pipelines,
+            RenderPipeline::unreflected(state),
+        ))
     }
 
     /// One command buffer and one render encoder over `targets`, each attachment cleared to zero
@@ -1323,9 +1523,13 @@ impl MetalSide {
     ) -> Answer<()> {
         match step {
             TileStep::Pipeline(state) => {
-                let state = self.render_pipelines.get(state.0 as usize).ok_or_else(|| {
-                    Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0))
-                })?;
+                let state = &self
+                    .render_pipelines
+                    .get(state.0 as usize)
+                    .ok_or_else(|| {
+                        Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0))
+                    })?
+                    .state;
                 encoder.setRenderPipelineState(state);
             }
             TileStep::TileBuffer {
@@ -1383,9 +1587,13 @@ impl MetalSide {
         };
         match step {
             MeshStep::Pipeline(state) => {
-                let state = self.render_pipelines.get(state.0 as usize).ok_or_else(|| {
-                    Failure::named("NoSuchHandle", format!("mesh pipeline {}", state.0))
-                })?;
+                let state = &self
+                    .render_pipelines
+                    .get(state.0 as usize)
+                    .ok_or_else(|| {
+                        Failure::named("NoSuchHandle", format!("mesh pipeline {}", state.0))
+                    })?
+                    .state;
                 encoder.setRenderPipelineState(state);
             }
             MeshStep::ObjectBuffer {

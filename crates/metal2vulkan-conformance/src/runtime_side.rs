@@ -18,20 +18,21 @@ use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
 use metal2vulkan::metal::{
-    BarrierScope, IndexType, IndirectCommandType, PixelFormat, PrimitiveType, RenderStages,
-    ResourceUsage, TextureUsage,
+    BarrierScope, BindingAccess, IndexType, IndirectCommandType, PixelFormat, PrimitiveType,
+    RenderStages, ResourceUsage, TextureUsage,
 };
 use metal2vulkan::pipeline::{
-    ColorAttachmentDescriptor, MeshPipelineDescriptor, StageInputAttributeDescriptor,
-    StageInputDescriptor, StageInputLayoutDescriptor, StageSource, TileRenderPipelineDescriptor,
+    ColorAttachmentDescriptor, MeshPipelineDescriptor, RenderPipelineDescriptor,
+    StageInputAttributeDescriptor, StageInputDescriptor, StageInputLayoutDescriptor, StageSource,
+    TileRenderPipelineDescriptor,
 };
 use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue, ComputePipelineState,
     Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer,
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
-    LoadAction, PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor,
-    RenderPipelineState, ResourceOptions, ResourceRef, SamplerState, SamplerStateOptions, Size,
-    StoreAction, Texture, TextureDescriptor,
+    LoadAction, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
+    RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState,
+    SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor,
 };
 use std::time::Duration;
 
@@ -59,8 +60,13 @@ pub struct RuntimeSide<'a> {
     /// itself lives in `buffers`.
     argument_residents: Vec<(Handle, Vec<Handle>)>,
     command_buffers: Vec<CommandBuffer>,
-    /// The render pipeline states the case has made. One pool, because a mesh state and a tile
-    /// state are one runtime object (`RenderPipelineState`) made from two descriptors.
+    /// The render pipeline states the case has made, each with whether its creation was asked
+    /// for a reflection. One pool, because a mesh state, a tile state and a graphics state are
+    /// one runtime object (`RenderPipelineState`) made from three descriptors.
+    ///
+    /// The runtime answers `texture_access` off the state itself, so nothing is kept beside it
+    /// here; the Metal side has to hold the reflection its creation answered, because Metal
+    /// answers one only then.
     render_pipelines: Vec<RenderPipelineState>,
     /// The indirect command buffers the case has made.
     command_buffers_indirect: Vec<IndirectCommandBuffer>,
@@ -1145,6 +1151,92 @@ impl Side for RuntimeSide<'_> {
         map.copy_parameter_data_to_buffer(&buffer, offset)
             .map_err(Failure::from_error)?;
         Ok(())
+    }
+
+    fn read_texture_over(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        before: &[u8],
+    ) -> Answer<Vec<u8>> {
+        let wanted = row_pitch as usize * size[1] as usize;
+        if before.len() != wanted {
+            return Err(Failure::named(
+                "TooFewBytes",
+                format!(
+                    "{} bytes before the read, and it reads {wanted}",
+                    before.len()
+                ),
+            ));
+        }
+        let texture = self.held_texture(texture)?;
+        let mut bytes = before.to_vec();
+        texture
+            .get_bytes(
+                &mut bytes,
+                row_pitch.into(),
+                0,
+                Region::new_2d(0, 0, size[0].into(), size[1].into()),
+                0,
+                0,
+            )
+            .map_err(Failure::from_error)?;
+        Ok(bytes)
+    }
+
+    fn render_pipeline_with_reflection(
+        &mut self,
+        library: Handle,
+        vertex: &str,
+        fragment: &str,
+        attachment: PixelFormat,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let stage = |name: &str| -> Answer<StageSource> {
+            Ok(StageSource::Function(
+                library
+                    .new_function_with_name(name)
+                    .map_err(Failure::from_error)?
+                    .function_descriptor(),
+            ))
+        };
+        let mut descriptor = RenderPipelineDescriptor::new(stage(vertex)?);
+        descriptor.fragment = Some(stage(fragment)?);
+        descriptor.color_attachments[0] = Some(ColorAttachmentDescriptor::new(attachment));
+        let options = PipelineOptions::new(PipelineOption::BINDING_INFO);
+        // The reflection out-parameter is asked for, as the case's Metal side asks for it, and
+        // dropped here: what the case reads is `texture_access`, the state's own answer, and the
+        // runtime's rule is that asking for a reflection may change what the creation computes.
+        let (state, _) = self
+            .device
+            .new_render_pipeline_state_with_reflection(&descriptor, &options)
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.render_pipelines, state))
+    }
+
+    fn texture_accesses(
+        &mut self,
+        pipeline: Handle,
+        stage: RenderStages,
+        indices: &[u64],
+    ) -> Answer<Vec<Option<BindingAccess>>> {
+        let state = self
+            .render_pipelines
+            .get(pipeline.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", pipeline.0)))?
+            .clone();
+        indices
+            .iter()
+            .map(|index| {
+                state
+                    .texture_access(stage, *index)
+                    .map_err(Failure::from_error)
+            })
+            .collect()
     }
 
     fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
