@@ -62,6 +62,7 @@
 //! tolerance. An intermediate byte would have put the 8-bit-to-float conversion in the answer,
 //! which is a different question and one `pixel_samplers` already asks with the notice it needs.
 
+use crate::allowance::Allowance;
 use crate::argument_encoders::{
     changed_node, changed_words, ArgumentDescriptorSpec, ArgumentWrite, ARGUMENT_WORD, BLANK,
 };
@@ -73,6 +74,7 @@ use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
 use crate::transcript::{ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value};
 use metal2vulkan::metal::{DataType, PixelFormat, SamplerAddressMode, SamplerMinMagFilter};
+use metal2vulkan_runtime::Degradation;
 
 /// The fixture whose kernel takes a texture and a sampler in an argument buffer. The same one
 /// `pixel_samplers` uses for its `arg` source, so this family needs no fixture of its own.
@@ -522,6 +524,33 @@ impl Case for ArgumentEncoderCase {
                 .collect::<Vec<u8>>(),
         ));
         Ok(inputs)
+    }
+
+    /// The notices a venue may announce for the sampling these cases do, each declared on its own
+    /// code.
+    ///
+    /// Nothing of a value is loosened here: every sampled word, the encoder's own facts and the
+    /// argument buffer's changed-word mask are compared exactly on every venue, which is what the
+    /// texels buy. The texture holds the sixteen patterns of each component at 0 or 255, so every
+    /// sampled component is exactly 0.0 or 1.0 wherever the sampling happens, and a filter, a
+    /// denormal or a decode a device does its own way cannot move a word of that.
+    ///
+    /// The three codes were measured, not guessed: Apple Metal announces none of them for this
+    /// work and llvmpipe announces all three, so a run on either venue alone would have left the
+    /// other's set undeclared. Only the two cases that dispatch declare them; the three that
+    /// encode and read back never sample, so a declaration there would never fire.
+    fn allowances(&self) -> Vec<Allowance> {
+        if !self.dispatches {
+            return Vec::new();
+        }
+        [
+            Degradation::DeviceTexelDenormals,
+            Degradation::FloatSampleFilter,
+            Degradation::SrgbTexelDecode,
+        ]
+        .into_iter()
+        .map(|notice| crate::replay::notice_allowance(notice.code()))
+        .collect()
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
