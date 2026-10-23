@@ -13,9 +13,10 @@
 //! ours, and a case that holds one must name what justifies it.
 
 use crate::case::{
-    Answer, Bindings, CommandDraw, Failure, Handle, MeshCommand, MeshFunctions, MeshStep,
-    PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion,
-    StageInput, TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
+    Answer, ArgumentSlot, Bindings, CommandDraw, Failure, Handle, MeshCommand, MeshFunctions,
+    MeshStep, PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side,
+    StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep,
+    Venue,
 };
 use crate::queue_slots::QueueSlots;
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
@@ -65,6 +66,10 @@ pub struct MetalSide {
     /// The rasterization-rate maps the case has made. Its own pool: a rate map is its own
     /// Metal object, not another name for one of the pools above.
     rate_maps: Vec<Retained<ProtocolObject<dyn MTLRasterizationRateMap>>>,
+    /// For each argument buffer the case has made, the textures it names: Metal keeps a resource a
+    /// kernel reaches through an argument buffer resident only where the encoder was told so, so
+    /// binding the buffer makes them resident. Not a pool — the buffer itself lives in `buffers`.
+    argument_residents: Vec<(Handle, Vec<Handle>)>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
 }
@@ -89,6 +94,7 @@ impl MetalSide {
             render_pipelines: Vec::new(),
             command_buffers_indirect: Vec::new(),
             rate_maps: Vec::new(),
+            argument_residents: Vec::new(),
             scratch: Scratch::new()?,
         })
     }
@@ -153,6 +159,21 @@ impl MetalSide {
             .iter()
             .map(|handle| self.held_sampler(*handle).map(Retained::from))
             .collect::<Answer<Vec<_>>>()?;
+        // The textures the bound argument buffers name: Metal keeps a resource reached through an
+        // argument buffer resident only where the encoder was told so.
+        let resident: Vec<Retained<ProtocolObject<dyn MTLResource>>> = self
+            .argument_residents
+            .iter()
+            .filter(|(buffer, _)| bindings.buffers.contains(buffer))
+            .flat_map(|(_, textures)| textures.clone())
+            .map(|handle| {
+                self.held_texture(handle).map(|texture| {
+                    let resource: &ProtocolObject<dyn MTLResource> =
+                        ProtocolObject::from_ref(texture);
+                    Retained::from(resource)
+                })
+            })
+            .collect::<Answer<Vec<_>>>()?;
         let state = self
             .pipelines
             .get(pipeline.0 as usize)
@@ -180,6 +201,9 @@ impl MetalSide {
             // SAFETY: the kernel declares a sampler at that slot, and the encoder outlives the
             // call.
             unsafe { encoder.setSamplerState_atIndex(Some(sampler), at) };
+        }
+        for resource in &resident {
+            encoder.useResource_usage(resource, MTLResourceUsage::Read);
         }
         for region in stage_in {
             match region {
@@ -580,6 +604,7 @@ impl Side for MetalSide {
         descriptor.setTAddressMode(address(spec.t_address_mode));
         descriptor.setBorderColor(MTLSamplerBorderColor(spec.border_color.as_raw() as usize));
         descriptor.setNormalizedCoordinates(spec.normalized_coordinates);
+        descriptor.setSupportArgumentBuffers(spec.support_argument_buffers);
         let sampler = self
             .device
             .newSamplerStateWithDescriptor(&descriptor)
@@ -590,6 +615,26 @@ impl Side for MetalSide {
                 )
             })?;
         Ok(keep(&mut self.samplers, sampler))
+    }
+
+    fn argument_buffer(&mut self, slots: &[ArgumentSlot]) -> Answer<Handle> {
+        let mut words = Vec::with_capacity(slots.len() * 8);
+        let mut named = Vec::new();
+        for slot in slots {
+            let id = match *slot {
+                ArgumentSlot::Texture(handle) => {
+                    named.push(handle);
+                    self.held_texture(handle)?.gpuResourceID().to_raw()
+                }
+                ArgumentSlot::Sampler(handle) => {
+                    self.held_sampler(handle)?.gpuResourceID().to_raw()
+                }
+            };
+            words.extend(id.to_le_bytes());
+        }
+        let buffer = self.buffer(&words)?;
+        self.argument_residents.push((buffer, named));
+        Ok(buffer)
     }
 
     fn dispatch(

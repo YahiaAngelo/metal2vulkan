@@ -147,6 +147,19 @@ impl TextureSpec {
     }
 }
 
+/// One slot of an argument buffer a case builds ([`Side::argument_buffer`]): the object whose GPU
+/// resource ID goes in that word.
+///
+/// The slots are what a kernel's argument-buffer struct declares, in `[[id(n)]]` order, and an
+/// eight-byte resource ID each, which is how Metal 3 and the runtime both write one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArgumentSlot {
+    /// A texture's resource ID. A side that binds the buffer makes this texture resident.
+    Texture(Handle),
+    /// A sampler state's resource ID. The state must support argument buffers.
+    Sampler(Handle),
+}
+
 /// A sampler state a case makes: `MTLSamplerDescriptor`'s facts a sampled case states.
 ///
 /// The vocabulary is Metal's own enumerations as the translator's public API names them, so a value
@@ -162,6 +175,10 @@ pub struct SamplerSpec {
     pub border_color: SamplerBorderColor,
     /// `normalizedCoordinates`: `false` is a pixel-coordinate sampler.
     pub normalized_coordinates: bool,
+    /// `supportArgumentBuffers`: whether the state has a GPU resource ID, which is what an
+    /// argument buffer needs of it ([`ArgumentSlot::Sampler`]). Metal gives a state made without
+    /// it no resource ID at all.
+    pub support_argument_buffers: bool,
 }
 
 impl SamplerSpec {
@@ -175,7 +192,15 @@ impl SamplerSpec {
             t_address_mode: SamplerAddressMode::ClampToEdge,
             border_color: SamplerBorderColor::TransparentBlack,
             normalized_coordinates: true,
+            support_argument_buffers: false,
         }
+    }
+
+    /// This state with `supportArgumentBuffers` set, so an argument buffer can name it.
+    #[must_use]
+    pub const fn for_argument_buffer(mut self) -> Self {
+        self.support_argument_buffers = true;
+        self
     }
 
     /// The defaults with `filter` as both the minifying and the magnifying filter.
@@ -196,18 +221,24 @@ impl SamplerSpec {
 
     /// The words the case's input fingerprint covers: every field, so a sampler state that moves
     /// is a change to the case's inputs.
+    ///
+    /// `supportArgumentBuffers` is a word only where it is set. The two forms still fingerprint
+    /// apart — one carries the word and the other does not — and a case that never puts a sampler
+    /// in an argument buffer fingerprints its state as it did before the field existed, so its
+    /// recording stays the answer to the inputs it was taken from.
     pub fn words(&self) -> Vec<u8> {
-        [
+        let mut words = vec![
             self.min_filter.as_raw(),
             self.mag_filter.as_raw(),
             self.s_address_mode.as_raw(),
             self.t_address_mode.as_raw(),
             self.border_color.as_raw(),
             u32::from(self.normalized_coordinates),
-        ]
-        .iter()
-        .flat_map(|word| word.to_le_bytes())
-        .collect()
+        ];
+        if self.support_argument_buffers {
+            words.push(1);
+        }
+        words.iter().flat_map(|word| word.to_le_bytes()).collect()
     }
 }
 
@@ -457,6 +488,22 @@ pub trait Side {
     fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
         let _ = spec;
         Err(Failure::unavailable("sampler"))
+    }
+
+    /// A buffer of the GPU resource IDs of `slots`, in order: the argument buffer a kernel reads
+    /// its texture and its sampler through, as Metal 3 writes one.
+    ///
+    /// The case states the slots and nothing about residency: a side that binds this buffer makes
+    /// the resources it names resident for the dispatch (`useResource:usage:`), because Metal
+    /// requires that of a resource a kernel reaches through an argument buffer rather than through
+    /// a slot. Binding it is binding a buffer, so it goes in [`Bindings::buffers`] at the index the
+    /// kernel declares.
+    ///
+    /// A sampler a case puts here must be one [`SamplerSpec::support_argument_buffers`] is set on:
+    /// Metal has no resource ID for a sampler state made without it.
+    fn argument_buffer(&mut self, slots: &[ArgumentSlot]) -> Answer<Handle> {
+        let _ = slots;
+        Err(Failure::unavailable("argument_buffer"))
     }
 
     /// One command buffer with one compute encoder: the pipeline set, `bindings` bound at 0 up per

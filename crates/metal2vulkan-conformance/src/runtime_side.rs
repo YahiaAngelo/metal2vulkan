@@ -8,10 +8,10 @@
 //! answers `NeverReturned` as a recorded fact rather than blocking the suite.
 
 use crate::case::{
-    Answer, Bindings, CommandDraw, Failure, Fill, Handle, IndirectReadBack, MeshCommand,
-    MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec,
-    ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
-    TilePipelineSpec, TileStep, Venue,
+    Answer, ArgumentSlot, Bindings, CommandDraw, Failure, Fill, Handle, IndirectReadBack,
+    MeshCommand, MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest,
+    SamplerSpec, ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec,
+    TileFacts, TilePipelineSpec, TileStep, Venue,
 };
 use crate::queue_slots::QueueSlots;
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
@@ -30,8 +30,8 @@ use metal2vulkan_runtime::{
     Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer,
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
     LoadAction, PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor,
-    RenderPipelineState, ResourceOptions, ResourceRef, SamplerState, Size, StoreAction, Texture,
-    TextureDescriptor,
+    RenderPipelineState, ResourceOptions, ResourceRef, SamplerState, SamplerStateOptions, Size,
+    StoreAction, Texture, TextureDescriptor,
 };
 use std::time::Duration;
 
@@ -53,6 +53,11 @@ pub struct RuntimeSide<'a> {
     /// The rasterization-rate maps the case has made. Its own pool: a rate map is its own
     /// runtime object, not another name for one of the pools above.
     rate_maps: Vec<RasterizationRateMap>,
+    /// For each argument buffer the case has made, the textures it names: a resource a kernel
+    /// reaches through an argument buffer rather than through a slot is resident only where the
+    /// encoder was told so, so binding the buffer makes them resident. Not a pool — the buffer
+    /// itself lives in `buffers`.
+    argument_residents: Vec<(Handle, Vec<Handle>)>,
     command_buffers: Vec<CommandBuffer>,
     /// The render pipeline states the case has made. One pool, because a mesh state and a tile
     /// state are one runtime object (`RenderPipelineState`) made from two descriptors.
@@ -76,6 +81,7 @@ impl<'a> RuntimeSide<'a> {
             textures: Vec::new(),
             samplers: Vec::new(),
             rate_maps: Vec::new(),
+            argument_residents: Vec::new(),
             command_buffers: Vec::new(),
             render_pipelines: Vec::new(),
             command_buffers_indirect: Vec::new(),
@@ -183,6 +189,15 @@ impl<'a> RuntimeSide<'a> {
             .iter()
             .map(|handle| self.held_sampler(*handle).cloned())
             .collect::<Answer<Vec<SamplerState>>>()?;
+        // The textures the bound argument buffers name: Metal keeps a resource reached through an
+        // argument buffer resident only where the encoder was told so.
+        let resident: Vec<Texture> = self
+            .argument_residents
+            .iter()
+            .filter(|(buffer, _)| bindings.buffers.contains(buffer))
+            .flat_map(|(_, textures)| textures.clone())
+            .map(|handle| self.held_texture(handle).cloned())
+            .collect::<Answer<Vec<Texture>>>()?;
         let state = self
             .pipelines
             .get(pipeline.0 as usize)
@@ -211,6 +226,11 @@ impl<'a> RuntimeSide<'a> {
         for (at, sampler) in states.iter().enumerate() {
             encoder
                 .set_sampler_state(Some(sampler), at as u32)
+                .map_err(Failure::from_error)?;
+        }
+        for texture in &resident {
+            encoder
+                .use_resource(ResourceRef::Texture(texture), ResourceUsage::READ)
                 .map_err(Failure::from_error)?;
         }
         for region in stage_in {
@@ -467,11 +487,31 @@ impl Side for RuntimeSide<'_> {
         descriptor.t_address_mode = spec.t_address_mode;
         descriptor.border_color = spec.border_color;
         descriptor.normalized_coordinates = spec.normalized_coordinates;
+        let mut options = SamplerStateOptions::default();
+        options.support_argument_buffers = spec.support_argument_buffers;
         let sampler = self
             .device
-            .new_sampler_state(&descriptor)
+            .new_sampler_state_with_options(&descriptor, options)
             .map_err(|error| Failure::of(&error))?;
         Ok(keep(&mut self.samplers, sampler))
+    }
+
+    fn argument_buffer(&mut self, slots: &[ArgumentSlot]) -> Answer<Handle> {
+        let mut words = Vec::with_capacity(slots.len() * 8);
+        let mut named = Vec::new();
+        for slot in slots {
+            let id = match *slot {
+                ArgumentSlot::Texture(handle) => {
+                    named.push(handle);
+                    self.held_texture(handle)?.gpu_resource_id().0
+                }
+                ArgumentSlot::Sampler(handle) => self.held_sampler(handle)?.gpu_resource_id().0,
+            };
+            words.extend(id.to_le_bytes());
+        }
+        let buffer = self.buffer(&words)?;
+        self.argument_residents.push((buffer, named));
+        Ok(buffer)
     }
 
     fn dispatch(
