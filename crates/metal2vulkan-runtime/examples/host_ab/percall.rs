@@ -188,6 +188,21 @@ pub const TIMED: [(&str, &str); 60] = [
     ("replace_region_256", "Texture::replace_region"),
 ];
 
+/// The counts of [`COUNTERS`] that moved between two readings of the side's own counts, and by
+/// how much: none at all on a side that keeps none.
+fn moved(from: &[(&'static str, f64)], to: &[(&'static str, f64)]) -> Vec<(&'static str, f64)> {
+    from.iter()
+        .filter(|(counted, _)| COUNTERS.contains(counted))
+        .filter_map(|(counted, before)| {
+            let now = to
+                .iter()
+                .find(|(name, _)| name == counted)
+                .map_or(0.0, |(_, count)| *count);
+            (now > *before).then_some((*counted, now - before))
+        })
+        .collect()
+}
+
 /// What one window measured: the calls' wall time on the calling thread, that thread's CPU time
 /// and the whole process's while they ran, then the same three of the drain after them.
 #[derive(Clone, Copy, Default)]
@@ -304,9 +319,12 @@ pub fn group<G: Gpu, S>(
         "ns/call",
         &mut [(each(sums.drain_process) - each(sums.drain_cpu)).max(0.0)],
     );
-    // One window more, this thread's allocations counted.
-    let made = g.pool(|| {
+    // One window more, this thread's allocations counted, and the runtime's counts read between
+    // the calls and the drain as well: what a call made the runtime do at the call, and what it
+    // left for the commit.
+    let (made, at_call, at_drain) = g.pool(|| {
         let mut state = prepare();
+        let opened = g.work_counts();
         let made = crate::allocs::counting(|| {
             let before = crate::allocs::this_thread();
             for i in 0..inner {
@@ -314,8 +332,10 @@ pub fn group<G: Gpu, S>(
             }
             crate::allocs::this_thread() - before
         });
+        let called = g.work_counts();
         drain(state);
-        made
+        let drained = g.work_counts();
+        (made, moved(&opened, &called), moved(&called, &drained))
     });
     emit(
         "percall",
@@ -323,6 +343,22 @@ pub fn group<G: Gpu, S>(
         "allocs/call",
         &mut [made as f64 / inner as f64],
     );
+    for (counted, count) in at_call {
+        emit(
+            "percall",
+            &metric(&format!("rt_{counted}_at_call")),
+            "count/call",
+            &mut [count / inner as f64],
+        );
+    }
+    for (counted, count) in at_drain {
+        emit(
+            "percall",
+            &metric(&format!("rt_{counted}_at_commit")),
+            "count/call",
+            &mut [count / inner as f64],
+        );
+    }
     // What the measured windows' calls made the runtime do, per call.
     for (counted, from) in &before {
         if !COUNTERS.contains(counted) {
