@@ -1132,6 +1132,59 @@ pub fn reach(drifted: &[Drift]) -> Reach {
     }
 }
 
+/// One count's drift across every case a comparison looked at.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Moved {
+    /// The count's dotted name.
+    pub count: String,
+    /// How many cases it differed in.
+    pub cases: usize,
+    /// How many of those are numbers the gate reads.
+    pub gated: usize,
+}
+
+/// Which counts a whole comparison moved, and in how many cases each, most cases first.
+///
+/// A re-measure after a landing reports its differences case by case, and that is the wrong shape
+/// for the first question anyone asks of it: whether the drift belongs to the thing that changed
+/// or is spread across the set. Case by case, 318 differences in 51 cases say nothing either way.
+/// By count, `images_started_on_the_host` in 40 cases and `host_texel_copies` in 38 name a
+/// host-copy path, and a reader can see at once that the submission counts moved with them rather
+/// than on their own.
+///
+/// The grouping is the counts themselves, which are structural. Grouping by case name would read
+/// families out of name prefixes, and a count's own name already says which path moved.
+pub fn counts_that_moved(per_case: &[Vec<Drift>]) -> Vec<Moved> {
+    let mut all: std::collections::BTreeMap<&str, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for case in per_case {
+        // A count is one case's drift however many lines it took, so the cases are counted once
+        // each: a count that moved twice in one case has not moved in two cases.
+        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for one in case {
+            if !seen.insert(one.count.as_str()) {
+                continue;
+            }
+            let row = all.entry(one.count.as_str()).or_insert((0, 0));
+            row.0 += 1;
+            if one.what.is_load_bearing() {
+                row.1 += 1;
+            }
+        }
+    }
+    let mut moved: Vec<Moved> = all
+        .into_iter()
+        .map(|(count, (cases, gated))| Moved {
+            count: count.to_owned(),
+            cases,
+            gated,
+        })
+        .collect();
+    // Most cases first, and by name within a tie so the order is the same on every run.
+    moved.sort_by(|a, b| b.cases.cmp(&a.cases).then_with(|| a.count.cmp(&b.count)));
+    moved
+}
+
 /// A count a run moved further than its bound.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Overrun {
