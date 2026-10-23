@@ -274,6 +274,33 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.render_descriptor_facts(library, spec)
     }
 
+    fn compute_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::compute_descriptors::DescriptorSpec<'_>,
+    ) -> Answer<crate::compute_descriptors::ComputeDescriptorFacts> {
+        let _span = self.watch("compute_descriptor_facts");
+        self.inner.compute_descriptor_facts(library, spec)
+    }
+
+    fn tile_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::tile_descriptors::DescriptorSpec<'_>,
+    ) -> Answer<crate::tile_descriptors::TileDescriptorFacts> {
+        let _span = self.watch("tile_descriptor_facts");
+        self.inner.tile_descriptor_facts(library, spec)
+    }
+
+    fn mesh_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::mesh_descriptors::DescriptorSpec<'_>,
+    ) -> Answer<crate::mesh_descriptors::MeshDescriptorFacts> {
+        let _span = self.watch("mesh_descriptor_facts");
+        self.inner.mesh_descriptor_facts(library, spec)
+    }
+
     fn heap_buffer_size_and_align(
         &mut self,
         query: &crate::device_queries::HeapBufferQuery,

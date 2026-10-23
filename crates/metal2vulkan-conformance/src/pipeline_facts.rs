@@ -154,7 +154,11 @@ fn label(held: &Option<String>) -> Value {
 }
 
 /// A `MTLSize` as a site records it, in the shape [`crate::case::RateMapFacts`] records one.
-fn size(axes: &[u64; 3]) -> Value {
+///
+/// Shared with the three descriptor families whose `requiredThreadsPerThreadgroup` is an
+/// `MTLSize` ([`crate::compute_descriptors`], [`crate::tile_descriptors`]), so one Metal size reads
+/// the same wherever a site records one.
+pub(crate) fn size(axes: &[u64; 3]) -> Value {
     Value::fields([
         ("width", Value::Uint(axes[0])),
         ("height", Value::Uint(axes[1])),

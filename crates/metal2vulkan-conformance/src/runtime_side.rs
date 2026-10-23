@@ -14,6 +14,10 @@ use crate::case::{
     RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion, StageInput,
     TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
+use crate::compute_descriptors::{
+    ComputeDescriptorFacts, DescriptorSpec as ComputeDescriptorSpec,
+    SuppliedLists as ComputeSuppliedLists, AWAY as COMPUTE_AWAY,
+};
 use crate::compute_pass::{
     ComputePass, ComputePassOutcome, ComputeStep, Dispatching, PassResource,
 };
@@ -29,6 +33,10 @@ use crate::indirect_commands::{
     CommandsMade, ComputeCommandStep, EncodedCommand, IcbDescriptor, RenderCommandStep,
 };
 use crate::library_facts::{FunctionDescriptorSpec, LibraryFacts};
+use crate::mesh_descriptors::{
+    DescriptorSpec as MeshDescriptorSpec, MeshDescriptorFacts, SuppliedLists as MeshSuppliedLists,
+    AWAY as MESH_AWAY,
+};
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -45,6 +53,10 @@ use crate::sparse_query::{
     TileSize,
 };
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
+use crate::tile_descriptors::{
+    DescriptorSpec as TileDescriptorSpec, SuppliedLists as TileSuppliedLists, TileDescriptorFacts,
+    AWAY as TILE_AWAY,
+};
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{
     ArgumentDescriptor, RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor,
@@ -205,24 +217,6 @@ fn read_descriptor(
     options: &PipelineOptions,
     supplied: bool,
 ) -> RenderDescriptorFacts {
-    let entry = |source: &StageSource| match source {
-        StageSource::Function(held) => held.function.info().name.to_owned(),
-        StageSource::Compiled(_) => COMPILED.to_owned(),
-    };
-    let stage_lists = |source: Option<&StageSource>| -> (u64, LinkedCounts) {
-        match source {
-            Some(StageSource::Function(held)) => (
-                held.libraries.preloaded.len() as u64,
-                LinkedCounts {
-                    functions: held.linked.functions.len() as u64,
-                    private_functions: held.linked.private_functions.len() as u64,
-                    binary_functions: held.linked.binary_functions.len() as u64,
-                    groups: held.linked.groups.len() as u64,
-                },
-            ),
-            _ => (0, LinkedCounts::default()),
-        }
-    };
     let (vertex_libraries, vertex_linked) = stage_lists(Some(&descriptor.vertex));
     let (fragment_libraries, fragment_linked) = stage_lists(descriptor.fragment.as_ref());
     let colors = (0..READ_COLORS)
@@ -246,22 +240,11 @@ fn read_descriptor(
             }
         })
         .collect();
-    let mutability = |stated: &std::collections::BTreeMap<u32, Mutability>| -> Vec<u32> {
-        (0..READ_BUFFERS)
-            .map(|index| {
-                stated
-                    .get(&index)
-                    .copied()
-                    .unwrap_or(Mutability::Default)
-                    .as_raw()
-            })
-            .collect()
-    };
     let tessellation = descriptor.tessellation.unwrap_or_default();
     RenderDescriptorFacts {
         label: options.label.clone(),
-        vertex_function: Some(entry(&descriptor.vertex)),
-        fragment_function: descriptor.fragment.as_ref().map(entry),
+        vertex_function: Some(stage_entry(&descriptor.vertex)),
+        fragment_function: descriptor.fragment.as_ref().map(stage_entry),
         vertex_descriptor: descriptor.vertex_descriptor.as_ref().map_or_else(
             || VertexDescriptorFacts::empty(READ_VERTEX_SLOTS),
             read_vertex_descriptor,
@@ -289,8 +272,8 @@ fn read_descriptor(
         tessellation_control_point_index_type: tessellation.control_point_index_type.as_raw(),
         tessellation_factor_step_function: tessellation.factor_step_function.as_raw(),
         tessellation_output_winding_order: tessellation.output_winding_order.as_raw(),
-        vertex_buffers: mutability(&descriptor.vertex_buffers),
-        fragment_buffers: mutability(&descriptor.fragment_buffers),
+        vertex_buffers: read_mutability(&descriptor.vertex_buffers),
+        fragment_buffers: read_mutability(&descriptor.fragment_buffers),
         support_indirect_command_buffers: descriptor.support_indirect_command_buffers,
         binary_archives: options.binary_archives.len() as u64,
         supplied: supplied.then_some(SuppliedLists {
@@ -307,9 +290,290 @@ fn read_descriptor(
     }
 }
 
+/// The mutability of a buffer-index map's first [`READ_BUFFERS`] slots, the runtime's side of
+/// Metal's pipeline buffer array.
+///
+/// A slot the map holds no entry for is `MTLMutabilityDefault`, which is the **runtime's claim
+/// about Metal's default** and what each family's Metal recording checks.
+fn read_mutability(stated: &std::collections::BTreeMap<u32, Mutability>) -> Vec<u32> {
+    (0..READ_BUFFERS)
+        .map(|index| {
+            stated
+                .get(&index)
+                .copied()
+                .unwrap_or(Mutability::Default)
+                .as_raw()
+        })
+        .collect()
+}
+
+/// How many objects one stage's supplied lists hold: its preloaded libraries, and the four lengths
+/// of its linked functions.
+///
+/// One function for every stage of every pipeline descriptor the suite reads, because the runtime
+/// takes all of them from the stage's own
+/// [`FunctionDescriptor`](metal2vulkan::pipeline::FunctionDescriptor) rather than from the
+/// descriptor. A stage made from an already-compiled function carries none of either.
+fn stage_lists(source: Option<&StageSource>) -> (u64, LinkedCounts) {
+    match source {
+        Some(StageSource::Function(held)) => (
+            held.libraries.preloaded.len() as u64,
+            LinkedCounts {
+                functions: held.linked.functions.len() as u64,
+                private_functions: held.linked.private_functions.len() as u64,
+                binary_functions: held.linked.binary_functions.len() as u64,
+                groups: held.linked.groups.len() as u64,
+            },
+        ),
+        _ => (0, LinkedCounts::default()),
+    }
+}
+
 /// The name a stage made from an already-compiled function records. No case of this family states
 /// one; a side that did would otherwise record the compiled stage as a function named nothing.
 const COMPILED: &str = "compiled";
+
+/// A stage's entry name, as a descriptor family's site records it.
+fn stage_entry(source: &StageSource) -> String {
+    match source {
+        StageSource::Function(held) => held.function.info().name.to_owned(),
+        StageSource::Compiled(_) => COMPILED.to_owned(),
+    }
+}
+
+/// Set every field [`COMPUTE_AWAY`] states on a compute pipeline descriptor and its creation
+/// options, each away from Metal's own default.
+///
+/// The label and the binary archives are the **creation's** options rather than the descriptor's
+/// fields, which is where the runtime takes `MTLComputePipelineDescriptor.label` and
+/// `binaryArchives` from, so a reset has to put both back.
+fn state_compute_descriptor(
+    descriptor: &mut metal2vulkan::pipeline::ComputePipelineDescriptor,
+    options: &mut PipelineOptions,
+) {
+    options.label = Some(COMPUTE_AWAY.label.to_owned());
+    descriptor.threadgroup_size_is_multiple_of_execution_width =
+        COMPUTE_AWAY.threadgroup_size_is_multiple_of_execution_width;
+    descriptor.max_total_threads_per_threadgroup =
+        Some(COMPUTE_AWAY.max_total_threads_per_threadgroup);
+    descriptor.support_indirect_command_buffers = COMPUTE_AWAY.support_indirect_command_buffers;
+    descriptor.support_adding_binary_functions = COMPUTE_AWAY.support_adding_binary_functions;
+    descriptor.max_call_stack_depth = COMPUTE_AWAY.max_call_stack_depth;
+    descriptor.required_threads_per_threadgroup =
+        Some(COMPUTE_AWAY.required_threads_per_threadgroup);
+    for (index, mutability) in COMPUTE_AWAY.buffers {
+        descriptor.buffers.insert(*index, *mutability);
+    }
+}
+
+/// What a compute pipeline descriptor and its options answer of themselves, the runtime's side of
+/// every getter of `MTLComputePipelineDescriptor`'s compared surface.
+///
+/// Metal's zero thread limit and zero required threadgroup size are the runtime's `None`, which is
+/// the claim the Metal leg's recording checks.
+fn read_compute_descriptor(
+    descriptor: &metal2vulkan::pipeline::ComputePipelineDescriptor,
+    options: &PipelineOptions,
+    supplied: bool,
+) -> ComputeDescriptorFacts {
+    let (preloaded, linked) = stage_lists(Some(&descriptor.kernel));
+    let required = descriptor
+        .required_threads_per_threadgroup
+        .unwrap_or([0; 3]);
+    ComputeDescriptorFacts {
+        label: options.label.clone(),
+        compute_function: Some(stage_entry(&descriptor.kernel)),
+        threadgroup_size_is_multiple_of_execution_width: descriptor
+            .threadgroup_size_is_multiple_of_execution_width,
+        max_total_threads_per_threadgroup: u64::from(
+            descriptor.max_total_threads_per_threadgroup.unwrap_or(0),
+        ),
+        buffers: read_mutability(&descriptor.buffers),
+        support_indirect_command_buffers: descriptor.support_indirect_command_buffers,
+        binary_archives: options.binary_archives.len() as u64,
+        supplied: supplied.then_some(ComputeSuppliedLists {
+            preloaded_libraries: preloaded,
+            // Metal's deprecated `insertLibraries` and its `preloadedLibraries` are one field of
+            // the runtime's, which is the claim the case's two sites check.
+            insert_libraries: preloaded,
+            linked_functions: linked,
+        }),
+        support_adding_binary_functions: descriptor.support_adding_binary_functions,
+        max_call_stack_depth: u64::from(descriptor.max_call_stack_depth),
+        required_threads_per_threadgroup: [
+            u64::from(required[0]),
+            u64::from(required[1]),
+            u64::from(required[2]),
+        ],
+    }
+}
+
+/// Set every field [`TILE_AWAY`] states on a tile render pipeline descriptor and its options.
+///
+/// `resets` says whether the caller will replace the descriptor afterwards, and the buffer
+/// mutability is stated only where it will not -- matching the Metal leg, which cannot state it on
+/// a descriptor it is about to reset
+/// ([`TileDescriptorFacts::buffers`](crate::tile_descriptors::TileDescriptorFacts::buffers)).
+fn state_tile_descriptor(
+    descriptor: &mut TileRenderPipelineDescriptor,
+    options: &mut PipelineOptions,
+    resets: bool,
+) {
+    options.label = Some(TILE_AWAY.label.to_owned());
+    descriptor.raster_sample_count = TILE_AWAY.raster_sample_count;
+    descriptor.threadgroup_size_matches_tile_size = TILE_AWAY.threadgroup_size_matches_tile_size;
+    descriptor.max_total_threads_per_threadgroup =
+        Some(TILE_AWAY.max_total_threads_per_threadgroup);
+    descriptor.support_adding_binary_functions = TILE_AWAY.support_adding_binary_functions;
+    descriptor.max_call_stack_depth = TILE_AWAY.max_call_stack_depth;
+    descriptor.required_threads_per_threadgroup = Some(TILE_AWAY.required_threads_per_threadgroup);
+    for (index, format) in TILE_AWAY.colors {
+        if let Some(slot) = descriptor.color_attachment_formats.get_mut(*index as usize) {
+            *slot = Some(*format);
+        }
+    }
+    if !resets {
+        for (index, mutability) in TILE_AWAY.buffers {
+            descriptor.buffers.insert(*index, *mutability);
+        }
+    }
+}
+
+/// What a tile render pipeline descriptor and its options answer of themselves.
+///
+/// A colour slot the descriptor holds no format for is Metal's `MTLPixelFormatInvalid`, which is
+/// the runtime's claim about Metal's default for a tile attachment.
+fn read_tile_descriptor(
+    descriptor: &TileRenderPipelineDescriptor,
+    options: &PipelineOptions,
+    supplied: bool,
+) -> TileDescriptorFacts {
+    let (preloaded, linked) = stage_lists(Some(&descriptor.tile));
+    let required = descriptor
+        .required_threads_per_threadgroup
+        .unwrap_or([0; 3]);
+    TileDescriptorFacts {
+        label: options.label.clone(),
+        tile_function: stage_entry(&descriptor.tile),
+        raster_sample_count: u64::from(descriptor.raster_sample_count),
+        colors: (0..READ_COLORS)
+            .map(|index| {
+                descriptor
+                    .color_attachment_formats
+                    .get(index as usize)
+                    .and_then(|slot| *slot)
+                    .unwrap_or(PixelFormat::Invalid)
+                    .as_raw()
+            })
+            .collect(),
+        threadgroup_size_matches_tile_size: descriptor.threadgroup_size_matches_tile_size,
+        // Read only where the Metal leg can read Metal's, which is every shape but the reset
+        // ([`TileDescriptorFacts::buffers`](crate::tile_descriptors::TileDescriptorFacts::buffers)).
+        buffers: supplied.then(|| read_mutability(&descriptor.buffers)),
+        max_total_threads_per_threadgroup: u64::from(
+            descriptor.max_total_threads_per_threadgroup.unwrap_or(0),
+        ),
+        binary_archives: options.binary_archives.len() as u64,
+        supplied: supplied.then_some(TileSuppliedLists {
+            preloaded_libraries: preloaded,
+            linked_functions: linked,
+        }),
+        support_adding_binary_functions: descriptor.support_adding_binary_functions,
+        max_call_stack_depth: u64::from(descriptor.max_call_stack_depth),
+        required_threads_per_threadgroup: [
+            u64::from(required[0]),
+            u64::from(required[1]),
+            u64::from(required[2]),
+        ],
+    }
+}
+
+/// Set every field [`MESH_AWAY`] states on a mesh render pipeline descriptor and its options.
+fn state_mesh_descriptor(descriptor: &mut MeshPipelineDescriptor, options: &mut PipelineOptions) {
+    options.label = Some(MESH_AWAY.label.to_owned());
+    descriptor.raster_sample_count = MESH_AWAY.raster_sample_count;
+    descriptor.alpha_to_coverage = MESH_AWAY.alpha_to_coverage;
+    descriptor.alpha_to_one = MESH_AWAY.alpha_to_one;
+    descriptor.rasterization_enabled = MESH_AWAY.rasterization_enabled;
+    descriptor.depth_format = Some(MESH_AWAY.depth_format);
+    descriptor.stencil_format = Some(MESH_AWAY.stencil_format);
+    descriptor.support_indirect_command_buffers = MESH_AWAY.support_indirect_command_buffers;
+    for color in MESH_AWAY.colors {
+        let mut attachment = ColorAttachmentDescriptor::new(color.pixel_format);
+        attachment.blending_enabled = color.blending_enabled;
+        attachment.source_rgb_blend_factor = color.source_rgb;
+        attachment.destination_rgb_blend_factor = color.destination_rgb;
+        attachment.rgb_blend_operation = color.rgb_operation;
+        attachment.source_alpha_blend_factor = color.source_alpha;
+        attachment.destination_alpha_blend_factor = color.destination_alpha;
+        attachment.alpha_blend_operation = color.alpha_operation;
+        attachment.write_mask = color.write_mask;
+        if let Some(slot) = descriptor.color_attachments.get_mut(color.index as usize) {
+            *slot = Some(attachment);
+        }
+    }
+}
+
+/// What a mesh render pipeline descriptor and its options answer of their compared surface.
+///
+/// An attachment the descriptor holds no entry for is Metal's `MTLPixelFormatInvalid` with blending
+/// off and every channel written, which is the runtime's claim about Metal's default and what the
+/// Metal leg's recording checks.
+fn read_mesh_descriptor(
+    descriptor: &MeshPipelineDescriptor,
+    options: &PipelineOptions,
+    supplied: bool,
+) -> MeshDescriptorFacts {
+    let (_, object_linked) = stage_lists(descriptor.object.as_ref());
+    let (_, mesh_linked) = stage_lists(Some(&descriptor.mesh));
+    let (_, fragment_linked) = stage_lists(descriptor.fragment.as_ref());
+    MeshDescriptorFacts {
+        label: options.label.clone(),
+        object_function: descriptor.object.as_ref().map(stage_entry),
+        mesh_function: Some(stage_entry(&descriptor.mesh)),
+        fragment_function: descriptor.fragment.as_ref().map(stage_entry),
+        raster_sample_count: u64::from(descriptor.raster_sample_count),
+        alpha_to_coverage_enabled: descriptor.alpha_to_coverage,
+        alpha_to_one_enabled: descriptor.alpha_to_one,
+        rasterization_enabled: descriptor.rasterization_enabled,
+        colors: (0..READ_COLORS)
+            .map(|index| {
+                let held = descriptor
+                    .color_attachments
+                    .get(index as usize)
+                    .and_then(Option::as_ref)
+                    .copied()
+                    .unwrap_or_else(|| ColorAttachmentDescriptor::new(PixelFormat::Invalid));
+                ColorFacts {
+                    pixel_format: held.pixel_format.as_raw(),
+                    blending_enabled: held.blending_enabled,
+                    source_rgb: held.source_rgb_blend_factor.as_raw(),
+                    destination_rgb: held.destination_rgb_blend_factor.as_raw(),
+                    rgb_operation: held.rgb_blend_operation.as_raw(),
+                    source_alpha: held.source_alpha_blend_factor.as_raw(),
+                    destination_alpha: held.destination_alpha_blend_factor.as_raw(),
+                    alpha_operation: held.alpha_blend_operation.as_raw(),
+                    write_mask: held.write_mask.as_raw(),
+                }
+            })
+            .collect(),
+        depth_attachment_pixel_format: descriptor
+            .depth_format
+            .unwrap_or(PixelFormat::Invalid)
+            .as_raw(),
+        stencil_attachment_pixel_format: descriptor
+            .stencil_format
+            .unwrap_or(PixelFormat::Invalid)
+            .as_raw(),
+        support_indirect_command_buffers: descriptor.support_indirect_command_buffers,
+        binary_archives: options.binary_archives.len() as u64,
+        supplied: supplied.then_some(MeshSuppliedLists {
+            object_linked_functions: object_linked,
+            mesh_linked_functions: mesh_linked,
+            fragment_linked_functions: fragment_linked,
+        }),
+    }
+}
 
 /// What a vertex descriptor's first [`READ_VERTEX_SLOTS`] attribute and layout slots answer, the
 /// runtime's side of Metal's two arrays.
@@ -1991,6 +2255,116 @@ impl Side for RuntimeSide<'_> {
             }
         }
         Ok(read_descriptor(&descriptor, &options, !spec.shape.resets()))
+    }
+
+    fn compute_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &ComputeDescriptorSpec<'_>,
+    ) -> Answer<ComputeDescriptorFacts> {
+        let held = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let stage = || -> Answer<StageSource> {
+            Ok(StageSource::Function(
+                held.new_function_with_name(spec.kernel)
+                    .map_err(Failure::from_error)?
+                    .function_descriptor(),
+            ))
+        };
+        // The runtime has no mutable descriptor object, so Metal's `init` is
+        // `ComputePipelineDescriptor::new` and Metal's `reset` is the same call again. The stating
+        // still runs for a reset shape — the point of the shape is that what the reset undoes was
+        // really set — and then the whole value is replaced, which is the only reset our side has.
+        let mut descriptor = metal2vulkan::pipeline::ComputePipelineDescriptor::new(stage()?);
+        let mut options = PipelineOptions::default();
+        if spec.shape.sets() {
+            state_compute_descriptor(&mut descriptor, &mut options);
+        }
+        if spec.shape.resets() {
+            descriptor = metal2vulkan::pipeline::ComputePipelineDescriptor::new(stage()?);
+            options = PipelineOptions::default();
+        }
+        Ok(read_compute_descriptor(
+            &descriptor,
+            &options,
+            !spec.shape.resets(),
+        ))
+    }
+
+    fn tile_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &TileDescriptorSpec<'_>,
+    ) -> Answer<TileDescriptorFacts> {
+        let held = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let stage = || -> Answer<StageSource> {
+            Ok(StageSource::Function(
+                held.new_function_with_name(spec.tile)
+                    .map_err(Failure::from_error)?
+                    .function_descriptor(),
+            ))
+        };
+        let mut descriptor = TileRenderPipelineDescriptor::new(stage()?);
+        let mut options = PipelineOptions::default();
+        if spec.shape.sets() {
+            state_tile_descriptor(&mut descriptor, &mut options, spec.shape.resets());
+        }
+        if spec.shape.resets() {
+            descriptor = TileRenderPipelineDescriptor::new(stage()?);
+            options = PipelineOptions::default();
+        }
+        Ok(read_tile_descriptor(
+            &descriptor,
+            &options,
+            !spec.shape.resets(),
+        ))
+    }
+
+    fn mesh_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &MeshDescriptorSpec<'_>,
+    ) -> Answer<MeshDescriptorFacts> {
+        let held = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let stage = |entry: &str| -> Answer<StageSource> {
+            Ok(StageSource::Function(
+                held.new_function_with_name(entry)
+                    .map_err(Failure::from_error)?
+                    .function_descriptor(),
+            ))
+        };
+        let fresh = |descriptor: &mut MeshPipelineDescriptor| -> Answer<()> {
+            descriptor.fragment = Some(stage(spec.fragment)?);
+            descriptor.object = match spec.object {
+                Some(object) => Some(stage(object)?),
+                None => None,
+            };
+            Ok(())
+        };
+        let mut descriptor = MeshPipelineDescriptor::new(stage(spec.mesh)?);
+        let mut options = PipelineOptions::default();
+        fresh(&mut descriptor)?;
+        if spec.shape.sets() {
+            state_mesh_descriptor(&mut descriptor, &mut options);
+        }
+        if spec.shape.resets() {
+            descriptor = MeshPipelineDescriptor::new(stage(spec.mesh)?);
+            options = PipelineOptions::default();
+            fresh(&mut descriptor)?;
+        }
+        Ok(read_mesh_descriptor(
+            &descriptor,
+            &options,
+            !spec.shape.resets(),
+        ))
     }
 
     fn function_facts(

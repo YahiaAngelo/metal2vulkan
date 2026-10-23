@@ -59,6 +59,7 @@ pub mod compressed_decode;
 pub mod compressed_moves;
 pub mod compressed_views;
 pub mod compute_encoder_commands;
+pub mod compute_pipeline_descriptors;
 pub mod compute_render_chains;
 pub mod compute_threadgroups;
 pub mod denormal_word_fetches;
@@ -97,6 +98,7 @@ pub mod math_routines;
 pub mod mesh_barriers;
 pub mod mesh_commands;
 pub mod mesh_draws;
+pub mod mesh_pipeline_descriptors;
 pub mod nearest_positions;
 pub mod norm_storage_writes;
 pub mod pass_bytes;
@@ -133,6 +135,7 @@ pub mod texture_accesses;
 pub mod texture_buffer_fills;
 pub mod texture_fills;
 pub mod textures;
+pub mod tile_pipeline_descriptors;
 pub mod tile_threadgroups;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
@@ -181,6 +184,15 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in pipeline_descriptors::all() {
+        cases.push(Box::new(case));
+    }
+    for case in compute_pipeline_descriptors::all() {
+        cases.push(Box::new(case));
+    }
+    for case in tile_pipeline_descriptors::all() {
+        cases.push(Box::new(case));
+    }
+    for case in mesh_pipeline_descriptors::all() {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {

@@ -839,6 +839,55 @@ pub trait Side {
         Err(Failure::unavailable("render_descriptor_facts"))
     }
 
+    /// What a compute pipeline **descriptor** answers of itself
+    /// ([`ComputeDescriptorFacts`](crate::compute_descriptors::ComputeDescriptorFacts)): the whole
+    /// of `MTLComputePipelineDescriptor`'s own surface, in the shape
+    /// [`spec`](crate::compute_descriptors::DescriptorSpec) states.
+    ///
+    /// One call, for the reason [`Side::render_descriptor_facts`] gives: the descriptor is mutable
+    /// and the observation is what it answers **after** a stated sequence of setters, a `reset`
+    /// among them, so a case cannot state it as independent calls over an object neither side's
+    /// handle space holds. No pipeline is made from the descriptor, which is what keeps the family
+    /// off the GPU.
+    fn compute_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::compute_descriptors::DescriptorSpec<'_>,
+    ) -> Answer<crate::compute_descriptors::ComputeDescriptorFacts> {
+        let _ = (library, spec);
+        Err(Failure::unavailable("compute_descriptor_facts"))
+    }
+
+    /// What a tile render pipeline **descriptor** answers of itself
+    /// ([`TileDescriptorFacts`](crate::tile_descriptors::TileDescriptorFacts)): the whole of
+    /// `MTLTileRenderPipelineDescriptor`'s own surface, in the shape
+    /// [`spec`](crate::tile_descriptors::DescriptorSpec) states.
+    ///
+    /// [`Side::tile_pipeline`] is the **state**'s side of the same descriptor: what a made tile
+    /// pipeline then answers. This is the descriptor before any state exists, which is where
+    /// Metal's defaults are.
+    fn tile_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::tile_descriptors::DescriptorSpec<'_>,
+    ) -> Answer<crate::tile_descriptors::TileDescriptorFacts> {
+        let _ = (library, spec);
+        Err(Failure::unavailable("tile_descriptor_facts"))
+    }
+
+    /// What a mesh render pipeline **descriptor** answers of itself
+    /// ([`MeshDescriptorFacts`](crate::mesh_descriptors::MeshDescriptorFacts)): the whole of
+    /// `MTLMeshRenderPipelineDescriptor`'s implemented surface, in the shape
+    /// [`spec`](crate::mesh_descriptors::DescriptorSpec) states.
+    fn mesh_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::mesh_descriptors::DescriptorSpec<'_>,
+    ) -> Answer<crate::mesh_descriptors::MeshDescriptorFacts> {
+        let _ = (library, spec);
+        Err(Failure::unavailable("mesh_descriptor_facts"))
+    }
+
     /// `newFunctionWithName:` of `entry`, or `newFunctionWithName:constantValues:error:` where
     /// `constants` holds a value, and what the function then answers about **itself**
     /// ([`crate::function_facts::FunctionFacts`]).

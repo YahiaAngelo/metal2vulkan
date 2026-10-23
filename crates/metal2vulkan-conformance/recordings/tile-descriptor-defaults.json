@@ -1,0 +1,343 @@
+{
+  "format": 1,
+  "case": "tile-descriptor-defaults",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "k10ts_tile_order.ll",
+      "entry": "k10ts_tile_order",
+      "source_sha256": "79263146113cf8253e6407c59a97f9b6386f4b735d67c2cdf5f05d6908d626b9"
+    },
+    {
+      "fixture": "k10ts_tile_order.air.ll",
+      "entry": "k10ts_tile_order",
+      "source_sha256": "f78d54ea1a28510e239ac7b5f810d9d44a079304cf3fbc0c7b0208118e97230b"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "79263146113cf8253e6407c59a97f9b6386f4b735d67c2cdf5f05d6908d626b9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f78d54ea1a28510e239ac7b5f810d9d44a079304cf3fbc0c7b0208118e97230b"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8d7793bd24ab90ec0a45b4d650c9e31e2d66a291320f52db281be8efb07f3074"
+                        }
+                      }
+                    },
+                    {
+                      "name": "slots",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f9815db16d8d228cca743c75d4cb4ddffd3a6d7cd6518658c9d3bd0e4fe27c82"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "facts",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "label",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "None",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "tile_function",
+                      "observed": {
+                        "value": {
+                          "lines": [
+                            "k10ts_tile_order"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "raster_sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "color_attachment_formats",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLPixelFormatInvalid"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 0
+                                }
+                              }
+                            },
+                            {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLPixelFormatInvalid"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 0
+                                }
+                              }
+                            },
+                            {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLPixelFormatInvalid"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 0
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "threadgroup_size_matches_tile_size",
+                      "observed": {
+                        "value": {
+                          "bool": false
+                        }
+                      }
+                    },
+                    {
+                      "name": "max_total_threads_per_threadgroup",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "binary_archives",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "support_adding_binary_functions",
+                      "observed": {
+                        "value": {
+                          "bool": false
+                        }
+                      }
+                    },
+                    {
+                      "name": "max_call_stack_depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "required_threads_per_threadgroup",
+                      "observed": {
+                        "value": {
+                          "fields": {
+                            "depth": {
+                              "uint": 0
+                            },
+                            "height": {
+                              "uint": 0
+                            },
+                            "width": {
+                              "uint": 0
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "tile_buffers",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLMutabilityDefault"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 0
+                                }
+                              }
+                            },
+                            {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLMutabilityDefault"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 0
+                                }
+                              }
+                            },
+                            {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLMutabilityDefault"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 0
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "preloaded_libraries",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "linked_functions",
+                      "observed": {
+                        "value": {
+                          "fields": {
+                            "binary_functions": {
+                              "uint": 0
+                            },
+                            "functions": {
+                              "uint": 0
+                            },
+                            "groups": {
+                              "uint": 0
+                            },
+                            "private_functions": {
+                              "uint": 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

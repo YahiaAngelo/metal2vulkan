@@ -1,0 +1,566 @@
+{
+  "format": 1,
+  "case": "mesh-descriptor-reset",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "mesh_draws.ll",
+      "entry": "mesh_draws_mesh",
+      "source_sha256": "3d3689026db57166984f585d018b63c37c47a9cd03915380bdd1453b6ad8b3fa"
+    },
+    {
+      "fixture": "mesh_draws.air.ll",
+      "entry": "mesh_draws_mesh",
+      "source_sha256": "fa449657f08460681d54420b735459f6c7fc6a5ee92dd56637e8f01a4c3d031c"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3d3689026db57166984f585d018b63c37c47a9cd03915380bdd1453b6ad8b3fa"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "fa449657f08460681d54420b735459f6c7fc6a5ee92dd56637e8f01a4c3d031c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "7ab0da58d20d16028e75a2dc6ea1366856ab83f5e4b6eda20d6b7aa2eba028e5"
+                        }
+                      }
+                    },
+                    {
+                      "name": "slots",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9d9f290527a6be626a8f5985b26e19b237b44872b03631811df4416fc1713178"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "facts",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "label",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "None",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "object_function",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Some",
+                            "payload": {
+                              "lines": [
+                                "mesh_draws_object"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "mesh_function",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Some",
+                            "payload": {
+                              "lines": [
+                                "mesh_draws_mesh"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "fragment_function",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Some",
+                            "payload": {
+                              "lines": [
+                                "mesh_draws_fragment"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "raster_sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "alpha_to_coverage_enabled",
+                      "observed": {
+                        "value": {
+                          "bool": false
+                        }
+                      }
+                    },
+                    {
+                      "name": "alpha_to_one_enabled",
+                      "observed": {
+                        "value": {
+                          "bool": false
+                        }
+                      }
+                    },
+                    {
+                      "name": "rasterization_enabled",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    },
+                    {
+                      "name": "color_attachments",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "alpha_blend_operation": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendOperationAdd"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "blending_enabled": {
+                                  "bool": false
+                                },
+                                "destination_alpha_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorZero"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "destination_rgb_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorZero"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "pixel_format": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLPixelFormatInvalid"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "rgb_blend_operation": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendOperationAdd"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "source_alpha_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorOne"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 1
+                                    }
+                                  }
+                                },
+                                "source_rgb_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorOne"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 1
+                                    }
+                                  }
+                                },
+                                "write_mask": {
+                                  "uint": 15
+                                }
+                              }
+                            },
+                            {
+                              "fields": {
+                                "alpha_blend_operation": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendOperationAdd"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "blending_enabled": {
+                                  "bool": false
+                                },
+                                "destination_alpha_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorZero"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "destination_rgb_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorZero"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "pixel_format": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLPixelFormatInvalid"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "rgb_blend_operation": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendOperationAdd"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "source_alpha_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorOne"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 1
+                                    }
+                                  }
+                                },
+                                "source_rgb_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorOne"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 1
+                                    }
+                                  }
+                                },
+                                "write_mask": {
+                                  "uint": 15
+                                }
+                              }
+                            },
+                            {
+                              "fields": {
+                                "alpha_blend_operation": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendOperationAdd"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "blending_enabled": {
+                                  "bool": false
+                                },
+                                "destination_alpha_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorZero"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "destination_rgb_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorZero"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "pixel_format": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLPixelFormatInvalid"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "rgb_blend_operation": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendOperationAdd"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 0
+                                    }
+                                  }
+                                },
+                                "source_alpha_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorOne"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 1
+                                    }
+                                  }
+                                },
+                                "source_rgb_blend_factor": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLBlendFactorOne"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 1
+                                    }
+                                  }
+                                },
+                                "write_mask": {
+                                  "uint": 15
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth_attachment_pixel_format",
+                      "observed": {
+                        "value": {
+                          "fields": {
+                            "name": {
+                              "lines": [
+                                "MTLPixelFormatInvalid"
+                              ]
+                            },
+                            "raw": {
+                              "uint": 0
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "stencil_attachment_pixel_format",
+                      "observed": {
+                        "value": {
+                          "fields": {
+                            "name": {
+                              "lines": [
+                                "MTLPixelFormatInvalid"
+                              ]
+                            },
+                            "raw": {
+                              "uint": 0
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "support_indirect_command_buffers",
+                      "observed": {
+                        "value": {
+                          "bool": false
+                        }
+                      }
+                    },
+                    {
+                      "name": "binary_archives",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

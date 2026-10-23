@@ -1,0 +1,315 @@
+{
+  "format": 1,
+  "case": "compute-descriptor-set",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "a27_ob1_threadgroup.ll",
+      "entry": "ob1_threadgroup",
+      "source_sha256": "0c98a096e60fd50b4a119ac1539c8907a7ca14df5c4c0ea9163bae96240c1235"
+    },
+    {
+      "fixture": "a27_ob1_threadgroup.air.ll",
+      "entry": "ob1_threadgroup",
+      "source_sha256": "6e2d8bc010bac734195035dcb2466f5947642236e3ec187537ef47b6ff23815e"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "0c98a096e60fd50b4a119ac1539c8907a7ca14df5c4c0ea9163bae96240c1235"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6e2d8bc010bac734195035dcb2466f5947642236e3ec187537ef47b6ff23815e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ffddf88741c4612662771dffa2f3d1deec6d1b69d01e024a1cefaf49e50f5ea3"
+                        }
+                      }
+                    },
+                    {
+                      "name": "slots",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9d9f290527a6be626a8f5985b26e19b237b44872b03631811df4416fc1713178"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "facts",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "label",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Some",
+                            "payload": {
+                              "lines": [
+                                "conformance-compute-descriptor"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "compute_function",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Some",
+                            "payload": {
+                              "lines": [
+                                "ob1_threadgroup"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "threadgroup_size_is_multiple_of_execution_width",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    },
+                    {
+                      "name": "max_total_threads_per_threadgroup",
+                      "observed": {
+                        "value": {
+                          "uint": 96
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffers",
+                      "observed": {
+                        "value": {
+                          "list": [
+                            {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLMutabilityImmutable"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 2
+                                }
+                              }
+                            },
+                            {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLMutabilityDefault"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 0
+                                }
+                              }
+                            },
+                            {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLMutabilityMutable"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 1
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "support_indirect_command_buffers",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    },
+                    {
+                      "name": "binary_archives",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "support_adding_binary_functions",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    },
+                    {
+                      "name": "max_call_stack_depth",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "required_threads_per_threadgroup",
+                      "observed": {
+                        "value": {
+                          "fields": {
+                            "depth": {
+                              "uint": 2
+                            },
+                            "height": {
+                              "uint": 6
+                            },
+                            "width": {
+                              "uint": 8
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "preloaded_libraries",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "insert_libraries",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "linked_functions",
+                      "observed": {
+                        "value": {
+                          "fields": {
+                            "binary_functions": {
+                              "uint": 0
+                            },
+                            "functions": {
+                              "uint": 0
+                            },
+                            "groups": {
+                              "uint": 0
+                            },
+                            "private_functions": {
+                              "uint": 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

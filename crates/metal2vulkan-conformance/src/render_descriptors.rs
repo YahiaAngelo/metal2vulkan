@@ -89,6 +89,12 @@ pub const READ_VERTEX_SLOTS: u32 = 2;
 const UNNAMED: &str = "unnamed";
 
 /// Which of the three shapes a case states.
+///
+/// The three other pipeline descriptors' families state the same three
+/// ([`crate::compute_descriptors`], [`crate::tile_descriptors`], [`crate::mesh_descriptors`]), and
+/// share this one enumeration rather than declaring four of their own: what a shape means — nothing
+/// set, everything set, everything set and reset — is the same question of every descriptor Metal
+/// has, and a family that spelled it again would be a second vocabulary for one contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
     /// The stage functions and nothing else: Metal's default for every other field.
@@ -102,7 +108,7 @@ pub enum Shape {
 
 impl Shape {
     /// The ordinal a case's input fingerprint carries.
-    const fn word(self) -> u8 {
+    pub const fn word(self) -> u8 {
         match self {
             Shape::Defaults => 0,
             Shape::Set => 1,
@@ -552,7 +558,7 @@ pub struct RenderDescriptorFacts {
 /// gives the ordinal, beside the ordinal itself, in the shape [`crate::function_facts`] records
 /// one. An ordinal no enumeration of ours names is recorded all the same, under [`UNNAMED`], so a
 /// value Apple added in a release we have not seen compares rather than refusing.
-fn ordinal<T: TryFrom<u32>>(raw: u32, name: impl Fn(T) -> &'static str) -> Value {
+pub(crate) fn ordinal<T: TryFrom<u32>>(raw: u32, name: impl Fn(T) -> &'static str) -> Value {
     let named = T::try_from(raw).ok().map_or(UNNAMED, name);
     Value::fields([
         ("name", Value::Lines(vec![named.to_owned()])),
@@ -566,7 +572,7 @@ fn bits(raw: u32) -> Value {
 }
 
 /// `Option<String>` as a site records it.
-fn optional(held: &Option<String>) -> Value {
+pub(crate) fn optional(held: &Option<String>) -> Value {
     match held {
         Some(held) => Value::Variant {
             name: "Some".to_owned(),
@@ -578,7 +584,7 @@ fn optional(held: &Option<String>) -> Value {
 
 impl LinkedCounts {
     /// The four lengths as a site records them.
-    fn value(&self) -> Value {
+    pub(crate) fn value(&self) -> Value {
         Value::fields([
             ("functions", Value::Uint(self.functions)),
             ("private_functions", Value::Uint(self.private_functions)),
@@ -590,7 +596,7 @@ impl LinkedCounts {
 
 impl ColorFacts {
     /// One attachment's answers as a site records them.
-    fn value(&self) -> Value {
+    pub(crate) fn value(&self) -> Value {
         Value::fields([
             (
                 "pixel_format",

@@ -621,3 +621,13 @@ driver's. Each is open work.
   blends, a format's operation was not measured or the function writes an attachment itself, the
   pipeline is refused (`PrivateRenderField::LogicOperation`), where the function could apply
   Metal's operation to the codes it reads and writes in the pixel interlock.
+
+- **A reset compute pipeline descriptor keeps its thread shape on Metal and not here.**
+  `MTLComputePipelineDescriptor.reset` restores the label, the buffer mutability,
+  `supportIndirectCommandBuffers`, `supportAddingBinaryFunctions` and `maxCallStackDepth`, and
+  leaves `threadGroupSizeIsMultipleOfThreadExecutionWidth`, `maxTotalThreadsPerThreadgroup` and
+  `requiredThreadsPerThreadgroup` as the program set them (measured on an Apple M3 Max, macOS
+  27.0.1; the tile and mesh descriptors' resets restore every field). The runtime's counterpart is
+  `ComputePipelineDescriptor::new`, a fresh value that resets all nine, so a consumer that resets
+  loses the thread shape where Metal keeps it. Nothing announces it.
+  `compute-descriptor-reset` holds it.
