@@ -1979,3 +1979,71 @@ fn record_mode_refuses_a_row_metal_does_not_return_from() {
     assert_eq!(answer.provenance.measured_elsewhere(), None);
     assert_eq!(answer.validated, Validated::NotRun);
 }
+
+#[test]
+fn the_report_says_how_many_answers_came_from_another_chip() {
+    // 53 recordings carried an Apple M4's values and `conformance cases` showed it only through a
+    // `Debug` print, so a run could read entirely green while a fifth of its answers came from a
+    // machine that is gone. The suite's own rule is that a recording of another oracle is stale;
+    // a carried table is the one place that rule is relaxed, so the relaxation has to be counted
+    // where a reader of the report sees it.
+    use crate::recording::APPLE_M4;
+    let carried = |case: &dyn Case, chip: &str| {
+        let bytes = words(&[1, 2]);
+        let transcript = WordsCase::new(case.name(), 2).transcript(bytes, "Completed", &[]);
+        Recording::new(
+            case.name(),
+            Vec::new(),
+            vec![RecordedAnswer {
+                key: crate::recording::OracleKey::current(MetalLevel::NEWEST),
+                provenance: Provenance::Carried {
+                    from: "a probe this tree holds".to_owned(),
+                    measured_on: chip.to_owned(),
+                },
+                device: "the probe's device".to_owned(),
+                runs: 1,
+                outcomes: vec![Outcome {
+                    runs: 1,
+                    transcript,
+                }],
+                validated: Validated::NotRun,
+            }],
+        )
+    };
+    let mut elsewhere = WordsCase::new("from-the-m4", 2);
+    elsewhere.source = MetalSource::carried("a probe this tree holds").measured_on(APPLE_M4);
+    let mut here = WordsCase::new("from-the-oracle", 2);
+    here.source = MetalSource::carried("a probe this tree holds");
+
+    let mut report = Report::new();
+    let mut side = StubSide::new(words(&[1, 2]));
+    let far = replay_against(&elsewhere, &mut side, &carried(&elsewhere, APPLE_M4)).unwrap();
+    assert_eq!(far.verdict, Verdict::Exact, "{}", far.verdict);
+    assert_eq!(far.measured_on.as_deref(), Some(APPLE_M4));
+    report.add(far);
+    let mut side = StubSide::new(words(&[1, 2]));
+    let near = replay_against(
+        &here,
+        &mut side,
+        &carried(&here, crate::recording::ORACLE_CHIP),
+    )
+    .unwrap();
+    // An answer taken on the oracle names no other chip: the count is of the relaxation, not of
+    // every carried row.
+    assert_eq!(near.measured_on, None);
+    report.add(near);
+
+    assert_eq!(
+        report.carried_from_another_chip(),
+        [(APPLE_M4, 1)].into_iter().collect()
+    );
+    let rendered = report.render();
+    assert!(rendered.contains("carried from another chip"), "{rendered}");
+    assert!(
+        rendered.contains(&format!("1 row(s) answered from {APPLE_M4}")),
+        "{rendered}"
+    );
+    // The rows are still compliant: a carried answer from another chip is weaker evidence, not a
+    // failure. Counting it is the whole mechanism.
+    assert!(report.is_compliant());
+}
