@@ -121,6 +121,15 @@ pub(crate) fn through_storage(profile: &DeviceProfile) -> bool {
     !fragment.rasterization_order_color_access && fragment.pixel_interlock
 }
 
+/// Whether `profile`'s device renders some color format only through the view of its word
+/// (`WordAttachment::of`: the one- and two-channel 8-bit sRGB formats on NVIDIA and ANV), whose
+/// fetch the compile layer does not build (`NotImplemented(Format)`).
+pub(crate) fn renders_through_words(profile: &DeviceProfile) -> bool {
+    metal2vulkan::metal::PixelFormat::ALL
+        .iter()
+        .any(|&pf| WordAttachment::of(pf, profile).is_some())
+}
+
 /// Whether the compile layer reads `profile`'s fetched color attachments of a pass of `samples`
 /// samples as sample planes (`StorageAttachmentView::SamplePlanes`): in the pixel interlock, at
 /// more than one sample, on a device without multisampled storage images.

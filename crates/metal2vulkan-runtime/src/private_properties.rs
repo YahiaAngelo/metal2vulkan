@@ -271,7 +271,11 @@ impl PrivateCount {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PrivateFlag {
     /// `isFramebufferReadSupported`: the device's (the `ProgrammableBlending` row: a fragment
-    /// function reads its color attachments).
+    /// function reads its color attachments): yes where the device orders color input
+    /// attachments in rasterization order, or orders a pixel interlock and renders every color
+    /// format in its own form (MoltenVK and RADV); no where the device renders a format only
+    /// through the view of its word (`R8Unorm_sRGB` and `RG8Unorm_sRGB` on NVIDIA and ANV), whose
+    /// fetch is not built, and where it has neither form.
     IsFramebufferReadSupported,
     /// `isLargeMRTSupported`: Metal's.
     IsLargeMrtSupported,

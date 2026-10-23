@@ -360,11 +360,13 @@ driver's. Each is open work.
   `NotImplemented`, and a blend of the second source, or a blend or partial mask on a device
   without the interlock, is refused as the device lacking the format.
 - **A blended, fetched or resolved one- or two-channel 8-bit sRGB attachment on a device that
-  does not render the format** (`R8Unorm_sRGB`, `RG8Unorm_sRGB` on the RTX 5080). Its word view
-  takes writes (partly masked ones through the pixel interlock, or over the attachment's input
-  attachment on a device that orders fetch through them, lavapipe); a blend other than one and zero
-  is refused as the device lacking the format, and a color input or resolve is
-  `NotImplemented(Format)`.
+  does not render the format** (`R8Unorm_sRGB`, `RG8Unorm_sRGB` on the RTX 5080 and ANV). Its
+  word view takes writes (partly masked ones through the pixel interlock, or over the attachment's
+  input attachment on a device that orders fetch through them, lavapipe); a blend other than one
+  and zero is refused as the device lacking the format, and a color input or resolve is
+  `NotImplemented(Format)`. A device that orders fetch only through the pixel interlock and renders
+  any color format through its word view (these, the packed 16-bit ones, `RGB9E5Float`) answers
+  the `ProgrammableBlending` family row `NotImplemented` and `isFramebufferReadSupported` no.
 - **A half output, blend, partial mask, color input or resolve of an `RGB9E5Float` attachment on
   a device that does not render the format** (the RTX 5080). Its word view takes a `float`
   output's writes and clears; a `half` output, a color input and a resolve are

@@ -281,7 +281,8 @@ fn the_core_count_and_fp16_are_the_devices() {
 
 /// The answers read from the device: the texture alignments are the 16 bytes the runtime takes a
 /// linear texture and an IOSurface plane at; ordered atomics follow the Vulkan memory model at
-/// device scope; the XR10 formats follow their family row; a half-float texture is filtered
+/// device scope; the XR10 formats and framebuffer reads follow their family rows (reads yes on
+/// MoltenVK and RADV); a half-float texture is filtered
 /// bicubically everywhere; and `RGB10A2Unorm_sRGB`, held as its raw word and filtered by the
 /// function (`ExtendedRange::Rgb10A2Srgb`), is filtered everywhere.
 #[test]
@@ -324,5 +325,13 @@ fn the_alignments_atomics_and_formats_are_the_devices() {
             "{stem}"
         );
         assert_eq!(flag(F::IsRgb10a2GammaSupported), Some(true), "{stem}");
+        let blending = rows
+            .iter()
+            .find(|a| a.row == FamilyRow::Feature(FeatureRow::ProgrammableBlending))
+            .map(|a| a.state == RowState::Exact);
+        assert_eq!(flag(F::IsFramebufferReadSupported), blending, "{stem}");
+        if stem.starts_with("moltenvk-") || stem.starts_with("amd-") {
+            assert_eq!(flag(F::IsFramebufferReadSupported), Some(true), "{stem}");
+        }
     }
 }

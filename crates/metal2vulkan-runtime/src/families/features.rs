@@ -32,7 +32,7 @@ use super::formats::{FormatRow, Missing};
 use super::{Column, Facts, FormatCapability, Framework, Refusal, RowState};
 use crate::capabilities::Query;
 use crate::error::RuntimeGap;
-use crate::framebuffer_fetch::{through_inputs, through_storage};
+use crate::framebuffer_fetch::{renders_through_words, through_inputs, through_storage};
 use crate::rate_mapped_pass::RegionRefusal;
 use metal2vulkan::device::{
     DriverWorkaround, OpBits, StageSimd, SubgroupOp, VkExtension, VkFeature, VkProperty,
@@ -1003,18 +1003,25 @@ impl FeatureRow {
             // Framebuffer fetch (the compile layer's color inputs, the runtime's
             // `framebuffer_fetch`): exact through input attachments in rasterization order. A
             // device with the ordered pixel interlock but not that access (MoltenVK, whose
-            // interlock is Metal's raster order groups, and RADV and ANV) fetches through the
-            // interlock's storage form (`lower::fragment::fetch`), exact for a fetch and for an
-            // unblended write, and for Metal's blend of an extended-range, a 16-bit float, an
-            // 8-bit unorm or a packed 16-bit attachment; another float-class format's blend is the
-            // shader's generic one, logged (`PrecisionNote::UnmeasuredFetchBlend`), as is a blend of
-            // the second source. Its blend of an sRGB attachment and its fetch of a one- or
-            // two-channel sRGB attachment are not built, refused per pipeline: the row's gap. A
-            // device with neither has no ordered fetch.
+            // interlock is Metal's raster order groups, and RADV, ANV and NVIDIA) fetches through
+            // the interlock's storage form (`lower::fragment::fetch`), exact for a fetch and for
+            // an unblended write, and for Metal's blend of an extended-range, a 16-bit float, an
+            // 8-bit unorm, an 8-bit sRGB or a packed 16-bit attachment; another float-class
+            // format's blend is the shader's generic one, logged
+            // (`PrecisionNote::UnmeasuredFetchBlend`), as are a blend of the second source and an
+            // sRGB blend the 8-bit unorm model does not build. A device that renders some color
+            // format only through the view of its word (`metal::format::WordAttachment`: the one-
+            // and two-channel 8-bit sRGB formats on NVIDIA and ANV, and on NVIDIA the packed
+            // 16-bit ones and `RGB9E5Float`) does not fetch an attachment
+            // of it (`NotImplemented(Format)` per pipeline): the row's gap there. A device with
+            // neither form has no ordered fetch.
             F::ProgrammableBlending => first([
                 match (through_inputs(f.profile), through_storage(f.profile)) {
                     (true, _) => None,
-                    (false, true) => not_implemented(Feature::FramebufferFetch),
+                    (false, true) if renders_through_words(f.profile) => {
+                        not_implemented(Feature::FramebufferFetch)
+                    }
+                    (false, true) => None,
                     (false, false) => Some(refused(Unsupported::needs(
                         Feature::FramebufferFetch,
                         Capability::Feature(VkFeature::RasterizationOrderColorAttachmentAccess),

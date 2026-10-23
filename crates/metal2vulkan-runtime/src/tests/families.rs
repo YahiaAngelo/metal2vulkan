@@ -6,7 +6,7 @@
 //! answers the same rows with the device's own limits.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::capabilities::{committed_descriptions, created};
 use crate::families::formats::{answers, FormatAnswers, Missing};
@@ -19,6 +19,7 @@ use crate::{
 use ash::vk;
 use metal2vulkan::device::{Device, DevicePolicy, OpBits, VkExtension, VkFeature, VkLimit};
 use metal2vulkan::error::{Capability, Feature, Needs, Unsupported};
+use metal2vulkan::metal::format::WordAttachment;
 use metal2vulkan::metal::PixelFormat;
 
 /// Every family's rows on the device the profile `stem` describes, created as the runtime
@@ -267,21 +268,39 @@ fn each_family_lists_its_columns_rows() {
 #[test]
 fn states_follow_their_sources() {
     use FeatureRow as F;
+    let mut storage_fetch = BTreeSet::new();
     for (stem, desc) in committed_descriptions() {
         let all = all_audits(&stem, &desc);
         let (enabled, _) = created(&stem, &desc);
         let apple9 = &all[&GpuFamily::Apple9];
         let blending = state(apple9, feature(F::ProgrammableBlending)).unwrap();
         // Through input attachments in rasterization order exact; through the pixel interlock's
-        // storage form the blends it does not build are the runtime's gap; with neither, refused.
+        // storage form exact but where the device renders a color format only through its word
+        // (the one- and two-channel sRGB formats on NVIDIA and ANV), whose fetch is the runtime's
+        // gap; with neither, refused.
         if enabled.has(VkFeature::RasterizationOrderColorAttachmentAccess) {
             assert_eq!(blending, RowState::Exact, "{stem}");
         } else if enabled.has(VkFeature::FragmentShaderPixelInterlock) {
-            assert_eq!(
-                blending,
-                not_implemented(Feature::FramebufferFetch),
-                "{stem}"
-            );
+            let compile = Device::new(enabled.clone(), DevicePolicy::UNTRUSTED).unwrap();
+            let words = (PixelFormat::ALL.iter())
+                .any(|&pf| WordAttachment::of(pf, compile.profile()).is_some());
+            let want = match words {
+                true => not_implemented(Feature::FramebufferFetch),
+                false => RowState::Exact,
+            };
+            assert_eq!(blending, want, "{stem}");
+            // MoltenVK and RADV render every sRGB format the storage form fetches; NVIDIA and
+            // ANV render `R8Unorm_sRGB` and `RG8Unorm_sRGB` through their words.
+            let class = [
+                ("moltenvk", true),
+                ("amd-", true),
+                ("nvidia", false),
+                ("intel", false),
+            ];
+            if let Some(&(c, exact)) = class.iter().find(|(c, _)| stem.starts_with(c)) {
+                assert_eq!(blending == RowState::Exact, exact, "{stem}");
+                storage_fetch.insert(c);
+            }
         } else {
             assert_eq!(
                 blending,
@@ -361,6 +380,7 @@ fn states_follow_their_sources() {
             );
         }
     }
+    assert_eq!(storage_fetch.len(), 4, "{storage_fetch:?}");
 }
 
 /// Vertex amplification: Apple7's count of 8 is exact on a device with `multiview`, through the
