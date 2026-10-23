@@ -493,4 +493,23 @@ impl<S: Side> Side for Announcing<S> {
         self.at("texture_accesses");
         self.inner.texture_accesses(pipeline, stage, indices)
     }
+
+    fn target(&mut self, spec: &crate::render::TargetSpec) -> Answer<Handle> {
+        self.at("target");
+        self.inner.target(spec)
+    }
+
+    fn render_pipeline(
+        &mut self,
+        library: Handle,
+        spec: &crate::render::RenderPipelineSpec<'_>,
+    ) -> Answer<Handle> {
+        self.at("render_pipeline");
+        self.inner.render_pipeline(library, spec)
+    }
+
+    fn render(&mut self, work: &[crate::render::RenderWork]) -> Answer<PassOutcome> {
+        self.at("render");
+        self.inner.render(work)
+    }
 }

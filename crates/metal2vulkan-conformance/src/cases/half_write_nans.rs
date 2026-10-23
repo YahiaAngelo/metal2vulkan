@@ -20,7 +20,7 @@
 //! module docs of `runtime_lane::half_write_nans` record that plain Metal stored the same bits
 //! through all three.
 //!
-//! Every texel of the texture holds [`FILL`] before the dispatch, so a texel the kernel did not
+//! Every texel of the texture holds one fill byte before the dispatch, so a texel the kernel did not
 //! reach is a recorded value rather than whatever the allocator left.
 //!
 //! Nothing here can fault a GPU: one compute pass, one texture, one thread a texel inside it, no

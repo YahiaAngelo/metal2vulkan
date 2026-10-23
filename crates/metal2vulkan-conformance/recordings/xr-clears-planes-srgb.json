@@ -1,0 +1,481 @@
+{
+  "format": 1,
+  "case": "xr-clears-planes-srgb",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "xr_two_planes.ll",
+      "entry": "xr2p_read_float",
+      "source_sha256": "305db9bdf0064ff785c347dd6208391a9c302c284cac61ecae4fbc7128877844"
+    },
+    {
+      "fixture": "xr_two_planes.air.ll",
+      "entry": "xr2p_read_float",
+      "source_sha256": "ae50a7261f3dc11bc2b8e6b9ccce82e0907b13e8183e3474239452f538d397a7"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "planes:air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "305db9bdf0064ff785c347dd6208391a9c302c284cac61ecae4fbc7128877844"
+                        }
+                      }
+                    },
+                    {
+                      "name": "planes:air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ae50a7261f3dc11bc2b8e6b9ccce82e0907b13e8183e3474239452f538d397a7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "format",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8bc0720875951d2f014c957a7555af855d02c5c19bac1787cd622018ab5a592f"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "1fe7a88a55c222138584bb799b323c294ab79004b95663e2cd7313caa7042f02"
+                        }
+                      }
+                    },
+                    {
+                      "name": "clear-colors",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "16a7eb817c76471220b35440d069c7c9fe1adcf78bfa7fe1b75999bbe668c9a0"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:shape",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "64ed86b909d6d0502b64b28db0ea1272ffb358e20e9b1d88b63ccb07fa900cf5"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library/planes",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/reads",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program/0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "render/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program/1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "render/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program/2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "render/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program/3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "render/4",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program/4",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "render/5",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program/5",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "render/6",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program/6",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "render/7",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program/7",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back/reads",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "reads",
+                  "observed": {
+                    "value": {
+                      "bytes": "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AIgVPwCIFT8AiBU/lpUVPwCIFT8AiBU/AIgVP5aVFT8AiBU/AIgVPwCIFT+WlRU/AIgVPwCIFT8AiBU/lpUVPwAAJT8AACU/AAAlP6WkJD8AACU/AAAlPwAAJT+lpCQ/AAAlPwAAJT8AACU/paQkPwAAJT8AACU/AAAlP6WkJD8AACU/AAAlPwAAJT+lpCQ/AFg1PwBYNT8AWDU/trU1PwBYNT8AWDU/AFg1P7a1NT8AWDU/AFg1PwBYNT+2tTU/AFg1PwBYNT8AWDU/trU1PwBYNT8AWDU/AFg1P7a1NT8AoEU/AKBFPwCgRT/FxEQ/AKBFPwCgRT8AoEU/xcREPwCgRT8AoEU/AKBFP8XERD8AoEU/AKBFPwCgRT/FxEQ/AKBFPwCgRT8AoEU/xcREPwC4VT8AuFU/ALhVP9bVVT8AuFU/ALhVPwC4VT/W1VU/ALhVPwC4VT8AuFU/1tVVPwC4VT8AuFU/ALhVP9bVVT8AuFU/ALhVPwC4VT/W1VU/AHBlPwBwZT8AcGU/5eRkPwBwZT8AcGU/AHBlP+XkZD8AcGU/AHBlPwBwZT/l5GQ/AHBlPwBwZT8AcGU/5eRkPwBwZT8AcGU/AHBlP+XkZD8A2HU/ANh1PwDYdT/29XU/ANh1PwDYdT8A2HU/9vV1PwDYdT8A2HU/ANh1P/b1dT8A2HU/ANh1PwDYdT/29XU/ANh1PwDYdT8A2HU/9vV1Pw=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 7744
+                          }
+                        },
+                        "element": "f32",
+                        "row_offset": 0,
+                        "row_elements": 4,
+                        "row_pitch": 16,
+                        "rows": 484,
+                        "image_pitch": 7744,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

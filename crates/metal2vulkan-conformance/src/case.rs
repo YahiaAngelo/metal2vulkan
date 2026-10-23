@@ -828,6 +828,46 @@ pub trait Side {
         let _ = (max, cap);
         Err(Failure::unavailable("queue_slots"))
     }
+
+    /// `newTextureWithDescriptor:` of a private render target the case describes whole
+    /// ([`TargetSpec`]).
+    ///
+    /// It joins the same handle space as [`texture_2d`](Side::texture_2d), so a kernel may bind it
+    /// and [`RenderWork::ReadTexture`] may read it back: a texture has one pool however it was
+    /// made.
+    ///
+    /// [`TargetSpec`]: crate::render::TargetSpec
+    /// [`RenderWork::ReadTexture`]: crate::render::RenderWork::ReadTexture
+    fn target(&mut self, spec: &crate::render::TargetSpec) -> Answer<Handle> {
+        let _ = spec;
+        Err(Failure::unavailable("target"))
+    }
+
+    /// `newRenderPipelineStateWithDescriptor:error:` of a vertex-and-fragment pipeline the case
+    /// describes whole ([`RenderPipelineSpec`]).
+    ///
+    /// [`RenderPipelineSpec`]: crate::render::RenderPipelineSpec
+    fn render_pipeline(
+        &mut self,
+        library: Handle,
+        spec: &crate::render::RenderPipelineSpec<'_>,
+    ) -> Answer<Handle> {
+        let _ = (library, spec);
+        Err(Failure::unavailable("render_pipeline"))
+    }
+
+    /// **One** command buffer holding every piece of `work` in order, `commit`, and a bounded
+    /// wait ([`RenderWork`]).
+    ///
+    /// Every piece is encoded whatever an earlier one answered, as the probes did: a refused draw
+    /// leaves the pass and its other commands as they were, and the answer names which piece
+    /// refused ([`PassOutcome::refused`], one entry per piece of `work`).
+    ///
+    /// [`RenderWork`]: crate::render::RenderWork
+    fn render(&mut self, work: &[crate::render::RenderWork]) -> Answer<PassOutcome> {
+        let _ = work;
+        Err(Failure::unavailable("render"))
+    }
 }
 
 /// A tile render pipeline a case makes: `MTLTileRenderPipelineDescriptor`'s facts the cases state.

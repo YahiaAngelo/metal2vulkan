@@ -1,0 +1,1948 @@
+{
+  "format": 1,
+  "case": "xr-clear-routes-bgra10xr",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_samples.ll",
+      "entry": "rt6_fill_vertex",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    },
+    {
+      "fixture": "rt6_samples.air.ll",
+      "entry": "rt6_fill_vertex",
+      "source_sha256": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+    },
+    {
+      "fixture": "rt6_samples.ll",
+      "entry": "rt6_fill_rgba32float",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    },
+    {
+      "fixture": "rt6_samples.air.ll",
+      "entry": "rt6_fill_rgba32float",
+      "source_sha256": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "fills:air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "fills:air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "format",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "53b6aa9c2a74dcdabd8a780295d95aab78fb23e1766e98f712aeabc7292f6c24"
+                        }
+                      }
+                    },
+                    {
+                      "name": "pipeline",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ac46cb03a5a42a922847be686d27e6db0d6b566a34ea9aba244141e4f29bbb66"
+                        }
+                      }
+                    },
+                    {
+                      "name": "clear-colors",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "c1f14bf56054a36e8da794785063d7f7319ee4f31d32bd4ac50653146dbfd703"
+                        }
+                      }
+                    },
+                    {
+                      "name": "route:plain-16",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "5f4acc56392b98a4451286c2d96485348d653e332f97b4f916f378f476b56a24"
+                        }
+                      }
+                    },
+                    {
+                      "name": "route:plain-8",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "36e644f4837960d289939326ee2224dc82cd472a8ad0e8e460998a55dcbbb1db"
+                        }
+                      }
+                    },
+                    {
+                      "name": "route:written-16",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6fd491fa0747bd9c78ea2c8e69515b07f5ac5538aa8c83615e3bd235a58008d9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "route:drawn-16",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "29b5336bebf747d7def8fd3c0a1b23ea4c0bd73a3b8dd4dd0ccf0761ebafc452"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library/fills",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/buffer/values",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/buffer/texels",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/target/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/other/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/render/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/program/0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-16/read-back/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/texels/0",
+                  "observed": {
+                    "value": {
+                      "bytes": "AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8AAEBAwH/AvwAAQEDAf8C/AABAQMB/wL8="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/target/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/other/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/render/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/program/1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-16/read-back/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/texels/1",
+                  "observed": {
+                    "value": {
+                      "bytes": "QN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGBA3wCgQGAAYEDfAKBAYABgQN8AoEBgAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/target/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/other/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/render/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/program/2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-16/read-back/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/texels/2",
+                  "observed": {
+                    "value": {
+                      "bytes": "QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH9AY4AdgGTAf0BjgB2AZMB/QGOAHYBkwH8="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/target/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/other/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/render/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/program/3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-16/read-back/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/texels/3",
+                  "observed": {
+                    "value": {
+                      "bytes": "wP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGDA/8D1QDQAYMD/wPVANABgwP/A9UA0AGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/buffer/values",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/buffer/texels",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/target/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/other/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/render/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/program/0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-8/read-back/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/texels/0",
+                  "observed": {
+                    "value": {
+                      "bytes": "AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              8,
+                              8,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 32,
+                        "row_pitch": 64,
+                        "rows": 8,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/target/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/other/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/render/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/program/1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-8/read-back/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/texels/1",
+                  "observed": {
+                    "value": {
+                      "bytes": "gN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              8,
+                              8,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 32,
+                        "row_pitch": 64,
+                        "rows": 8,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/target/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/other/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/render/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/program/2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-8/read-back/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/texels/2",
+                  "observed": {
+                    "value": {
+                      "bytes": "QGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              8,
+                              8,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 32,
+                        "row_pitch": 64,
+                        "rows": 8,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/target/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/other/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/render/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/program/3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-8/read-back/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/texels/3",
+                  "observed": {
+                    "value": {
+                      "bytes": "wP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              8,
+                              8,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 32,
+                        "row_pitch": 64,
+                        "rows": 8,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/buffer/values",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/buffer/texels",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/target/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/other/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/render/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/program/0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "written-16/read-back/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/texels/0",
+                  "observed": {
+                    "value": {
+                      "bytes": "AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/target/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/other/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/render/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/program/1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "written-16/read-back/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/texels/1",
+                  "observed": {
+                    "value": {
+                      "bytes": "gN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/target/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/other/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/render/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/program/2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "written-16/read-back/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/texels/2",
+                  "observed": {
+                    "value": {
+                      "bytes": "QGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/target/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/other/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/render/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/program/3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "written-16/read-back/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/texels/3",
+                  "observed": {
+                    "value": {
+                      "bytes": "wP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/buffer/values",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/buffer/texels",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/target/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/other/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/render/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/program/0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "drawn-16/read-back/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/texels/0",
+                  "observed": {
+                    "value": {
+                      "bytes": "AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8AYABAAICAvwBgAEAAgIC/AGAAQACAgL8="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/target/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/other/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/render/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/program/1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "drawn-16/read-back/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/texels/1",
+                  "observed": {
+                    "value": {
+                      "bytes": "gN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGCA38CfAGAAYIDfwJ8AYABggN/AnwBgAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/target/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/other/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/render/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/program/2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "drawn-16/read-back/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/texels/2",
+                  "observed": {
+                    "value": {
+                      "bytes": "QGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIBAY4AdgGQAgEBjgB2AZACAQGOAHYBkAIA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/target/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/other/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/render/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/program/3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "drawn-16/read-back/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/texels/3",
+                  "observed": {
+                    "value": {
+                      "bytes": "wP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGDA/wD2QDQAYMD/APZANABgwP8A9kA0AGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

@@ -49,6 +49,7 @@ pub mod measured;
 pub mod queue_slots;
 pub mod record;
 pub mod recording;
+pub mod render;
 pub mod replay;
 pub mod report;
 pub mod run;

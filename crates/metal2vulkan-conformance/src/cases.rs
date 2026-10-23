@@ -26,7 +26,9 @@
 
 pub mod command_queues;
 pub mod depth_texel_reads;
+pub mod extended_range_blends;
 pub mod extended_range_planes;
+pub mod extended_range_targets;
 pub mod extended_range_two_planes;
 pub mod half_write_nans;
 pub mod heap_metal_sizes;
@@ -87,6 +89,10 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in half_write_nans::all() {
+        cases.push(Box::new(case));
+    }
+    cases.extend(extended_range_targets::all());
+    for case in extended_range_blends::all() {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(texture_buffer_fills::streams()));
