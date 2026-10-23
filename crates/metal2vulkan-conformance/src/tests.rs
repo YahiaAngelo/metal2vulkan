@@ -2131,12 +2131,12 @@ WorkCounts {
             calls: 0,
         },
     ],
-    fences_made: 1,
+    render_passes_made: 1,
 }";
     let read = crate::cost::Counts::read(shape).expect("the shape reads");
     assert_eq!(read.get("queue_submissions"), 2);
     assert_eq!(read.get("commands_replayed.cmd_draw"), 7);
-    assert_eq!(read.get("fences_made"), 1);
+    assert_eq!(read.get("render_passes_made"), 1);
     assert_eq!(read.len(), 3, "{:?}", read);
 }
 
@@ -2216,9 +2216,9 @@ fn a_count_the_measurement_never_saw_is_bounded_at_zero() {
         "{over}"
     );
     // A count nothing bounded, which the measurement never saw: over, bounded at zero.
-    let fresh = judge("WorkCounts {\n    queue_submissions: 1,\n    fences_made: 1,\n}");
+    let fresh = judge("WorkCounts {\n    queue_submissions: 1,\n    render_passes_made: 1,\n}");
     assert_eq!(fresh.word(), "over");
-    assert!(fresh.to_string().contains("fences_made"), "{fresh}");
+    assert!(fresh.to_string().contains("render_passes_made"), "{fresh}");
 }
 
 /// A count whose readings moved between runs of the same case on the same venue is reported, not
@@ -2230,12 +2230,16 @@ fn a_count_whose_readings_moved_is_reported_and_not_gated() {
         runs: 3,
         measured: "three runs".to_owned(),
         degraded: Vec::new(),
-        bounds: [("fences_made".to_owned(), 2)].into_iter().collect(),
+        bounds: [("render_passes_made".to_owned(), 2)].into_iter().collect(),
         moving: range
-            .map(|least| [("fences_made".to_owned(), least)].into_iter().collect())
+            .map(|least| {
+                [("render_passes_made".to_owned(), least)]
+                    .into_iter()
+                    .collect()
+            })
             .unwrap_or_default(),
     };
-    let found = crate::cost::Counts::read("WorkCounts {\n    fences_made: 9,\n}").unwrap();
+    let found = crate::cost::Counts::read("WorkCounts {\n    render_passes_made: 9,\n}").unwrap();
     // Deterministic in the measurement: held, and 9 is over 2.
     let gated = bound(None);
     assert_eq!(
@@ -2389,11 +2393,11 @@ fn a_measurement_becomes_bounds_that_name_it() {
     let cost = crate::cost::CaseCost {
         case: "a case".to_owned(),
         counts: crate::cost::Counts::read(
-            "WorkCounts {\n    queue_submissions: 2,\n    fences_made: 5,\n}",
+            "WorkCounts {\n    queue_submissions: 2,\n    render_passes_made: 5,\n}",
         )
         .unwrap(),
         least: crate::cost::Counts::read(
-            "WorkCounts {\n    queue_submissions: 2,\n    fences_made: 1,\n}",
+            "WorkCounts {\n    queue_submissions: 2,\n    render_passes_made: 1,\n}",
         )
         .unwrap(),
         runs: 3,
@@ -2409,11 +2413,11 @@ fn a_measurement_becomes_bounds_that_name_it() {
     let submissions = record.bound("queue_submissions").expect("it is bounded");
     assert_eq!((submissions.most, submissions.range), (2, None));
     assert!(submissions.gated());
-    let passes = record.bound("fences_made").expect("it is bounded");
+    let passes = record.bound("render_passes_made").expect("it is bounded");
     assert_eq!((passes.most, passes.range), (5, Some(1)));
     assert!(!passes.gated());
     assert_eq!(record.gated(), 1);
-    assert_eq!(cost.moved(), vec![("fences_made", 1, 5)]);
+    assert_eq!(cost.moved(), vec![("render_passes_made", 1, 5)]);
 }
 
 /// Re-taking a case's Metal answer keeps its cost record.

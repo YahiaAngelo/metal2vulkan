@@ -189,10 +189,23 @@ fn cost(
         }
         raced += one.moved_by_a_race().len();
     }
+    // How much of the runtime's counted surface the selection reaches: the cost half's own
+    // coverage number, tracked the way "unrecorded" is rather than left to a feeling.
+    let kept = metal2vulkan_conformance::cost::Counts::of(&Default::default())
+        .map(|all| all.len())
+        .unwrap_or_default();
+    let mut touched: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for one in &measured {
+        touched.extend(one.counts.iter().map(|(name, _)| name));
+    }
     println!(
         "\n{} case(s) measured, {stopped} stopped before finishing, {moved} count reading(s) \
          moved between runs for a reason the race rule does not name, {raced} for one it does",
         measured.len()
+    );
+    println!(
+        "the selection moves {} of the {kept} counts the runtime keeps",
+        touched.len()
     );
     if !write {
         println!("nothing written; pass --write to put these bounds in the recordings");

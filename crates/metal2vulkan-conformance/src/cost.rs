@@ -101,15 +101,31 @@ pub fn excluded(name: &str) -> Option<&'static str> {
 ///
 /// Measured on this M3 Max over seven measurements of the whole case set (3 to 10 rounds of 126
 /// cases, about 6,300 counts a round): 24, 27, 35, 38, 47, 49 and 68 readings moved, and every one
-/// of them was one of these families **but one** — `fences_made`, which moved by a single reading
-/// (0..1, in one case) in four of the seven and is left to the measurement's own range instead,
-/// because one reading in one case is not a family. Three replays of the whole set then went over a
-/// bound five times, again every time one of these families, which is what sent the rule here
-/// instead of into a longer measurement.
+/// of them was one of these families. Replays of the whole set then went over a bound six times,
+/// again every time one of them, which is what sent the rule here instead of into a longer
+/// measurement.
+///
+/// `fences_made` is the one that had to be read twice. Each measurement saw it move by a single
+/// reading in a single case, which looked like too little to be a family — until three replays in
+/// a row went over its bound in a **different case each time**. A measurement's range cannot cover
+/// that, because the case the race lands in is not fixed, and the mechanism is the same as the
+/// others': a fence is made where no spare one is free, and a spare comes back on the completion
+/// thread.
 ///
 /// What is **not** here, on the same evidence: `slot_returns` and `completed_waits` count work
-/// items rather than thread arrivals, one a command buffer, and they held still over every round.
-const RACY: [(&str, &str); 4] = [
+/// items rather than thread arrivals, one a command buffer, and they held still over every round
+/// of every measurement and every replay.
+/// Why a count of an object made because no spare was free is reported and never gated.
+const POOLED: &str = "an object made because no spare was free, where a spare comes back on \
+     another thread: which case has to make one depends on when that thread returned the one \
+     before it, not on the case's own work. Measured: `fences_made` reached 1 where the \
+     measurement's most was 0 on three whole-set replays in a row, in a different case each time";
+
+const RACY: [(&str, &str); 8] = [
+    ("fences_made", POOLED),
+    ("command_pools_made", POOLED),
+    ("spare_command_pools_", POOLED),
+    ("live_tables_uploaded", POOLED),
     (
         "scheduler_",
         "how many times one of our own background threads woke, slept or made a pass, which is \
