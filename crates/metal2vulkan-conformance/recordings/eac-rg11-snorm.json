@@ -1,0 +1,352 @@
+{
+  "format": 1,
+  "case": "eac-rg11-snorm",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "format_scout.ll",
+      "entry": "scout_read_f",
+      "source_sha256": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+    },
+    {
+      "fixture": "format_scout.air.ll",
+      "entry": "scout_read_f",
+      "source_sha256": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:zero-blocks",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "1d5661d92fa0ea73b9f4ca0fba233105e8b42bfe7882194227bfc47547d4e13e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:seeded-blocks",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "bb57d6409b6142e293f240b3d0b008de144c59495c3d823378328a34dc55ea0a"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "zero-blocks/texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "zero-blocks/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "zero-blocks/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "zero-blocks/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "zero-blocks/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "zero-blocks",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texels",
+                      "observed": {
+                        "value": {
+                          "bytes": "DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPwwwQLsMMEC7AAAAAAAAgD8MMEC7DDBAuwAAAAAAAIA/DDBAuwwwQLsAAAAAAACAPw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 256,
+                            "rows": 16,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "seeded-blocks/texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "seeded-blocks/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "seeded-blocks/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "seeded-blocks/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "seeded-blocks/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "seeded-blocks",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texels",
+                      "observed": {
+                        "value": {
+                          "bytes": "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"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 256,
+                            "rows": 16,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

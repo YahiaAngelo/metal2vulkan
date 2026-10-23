@@ -37,6 +37,7 @@ pub mod compressed_views;
 pub mod compute_threadgroups;
 pub mod depth_texel_reads;
 pub mod discard_hoist;
+pub mod etc_textures;
 pub mod event_orders;
 pub mod extended_range_blends;
 pub mod extended_range_planes;
@@ -105,6 +106,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.push(Box::new(stage_in_regions::stage_in_region_clamps()));
     for case in compressed_decode::all() {
+        cases.push(Box::new(case));
+    }
+    for case in etc_textures::all() {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {
