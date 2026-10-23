@@ -1624,6 +1624,9 @@ impl Side for RuntimeSide<'_> {
         if let Some(plane) = &spec.surface {
             return self.surface_target(spec, plane);
         }
+        if let Some(over) = &spec.over_buffer {
+            return self.buffer_backed_target(spec, over);
+        }
         let mut descriptor = TextureDescriptor::texture_2d(
             spec.format,
             u64::from(spec.size[0]),
@@ -2639,6 +2642,44 @@ impl RuntimeSide<'_> {
                     format!("texture {} lies over no surface plane", target.0),
                 )
             })
+    }
+
+    /// A target as a texture over a buffer the case made, through the runtime's own
+    /// `newTextureWithDescriptor:offset:bytesPerRow:`.
+    ///
+    /// The stride is refused before the call for the same reason the Metal side refuses it: a
+    /// `bytesPerRow` below the target's own row ends Metal's process, so neither side may make
+    /// such a texture and both must refuse the same shape, or the comparison would be of two
+    /// different questions.
+    fn buffer_backed_target(
+        &mut self,
+        spec: &TargetSpec,
+        over: &crate::render::OverBuffer,
+    ) -> Answer<Handle> {
+        if let Some(why) = over.unsafe_stride() {
+            return Err(Failure::named("WouldEndMetalsProcess", why));
+        }
+        let mut descriptor = TextureDescriptor::texture_2d(
+            spec.format,
+            u64::from(spec.size[0]),
+            u64::from(spec.size[1]),
+            false,
+        );
+        let mut usage = TextureUsage::RENDER_TARGET;
+        if spec.shader_read {
+            usage |= TextureUsage::SHADER_READ;
+        }
+        if spec.shader_write {
+            usage |= TextureUsage::SHADER_WRITE;
+        }
+        descriptor.usage = usage;
+        // A texture over a buffer holds the buffer's own bytes, so its storage is the buffer's.
+        descriptor.resource_options = ResourceOptions::shared();
+        let buffer = self.held(over.buffer)?.clone();
+        let texture = buffer
+            .new_texture(&descriptor, over.offset, over.bytes_per_row)
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.textures, texture))
     }
 
     /// A framebuffer-only rotated texture over a buffer standing for an IOSurface plane

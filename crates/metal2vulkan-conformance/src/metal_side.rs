@@ -1749,6 +1749,9 @@ impl Side for MetalSide {
         if let Some(plane) = &spec.surface {
             return self.surface_target(spec, plane);
         }
+        if let Some(over) = &spec.over_buffer {
+            return self.buffer_backed_target(spec, over);
+        }
         // SAFETY: the descriptor constructor reads only the format and the size it is given.
         let descriptor = unsafe {
             MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
@@ -2787,6 +2790,61 @@ impl MetalSide {
     ///   argument belongs to a framework this crate does not depend on, so it is sent by selector
     ///   with the raw pointer.
     ///
+    /// A target as a texture over a buffer the case made:
+    /// `newTextureWithDescriptor:offset:bytesPerRow:`.
+    ///
+    /// The stride is checked **before any object is made**, because a `bytesPerRow` below the
+    /// target's own row ends Metal's process rather than answering nil
+    /// ([`crate::render::OverBuffer::unsafe_stride`]). That is the same order the surface target
+    /// takes for the same reason, and it is what lets a case that would stop the oracle be
+    /// refused on a machine with no device at all.
+    fn buffer_backed_target(
+        &mut self,
+        spec: &TargetSpec,
+        over: &crate::render::OverBuffer,
+    ) -> Answer<Handle> {
+        if let Some(why) = over.unsafe_stride() {
+            return Err(Failure::named("WouldEndMetalsProcess", why));
+        }
+        let buffer = self.held(over.buffer)?;
+        // SAFETY: the descriptor constructor reads only the format and the size it is given.
+        let descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                MTLPixelFormat(spec.format.as_raw() as usize),
+                spec.size[0] as usize,
+                spec.size[1] as usize,
+                false,
+            )
+        };
+        let mut usage = MTLTextureUsage::RenderTarget;
+        if spec.shader_read {
+            usage |= MTLTextureUsage::ShaderRead;
+        }
+        if spec.shader_write {
+            usage |= MTLTextureUsage::ShaderWrite;
+        }
+        descriptor.setUsage(usage);
+        // A texture over a buffer holds the buffer's own bytes, so its storage is the buffer's.
+        descriptor.setStorageMode(MTLStorageMode::Shared);
+        let texture = buffer
+            .newTextureWithDescriptor_offset_bytesPerRow(
+                &descriptor,
+                over.offset as usize,
+                over.bytes_per_row as usize,
+            )
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewTextureWithDescriptorOffsetBytesPerRow",
+                    format!(
+                        "a {:?} {}x{} target over a buffer at offset {} and {} bytes a row \
+                         returned nil",
+                        spec.format, spec.size[0], spec.size[1], over.offset, over.bytes_per_row
+                    ),
+                )
+            })?;
+        Ok(keep(&mut self.textures, texture))
+    }
+
     /// Metal answering nil is a refusal, which is safe and is what the suite reads a venue's gap
     /// out of.
     fn surface_target(
