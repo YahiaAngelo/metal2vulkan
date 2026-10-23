@@ -191,6 +191,7 @@ edits one.
 | `indirect_private_types` | An indirect render command's read-back for each primitive type | carried; the getters are private |
 | `pixel_samplers` | A pixel-coordinate sampler's samples, through a slot, an argument buffer, a normalized control and a constexpr sampler | run on Metal |
 | `pixel_downscales` | A linear downscale by eight through a pixel-coordinate sampler, at seven texture sizes | run on Metal |
+| `chroma_pairs` | What a copy of a 4:2:2 chroma-pair texture moved, and what a kernel's `read()` of one answers | run on Metal |
 
 A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
 case forbids re-recording with the reason why. Record mode refuses such a case rather than
