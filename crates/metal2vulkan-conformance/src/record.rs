@@ -31,6 +31,13 @@ pub enum RecordError {
     Case { case: String, why: String },
     /// No run produced an answer.
     NoRuns { case: String },
+    /// Metal's own run of the case **stopped** at a site, so the transcript holds part of the case
+    /// and not its answer. The site and the refusal, in the words a ledger row uses.
+    Refused {
+        case: String,
+        at: String,
+        refusal: String,
+    },
 }
 
 impl std::fmt::Display for RecordError {
@@ -48,6 +55,12 @@ impl std::fmt::Display for RecordError {
             RecordError::NoMetal => out.write_str("there is no Metal on this host"),
             RecordError::Case { case, why } => write!(out, "{case}: {why}"),
             RecordError::NoRuns { case } => write!(out, "{case}: no run produced an answer"),
+            RecordError::Refused { case, at, refusal } => write!(
+                out,
+                "{case}: Metal's own run stopped at {at} ({refusal}), so a recording taken here \
+                 would hold part of the case and not its answer. Fix what the Metal leg cannot \
+                 do, or state the answer by hand if Metal does not come back from the call"
+            ),
         }
     }
 }
@@ -57,6 +70,18 @@ impl std::fmt::Display for RecordError {
 ///
 /// `side` must be a Metal side. The two Metal facts stay apart: the transcripts are plain Metal's,
 /// and `validated` is recorded beside them without ever being compared with our behaviour.
+///
+/// A run that **stops** is refused rather than written down. [`crate::case::call`] aborts the whole
+/// case, so the sites after it are never emitted, and a recording of a truncated Metal run is not a
+/// recording of the case: on replay every site past the stop reads as one only our side observed,
+/// which is a divergence the case never asked about. Worse, a recorded Metal `Err` our side happens
+/// to match compares **exact**, so the case would report as passing where neither side did the
+/// work. So the recording is refused, naming the site, and the author either fixes what the Metal
+/// leg cannot do or states the answer by hand ([`never_returned`]).
+///
+/// A refusal a [`crate::case::probe`] sweep records at its own site is the deliberate complement:
+/// it emits every other site, so the transcript is the whole case with one query Metal answered nil
+/// for, which is Metal's answer and compares as one. Only a stop truncates.
 pub fn record(
     case: &dyn Case,
     side: &mut dyn Side,
@@ -79,7 +104,13 @@ pub fn record(
     for _ in 0..runs {
         let mut sites = Sites::new();
         sites.push(crate::case::inputs_node(&inputs));
-        let _ = case.run(side, &mut sites);
+        if let Err(stopped) = case.run(side, &mut sites) {
+            return Err(RecordError::Refused {
+                case: case.name().to_owned(),
+                at: stopped.at,
+                refusal: crate::diff::print(&stopped.failure.recorded()),
+            });
+        }
         let announced = side.announced();
         sites.notices(NOTICES_SITE, &announced);
         add(&mut outcomes, sites.finish());

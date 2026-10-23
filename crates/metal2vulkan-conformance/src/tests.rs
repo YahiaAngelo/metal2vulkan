@@ -1642,6 +1642,75 @@ fn record_mode_refuses_a_case_that_must_not_be_re_recorded() {
     assert!(format!("{error}").contains("must not be re-recorded"));
 }
 
+/// Record mode refuses a case whose **Metal** run stopped, rather than writing a recording of part
+/// of it -- and still records the refusal a sweep carries past, which is Metal's answer.
+///
+/// `crate::case::call` aborts the whole case, so the sites after it are never emitted. Writing that
+/// down would be the suite blessing a recording nobody took: on replay, every site past the stop
+/// reads as one only our side observed, a divergence the case never asked about, and a recorded
+/// Metal `Err` our side happens to match compares **exact** -- the case reporting as passing where
+/// neither side did the work. Nothing of that is reachable today, because zero of the committed
+/// recordings hold any `Err` at all, which is also why it had to be closed before a case reached
+/// it rather than after.
+///
+/// `LedgerCase` carries both shapes, which is why it is the case here: it makes its library with
+/// `made`, which stops the run, and its texture with a `call` whose refusal it carries past. So the
+/// two directions are one case with one site moved, not two cases that could drift apart.
+#[test]
+fn record_mode_refuses_a_case_whose_metal_run_stopped() {
+    let case = LedgerCase::new("ledger-record-stopped");
+    let refusal = Failure::named("Error::Nil", "newLibraryWithData returned nil");
+    // Off macOS there is no Metal to record from, and that check comes first: both legs say so,
+    // so the test is honest about what it checked rather than appearing to check more.
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut stops = StubSide::new(words(&[7])).refusing("library", refusal.clone());
+        assert_eq!(
+            record(&case, &mut stops, 1, MetalLevel::NEWEST, Validated::Ran).unwrap_err(),
+            RecordError::NoMetal
+        );
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // A refusal at the site the case makes with `made`: the run stops, and no recording is
+        // written. The site is named, and the refusal in the words a ledger row uses.
+        let mut stops = StubSide::new(words(&[7])).refusing("library", refusal.clone());
+        let error = record(&case, &mut stops, 1, MetalLevel::NEWEST, Validated::Ran).unwrap_err();
+        let RecordError::Refused {
+            case: named,
+            at,
+            refusal: said,
+        } = &error
+        else {
+            panic!("a stopped Metal run must refuse the recording, not write one: {error:?}");
+        };
+        assert_eq!(named, case.name());
+        assert_eq!(at, "library");
+        assert!(said.contains("Error::Nil"), "{said}");
+        assert!(
+            format!("{error}").contains("would hold part of the case"),
+            "{error}"
+        );
+
+        // The other direction, so this cannot become a blanket ban on recording a refusal: the
+        // same case, the same refusal, at the site it carries past. The transcript is the whole
+        // case with one query Metal answered nil for, which is Metal's answer, so it records.
+        let mut carries = StubSide::new(words(&[7])).refusing("texture", refusal);
+        let answer = record(&case, &mut carries, 1, MetalLevel::NEWEST, Validated::Ran)
+            .expect("a refusal a sweep carries past is Metal's answer, not a truncated run");
+        assert_eq!(answer.provenance, Provenance::MetalRun);
+        let printed = format!("{:?}", answer.outcomes[0].transcript);
+        assert!(
+            printed.contains("Error::Nil"),
+            "the recording holds the refusal at its own site: {printed}"
+        );
+        assert!(
+            printed.contains("output"),
+            "and every site after it, which is what makes it the case's answer: {printed}"
+        );
+    }
+}
+
 #[test]
 fn record_mode_counts_the_outcomes_it_saw_with_their_runs() {
     // Off macOS there is no Metal to record from, and record mode says so rather than writing a
