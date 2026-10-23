@@ -432,4 +432,17 @@ impl<S: Side> Side for Announcing<S> {
         self.at("tile_pass");
         self.inner.tile_pass(targets, tile, steps)
     }
+
+    fn heap_texture_size_and_align(
+        &mut self,
+        query: &crate::texture_query::HeapTextureQuery,
+    ) -> Answer<crate::texture_query::SizeAndAlign> {
+        self.at("heap_texture_size_and_align");
+        self.inner.heap_texture_size_and_align(query)
+    }
+
+    fn makes_texture(&mut self, query: &crate::texture_query::HeapTextureQuery) -> Answer<bool> {
+        self.at("makes_texture");
+        self.inner.makes_texture(query)
+    }
 }

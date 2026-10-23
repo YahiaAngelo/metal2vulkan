@@ -53,6 +53,7 @@ pub mod report;
 pub mod run;
 pub mod runtime_side;
 pub mod runtime_work;
+pub mod texture_query;
 pub mod transcript;
 pub mod validated;
 pub mod verdict;

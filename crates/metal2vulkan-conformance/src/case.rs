@@ -676,6 +676,34 @@ pub trait Side {
         let _ = (targets, tile, steps);
         Err(Failure::unavailable("tile_pass"))
     }
+
+    /// `heapTextureSizeAndAlignWithDescriptor:` of the descriptor `query` names
+    /// ([`crate::texture_query`]).
+    ///
+    /// A pure getter: it compiles nothing, allocates nothing and reaches no GPU, so a case over it
+    /// is safe on every device and its answer can be re-measured on the oracle as often as anybody
+    /// asks.
+    fn heap_texture_size_and_align(
+        &mut self,
+        query: &crate::texture_query::HeapTextureQuery,
+    ) -> Answer<crate::texture_query::SizeAndAlign> {
+        let _ = query;
+        Err(Failure::unavailable("heap_texture_size_and_align"))
+    }
+
+    /// Whether `newTextureWithDescriptor:` of the descriptor `query` names answers a texture.
+    ///
+    /// The answer is a **fact about the descriptor**, not about the object: Metal answers nil for a
+    /// descriptor it describes no texture of, and the runtime answers a typed `Nil` error for the
+    /// same descriptor, which is the same fact in the two APIs' spellings. So both sides answer
+    /// `false` there, and a side that refuses the call for any other reason answers its typed
+    /// error, which compares as a refusal.
+    ///
+    /// A case asks this only of descriptors Metal makes no texture of, so nothing is allocated.
+    fn makes_texture(&mut self, query: &crate::texture_query::HeapTextureQuery) -> Answer<bool> {
+        let _ = query;
+        Err(Failure::unavailable("makes_texture"))
+    }
 }
 
 /// A tile render pipeline a case makes: `MTLTileRenderPipelineDescriptor`'s facts the cases state.

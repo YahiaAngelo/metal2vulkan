@@ -17,6 +17,7 @@ use crate::case::{
     PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion,
     StageInput, TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
+use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
 use metal2vulkan::metal::PixelFormat;
 use objc2::rc::Retained;
@@ -35,7 +36,7 @@ use objc2_metal::{
     MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage,
     MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
     MTLSamplerState, MTLSize, MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode,
-    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
     MTLTileRenderPipelineDescriptor,
 };
 
@@ -1052,6 +1053,49 @@ impl Side for MetalSide {
             error,
         })
     }
+
+    fn heap_texture_size_and_align(&mut self, query: &HeapTextureQuery) -> Answer<SizeAndAlign> {
+        let descriptor = queried_descriptor(query);
+        let answered = self
+            .device
+            .heapTextureSizeAndAlignWithDescriptor(&descriptor);
+        Ok(SizeAndAlign {
+            size: answered.size as u64,
+            align: answered.align as u64,
+        })
+    }
+
+    fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {
+        let descriptor = queried_descriptor(query);
+        // The texture, where Metal makes one, is released as this statement ends: the case asks
+        // this only of descriptors Metal makes none of, and nothing here keeps a handle, so no
+        // sweep of the family holds a texture it does not read.
+        Ok(self.device.newTextureWithDescriptor(&descriptor).is_some())
+    }
+}
+
+/// Metal's descriptor for a queried one: every field the case names, by its raw ordinal, so a
+/// private format and a private usage bit reach Metal as readily as a public one.
+fn queried_descriptor(query: &HeapTextureQuery) -> Retained<MTLTextureDescriptor> {
+    let descriptor = MTLTextureDescriptor::new();
+    descriptor.setTextureType(MTLTextureType(query.texture_type.as_raw() as usize));
+    descriptor.setPixelFormat(MTLPixelFormat(query.format.as_raw() as usize));
+    // SAFETY: each extent, count and index is a case's own, and the setters read nothing but the
+    // value they are given.
+    unsafe {
+        descriptor.setWidth(query.size[0] as usize);
+        descriptor.setHeight(query.size[1] as usize);
+        descriptor.setDepth(query.size[2] as usize);
+        descriptor.setMipmapLevelCount(query.levels as usize);
+        descriptor.setSampleCount(query.samples as usize);
+        descriptor.setArrayLength(query.array_length as usize);
+    }
+    descriptor.setUsage(MTLTextureUsage(query.usage.as_raw() as usize));
+    descriptor.setStorageMode(match query.storage {
+        Storage::Shared => MTLStorageMode::Shared,
+        Storage::Private => MTLStorageMode::Private,
+    });
+    descriptor
 }
 
 /// The pixel format [`crate::case::TARGET_FORMAT`] names, as Metal spells it.

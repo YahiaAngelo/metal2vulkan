@@ -13,6 +13,7 @@ use crate::case::{
     ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
     TilePipelineSpec, TileStep, Venue,
 };
+use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
 use metal2vulkan::metal::{
@@ -1231,6 +1232,48 @@ impl Side for RuntimeSide<'_> {
                 .map(|error| Value::unit_variant(format!("{error:?}"))),
         })
     }
+
+    fn heap_texture_size_and_align(&mut self, query: &HeapTextureQuery) -> Answer<SizeAndAlign> {
+        let answered = self
+            .device
+            .heap_texture_size_and_align(&queried_descriptor(query))
+            .map_err(Failure::from_error)?;
+        Ok(SizeAndAlign {
+            size: answered.size,
+            align: answered.align,
+        })
+    }
+
+    fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {
+        match self.device.new_texture(&queried_descriptor(query)) {
+            Ok(_) => Ok(true),
+            // Metal answers nil for a descriptor it describes no texture of, and the runtime
+            // answers the typed `Nil` for the same descriptor: the same fact, so both sides answer
+            // `false`. Anything else is our own refusal and is recorded as one.
+            Err(metal2vulkan_runtime::Error::Nil(_)) => Ok(false),
+            Err(error) => Err(Failure::of(&error)),
+        }
+    }
+}
+
+/// The runtime's descriptor for a queried one: the case's vocabulary is Metal's own, so every
+/// field reaches the descriptor unchanged.
+fn queried_descriptor(query: &HeapTextureQuery) -> TextureDescriptor {
+    let mut descriptor = TextureDescriptor::default();
+    descriptor.texture_type = query.texture_type;
+    descriptor.pixel_format = query.format;
+    descriptor.width = u64::from(query.size[0]);
+    descriptor.height = u64::from(query.size[1]);
+    descriptor.depth = u64::from(query.size[2]);
+    descriptor.mipmap_level_count = u64::from(query.levels);
+    descriptor.sample_count = u64::from(query.samples);
+    descriptor.array_length = u64::from(query.array_length);
+    descriptor.usage = query.usage;
+    descriptor.resource_options = match query.storage {
+        Storage::Shared => ResourceOptions::shared(),
+        Storage::Private => ResourceOptions::private(),
+    };
+    descriptor
 }
 
 /// The pixel format [`crate::case::TARGET_FORMAT`] names, as the runtime spells it.
