@@ -1741,6 +1741,37 @@ fn the_known_gaps_ledger_parses_and_names_real_cases() {
         );
     }
 
+    // The divergence rows this round left open over every venue: Metal's `tailSizeInBytes` on
+    // extreme aspect ratios, where our model is short by whole 16384-byte pages. Scoped `*`
+    // because the answer is CPU arithmetic over a descriptor, the same model on every device, and
+    // it was verified identical on both venues.
+    let tails: Vec<&crate::known_gaps::KnownGap> = ledger
+        .iter()
+        .filter(|known| known.case == crate::cases::sparse_heaps::TAILS_WIDE)
+        .collect();
+    assert_eq!(tails.len(), 13, "{ledger:?}");
+    for known in tails {
+        assert_eq!(known.expects, crate::known_gaps::Expects::Divergent);
+        assert_eq!(known.venue, crate::known_gaps::EVERY_VENUE, "{known:?}");
+        assert!(known.site.ends_with("/tail_size_in_bytes"), "{known:?}");
+        // Each row carries its own two numbers, and the shared description carries the one thing
+        // the thirteen of them establish together: the difference is whole pages, not a rounding.
+        // Each side's first decimal number: the answer prints "Metal 32768 (0x8000), ours 16384
+        // (0x4000)", so a naive digit scan would take the hex as the second value.
+        let first_number = |text: &str| -> u64 {
+            text.split_whitespace()
+                .find_map(|word| word.trim_end_matches(',').parse::<u64>().ok())
+                .unwrap_or_else(|| panic!("no number in {text:?}"))
+        };
+        let (metal, ours) = known
+            .answer
+            .split_once(", ours ")
+            .map(|(metal, ours)| (first_number(metal), first_number(ours)))
+            .unwrap_or_else(|| panic!("{known:?}"));
+        assert!(metal > ours, "{known:?}");
+        assert_eq!((metal - ours) % 16384, 0, "{known:?}");
+    }
+
     // The zero-screen-width refusal is closed, so no row may name that case: the ledger holds
     // rows in both directions and a stale row would fail the run it is selected in.
     assert!(
@@ -1781,15 +1812,41 @@ fn a_ledger_row_missing_a_field_is_refused() {
 }
 
 /// Whether `want` is the path of `node` or of anything under it, with `node` sitting at `at`.
+///
+/// The path is built the way the comparison's walk builds it, and for the same reason it has to
+/// descend into the **value** as well as into the children: a node's name may itself carry
+/// slashes, and a site may lie inside a variant (`.../Ok`) or a field (`.../tail_size_in_bytes`),
+/// which is where the sparse tails' sites live. A guard that only walked the nodes would have
+/// rejected thirteen legitimate rows -- it did, which is how this was found.
 fn site_exists(node: &Node, at: &str, want: &str) -> bool {
     if at == want {
         return true;
     }
-    // A node's name may itself carry slashes, so the path is built the way the comparison's walk
-    // builds it rather than by splitting the wanted path.
+    if value_holds(&node.observed.value, at, want) {
+        return true;
+    }
     node.children
         .iter()
         .any(|child| site_exists(child, &format!("{at}/{}", child.name), want))
+}
+
+/// [`site_exists`] through a value: a variant adds its name, a field its key, a list element its
+/// index, exactly as `compare`'s walk does.
+fn value_holds(value: &Value, at: &str, want: &str) -> bool {
+    if at == want {
+        return true;
+    }
+    match value {
+        Value::Variant { name, payload } => value_holds(payload, &format!("{at}/{name}"), want),
+        Value::Fields(fields) => fields
+            .iter()
+            .any(|(name, held)| value_holds(held, &format!("{at}/{name}"), want)),
+        Value::List(values) => values
+            .iter()
+            .enumerate()
+            .any(|(index, held)| value_holds(held, &format!("{at}/{index}"), want)),
+        _ => false,
+    }
 }
 
 /// A venue, for a test that holds a row against one venue and not another.
