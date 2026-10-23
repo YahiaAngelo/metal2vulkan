@@ -91,13 +91,19 @@ pub fn excluded(name: &str) -> Option<&'static str> {
     None
 }
 
+/// Why a count of an object made because no spare was free is reported and never gated.
+const POOLED: &str = "an object made because no spare was free, where a spare comes back on \
+     another thread: which case has to make one depends on when that thread returned the one \
+     before it, not on the case's own work. Measured: `fences_made` reached 1 where the \
+     measurement's most was 0 on three whole-set replays in a row, in a different case each time";
+
 /// A count whose value says **which thread arrived first**, with why it is reported and never
 /// gated, whatever a measurement happened to see.
 ///
 /// The cost half gates on counts because a count is deterministic. These are not, structurally,
 /// and no number of measurements makes them so: holding them to a bound gives a gate that fires at
-/// random on honest work. Both entries are the runtime's own words about itself, and both were
-/// then measured here.
+/// random on honest work. Every entry's reason is the runtime's own words about itself, and
+/// every one of them was then measured here.
 ///
 /// Measured on this M3 Max over seven measurements of the whole case set (3 to 10 rounds of 126
 /// cases, about 6,300 counts a round): 24, 27, 35, 38, 47, 49 and 68 readings moved, and every one
@@ -115,12 +121,6 @@ pub fn excluded(name: &str) -> Option<&'static str> {
 /// What is **not** here, on the same evidence: `slot_returns` and `completed_waits` count work
 /// items rather than thread arrivals, one a command buffer, and they held still over every round
 /// of every measurement and every replay.
-/// Why a count of an object made because no spare was free is reported and never gated.
-const POOLED: &str = "an object made because no spare was free, where a spare comes back on \
-     another thread: which case has to make one depends on when that thread returned the one \
-     before it, not on the case's own work. Measured: `fences_made` reached 1 where the \
-     measurement's most was 0 on three whole-set replays in a row, in a different case each time";
-
 const RACY: [(&str, &str); 8] = [
     ("fences_made", POOLED),
     ("command_pools_made", POOLED),
