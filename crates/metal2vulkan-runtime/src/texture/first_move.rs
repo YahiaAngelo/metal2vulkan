@@ -1213,8 +1213,9 @@ impl Scratch {
                 }
             };
         // SAFETY: the placement meets the image's requirements and is bound nowhere else.
-        let bound =
-            unsafe { raw_device.bind_image_memory(image, placement.memory, placement.offset) };
+        let bound = unsafe {
+            crate::creation::bind_image(raw_device, image, placement.memory, placement.offset)
+        };
         if let Err(error) = bound {
             // SAFETY: the image is unused.
             unsafe { release::object(raw_device, image) };
@@ -1237,7 +1238,7 @@ impl Zeros {
                 .usage(vk::BufferUsageFlags::TRANSFER_SRC),
         );
         // SAFETY: the device is live and `info` valid.
-        let raw = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
+        let raw = unsafe { crate::creation::buffer(raw_device, &info) }.map_err(vulkan)?;
         // SAFETY: `raw` is a live buffer of this device.
         let requirements = unsafe { raw_device.get_buffer_memory_requirements(raw) };
         let placement = match crate::memory::allocate(
@@ -1258,7 +1259,12 @@ impl Zeros {
             None => Err(Error::OutOfMemory(MemoryKind::Host)),
             // SAFETY: the placement meets the buffer's requirements and is bound nowhere else.
             Some(mapped) => unsafe {
-                raw_device.bind_buffer_memory(raw, made.placement.memory, made.placement.offset)
+                crate::creation::bind_buffer(
+                    raw_device,
+                    raw,
+                    made.placement.memory,
+                    made.placement.offset,
+                )
             }
             .map_err(vulkan)
             .map(|()| mapped),
@@ -1296,7 +1302,7 @@ impl Zeros {
         let info =
             (shared.sharing()).buffer(vk::BufferCreateInfo::default().size(length).usage(usage));
         // SAFETY: the device is live and `info` valid.
-        let raw = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
+        let raw = unsafe { crate::creation::buffer(raw_device, &info) }.map_err(vulkan)?;
         // SAFETY: `raw` is a live buffer of this device.
         let requirements = unsafe { raw_device.get_buffer_memory_requirements(raw) };
         let placement = match crate::memory::allocate(
@@ -1315,7 +1321,12 @@ impl Zeros {
         let made = Zeros { raw, placement };
         // SAFETY: the placement meets the buffer's requirements and is bound nowhere else.
         let bound = unsafe {
-            raw_device.bind_buffer_memory(raw, made.placement.memory, made.placement.offset)
+            crate::creation::bind_buffer(
+                raw_device,
+                raw,
+                made.placement.memory,
+                made.placement.offset,
+            )
         };
         if let Err(error) = bound {
             made.destroy(raw_device, &mut lock(&shared.memory));

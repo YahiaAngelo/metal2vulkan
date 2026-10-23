@@ -1505,6 +1505,28 @@ fn every_image_render_pass_and_framebuffer_goes_through_the_creation_door() {
     );
 }
 
+/// Every buffer, image view, memory allocation and binding the runtime makes goes through
+/// `creation.rs` too, where each counts itself at its caller's place (`churn_counts.rs`): a
+/// making outside the door would be driver work no call of the API could be held to. The device's
+/// priming makes its own, on the thread that makes the device.
+#[test]
+fn every_buffer_view_allocation_and_binding_goes_through_the_creation_door() {
+    let found: Vec<String> = [
+        ".create_buffer(",
+        ".create_image_view(",
+        ".allocate_memory(",
+        ".bind_image_memory(",
+        ".bind_buffer_memory(",
+    ]
+    .iter()
+    .flat_map(|needle| uses(&["creation.rs", "device/prime.rs"], needle, &[]))
+    .collect();
+    assert!(
+        found.is_empty(),
+        "buffers, views, allocations or bindings made outside creation.rs: {found:#?}"
+    );
+}
+
 /// Every instance the runtime creates goes through `device/create.rs`'s door (`new_instance`),
 /// which registers the exit hook again after it: a layer registers an exit handler at each
 /// `vkCreateInstance`. The runtime's sources call `vkCreateInstance` once, in that door, and the

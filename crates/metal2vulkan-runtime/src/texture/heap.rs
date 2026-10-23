@@ -2698,7 +2698,7 @@ impl Device {
         // SAFETY: the image is live and unbound; the memory is the heap's, which the texture
         // holds, of a type the image takes (`new_heap_texture`, `host_heap_plan`), at an offset
         // that meets the image's alignment and with its size inside the heap.
-        if let Err(error) = unsafe { raw_device.bind_image_memory(raw, memory, at) } {
+        if let Err(error) = unsafe { crate::creation::bind_image(raw_device, raw, memory, at) } {
             // SAFETY: the image is live and unbound, and no command uses it.
             unsafe { release::object(raw_device, raw) };
             return Err(vulkan(error));
@@ -3544,7 +3544,7 @@ impl Device {
                 .usage(buffer_usage(shared.device_address)),
         );
         // SAFETY: the device is live and `info` valid.
-        let raw = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
+        let raw = unsafe { crate::creation::buffer(raw_device, &info) }.map_err(vulkan)?;
         // SAFETY: `raw` is a live buffer of this device, which nothing else uses: it is
         // destroyed right after the query, with no memory bound.
         let requirements = unsafe {

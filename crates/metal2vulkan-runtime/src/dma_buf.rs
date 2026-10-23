@@ -576,7 +576,7 @@ impl Device {
         );
         // SAFETY: the device is live and `info` and its chain valid; a sparse one has
         // `sparseBinding` (`Device::sparse_granule`).
-        let raw = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
+        let raw = unsafe { crate::creation::buffer(raw_device, &info) }.map_err(vulkan)?;
         shared.counts.buffer_made(info.usage);
         // SAFETY: `raw` is a live buffer of this device.
         let requirements = unsafe { raw_device.get_buffer_memory_requirements(raw) };
@@ -597,7 +597,8 @@ impl Device {
             if !sparse {
                 // SAFETY: the buffer is unbound, made for dma-bufs; the memory is of a type it
                 // takes and holds its requirements from 0.
-                unsafe { raw_device.bind_buffer_memory(raw, memories[0].0, 0) }.map_err(vulkan)?;
+                unsafe { crate::creation::bind_buffer(raw_device, raw, memories[0].0, 0) }
+                    .map_err(vulkan)?;
                 return Ok(memories[0]);
             }
             let mut offset = 0;
@@ -689,7 +690,7 @@ impl Device {
                     .push_next(&mut external),
             );
             // SAFETY: the device is live, has `sparseBinding`, and `info` and its chain are valid.
-            let raw = unsafe { raw_device.create_buffer(&info, None) }.ok()?;
+            let raw = unsafe { crate::creation::buffer(raw_device, &info) }.ok()?;
             shared.counts.buffer_made(info.usage);
             // SAFETY: `raw` is a live buffer of this device.
             let alignment = unsafe { raw_device.get_buffer_memory_requirements(raw) }.alignment;
@@ -998,7 +999,7 @@ impl Device {
             }
         };
         // SAFETY: the image is unbound; the memory is its dedicated allocation, of its size.
-        if let Err(error) = unsafe { raw_device.bind_image_memory(raw, memory, 0) } {
+        if let Err(error) = unsafe { crate::creation::bind_image(raw_device, raw, memory, 0) } {
             // SAFETY: nothing is bound to the memory, and no command uses it.
             unsafe { release::object(raw_device, memory) };
             return refuse(format!("the driver refuses to bind the import ({error:?})"));

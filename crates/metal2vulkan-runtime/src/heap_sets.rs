@@ -361,7 +361,7 @@ impl Table {
                 .usage(vk::BufferUsageFlags::STORAGE_BUFFER),
         );
         // SAFETY: the device is live and `info` valid.
-        let buffer = unsafe { raw.create_buffer(&info, None) }.map_err(vulkan)?;
+        let buffer = unsafe { crate::creation::buffer(raw, &info) }.map_err(vulkan)?;
         // SAFETY: `buffer` is a live buffer of this device.
         let requirements = unsafe { raw.get_buffer_memory_requirements(buffer) };
         let placement = match crate::memory::allocate(
@@ -380,7 +380,12 @@ impl Table {
         let table = Table { buffer, placement };
         // SAFETY: the placement meets the buffer's requirements and is not bound elsewhere.
         let bound = unsafe {
-            raw.bind_buffer_memory(buffer, table.placement.memory, table.placement.offset)
+            crate::creation::bind_buffer(
+                raw,
+                buffer,
+                table.placement.memory,
+                table.placement.offset,
+            )
         };
         if let Err(error) = bound.map_err(vulkan).and_then(|()| table.start()) {
             table.destroy(raw, &mut lock(&shared.memory));

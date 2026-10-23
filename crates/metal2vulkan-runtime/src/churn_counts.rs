@@ -10,6 +10,12 @@
 //!   on MoltenVK, a commit at the release and one at the making before it. The releases of the
 //!   whole process, by entry point (`release.rs`), and of a device's images and textures, by
 //!   what owned them.
+//! - **Object makings.** The other side of the same ledger: the `vkCreateImage`,
+//!   `vkCreateBuffer`, `vkCreateImageView`, `vkAllocateMemory`, `vkBindImageMemory` and
+//!   `vkBindBufferMemory` calls of the whole process, by entry point and by the place in the
+//!   runtime that asked for one (`creation.rs`, their one door). What a texture or buffer
+//!   creation made the driver do is then a count of that call's own work, not an inference from a
+//!   driver floor timed apart, and a count holds under any load where a time does not.
 //! - **Shadow keeps.** The keeps of merged-back shadows (`shadow_merge.rs`) by the encoder that
 //!   planned them (a render pass's attachments, a compute dispatch's bindings, a blit), cut to a
 //!   rectangle or of every texel, and the texels they copy.
@@ -25,6 +31,12 @@ static VK_RELEASES: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 /// The places in the runtime that released those, the first [`COPY_SITES`] met.
 static RELEASE_SITES: LazyLock<CopySites> = LazyLock::new(CopySites::default);
 
+/// The Vulkan makings of the process a driver charges for, by entry point ([`VkMaking`]).
+static VK_MAKINGS: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+
+/// The places in the runtime that made those, the first [`COPY_SITES`] met.
+static MAKING_SITES: LazyLock<CopySites> = LazyLock::new(CopySites::default);
+
 /// An entry point [`VK_RELEASES`] counts.
 #[derive(Clone, Copy)]
 pub(crate) enum VkRelease {
@@ -32,6 +44,18 @@ pub(crate) enum VkRelease {
     Buffer = 1,
     BufferView = 2,
     Memory = 3,
+}
+
+/// An entry point [`VK_MAKINGS`] counts: the makings a driver charges for, whose cost one call of
+/// the API carries (`creation.rs`).
+#[derive(Clone, Copy)]
+pub(crate) enum VkMaking {
+    Image = 0,
+    Buffer = 1,
+    ImageView = 2,
+    Memory = 3,
+    ImageBinding = 4,
+    BufferBinding = 5,
 }
 
 /// A release of `what` (`release::object`), called `at`.
@@ -44,6 +68,26 @@ pub(crate) fn vk_released(what: VkRelease, at: &Location<'static>) {
         VkRelease::Memory => "vkFreeMemory",
     };
     RELEASE_SITES.count(command, at, 0);
+}
+
+/// A making of `what` (`creation.rs`), called `at`.
+pub(crate) fn vk_made(what: VkMaking, at: &Location<'static>) {
+    VK_MAKINGS[what as usize].fetch_add(1, Ordering::Relaxed);
+    MAKING_SITES.count(what.command(), at, 0);
+}
+
+impl VkMaking {
+    /// Its Vulkan entry point.
+    fn command(self) -> &'static str {
+        match self {
+            VkMaking::Image => "vkCreateImage",
+            VkMaking::Buffer => "vkCreateBuffer",
+            VkMaking::ImageView => "vkCreateImageView",
+            VkMaking::Memory => "vkAllocateMemory",
+            VkMaking::ImageBinding => "vkBindImageMemory",
+            VkMaking::BufferBinding => "vkBindBufferMemory",
+        }
+    }
 }
 
 /// What owned an image or a texture as it went.
@@ -135,6 +179,7 @@ impl ChurnCounters {
     pub(crate) fn snapshot(&self) -> (ObjectChurn, ShadowKeeps) {
         let owned = |o: Owned| self.owned[o as usize].load(Ordering::Relaxed);
         let vk = |r: VkRelease| VK_RELEASES[r as usize].load(Ordering::Relaxed);
+        let made = |m: VkMaking| VK_MAKINGS[m as usize].load(Ordering::Relaxed);
         let keep = |by: KeepBy, at: usize| self.keeps[by as usize][at].load(Ordering::Relaxed);
         let recycled =
             |what: Recycled, at: usize| self.recycled[what as usize][at].load(Ordering::Relaxed);
@@ -144,6 +189,13 @@ impl ChurnCounters {
                 vk_buffers_destroyed: vk(VkRelease::Buffer),
                 vk_buffer_views_destroyed: vk(VkRelease::BufferView),
                 vk_memory_freed: vk(VkRelease::Memory),
+                vk_images_made: made(VkMaking::Image),
+                vk_buffers_made: made(VkMaking::Buffer),
+                vk_image_views_made: made(VkMaking::ImageView),
+                vk_memory_allocations: made(VkMaking::Memory),
+                vk_image_bindings: made(VkMaking::ImageBinding),
+                vk_buffer_bindings: made(VkMaking::BufferBinding),
+                making_sites: MAKING_SITES.read(),
                 images_own_memory: owned(Owned::ImageOwnMemory),
                 images_in_buffers: owned(Owned::ImageInBuffer),
                 images_in_heaps: owned(Owned::ImageInHeap),
@@ -193,6 +245,19 @@ pub struct ObjectChurn {
     pub vk_buffer_views_destroyed: u64,
     /// `vkFreeMemory` calls of the process.
     pub vk_memory_freed: u64,
+    /// `vkCreateImage` calls of the process (`creation.rs`).
+    pub vk_images_made: u64,
+    /// `vkCreateBuffer` calls of the process.
+    pub vk_buffers_made: u64,
+    /// `vkCreateImageView` calls of the process.
+    pub vk_image_views_made: u64,
+    /// `vkAllocateMemory` calls of the process, the tries a caller that walks the memory types
+    /// made included.
+    pub vk_memory_allocations: u64,
+    /// `vkBindImageMemory` calls of the process.
+    pub vk_image_bindings: u64,
+    /// `vkBindBufferMemory` calls of the process.
+    pub vk_buffer_bindings: u64,
     /// The device's images that went, of memory of their own.
     pub images_own_memory: u64,
     /// Linear images in buffers' memory.
@@ -229,6 +294,10 @@ pub struct ObjectChurn {
     /// The places that released the images, buffers, buffer views and memory counted above, each
     /// with its calls (`regions` unused): the first 32 the process met.
     pub release_sites: [CopySite; COPY_SITES],
+    /// The places that made the images, buffers, views, memory and bindings counted above, each
+    /// with its calls (`regions` unused): the first 32 the process met. What a creation call of
+    /// the API made the driver do, and the line of the runtime that asked for it.
+    pub making_sites: [CopySite; COPY_SITES],
 }
 
 /// The keeps of merged-back shadows by who planned them, cut to a rectangle or of every texel

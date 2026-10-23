@@ -135,7 +135,7 @@ impl Placeholder {
                 layer_count: key.1,
             });
         // SAFETY: the image is live and bound; the layers are among its own (`covers`).
-        let view = unsafe { device.create_image_view(&info, None) }.map_err(vulkan)?;
+        let view = unsafe { crate::creation::image_view(device, &info) }.map_err(vulkan)?;
         views.push((key, view));
         Ok(view)
     }
@@ -258,9 +258,9 @@ impl Device {
             }
         };
         // SAFETY: the placement meets the image's requirements and is not bound elsewhere.
-        if let Err(error) =
-            unsafe { raw_device.bind_image_memory(image, placement.memory, placement.offset) }
-        {
+        if let Err(error) = unsafe {
+            crate::creation::bind_image(raw_device, image, placement.memory, placement.offset)
+        } {
             lock(&shared.memory).free(raw_device, &placement);
             // SAFETY: the image is unused.
             unsafe { release::object(raw_device, image) };
