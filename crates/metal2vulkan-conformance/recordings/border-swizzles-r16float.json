@@ -6060,5 +6060,58 @@
         }
       }
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "bounds": {
+        "argument_objects_retained": 360,
+        "argument_tables_retained": 60,
+        "bare_starts": 60,
+        "batches_with_none_pending": 60,
+        "bound_notices_made": 1,
+        "command_buffers_begun": 60,
+        "command_buffers_begun_encoders": 60,
+        "command_buffers_deferred": 60,
+        "command_buffers_replayed_inline": 60,
+        "command_buffers_submitted": 60,
+        "commands_replayed.begin_command_buffer": 60,
+        "commands_replayed.cmd_bind_descriptor_sets": 60,
+        "commands_replayed.cmd_bind_pipeline": 60,
+        "commands_replayed.cmd_dispatch": 60,
+        "commands_replayed.cmd_pipeline_barrier": 60,
+        "commands_replayed.cmd_push_constants": 60,
+        "commands_replayed.end_command_buffer": 60,
+        "commits_handed_off": 60,
+        "completed_waits": 63,
+        "completed_where_seen": 60,
+        "encoder_command_buffers_begun": 60,
+        "finales_folded": 60,
+        "host_texel_copies": 8,
+        "images_started_on_the_host": 8,
+        "new_buffer_bytes_cleared": 14432,
+        "object_churn.buffers_parked": 61,
+        "object_churn.buffers_recycled": 61,
+        "object_churn.images_own_memory": 8,
+        "object_churn.textures_image": 8,
+        "object_churn.vk_image_bindings": 8,
+        "object_churn.vk_image_views_made": 8,
+        "object_churn.vk_images_destroyed": 10,
+        "object_churn.vk_images_made": 10,
+        "queue_submissions": 60,
+        "scheduled_where_submitted": 60,
+        "scheduler_passes": 60,
+        "scheduler_sleeps": 60,
+        "scheduler_wakes_commit": 60,
+        "slot_returns": 60,
+        "spare_command_pools_taken": 120,
+        "submit_infos": 60,
+        "variants_taken_back": 1,
+        "wakes_completion_waiters": 60,
+        "wakes_spared": 361
+      }
+    }
   ]
 }

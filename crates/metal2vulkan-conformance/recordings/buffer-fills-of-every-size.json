@@ -237,5 +237,52 @@
       ],
       "validated": "ran"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "degraded": [
+        "metal2vulkan-degrade-split-buffer-fill"
+      ],
+      "bounds": {
+        "bare_starts": 2,
+        "batches_with_none_pending": 2,
+        "command_barriers": 1,
+        "command_buffers_begun": 3,
+        "command_buffers_begun_batch_work": 1,
+        "command_buffers_begun_encoders": 2,
+        "command_buffers_deferred": 2,
+        "command_buffers_replayed_inline": 2,
+        "command_buffers_submitted": 3,
+        "commands_replayed.begin_command_buffer": 2,
+        "commands_replayed.cmd_copy_buffer": 4,
+        "commands_replayed.cmd_fill_buffer": 5,
+        "commands_replayed.cmd_pipeline_barrier": 3,
+        "commands_replayed.end_command_buffer": 2,
+        "commits_handed_off": 2,
+        "completed_waits": 5,
+        "completed_where_seen": 2,
+        "encoder_command_buffers_begun": 2,
+        "fills_recorded": 5,
+        "finales_folded": 2,
+        "new_buffer_bytes_cleared": 615424,
+        "object_churn.buffers_parked": 3,
+        "object_churn.buffers_recycled": 1,
+        "object_churn.vk_buffer_bindings": 2,
+        "object_churn.vk_buffers_made": 2,
+        "queue_submissions": 2,
+        "scheduled_where_submitted": 2,
+        "scheduler_passes": 2,
+        "scheduler_sleeps": 2,
+        "scheduler_wakes_commit": 2,
+        "slot_returns": 2,
+        "spare_command_pools_taken": 4,
+        "submit_infos": 2,
+        "wakes_completion_waiters": 2,
+        "wakes_spared": 12
+      }
+    }
   ]
 }

@@ -1291,8 +1291,8 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 5,
-      "measured": "5 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-emulated-mesh-draws",
         "metal2vulkan-degrade-fast-math-rewrites",
@@ -1302,7 +1302,6 @@
       ],
       "bounds": {
         "argument_objects_retained": 6,
-        "argument_samplers_taken": 2,
         "argument_tables_retained": 6,
         "bare_starts": 6,
         "batches_with_none_pending": 6,
@@ -1364,14 +1363,15 @@
         "indirect_draws_recorded": 4,
         "instance_splits_barrier": 6,
         "live_tables_uploaded": 4,
+        "memory_blocks_live": 1,
         "new_buffer_bytes_cleared": 25280,
-        "object_churn.buffers_evicted": 4,
+        "object_churn.buffers_evicted": 28,
         "object_churn.buffers_parked": 20,
         "object_churn.buffers_recycled": 16,
         "object_churn.images_own_memory": 6,
         "object_churn.textures_image": 6,
         "object_churn.vk_buffer_bindings": 5,
-        "object_churn.vk_buffers_destroyed": 5,
+        "object_churn.vk_buffers_destroyed": 29,
         "object_churn.vk_buffers_made": 5,
         "object_churn.vk_image_bindings": 6,
         "object_churn.vk_image_views_made": 6,
@@ -1389,8 +1389,9 @@
         "render_passes_begun_instances": 12,
         "render_passes_made": 3,
         "scheduled_where_submitted": 6,
-        "scheduler_passes": 10,
-        "scheduler_sleeps": 8,
+        "scheduler_passes": 11,
+        "scheduler_sleep_slices": 1,
+        "scheduler_sleeps": 10,
         "scheduler_wakes_commit": 6,
         "scheduler_wakes_host": 4,
         "shader_modules_made": 10,
@@ -1402,7 +1403,7 @@
         "variant_pipelines_made": 27,
         "wakes_completion_waiters": 6,
         "wakes_handler_threads": 2,
-        "wakes_spared": 36
+        "wakes_spared": 37
       }
     }
   ]

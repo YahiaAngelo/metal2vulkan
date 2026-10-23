@@ -194,8 +194,10 @@ mod tests {
                 Recording::new(case.name(), Vec::new(), vec![case.stated_answer().unwrap()]);
             let committed =
                 recording::read(case.name()).unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+            // Metal's answer alone: the cost half of the file is our own measurement on a venue,
+            // taken by another leg, and a case states nothing about it.
             assert_eq!(
-                committed,
+                committed.without_costs(),
                 stated,
                 "{}: its committed recording is not the answer the case states",
                 case.name()

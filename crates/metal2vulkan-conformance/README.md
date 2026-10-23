@@ -114,14 +114,36 @@ queueing work cannot score as a win). The device API is the residual.
 A count the measurement never saw move is bounded at **zero**, so a case that starts doing something
 it did not do before is `over` rather than unnoticed.
 
-Two kinds of count are reported and never gated, because holding them would give a gate that fires
-at random:
+Some counts are reported and never gated, because holding them would give a gate that fires at
+random on honest work. Each reason is written at its site in `cost.rs` with the runs behind it:
 
 - one whose readings **moved** between the measurement's own rounds, which the record keeps as the
   range it was seen in;
 - one that says **which thread arrived first** — which thread replayed a deferred command buffer,
-  and everything on the asynchronous release path, whose counts may land in a later case's window.
-  Their totals are gated: `command_buffers_deferred` holds the two replay counts between them.
+  when one of our background threads ran, and everything on the asynchronous release path, whose
+  counts may land in a later case's window;
+- one that is a reading of **what was alive at that instant** rather than work a case did;
+- one that says an object was **found already made** rather than made, which depends on what every
+  case before it in the same process made;
+- `completed_waits`, which charges a case for waits belonging to whatever ran before it.
+
+Totals stay gated where one exists, so nothing is lost: `command_buffers_deferred` holds the two
+replay counts between them, and a `_made` count holds its `_shared` partner — finding one already
+made only ever *lowers* it, and the gate is an upper bound.
+
+**A bound is a bound on the selection it was measured over.** A case's counts depend on what ran
+before it in the same process, so a cost record is evidence for a whole-set run and nothing else; a
+run of fewer cases reads `unmeasured`. When cases land, re-measure. To tell a case's own work from
+what the process handed it, run the contrast:
+
+```sh
+conformance cost --runs 2 --show <case>   # a selection of one, on its own fresh device
+conformance cost --runs 1 --show          # the same case inside the whole set
+```
+
+A count that differs between the two depends on the selection. That is how `completed_waits` was
+caught charging three cases for four or five waits that were not theirs, after it had held still
+over seven rounds of an earlier measurement.
 
 **A device's gap is not a cost win.** A count that is lower because the device lacks the exact form,
 so the runtime announced a notice and did something cheaper, is the device's gap and not work we

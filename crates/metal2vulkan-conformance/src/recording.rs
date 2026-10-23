@@ -320,6 +320,19 @@ impl Recording {
         self
     }
 
+    /// The same recording with the cost half dropped: **Metal's answer alone**.
+    ///
+    /// What a case can state about itself. The cost half is our own measurement on a venue, taken
+    /// by a different leg and written by a different command, so a test that ties a committed
+    /// recording to the answer its case states compares this and not the whole file — otherwise
+    /// measuring the cost of a hand-written recording's case would break the test that keeps that
+    /// file honest.
+    #[must_use]
+    pub fn without_costs(mut self) -> Self {
+        self.costs = Vec::new();
+        self
+    }
+
     /// The answer for the venue's declared Metal `level`, or why there is none.
     ///
     /// The two outcomes are kept apart because they mean different things. A recording of another
