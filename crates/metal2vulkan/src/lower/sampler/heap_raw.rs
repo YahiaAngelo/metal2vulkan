@@ -198,7 +198,7 @@ pub(crate) fn emit(
             parent: None,
         };
         let at = At {
-            coord: cx.operand(fb, s.coord)?,
+            coord: super::emit::plane_coord(cx, fb, s)?,
             layer: None,
             offset: raw.offset.as_deref(),
             passed: None,

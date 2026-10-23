@@ -464,7 +464,7 @@ pub(super) fn sample(
     let Some(&(_, image)) = cx.decl.families.sampler.combined.get(&key) else {
         return Err(cx.fail(format!("combined binding {key:?} is not declared")));
     };
-    let coord = cx.operand(fb, s.coord)?;
+    let coord = super::emit::plane_coord(cx, fb, s)?;
     // A cube's direction with its ties broken as Metal breaks them, whose face Metal reads.
     let coord = match s.cube {
         true => super::face::metal_ties(fb, coord)?,

@@ -1070,7 +1070,7 @@ impl At {
         fb: &mut FunctionBuilder<'_>,
         s: &Sampling,
     ) -> BResult<At> {
-        let coord = cx.operand(fb, s.coord)?;
+        let coord = super::emit::plane_coord(cx, fb, s)?;
         let layer = match s.layer {
             Some(l) => Some(cx.operand(fb, l)?),
             None => None,
