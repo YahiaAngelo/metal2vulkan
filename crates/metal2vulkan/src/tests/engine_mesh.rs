@@ -1274,11 +1274,6 @@ fn object_records_draws(dev: &crate::device::Device, draws: &crate::library::Lib
         u32::try_from((4 - range.offset) / 4 + 1).expect("a word"),
         "{stem}"
     );
-    assert_eq!(
-        d.work[work::OBJECT_THREADS as usize],
-        crate::lower::dispatch::pack_nominal([4, 1, 1]).expect("packs"),
-        "{stem}"
-    );
     assert_eq!(d.work[work::OBJECT_GROUPS as usize], 0, "{stem}");
     assert_eq!(
         d.work_bytes,

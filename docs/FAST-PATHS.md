@@ -452,9 +452,9 @@ driver's. Each is open work.
   a direct one is refused (`Unsupported{MeshShading}` naming the limit). The emulation (MoltenVK,
   ANV on the Iris Xe) refuses a direct object grid past the compute stage's limits or whose work
   buffer passes `maxStorageBufferRange` (`Unsupported{MeshShading}` naming the limit), and fails
-  the command buffer of an indirect one past the compute limits, or whose threads per grid wrap
-  along an axis (its object dispatch cannot report Metal's wrapped grid), with
-  `CommandBufferError::MeshGridPastLimits`.
+  the command buffer of an indirect one past the compute limits with
+  `CommandBufferError::MeshGridPastLimits` (ANV's y and z axes stop at 65,535; MoltenVK's limits
+  pass every grid Metal runs).
 - **An object threadgroup that sets a mesh grid Metal launches nothing for keeps its own writes.**
   On the M3 Max such a threadgroup's device writes (an atomic add before the set) do not land
   either, while the draw's other threadgroups run; the runtime runs the threadgroup and launches

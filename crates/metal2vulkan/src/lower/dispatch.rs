@@ -58,7 +58,10 @@
 //! `thread_position_in_grid = (base + WorkgroupId) · L + position in threadgroup` (an edge axis
 //! has one group), and `threadgroups_per_grid = ⌈threads_per_grid / L⌉`. Both forms are
 //! evaluated and selected by the specialization constant; the packing never yields a zero divisor,
-//! so the unselected form is always defined.
+//! so the unselected form is always defined. An unfolded object function's single-region
+//! `threadgroups_per_grid` is `⌈threads_per_grid / L⌉` too, of `NumWorkgroups · L` wrapped at 2^32
+//! as Metal's object grid is (measured: an indirect draw runs every threadgroup and reports the
+//! grid its wrapped threads fill); it is `NumWorkgroups` wherever no axis wraps.
 //!
 //! **Flat grids**. A flat variant (`LoweringInputs::flat_grid`, of a device replay or not) of a
 //! kernel that does not observe its threadgroup partition runs any grid in threadgroups of its own
@@ -398,6 +401,12 @@ pub struct DispatchPlan {
     /// dispatch's: an emulated mesh function under an object function, whose flat dispatch runs
     /// every object threadgroup's mesh grid ([`WrapperGroups`]).
     pub wrapper_groups: bool,
+    /// An unfolded object function: its single-region `threadgroups_per_grid` is Metal's object
+    /// grid's, the threadgroups its threads per grid fill once each axis wraps at 2^32
+    /// (`bind::metal_object_grid`, measured): `⌈(NumWorkgroups · L mod 2^32) / L⌉`, which is
+    /// `NumWorkgroups` unless an axis's threads wrap, as an indirect draw's may (Metal runs every
+    /// threadgroup of it and reports the wrapped grid).
+    pub object_grid: bool,
 }
 
 /// The words a flat grid adds: its thread's index, position, and early return, derived once for the
@@ -562,6 +571,7 @@ pub fn plan_kernel(cx: &mut SelectCx<'_>, tier: Tier) -> Result<DispatchPlan, Er
         folded_groups,
         draw_pieces: folded_groups && cx.stage == crate::pipeline::sym::Stage::Object,
         wrapper_groups: crate::lower::mesh::wrapper_groups(&cx.families.mesh),
+        object_grid: !folded_groups && cx.stage == crate::pipeline::sym::Stage::Object,
     })
 }
 
@@ -751,6 +761,8 @@ pub struct KernelDecl {
     /// The words the entry wrapper stores the threadgroup's position and grid into
     /// ([`DispatchPlan::wrapper_groups`]), with the dispatch's own builtins it reads.
     wrapper: Option<WrapperGroups>,
+    /// An unfolded object function's grid ([`DispatchPlan::object_grid`]).
+    object_grid: bool,
 }
 
 /// The threadgroup position and grid of a kernel whose entry wrapper computes them
@@ -982,7 +994,18 @@ impl KernelDecl {
             subgroup_size: var(subgroups, B::SubgroupSize, u32_)?,
             subgroup_local: var(subgroups, B::SubgroupLocalInvocationId, u32_)?,
             wrapper,
+            object_grid: dp.object_grid,
         })
+    }
+
+    /// The dispatch's own `WorkgroupId` and `NumWorkgroups`, of a kernel that reads its
+    /// threadgroup's position and the grid's threadgroups (an emulated object function's wrapper:
+    /// its slot's number counts the threadgroups the dispatch runs, not the grid Metal reports).
+    pub fn dispatch_groups(&self, fb: &mut FunctionBuilder<'_>) -> BResult<(SValue, SValue)> {
+        Ok((
+            self.load(fb, self.workgroup_id)?,
+            self.load(fb, self.num_workgroups)?,
+        ))
     }
 
     /// The words the entry wrapper computes the threadgroup's position and grid into, where it
@@ -1505,7 +1528,13 @@ impl KernelDecl {
                 }
             }
             K::ThreadgroupsPerGrid => {
-                let groups = self.load(fb, self.num_workgroups)?;
+                let mut groups = self.load(fb, self.num_workgroups)?;
+                // An object function's grid: the threadgroups its wrapped threads fill.
+                if self.object_grid {
+                    let s = self.size3(fb)?;
+                    let threads = fb.binary(BinOp::IMul, groups, s)?;
+                    groups = self.ceil_div(fb, threads, s)?;
+                }
                 match self.region_threads(fb, region)? {
                     Some((mr, t)) => {
                         let (_, l) = self.region(fb, region)?;

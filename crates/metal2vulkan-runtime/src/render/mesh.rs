@@ -87,8 +87,8 @@
 //!   the object arguments pass (`bind::mesh_object_arguments_module`), which reads Metal's
 //!   arguments, reserves the object threadgroups' slots in the records pool and writes the object
 //!   dispatch, which then launches indirectly: a grid Metal's GPU discards fails the command
-//!   buffer as Metal's (`CommandBufferError::GpuRecoveryVictim`), one past the compute limits or
-//!   whose threads per grid wrap fails it as one the device cannot launch
+//!   buffer as Metal's (`CommandBufferError::GpuRecoveryVictim`), one past the compute limits
+//!   fails it as one the device cannot launch
 //!   (`CommandBufferError::MeshGridPastLimits`), and one whose slots the pool cannot hold as a
 //!   records overflow (`CommandBufferError::MeshRecordsOverflow`, naming no mesh threadgroup).
 

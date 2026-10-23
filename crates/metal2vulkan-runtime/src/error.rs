@@ -1631,9 +1631,8 @@ pub enum CommandBufferError {
     /// `maxTaskWorkGroupTotalCount`), or a mesh grid past the mesh stage's; on one that folds them,
     /// a grid of more pieces than `MeshArguments::OBJECT_PIECES` (only under task limits below
     /// Vulkan's required least); on a device without `VK_EXT_mesh_shader` (the emulation), an
-    /// indirect draw's object grid past the device's `maxComputeWorkGroupCount`, or one whose
-    /// threads per grid along an axis reach 2^32 (Metal reports the wrapped grid, which the
-    /// emulation's dispatch cannot). Nothing is drawn short silently. A direct draw of such a grid on
+    /// indirect draw's object grid past the device's `maxComputeWorkGroupCount`. Nothing is drawn
+    /// short silently. A direct draw of such a grid on
     /// a device that does not fold is refused as it is encoded (`Unsupported{MeshShading}` naming
     /// the limit). Not Metal's failure: an object grid Metal's GPU discards is
     /// [`GpuRecoveryVictim`](Self::GpuRecoveryVictim).

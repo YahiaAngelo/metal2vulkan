@@ -257,8 +257,8 @@ impl StatusBits {
     /// launch: a mesh grid past the mesh stage's limits, an unfolded object grid past the task
     /// stage's, or a folded one of more pieces than `MeshArguments::OBJECT_PIECES` (only under task
     /// limits below Vulkan's required least); or an emulated indirect draw's object arguments pass
-    /// met an object grid past the device's compute limits, or one whose threads per grid wrap
-    /// along an axis (`bind::mesh_object_arguments_module`); the draw drew nothing
+    /// met an object grid past the device's compute limits (`bind::mesh_object_arguments_module`);
+    /// the draw drew nothing
     /// (`bind::MeshArguments`).
     pub const MESH_GRID_PAST_LIMITS: StatusBits = StatusBits(1 << 9);
     /// An indirect mesh draw's arguments pass met an object grid of more threadgroups than

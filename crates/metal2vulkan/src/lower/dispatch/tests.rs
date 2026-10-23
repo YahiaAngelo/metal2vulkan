@@ -35,6 +35,7 @@ fn plan(form: LocalSizeForm, multi_region: bool) -> DispatchPlan {
         folded_groups: false,
         draw_pieces: false,
         wrapper_groups: false,
+        object_grid: false,
     }
 }
 
@@ -353,12 +354,15 @@ fn thread_regions(threads: [u32; 3], l: [u32; 3]) -> Vec<Region> {
 }
 
 /// `MultiRegion = 0`: a `Threadgroups` dispatch reads `NumWorkgroups` and no push field, in both
-/// local-size forms and both modelled subgroup widths.
+/// local-size forms and both modelled subgroup widths; so does an object function's grid
+/// (`DispatchPlan::object_grid`), whose threads per grid here wrap on no axis.
 #[test]
 fn single_region_builtins_match_metal() {
     for form in [LocalSizeForm::Spec, LocalSizeForm::Flat] {
-        for mr in [false, true] {
-            let m = module(&plan(form, mr));
+        for (mr, object) in [(false, false), (true, false), (false, true), (true, true)] {
+            let mut dp = plan(form, mr);
+            dp.object_grid = object;
+            let m = module(&dp);
             for sg in [SubgroupSize::W32, SubgroupSize::W64] {
                 // Flattened tiers need N % S = 0 (LocalSizeConstraint); 64 fits both widths.
                 for (l, groups) in [([8, 4, 2], [3, 2, 1]), ([64, 1, 1], [2, 1, 2])] {

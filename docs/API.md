@@ -606,10 +606,11 @@ arguments pass (`MeshDispatch::object_arguments`, `bind::mesh_object_arguments_m
 invocation over the scan's bindings): it reads Metal's arguments, reserves the object threadgroups'
 slots in the command buffer's records pool, and writes the object function's
 `VkDispatchIndirectCommand` into the work buffer (`MeshDispatch::OBJECT_DISPATCH_OFFSET`). A grid
-Metal's GPU discards sets `StatusBits::MESH_GRID_DISCARDED`; one past the device's compute limits,
-or whose threads per grid wrap along an axis (Metal reports the wrapped grid, which the object
-dispatch cannot), sets `MESH_GRID_PAST_LIMITS`; slots the rest of the pool cannot hold set
-`MESH_RECORDS_OVERFLOW`. Each draws nothing.
+Metal's GPU discards sets `StatusBits::MESH_GRID_DISCARDED`; one past the device's compute limits
+sets `MESH_GRID_PAST_LIMITS`; slots the rest of the pool cannot hold set `MESH_RECORDS_OVERFLOW`.
+Each draws nothing. A grid whose threads per grid wrap along an axis runs every threadgroup, and
+the object function reports the wrapped grid as Metal's: an unfolded object function's
+`threadgroups_per_grid` is the threadgroups its wrapped threads fill.
 
 ### Tile pipelines
 

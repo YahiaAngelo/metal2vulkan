@@ -329,13 +329,12 @@ fn the_scan_reads_slots_in_the_records_pool() {
     assert!(s.pool[..200].iter().all(|&w| w == 0x5555_5555));
 }
 
-/// An object arguments pass: Metal's arguments `arguments` at word `at` (0: none), object
-/// threadgroups of `threads`, slots of 6 words, a pool of `pool_words` with its cursor at
-/// `cursor`, the status bits `bits`, and the device's `compute` limits.
+/// An object arguments pass: Metal's arguments `arguments` at word `at` (0: none), slots of 6
+/// words, a pool of `pool_words` with its cursor at `cursor`, the status bits `bits`, and the
+/// device's `compute` limits.
 struct Arguments {
     arguments: Vec<u32>,
     at: u32,
-    threads: [u32; 3],
     pool_words: u32,
     cursor: u32,
     bits: u32,
@@ -349,7 +348,6 @@ impl Arguments {
         Arguments {
             arguments,
             at: 1,
-            threads: [32, 1, 1],
             pool_words: 1000,
             cursor: 40,
             bits: 0,
@@ -361,8 +359,6 @@ impl Arguments {
     fn work(&self) -> Vec<u32> {
         let mut w = vec![0xAAAA_AAAA; work::HEADER as usize + 1];
         w[work::OBJECT_ARGUMENTS as usize] = self.at + 1;
-        w[work::OBJECT_THREADS as usize] =
-            crate::lower::dispatch::pack_nominal(self.threads).expect("threads");
         w[work::SLOT_WORDS as usize] = 6;
         w[work::POOL_WORDS as usize] = self.pool_words;
         w[work::DRAW_ID as usize] = 7;
@@ -483,7 +479,6 @@ fn the_object_arguments_pass_discards_what_metal_discards() {
     for grid in [[1 << 15, 1 << 15, 1], [(1 << 29) + 1, 1, 1], [65535; 3]] {
         let mut a = Arguments::of(grid);
         a.compute = [u32::MAX; 3];
-        a.threads = [1, 1, 1];
         let s = a.run();
         runs_nothing(&a, &s);
         assert!(s.report.mesh_grid_discarded, "{grid:?}");
@@ -492,7 +487,6 @@ fn the_object_arguments_pass_discards_what_metal_discards() {
     }
     let mut a = Arguments::of([1 << 29, 1, 1]);
     a.compute = [u32::MAX; 3];
-    a.threads = [1, 1, 1];
     a.pool_words = u32::MAX;
     a.cursor = 0;
     let s = a.run();
@@ -501,33 +495,28 @@ fn the_object_arguments_pass_discards_what_metal_discards() {
     assert_eq!(s.report, StatusReport::default());
 }
 
-/// An axis past the device's compute limits, or whose threads per grid wrap (Metal runs it; the
-/// dispatch cannot report its wrapped grid), runs nothing and sets the past-limits bit.
+/// An axis past the device's compute limits runs nothing and sets the past-limits bit; a grid
+/// whose threads per grid wrap runs whole (the object function reports the wrapped grid).
 #[test]
 fn the_object_arguments_pass_holds_the_device_limits() {
-    for (grid, compute, threads) in [
-        ([65536, 1, 1], [65535; 3], [1, 1, 1]),
-        ([1, 1, 3], [65535, 65535, 2], [1, 1, 1]),
-        ([1 << 22, 1, 1], [u32::MAX; 3], [1024, 1, 1]),
-        ([1, 1 << 23, 1], [u32::MAX; 3], [1, 512, 1]),
-    ] {
+    for (grid, compute) in [([65536, 1, 1], [65535; 3]), ([1, 1, 3], [65535, 65535, 2])] {
         let mut a = Arguments::of(grid);
         a.compute = compute;
-        a.threads = threads;
-        a.pool_words = u32::MAX;
         let s = a.run();
         runs_nothing(&a, &s);
         assert!(s.report.mesh_grid_past_limits, "{grid:?}");
         assert!(!s.report.mesh_grid_discarded, "{grid:?}");
     }
-    // One threadgroup less does not wrap.
-    let mut a = Arguments::of([(1 << 22) - 1, 1, 1]);
-    a.compute = [u32::MAX; 3];
-    a.threads = [1024, 1, 1];
-    a.pool_words = u32::MAX;
-    let s = a.run();
-    assert_eq!(s.work[work::OBJECT_GROUPS as usize], (1 << 22) - 1);
-    assert_eq!(s.report, StatusReport::default());
+    for grid in [[1 << 22, 1, 1], [1, 1 << 23, 1], [65535, 1, 1]] {
+        let mut a = Arguments::of(grid);
+        a.compute = [u32::MAX; 3];
+        a.pool_words = u32::MAX;
+        let s = a.run();
+        let n = grid.iter().product::<u32>();
+        assert_eq!(s.work[work::OBJECT_GROUPS as usize], n, "{grid:?}");
+        assert_eq!(header(&s.work, work::OBJECT_DISPATCH, 3), grid.to_vec());
+        assert_eq!(s.report, StatusReport::default(), "{grid:?}");
+    }
 }
 
 /// Slots the rest of the pool cannot hold: nothing runs, the cursor stays, and the first such
