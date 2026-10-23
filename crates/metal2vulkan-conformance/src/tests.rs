@@ -102,10 +102,31 @@ impl Side for StubSide {
         Ok(self.handle())
     }
 
+    fn texture_2d(
+        &mut self,
+        _format: metal2vulkan::metal::PixelFormat,
+        _size: [u32; 2],
+        _row_pitch: u32,
+        _bytes: &[u8],
+    ) -> Answer<Handle> {
+        Ok(self.handle())
+    }
+
+    fn read_texture(
+        &mut self,
+        _texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+    ) -> Answer<Vec<u8>> {
+        let mut bytes = self.output.clone();
+        bytes.resize(row_pitch as usize * size[1] as usize, 0);
+        Ok(bytes)
+    }
+
     fn dispatch(
         &mut self,
         _pipeline: Handle,
-        _buffers: &[Handle],
+        _bindings: &crate::case::Bindings<'_>,
         _threadgroups: [u32; 3],
         _threads: [u32; 3],
     ) -> Answer<Handle> {
@@ -130,7 +151,7 @@ impl Side for StubSide {
     fn dispatch_threads(
         &mut self,
         _pipeline: Handle,
-        _buffers: &[Handle],
+        _bindings: &crate::case::Bindings<'_>,
         _stage_in: &[crate::case::StageInRegion],
         _grid: [u32; 3],
         _threads: [u32; 3],
@@ -243,7 +264,12 @@ impl Case for WordsCase {
         let command_buffer = made(
             sites,
             "dispatch",
-            side.dispatch(pipeline, &[buffer], [1, 1, 1], [self.words, 1, 1]),
+            side.dispatch(
+                pipeline,
+                &crate::case::Bindings::buffers(&[buffer]),
+                [1, 1, 1],
+                [self.words, 1, 1],
+            ),
         )?;
         call(sites, "status", side.wait(command_buffer), Clone::clone)?;
         let bytes = call(

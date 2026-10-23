@@ -12,8 +12,11 @@
 //! Metal announces no degrade notice, so this side announces none: a notice in a transcript is
 //! ours, and a case that holds one must name what justifies it.
 
-use crate::case::{Answer, Failure, Handle, ShaderSource, Side, StageInRegion, StageInput, Venue};
+use crate::case::{
+    Answer, Bindings, Failure, Handle, ShaderSource, Side, StageInRegion, StageInput, Venue,
+};
 use crate::transcript::Value;
+use metal2vulkan::metal::PixelFormat;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSString, NSURL};
@@ -21,8 +24,9 @@ use objc2_metal::{
     MTLAttributeFormat, MTLBuffer, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder,
     MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineDescriptor,
     MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDevice, MTLIndexType, MTLLibrary,
-    MTLOrigin, MTLPipelineOption, MTLRegion, MTLResourceOptions, MTLSize,
-    MTLStageInputOutputDescriptor, MTLStepFunction,
+    MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLRegion, MTLResourceOptions, MTLSize,
+    MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode, MTLTexture,
+    MTLTextureDescriptor, MTLTextureUsage,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -36,6 +40,7 @@ pub struct MetalSide {
     libraries: Vec<Retained<ProtocolObject<dyn MTLLibrary>>>,
     pipelines: Vec<Retained<ProtocolObject<dyn MTLComputePipelineState>>>,
     buffers: Vec<Retained<ProtocolObject<dyn MTLBuffer>>>,
+    textures: Vec<Retained<ProtocolObject<dyn MTLTexture>>>,
     command_buffers: Vec<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
@@ -55,6 +60,7 @@ impl MetalSide {
             libraries: Vec::new(),
             pipelines: Vec::new(),
             buffers: Vec::new(),
+            textures: Vec::new(),
             command_buffers: Vec::new(),
             scratch: Scratch::new()?,
         })
@@ -68,19 +74,33 @@ impl MetalSide {
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
     }
 
-    /// One command buffer with one compute encoder: the pipeline set, `buffers` bound at 0 up,
+    /// The texture `handle` names.
+    fn held_texture(&self, handle: Handle) -> Answer<&ProtocolObject<dyn MTLTexture>> {
+        self.textures
+            .get(handle.0 as usize)
+            .map(|texture| &**texture)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+    }
+
+    /// One command buffer with one compute encoder: the pipeline set, `bindings` bound at 0 up,
     /// each of `stage_in` set in order, `dispatch` encoded, and `commit`. The two dispatch calls
     /// share this body, so neither side can pick up a different binding order with one of them.
     fn encode(
         &mut self,
         pipeline: Handle,
-        buffers: &[Handle],
+        bindings: &Bindings<'_>,
         stage_in: &[StageInRegion],
         dispatch: impl FnOnce(&ProtocolObject<dyn MTLComputeCommandEncoder>),
     ) -> Answer<Handle> {
-        let bound: Vec<Retained<ProtocolObject<dyn MTLBuffer>>> = buffers
+        let bound: Vec<Retained<ProtocolObject<dyn MTLBuffer>>> = bindings
+            .buffers
             .iter()
             .map(|handle| self.held(*handle).map(Retained::from))
+            .collect::<Answer<Vec<_>>>()?;
+        let sampled: Vec<Retained<ProtocolObject<dyn MTLTexture>>> = bindings
+            .textures
+            .iter()
+            .map(|handle| self.held_texture(*handle).map(Retained::from))
             .collect::<Answer<Vec<_>>>()?;
         let state = self
             .pipelines
@@ -99,6 +119,11 @@ impl MetalSide {
             // SAFETY: the buffer is at least as long as the kernel's binding, and the encoder
             // outlives the call.
             unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, at) };
+        }
+        for (at, texture) in sampled.iter().enumerate() {
+            // SAFETY: the texture is of the kind and access the kernel declares at that slot, and
+            // the encoder outlives the call.
+            unsafe { encoder.setTexture_atIndex(Some(texture), at) };
         }
         for region in stage_in {
             match region {
@@ -309,14 +334,92 @@ impl Side for MetalSide {
         Ok(keep(&mut self.buffers, buffer))
     }
 
+    fn texture_2d(
+        &mut self,
+        format: PixelFormat,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<Handle> {
+        // SAFETY: the descriptor constructor reads only the format and the size it is given.
+        let descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                MTLPixelFormat(format.as_raw() as usize),
+                size[0] as usize,
+                size[1] as usize,
+                false,
+            )
+        };
+        descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite);
+        descriptor.setStorageMode(MTLStorageMode::Shared);
+        let texture = self
+            .device
+            .newTextureWithDescriptor(&descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewTextureWithDescriptor",
+                    format!("{format:?} {}x{} returned nil", size[0], size[1]),
+                )
+            })?;
+        let region = MTLRegion {
+            origin: MTLOrigin { x: 0, y: 0, z: 0 },
+            size: MTLSize {
+                width: size[0] as usize,
+                height: size[1] as usize,
+                depth: 1,
+            },
+        };
+        if bytes.len() < row_pitch as usize * size[1] as usize {
+            return Err(Failure::named(
+                "TooFewBytes",
+                format!("{} bytes for {} rows of {row_pitch}", bytes.len(), size[1]),
+            ));
+        }
+        // SAFETY: `bytes` holds `size[1]` rows of `row_pitch` bytes, checked just above, which is
+        // the region the call writes.
+        unsafe {
+            texture.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                region,
+                0,
+                std::ptr::NonNull::from(bytes).cast(),
+                row_pitch as usize,
+            );
+        }
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn read_texture(&mut self, texture: Handle, size: [u32; 2], row_pitch: u32) -> Answer<Vec<u8>> {
+        let texture = self.held_texture(texture)?;
+        let mut bytes = vec![0u8; row_pitch as usize * size[1] as usize];
+        let region = MTLRegion {
+            origin: MTLOrigin { x: 0, y: 0, z: 0 },
+            size: MTLSize {
+                width: size[0] as usize,
+                height: size[1] as usize,
+                depth: 1,
+            },
+        };
+        // SAFETY: `bytes` is `size[1]` rows of `row_pitch` bytes, which is the region the call
+        // reads, and the caller waited for the command buffer that wrote the texture.
+        unsafe {
+            texture.getBytes_bytesPerRow_fromRegion_mipmapLevel(
+                std::ptr::NonNull::from(bytes.as_mut_slice()).cast(),
+                row_pitch as usize,
+                region,
+                0,
+            );
+        }
+        Ok(bytes)
+    }
+
     fn dispatch(
         &mut self,
         pipeline: Handle,
-        buffers: &[Handle],
+        bindings: &Bindings<'_>,
         threadgroups: [u32; 3],
         threads: [u32; 3],
     ) -> Answer<Handle> {
-        self.encode(pipeline, buffers, &[], |encoder| {
+        self.encode(pipeline, bindings, &[], |encoder| {
             encoder.dispatchThreadgroups_threadsPerThreadgroup(size(threadgroups), size(threads));
         })
     }
@@ -351,12 +454,12 @@ impl Side for MetalSide {
     fn dispatch_threads(
         &mut self,
         pipeline: Handle,
-        buffers: &[Handle],
+        bindings: &Bindings<'_>,
         stage_in: &[StageInRegion],
         grid: [u32; 3],
         threads: [u32; 3],
     ) -> Answer<Handle> {
-        self.encode(pipeline, buffers, stage_in, |encoder| {
+        self.encode(pipeline, bindings, stage_in, |encoder| {
             encoder.dispatchThreads_threadsPerThreadgroup(size(grid), size(threads));
         })
     }

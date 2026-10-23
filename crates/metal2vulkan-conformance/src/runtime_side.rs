@@ -8,17 +8,20 @@
 //! answers `NeverReturned` as a recorded fact rather than blocking the suite.
 
 use crate::case::{
-    Answer, Failure, Handle, IndirectReadBack, ShaderSource, Side, StageInRegion, StageInput, Venue,
+    Answer, Bindings, Failure, Handle, IndirectReadBack, ShaderSource, Side, StageInRegion,
+    StageInput, Venue,
 };
 use crate::transcript::{Negative, Value};
-use metal2vulkan::metal::{IndexType, IndirectCommandType, PrimitiveType};
+use metal2vulkan::metal::{
+    IndexType, IndirectCommandType, PixelFormat, PrimitiveType, TextureUsage,
+};
 use metal2vulkan::pipeline::{
     StageInputAttributeDescriptor, StageInputDescriptor, StageInputLayoutDescriptor,
 };
 use metal2vulkan_runtime::{
     Buffer, CommandBuffer, CommandBufferStatus, CommandQueue, ComputePipelineState, Device,
     DrawPrimitiveType, IndirectCommand, IndirectDraw, Library, PipelineOptions, Region,
-    ResourceOptions, Size,
+    ResourceOptions, Size, Texture, TextureDescriptor,
 };
 use std::time::Duration;
 
@@ -33,6 +36,7 @@ pub struct RuntimeSide<'a> {
     libraries: Vec<Library>,
     pipelines: Vec<ComputePipelineState>,
     buffers: Vec<Buffer>,
+    textures: Vec<Texture>,
     command_buffers: Vec<CommandBuffer>,
     /// The degrade-notice codes the device has delivered so far, which `announced` takes away.
     notices: Box<dyn FnMut() -> Vec<String> + 'a>,
@@ -48,6 +52,7 @@ impl<'a> RuntimeSide<'a> {
             libraries: Vec::new(),
             pipelines: Vec::new(),
             buffers: Vec::new(),
+            textures: Vec::new(),
             command_buffers: Vec::new(),
             notices: Box::new(notices),
         }
@@ -77,23 +82,36 @@ impl<'a> RuntimeSide<'a> {
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
     }
 
-    /// One command buffer with one compute encoder: the pipeline set, `buffers` bound at 0 up,
+    /// The texture `handle` names.
+    fn held_texture(&self, handle: Handle) -> Answer<&Texture> {
+        self.textures
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+    }
+
+    /// One command buffer with one compute encoder: the pipeline set, `bindings` bound at 0 up,
     /// each of `stage_in` set in order, `dispatch` encoded, and `commit`. The two dispatch calls
     /// differ in that one line alone, so they share this body and a case cannot pick up a
     /// different binding order with one of them.
     fn encode(
         &mut self,
         pipeline: Handle,
-        buffers: &[Handle],
+        bindings: &Bindings<'_>,
         stage_in: &[StageInRegion],
         dispatch: impl FnOnce(
             &mut metal2vulkan_runtime::ComputeCommandEncoder,
         ) -> Result<(), metal2vulkan_runtime::Error>,
     ) -> Answer<Handle> {
-        let bound: Vec<Buffer> = buffers
+        let bound: Vec<Buffer> = bindings
+            .buffers
             .iter()
             .map(|handle| self.held(*handle).cloned())
             .collect::<Answer<Vec<Buffer>>>()?;
+        let sampled: Vec<Texture> = bindings
+            .textures
+            .iter()
+            .map(|handle| self.held_texture(*handle).cloned())
+            .collect::<Answer<Vec<Texture>>>()?;
         let state = self
             .pipelines
             .get(pipeline.0 as usize)
@@ -112,6 +130,11 @@ impl<'a> RuntimeSide<'a> {
         for (at, buffer) in bound.iter().enumerate() {
             encoder
                 .set_buffer(Some(buffer), 0, at as u32)
+                .map_err(Failure::from_error)?;
+        }
+        for (at, texture) in sampled.iter().enumerate() {
+            encoder
+                .set_texture(Some(texture), at as u32)
                 .map_err(Failure::from_error)?;
         }
         for region in stage_in {
@@ -258,14 +281,58 @@ impl Side for RuntimeSide<'_> {
         Ok(keep(&mut self.buffers, buffer))
     }
 
+    fn texture_2d(
+        &mut self,
+        format: PixelFormat,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<Handle> {
+        let mut descriptor =
+            TextureDescriptor::texture_2d(format, size[0].into(), size[1].into(), false);
+        descriptor.usage = TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE;
+        descriptor.resource_options = ResourceOptions::shared();
+        let texture = self
+            .device
+            .new_texture(&descriptor)
+            .map_err(|error| Failure::of(&error))?;
+        texture
+            .replace_region(
+                Region::new_2d(0, 0, size[0].into(), size[1].into()),
+                0,
+                0,
+                bytes,
+                row_pitch.into(),
+                0,
+            )
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn read_texture(&mut self, texture: Handle, size: [u32; 2], row_pitch: u32) -> Answer<Vec<u8>> {
+        let texture = self.held_texture(texture)?;
+        let mut bytes = vec![0u8; row_pitch as usize * size[1] as usize];
+        texture
+            .get_bytes(
+                &mut bytes,
+                row_pitch.into(),
+                0,
+                Region::new_2d(0, 0, size[0].into(), size[1].into()),
+                0,
+                0,
+            )
+            .map_err(Failure::from_error)?;
+        Ok(bytes)
+    }
+
     fn dispatch(
         &mut self,
         pipeline: Handle,
-        buffers: &[Handle],
+        bindings: &Bindings<'_>,
         threadgroups: [u32; 3],
         threads: [u32; 3],
     ) -> Answer<Handle> {
-        self.encode(pipeline, buffers, &[], |encoder| {
+        self.encode(pipeline, bindings, &[], |encoder| {
             encoder.dispatch_threadgroups(size(threadgroups), size(threads))
         })
     }
@@ -297,12 +364,12 @@ impl Side for RuntimeSide<'_> {
     fn dispatch_threads(
         &mut self,
         pipeline: Handle,
-        buffers: &[Handle],
+        bindings: &Bindings<'_>,
         stage_in: &[StageInRegion],
         grid: [u32; 3],
         threads: [u32; 3],
     ) -> Answer<Handle> {
-        self.encode(pipeline, buffers, stage_in, |encoder| {
+        self.encode(pipeline, bindings, stage_in, |encoder| {
             encoder.dispatch_threads(size(grid), size(threads))
         })
     }
