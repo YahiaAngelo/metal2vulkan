@@ -42,8 +42,10 @@ pub mod allowance;
 pub mod buffer_texture;
 pub mod case;
 pub mod cases;
+pub mod clocks;
 pub mod compare;
 pub mod cost;
+pub mod coverage;
 pub mod device;
 pub mod diff;
 pub mod event_orders;
@@ -66,9 +68,11 @@ pub mod sparse_query;
 pub mod surface;
 pub mod texture;
 pub mod texture_query;
+pub mod times;
 pub mod transcript;
 pub mod validated;
 pub mod verdict;
+pub mod watch;
 pub mod work;
 
 #[cfg(target_os = "macos")]
@@ -89,6 +93,7 @@ pub use cost::{CostBound, CostRecord, CostVerdict, Counts, Region};
 pub use recording::{Recording, SUITE_VERSION};
 pub use replay::{replay, replay_against, Replayed};
 pub use report::Report;
+pub use times::{CallTimes, CaseTimes, Leg, TimeRecord, TimeVerdict};
 pub use transcript::{Node, Observed, Sites, Transcript, Value};
 pub use verdict::Verdict;
 

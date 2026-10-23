@@ -1,0 +1,790 @@
+//! One wrapper that forwards every [`Side`] call and lets something watch the boundary.
+//!
+//! Two parts of the suite need to do something **at each call** without changing what the call
+//! does: [`crate::validated`] announces the call's name so the parent process can attribute
+//! Metal's own output to it, and [`crate::times`] measures what the call cost. Both want the same
+//! narrow span — around the Metal or Vulkan call and nothing else — and neither wants to reach
+//! inside [`crate::metal_side::MetalSide`] or [`crate::runtime_side::RuntimeSide`], because a span
+//! placed separately in each of them is two spans that can drift apart, and a cost comparison of
+//! two legs measured in different places is not a comparison.
+//!
+//! So there is **one** forwarding impl, here, parameterised by what happens at the boundary. That
+//! is not tidiness: `Side`'s methods mostly carry a default that answers
+//! [`Failure::unavailable`](crate::case::Failure::unavailable), so a wrapper that forgets to
+//! forward one answers "no such call" where the wrapped side answers fine, **and the compiler says
+//! nothing**. A second hand-written wrapper would be a second copy of that hazard, in a trait
+//! several streams are extending. One impl means one place to forget, and
+//! `the_announcing_side_forwards_every_call` already watches that place.
+//!
+//! # What the span covers, and what it deliberately does not
+//!
+//! The span opens on entry to the `Side` method and closes when it returns, so it holds the Metal
+//! or Vulkan call plus the side's own handle bookkeeping, and **excludes** building the transcript,
+//! reading a fixture, hashing an input and everything else the harness does between calls. That is
+//! the narrowest boundary both legs share.
+//!
+//! Two methods are forwarded without a span, because neither is a call to the implementation under
+//! test: [`Side::venue`] answers a label, and [`Side::announced`] drains the notices our own side
+//! collected, which Metal has no counterpart for at all. Timing them would put the harness's own
+//! bookkeeping in the table.
+
+use crate::case::{
+    Answer, ArgumentSlot, Bindings, Fill, FragmentFill, FragmentFilled, Handle, IndirectReadBack,
+    MeshCommand, MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest,
+    SamplerSpec, ShaderSource, Side, StageInRegion, StageInput, TextureSpec, TileFacts,
+    TilePipelineSpec, TileStep, Venue,
+};
+use crate::transcript::Value;
+use metal2vulkan::metal::state::DepthStencilDescriptor;
+use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
+
+/// What happens at a [`Side`] call's boundary.
+///
+/// `enter` is handed the call's name and answers a span. The span is dropped when the call
+/// returns, so a watcher that wants the call's *end* does its work in the span's `Drop`. A span
+/// must not borrow the watcher, because the wrapper holds the span across the forwarded call and
+/// that call needs the side mutably; a watcher with state shares it through a handle of its own
+/// instead.
+pub trait Watcher {
+    /// What `enter` answers, dropped when the call returns.
+    type Span;
+
+    /// `call` is about to be made.
+    fn enter(&self, call: &'static str) -> Self::Span;
+}
+
+/// `inner`, with `watcher` watching every call it is asked to make. It observes nothing of the
+/// answers and changes none of them.
+pub struct Watching<S, W> {
+    inner: S,
+    watcher: W,
+}
+
+impl<S: Side, W: Watcher + Default> Watching<S, W> {
+    /// `inner`, watched by a watcher that needs no setting up.
+    pub fn new(inner: S) -> Self {
+        Self {
+            inner,
+            watcher: W::default(),
+        }
+    }
+}
+
+impl<S: Side, W: Watcher> Watching<S, W> {
+    /// `inner`, watched by `watcher`.
+    pub fn with(inner: S, watcher: W) -> Self {
+        Self { inner, watcher }
+    }
+
+    /// The watched side back.
+    pub fn into_inner(self) -> S {
+        self.inner
+    }
+
+    /// Open `call`'s span.
+    ///
+    /// It takes `&self` and answers a span that borrows nothing of `self`, which is what lets the
+    /// caller hold the span across a forwarded call that needs `self.inner` mutably.
+    fn watch(&self, call: &'static str) -> W::Span {
+        self.watcher.enter(call)
+    }
+}
+
+/// Every call is forwarded, and every call opens a span.
+///
+/// **A forwarded method that is left out is a defect, not a gap**: `Side` gives most of its calls a
+/// default that answers [`Failure::unavailable`](crate::case::Failure::unavailable), so an
+/// unforwarded method would make a wrapped side answer "no such call" where the side itself
+/// answers perfectly well, and the compiler would say nothing. `the_announcing_side_forwards_every_call`
+/// catches that by running the whole case set through both and comparing the transcripts, so the
+/// trait can keep growing without this wrapper rotting.
+///
+/// The same test covers the timing side too, because there is one impl rather than one per
+/// watcher. A call left out would also read as a *free* call in the cost table -- the worst
+/// shape of the same defect, since a missing measurement there looks like good news.
+impl<S: Side, W: Watcher> Side for Watching<S, W> {
+    fn venue(&self) -> Venue {
+        self.inner.venue()
+    }
+
+    fn library(&mut self, source: &ShaderSource<'_>) -> Answer<Handle> {
+        let _span = self.watch("library");
+        self.inner.library(source)
+    }
+
+    fn compute_pipeline(&mut self, library: Handle, entry: &str) -> Answer<Handle> {
+        let _span = self.watch("compute_pipeline");
+        self.inner.compute_pipeline(library, entry)
+    }
+
+    fn static_threadgroup_memory_length(&mut self, pipeline: Handle) -> Answer<u64> {
+        let _span = self.watch("static_threadgroup_memory_length");
+        self.inner.static_threadgroup_memory_length(pipeline)
+    }
+
+    fn compute_pipeline_with_stage_input(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        stage_input: &StageInput,
+    ) -> Answer<Handle> {
+        let _span = self.watch("compute_pipeline_with_stage_input");
+        self.inner
+            .compute_pipeline_with_stage_input(library, entry, stage_input)
+    }
+
+    fn buffer(&mut self, bytes: &[u8]) -> Answer<Handle> {
+        let _span = self.watch("buffer");
+        self.inner.buffer(bytes)
+    }
+
+    fn zeroed_buffer(&mut self, length: usize) -> Answer<Handle> {
+        let _span = self.watch("zeroed_buffer");
+        self.inner.zeroed_buffer(length)
+    }
+
+    fn texture_2d(
+        &mut self,
+        format: PixelFormat,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<Handle> {
+        let _span = self.watch("texture_2d");
+        self.inner.texture_2d(format, size, row_pitch, bytes)
+    }
+
+    fn read_texture(&mut self, texture: Handle, size: [u32; 2], row_pitch: u32) -> Answer<Vec<u8>> {
+        let _span = self.watch("read_texture");
+        self.inner.read_texture(texture, size, row_pitch)
+    }
+
+    fn texture_2d_in_role(&mut self, spec: &TextureSpec, bytes: &[u8]) -> Answer<Handle> {
+        let _span = self.watch("texture_2d_in_role");
+        self.inner.texture_2d_in_role(spec, bytes)
+    }
+
+    fn replace_region(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<()> {
+        let _span = self.watch("replace_region");
+        self.inner.replace_region(texture, size, row_pitch, bytes)
+    }
+
+    fn texture(&mut self, request: &crate::texture::TextureRequest<'_>) -> Answer<Handle> {
+        let _span = self.watch("texture");
+        self.inner.texture(request)
+    }
+
+    fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
+        let _span = self.watch("sampler");
+        self.inner.sampler(spec)
+    }
+
+    fn argument_buffer(&mut self, slots: &[ArgumentSlot]) -> Answer<Handle> {
+        let _span = self.watch("argument_buffer");
+        self.inner.argument_buffer(slots)
+    }
+
+    fn dispatch(
+        &mut self,
+        pipeline: Handle,
+        bindings: &Bindings<'_>,
+        threadgroups: [u32; 3],
+        threads: [u32; 3],
+    ) -> Answer<Handle> {
+        let _span = self.watch("dispatch");
+        self.inner
+            .dispatch(pipeline, bindings, threadgroups, threads)
+    }
+
+    fn dispatch_threads(
+        &mut self,
+        pipeline: Handle,
+        bindings: &Bindings<'_>,
+        stage_in: &[StageInRegion],
+        grid: [u32; 3],
+        threads: [u32; 3],
+    ) -> Answer<Handle> {
+        let _span = self.watch("dispatch_threads");
+        self.inner
+            .dispatch_threads(pipeline, bindings, stage_in, grid, threads)
+    }
+
+    fn wait(&mut self, command_buffer: Handle) -> Answer<Value> {
+        let _span = self.watch("wait");
+        self.inner.wait(command_buffer)
+    }
+
+    fn read_buffer(&mut self, buffer: Handle, offset: u64, length: usize) -> Answer<Vec<u8>> {
+        let _span = self.watch("read_buffer");
+        self.inner.read_buffer(buffer, offset, length)
+    }
+
+    fn buffer_texture(
+        &mut self,
+        request: &crate::buffer_texture::BufferTextureRequest,
+    ) -> Answer<crate::buffer_texture::BufferTextureFacts> {
+        let _span = self.watch("buffer_texture");
+        self.inner.buffer_texture(request)
+    }
+
+    fn write_plane(&mut self, target: Handle, bytes: &[u8]) -> Answer<()> {
+        let _span = self.watch("write_plane");
+        self.inner.write_plane(target, bytes)
+    }
+
+    fn read_plane(&mut self, target: Handle) -> Answer<Vec<u8>> {
+        let _span = self.watch("read_plane");
+        self.inner.read_plane(target)
+    }
+
+    fn announced(&mut self) -> Vec<String> {
+        self.inner.announced()
+    }
+
+    fn indirect_draw_read_back(
+        &mut self,
+        primitive_type: u64,
+        indexed: bool,
+    ) -> Answer<IndirectReadBack> {
+        let _span = self.watch("indirect_draw_read_back");
+        self.inner.indirect_draw_read_back(primitive_type, indexed)
+    }
+
+    fn work(&mut self, work: &crate::work::Work) -> Answer<crate::work::Done> {
+        let _span = self.watch("work");
+        self.inner.work(work)
+    }
+
+    fn fragment_fill(&mut self, fill: &FragmentFill<'_>) -> Answer<FragmentFilled> {
+        let _span = self.watch("fragment_fill");
+        self.inner.fragment_fill(fill)
+    }
+
+    fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {
+        let _span = self.watch("mesh_pipeline");
+        self.inner.mesh_pipeline(library, functions)
+    }
+
+    fn mesh_pipeline_for_commands(
+        &mut self,
+        library: Handle,
+        functions: &MeshFunctions<'_>,
+    ) -> Answer<Handle> {
+        let _span = self.watch("mesh_pipeline_for_commands");
+        self.inner.mesh_pipeline_for_commands(library, functions)
+    }
+
+    fn render_target(&mut self, width: u32, height: u32) -> Answer<Handle> {
+        let _span = self.watch("render_target");
+        self.inner.render_target(width, height)
+    }
+
+    fn mesh_pass(&mut self, targets: &[Handle], steps: &[MeshStep]) -> Answer<PassOutcome> {
+        let _span = self.watch("mesh_pass");
+        self.inner.mesh_pass(targets, steps)
+    }
+
+    fn mesh_command_buffer(&mut self, commands: &[MeshCommand]) -> Answer<Handle> {
+        let _span = self.watch("mesh_command_buffer");
+        self.inner.mesh_command_buffer(commands)
+    }
+
+    fn execute_mesh_commands(
+        &mut self,
+        targets: &[Handle],
+        commands: Handle,
+        used: &[Handle],
+    ) -> Answer<PassOutcome> {
+        let _span = self.watch("execute_mesh_commands");
+        self.inner.execute_mesh_commands(targets, commands, used)
+    }
+
+    fn plane_texture(&mut self, buffer: Handle, over: &PlaneTexture) -> Answer<Handle> {
+        let _span = self.watch("plane_texture");
+        self.inner.plane_texture(buffer, over)
+    }
+
+    fn fill_texture(&mut self, texture: Handle, fill: &Fill) -> Answer<Value> {
+        let _span = self.watch("fill_texture");
+        self.inner.fill_texture(texture, fill)
+    }
+
+    fn rate_map(&mut self, request: &RateMapRequest<'_>) -> Answer<Handle> {
+        let _span = self.watch("rate_map");
+        self.inner.rate_map(request)
+    }
+
+    fn rate_map_facts(&mut self, map: Handle, layers: &[u64]) -> Answer<RateMapFacts> {
+        let _span = self.watch("rate_map_facts");
+        self.inner.rate_map_facts(map, layers)
+    }
+
+    fn copy_rate_map_parameters(&mut self, map: Handle, into: Handle, offset: u64) -> Answer<()> {
+        let _span = self.watch("copy_rate_map_parameters");
+        self.inner.copy_rate_map_parameters(map, into, offset)
+    }
+
+    fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
+        let _span = self.watch("tile_pipeline");
+        self.inner.tile_pipeline(library, spec)
+    }
+
+    fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
+        let _span = self.watch("tile_facts");
+        self.inner.tile_facts(state)
+    }
+
+    fn tile_pass(
+        &mut self,
+        targets: &[Handle],
+        tile: [u32; 2],
+        steps: &[TileStep],
+    ) -> Answer<PassOutcome> {
+        let _span = self.watch("tile_pass");
+        self.inner.tile_pass(targets, tile, steps)
+    }
+
+    fn heap_texture_size_and_align(
+        &mut self,
+        query: &crate::texture_query::HeapTextureQuery,
+    ) -> Answer<crate::texture_query::SizeAndAlign> {
+        let _span = self.watch("heap_texture_size_and_align");
+        self.inner.heap_texture_size_and_align(query)
+    }
+
+    fn makes_texture(&mut self, query: &crate::texture_query::HeapTextureQuery) -> Answer<bool> {
+        let _span = self.watch("makes_texture");
+        self.inner.makes_texture(query)
+    }
+
+    fn sparse_tile_size(
+        &mut self,
+        query: &crate::sparse_query::SparseTileQuery,
+    ) -> Answer<crate::sparse_query::TileSize> {
+        let _span = self.watch("sparse_tile_size");
+        self.inner.sparse_tile_size(query)
+    }
+
+    fn sparse_tile_size_in_bytes(&mut self, page: crate::sparse_query::QueryPage) -> Answer<u64> {
+        let _span = self.watch("sparse_tile_size_in_bytes");
+        self.inner.sparse_tile_size_in_bytes(page)
+    }
+
+    fn sparse_heap(&mut self, spec: &crate::sparse_query::SparseHeapSpec) -> Answer<Handle> {
+        let _span = self.watch("sparse_heap");
+        self.inner.sparse_heap(spec)
+    }
+
+    fn heap_facts(&mut self, heap: Handle) -> Answer<crate::sparse_query::HeapFacts> {
+        let _span = self.watch("heap_facts");
+        self.inner.heap_facts(heap)
+    }
+
+    fn heap_texture(
+        &mut self,
+        heap: Handle,
+        spec: &crate::sparse_query::SparseTextureSpec,
+    ) -> Answer<Handle> {
+        let _span = self.watch("heap_texture");
+        self.inner.heap_texture(heap, spec)
+    }
+
+    fn sparse_texture_facts(
+        &mut self,
+        texture: Handle,
+    ) -> Answer<crate::sparse_query::SparseTextureFacts> {
+        let _span = self.watch("sparse_texture_facts");
+        self.inner.sparse_texture_facts(texture)
+    }
+
+    fn queue_slots(
+        &mut self,
+        max: Option<u32>,
+        cap: u32,
+    ) -> Answer<crate::queue_slots::QueueSlots> {
+        let _span = self.watch("queue_slots");
+        self.inner.queue_slots(max, cap)
+    }
+
+    fn read_texture_over(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        before: &[u8],
+    ) -> Answer<Vec<u8>> {
+        let _span = self.watch("read_texture_over");
+        self.inner
+            .read_texture_over(texture, size, row_pitch, before)
+    }
+
+    fn render_pipeline_with_reflection(
+        &mut self,
+        library: Handle,
+        vertex: &str,
+        fragment: &str,
+        attachment: PixelFormat,
+    ) -> Answer<Handle> {
+        let _span = self.watch("render_pipeline_with_reflection");
+        self.inner
+            .render_pipeline_with_reflection(library, vertex, fragment, attachment)
+    }
+
+    fn texture_accesses(
+        &mut self,
+        pipeline: Handle,
+        stage: RenderStages,
+        indices: &[u64],
+    ) -> Answer<Vec<Option<BindingAccess>>> {
+        let _span = self.watch("texture_accesses");
+        self.inner.texture_accesses(pipeline, stage, indices)
+    }
+
+    fn target(&mut self, spec: &crate::render::TargetSpec) -> Answer<Handle> {
+        let _span = self.watch("target");
+        self.inner.target(spec)
+    }
+
+    fn render_pipeline(
+        &mut self,
+        library: Handle,
+        spec: &crate::render::RenderPipelineSpec<'_>,
+    ) -> Answer<Handle> {
+        let _span = self.watch("render_pipeline");
+        self.inner.render_pipeline(library, spec)
+    }
+
+    fn depth_stencil_state(&mut self, spec: &DepthStencilDescriptor) -> Answer<Handle> {
+        let _span = self.watch("depth_stencil_state");
+        self.inner.depth_stencil_state(spec)
+    }
+
+    fn render(&mut self, work: &[crate::render::RenderWork]) -> Answer<PassOutcome> {
+        let _span = self.watch("render");
+        self.inner.render(work)
+    }
+
+    fn handler_wait(&mut self, wait: crate::handler_waits::OwnWait) -> Answer<Value> {
+        let _span = self.watch("handler_wait");
+        self.inner.handler_wait(wait)
+    }
+
+    fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {
+        let _span = self.watch("shared_event_rises");
+        self.inner.shared_event_rises(label)
+    }
+
+    fn event_cross_queue_wait(&mut self) -> Answer<crate::event_orders::CrossQueueWait> {
+        let _span = self.watch("event_cross_queue_wait");
+        self.inner.event_cross_queue_wait()
+    }
+
+    fn event_highest_signal(&mut self, values: [u64; 2]) -> Answer<u64> {
+        let _span = self.watch("event_highest_signal");
+        self.inner.event_highest_signal(values)
+    }
+
+    fn held_command_buffer(&mut self) -> Answer<crate::event_orders::HeldCommandBuffer> {
+        let _span = self.watch("held_command_buffer");
+        self.inner.held_command_buffer()
+    }
+
+    fn signal_before_a_wait(&mut self) -> Answer<crate::event_orders::SignalBeforeWait> {
+        let _span = self.watch("signal_before_a_wait");
+        self.inner.signal_before_a_wait()
+    }
+
+    fn scheduled_handler_order(
+        &mut self,
+    ) -> Answer<crate::scheduled_handlers::ScheduledHandlerOrder> {
+        let _span = self.watch("scheduled_handler_order");
+        self.inner.scheduled_handler_order()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::case::Failure;
+
+    /// A shader source no side reads: the stub answers without looking at it.
+    fn stub_source() -> ShaderSource<'static> {
+        ShaderSource {
+            bitcode: &[],
+            air_text: "",
+            entry: "main",
+        }
+    }
+
+    /// A side that answers nothing and records which calls it was asked for: enough to prove the
+    /// wrapper forwards a call, opens exactly one span for it, and changes neither the answer nor
+    /// the order.
+    #[derive(Default)]
+    struct Stub {
+        asked: Vec<&'static str>,
+    }
+
+    impl Side for Stub {
+        fn venue(&self) -> Venue {
+            Venue {
+                device: "stub".to_owned(),
+                driver: "stub".to_owned(),
+                api: "stub".to_owned(),
+                metal_level: "stub".to_owned(),
+            }
+        }
+
+        fn library(&mut self, _source: &ShaderSource<'_>) -> Answer<Handle> {
+            self.asked.push("library");
+            Ok(Handle(7))
+        }
+
+        fn compute_pipeline(&mut self, _library: Handle, _entry: &str) -> Answer<Handle> {
+            self.asked.push("compute_pipeline");
+            Err(Failure::named("Stub", "nothing here".to_owned()))
+        }
+
+        fn compute_pipeline_with_stage_input(
+            &mut self,
+            _library: Handle,
+            _entry: &str,
+            _stage_input: &StageInput,
+        ) -> Answer<Handle> {
+            self.asked.push("compute_pipeline_with_stage_input");
+            Ok(Handle(0))
+        }
+
+        fn buffer(&mut self, _bytes: &[u8]) -> Answer<Handle> {
+            self.asked.push("buffer");
+            Ok(Handle(1))
+        }
+
+        fn zeroed_buffer(&mut self, _length: usize) -> Answer<Handle> {
+            self.asked.push("zeroed_buffer");
+            Ok(Handle(2))
+        }
+
+        fn texture_2d(
+            &mut self,
+            _format: PixelFormat,
+            _size: [u32; 2],
+            _row_pitch: u32,
+            _bytes: &[u8],
+        ) -> Answer<Handle> {
+            self.asked.push("texture_2d");
+            Ok(Handle(3))
+        }
+
+        fn read_texture(
+            &mut self,
+            _texture: Handle,
+            _size: [u32; 2],
+            _row_pitch: u32,
+        ) -> Answer<Vec<u8>> {
+            self.asked.push("read_texture");
+            Ok(Vec::new())
+        }
+
+        fn dispatch(
+            &mut self,
+            _pipeline: Handle,
+            _bindings: &Bindings<'_>,
+            _threadgroups: [u32; 3],
+            _threads: [u32; 3],
+        ) -> Answer<Handle> {
+            self.asked.push("dispatch");
+            Ok(Handle(4))
+        }
+
+        fn dispatch_threads(
+            &mut self,
+            _pipeline: Handle,
+            _bindings: &Bindings<'_>,
+            _stage_in: &[StageInRegion],
+            _grid: [u32; 3],
+            _threads: [u32; 3],
+        ) -> Answer<Handle> {
+            self.asked.push("dispatch_threads");
+            Ok(Handle(5))
+        }
+
+        fn wait(&mut self, _command_buffer: Handle) -> Answer<Value> {
+            self.asked.push("wait");
+            Ok(Value::Uint(0))
+        }
+
+        fn read_buffer(
+            &mut self,
+            _buffer: Handle,
+            _offset: u64,
+            _length: usize,
+        ) -> Answer<Vec<u8>> {
+            self.asked.push("read_buffer");
+            Ok(Vec::new())
+        }
+
+        fn announced(&mut self) -> Vec<String> {
+            self.asked.push("announced");
+            Vec::new()
+        }
+    }
+
+    /// One span per call, named for the call, in the order the calls were made — and the answers
+    /// are the wrapped side's own, including a typed error.
+    ///
+    /// The last part is what makes the wrapper safe to put under a measurement: a wrapper that
+    /// swallowed an error would turn a refusal into a cheap call and the cost table would read it
+    /// as good news.
+    #[test]
+    fn a_span_is_opened_for_each_call_and_the_answer_is_the_sides_own() {
+        let timer = crate::times::Timer::new();
+        let mut side = Watching::with(Stub::default(), timer.clone());
+        assert_eq!(side.library(&stub_source()), Ok(Handle(7)));
+        assert!(side.compute_pipeline(Handle(7), "main").is_err());
+        assert_eq!(side.buffer(&[1, 2, 3]), Ok(Handle(1)));
+        assert_eq!(side.wait(Handle(0)), Ok(Value::Uint(0)));
+        let observed = timer.take();
+        let names: Vec<&str> = observed.iter().map(|one| one.call).collect();
+        assert_eq!(names, ["library", "compute_pipeline", "buffer", "wait"]);
+        // The refused call is measured like any other: a refusal has a cost and hiding it would
+        // make a gap look free.
+        assert_eq!(observed.len(), 4);
+    }
+
+    /// `venue` and `announced` are forwarded with **no** span, because neither is a call to the
+    /// implementation under test. Timing them would put the harness's own bookkeeping in the
+    /// table, and `announced` has no Metal counterpart at all.
+    #[test]
+    fn the_two_calls_that_are_not_the_implementations_open_no_span() {
+        let timer = crate::times::Timer::new();
+        let mut side = Watching::with(Stub::default(), timer.clone());
+        let _ = side.venue();
+        let _ = side.announced();
+        assert!(
+            timer.is_empty(),
+            "venue or announced opened a span: {:?}",
+            timer.take()
+        );
+    }
+
+    /// The span closes when the call returns, not before: a call that takes a known time is
+    /// measured as at least that long.
+    ///
+    /// Without this the wrapper could record a zero for every call and every table would read as
+    /// free — the one failure of a timing layer that looks like success.
+    #[test]
+    fn a_span_covers_the_call_rather_than_closing_early() {
+        /// A side whose one call sleeps, so the span has something to measure.
+        struct Slow(std::time::Duration);
+        impl Side for Slow {
+            fn venue(&self) -> Venue {
+                Venue {
+                    device: "slow".to_owned(),
+                    driver: "slow".to_owned(),
+                    api: "slow".to_owned(),
+                    metal_level: "slow".to_owned(),
+                }
+            }
+            fn library(&mut self, _source: &ShaderSource<'_>) -> Answer<Handle> {
+                std::thread::sleep(self.0);
+                Ok(Handle(0))
+            }
+            fn compute_pipeline(&mut self, _library: Handle, _entry: &str) -> Answer<Handle> {
+                Err(Failure::unavailable("compute_pipeline"))
+            }
+            fn compute_pipeline_with_stage_input(
+                &mut self,
+                _library: Handle,
+                _entry: &str,
+                _stage_input: &StageInput,
+            ) -> Answer<Handle> {
+                Err(Failure::unavailable("compute_pipeline_with_stage_input"))
+            }
+            fn buffer(&mut self, _bytes: &[u8]) -> Answer<Handle> {
+                Err(Failure::unavailable("buffer"))
+            }
+            fn zeroed_buffer(&mut self, _length: usize) -> Answer<Handle> {
+                Err(Failure::unavailable("zeroed_buffer"))
+            }
+            fn texture_2d(
+                &mut self,
+                _format: PixelFormat,
+                _size: [u32; 2],
+                _row_pitch: u32,
+                _bytes: &[u8],
+            ) -> Answer<Handle> {
+                Err(Failure::unavailable("texture_2d"))
+            }
+            fn read_texture(
+                &mut self,
+                _texture: Handle,
+                _size: [u32; 2],
+                _row_pitch: u32,
+            ) -> Answer<Vec<u8>> {
+                Err(Failure::unavailable("read_texture"))
+            }
+            fn dispatch(
+                &mut self,
+                _pipeline: Handle,
+                _bindings: &Bindings<'_>,
+                _threadgroups: [u32; 3],
+                _threads: [u32; 3],
+            ) -> Answer<Handle> {
+                Err(Failure::unavailable("dispatch"))
+            }
+            fn dispatch_threads(
+                &mut self,
+                _pipeline: Handle,
+                _bindings: &Bindings<'_>,
+                _stage_in: &[StageInRegion],
+                _grid: [u32; 3],
+                _threads: [u32; 3],
+            ) -> Answer<Handle> {
+                Err(Failure::unavailable("dispatch_threads"))
+            }
+            fn wait(&mut self, _command_buffer: Handle) -> Answer<Value> {
+                Err(Failure::unavailable("wait"))
+            }
+            fn read_buffer(
+                &mut self,
+                _buffer: Handle,
+                _offset: u64,
+                _length: usize,
+            ) -> Answer<Vec<u8>> {
+                Err(Failure::unavailable("read_buffer"))
+            }
+            fn announced(&mut self) -> Vec<String> {
+                Vec::new()
+            }
+        }
+        let slept = std::time::Duration::from_millis(20);
+        let timer = crate::times::Timer::new();
+        let mut side = Watching::with(Slow(slept), timer.clone());
+        let _ = side.library(&stub_source());
+        let observed = timer.take();
+        let [one] = observed.as_slice() else {
+            panic!("one call, one observation: {observed:?}");
+        };
+        let slept = u64::try_from(slept.as_nanos()).unwrap();
+        assert!(
+            one.wall >= slept,
+            "the span read {} ns for a call that slept {slept} ns, so it closed before the call \
+             returned",
+            one.wall
+        );
+        // Asleep is not on the CPU, so nearly all of it must land in `blocked` rather than in the
+        // caller's own CPU time. That is the attribution the whole design turns on.
+        assert!(
+            one.blocked() > one.on_cpu,
+            "a sleeping call read {} ns on cpu and {} ns blocked",
+            one.on_cpu,
+            one.blocked()
+        );
+    }
+}

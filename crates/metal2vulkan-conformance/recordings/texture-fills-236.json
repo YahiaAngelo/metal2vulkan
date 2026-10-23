@@ -179,5 +179,45 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 2,
+      "measured": "2 round(s) of the whole selection, in the case set's own order, each round on a fresh device; a figure is the median of the rounds' own medians",
+      "instrument": 240,
+      "times": {
+        "case": "texture-fills-236",
+        "calls": 25,
+        "in_calls": 7513165,
+        "on_cpu": 534749,
+        "blocked": 6969164,
+        "elsewhere": 2995208,
+        "spend": 10546332,
+        "spend_least": 10546332,
+        "spend_most": 10829085,
+        "degraded": [
+          "metal2vulkan-degrade-unpacked-fill-color"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 25,
+            "most_calls": 25,
+            "wall": 290916,
+            "on_cpu": 19500,
+            "blocked": 269083,
+            "wall_least": 290916,
+            "wall_most": 299000,
+            "wall_total": 7513165,
+            "on_cpu_total": 534749,
+            "blocked_total": 6969164
+          }
+        ]
+      }
+    }
   ]
 }

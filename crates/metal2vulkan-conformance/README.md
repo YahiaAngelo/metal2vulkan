@@ -246,9 +246,118 @@ venue the measurement was not taken on, a selection that is not the whole case s
 depend on what ran before it in the same process), a run that stopped part way, and a run the device
 degraded otherwise.
 
-Times are **advisory** here: a wall-clock figure is printed per case so a reader can see where the
-counts are large, and it is neither recorded nor gated. Per-call timing against Metal is the per-call
-cost table in `metal2vulkan-runtime/examples/host_ab`, which this half does not duplicate.
+`cost`'s own per-case wall-clock figure stays **advisory**: it is printed so a reader can see where
+the counts are large, and it is neither recorded nor gated. Timing against Metal is the times half,
+below.
+
+## The times half: Metal's cost beside ours
+
+The counters say what our side **did**. The times half says what each leg **cost**, over the same
+case set, with native Metal's own cost as the thing to beat:
+
+```sh
+conformance times --runs 8                  # both legs, print the tables
+conformance times --runs 8 --show           # and every per-case row, not only the interesting ones
+conformance times --leg metal --runs 8      # one leg in a process of its own
+conformance times --runs 8 --write          # keep the figures in the cases' recordings
+conformance times --runs 8 --call replace_region   # where one call's cost sits, case by case
+conformance timing-coverage                 # which calls are timed, and which are not
+```
+
+`--call` is the triage, and it earns its place: the first whole-set run put `replace_region` at
+105x over 108 calls, and the three cases that obviously make it came out at 1.2x over 3 when run
+alone. The figure was real and almost none of it was there. `--call replace_region` put all of it
+in one family — 16 `xr-two-plane-samples` cases, one such call each, Metal 72 us against our
+19,132 us (**265x**, 92% of ours spent blocked) — while the other 86 cases that make the call sit
+at 1.3x together. A per-call total says *that* a call is expensive and never *where*, and a reading
+over one selection is not evidence about another.
+
+Both legs are measured **at one boundary**, `watch::Watching`'s span: around the Metal or Vulkan
+call and the side's own handle bookkeeping, outside the transcript, the fixtures and the input
+fingerprint. One wrapper, not one span in `MetalSide` and another in `RuntimeSide`, because two
+spans placed separately are two spans that drift and a comparison of two legs measured in different
+places is not a comparison.
+
+**A difference is the whole chain's, and attributes to no layer.** On this Mac our leg is
+translation, then our runtime, then MoltenVK, then Metal. A ratio is the cost of all of that against
+native Metal. The suite cannot say what MoltenVK's share is or what ours is, and no figure it prints
+licenses a sentence of the form "MoltenVK costs X". Separating the shares needs counters inside each
+layer or the same case on a non-Apple driver to difference against.
+
+**Three attributions, kept apart, because moving work between them is not a win.** The calling
+thread's own CPU inside the call; what the caller waited for; and CPU the rest of the process burned
+over the case. A call that returns at once and hands its work to a thread the caller must then wait
+on has saved nothing, so the margin is judged on `wall-in-calls + elsewhere` — everything the
+machine spent on the case's calls, however attributed. No split of one total changes a verdict.
+
+The split is the instrument's, not a preference. Measured on this M3 Max: the wall clock reads in
+16 ns and answers nanoseconds, the thread CPU clock reads in 95 ns and steps in 125 ns, and the
+**process** CPU clock reads in 230 ns and steps in **1000 ns**. A microsecond step is most of a
+short call, so the handoff is a per-case figure and the other two are per call. The instrument's own
+~0.24 us a call is measured on the host and printed beside the table; it is never subtracted, and it
+is paid identically on both legs, so a ratio carries it top and bottom.
+
+**Two tables, and the per-call one needs the other to be honest.** Metal compiles the AIR at
+`library` and we translate it at `compute_pipeline`, so the same work sits at a different call on
+each leg: measured here, `library` costs Metal about 23 ms and us about 0.1 ms, while
+`compute_pipeline` costs Metal 0.09 ms and us 2.1 ms. Neither row alone is a result. The per-case
+total is the figure that cannot be moved.
+
+The per-call table is **paired over the cases both legs did exactly**, and that is not optional. Each
+leg's own pool is over the cases *that leg* finished without a notice, and the two sets differ: 77 of
+this suite's cases announce a notice on our leg and none do on Metal's. The first whole-set run,
+before the pairing, compared `render_pipeline` over 132 Metal calls against 85 of ours and printed a
+ratio of different work. Each row still prints both legs' call counts, because a case whose legs make
+a call a different number of times is comparing different work and only the counts can say so. The
+ratio is on the **totals**, so a call is weighted by how often it runs.
+
+**The degraded-set rule, which matters more here than for counts.** A leg that announced a degrade
+notice did a different amount of work: the device lacked the exact form and the runtime did something
+cheaper and said so. Its cost is `unmeasured`, never a fast row. Without that rule a device's honest
+gap reads as a cost win, which is the most flattering lie the suite could tell.
+
+**Reported, never gated.** `times::MARGIN` is an order of magnitude, computed and printed as a
+verdict, and it decides **no exit status**. Measured twice over the whole set on this Mac, eight
+rounds each: the verdicts were identical both times (221 within, 0 over, 162 unmeasured) while
+Metal's own per-call totals moved a median 1.28x and as much as 2.43x between the two runs, and the
+ratios moved a median 1.25x. So a 10x margin survived both runs and a 2x margin would not have. What
+the commit that turns the gate on has to show first: a bound per case rather than one margin for all,
+each naming its measurement the way a cost bound does; the contrast between a case run alone and the
+same case inside the set, which for counts turned five apparent regressions into four counters that
+were never per-case facts; and a rule for what happens when the machine is busy, since one of these
+two runs took 4m20s and the other 7m48s on the same binary over the same cases.
+
+**What a recording keeps, and why.** Metal's cost on a given macOS build is the one half that cannot
+be re-taken: a measurement of ours is a command away on any host, but what Metal charged for a call
+on 26A434 is gone the moment the machine updates. `--write` keeps both legs' figures in the case's own
+recording for that reason. Nothing compares a stored figure with a live one — a comparison is only
+ever between two legs measured in the same run, on one machine, from the identical transcript — so
+the stored figures are history, and a case with none is a reported hole. `RECORDING_FORMAT_VERSION`
+is untouched: the field is optional, the pattern the counters half established, so no committed
+recording moves.
+
+## Timing coverage is a number
+
+A per-call table over an unknown fraction of the API is a table nobody can act on, so `untimed` is
+tracked and driven down the way `unrecorded` is. `conformance timing-coverage` answers it in two
+parts, and only the first is exact:
+
+- **The suite's own vocabulary.** Every call a case can make is a `Side` method, and a run says
+  which ones the selection made. Both the trait and the wrapper are read from their own sources, so
+  a call a stream adds cannot make coverage look complete by being left off a list. Today: **51 of
+  51 spanned calls are timed** by the whole case set; `venue` and `announced` are forwarded without
+  a span on purpose and are listed as such rather than counted as holes.
+- **The runtime's public frame surface**, which can only be answered approximately from here. A
+  `Side` call reaches the runtime through our own code, which calls further helpers, so knowing
+  which public method a timed call reaches needs a call graph this crate has no business building.
+  The census counts the public methods of the objects a frame makes its calls on and says which are
+  **named anywhere** in the suite's runtime-side sources — an **upper bound** on timed coverage, and
+  the report says so in those words. Today: **148 of 540**, so at least 392 frame-surface methods
+  cannot be timed by any case. Narrowing the bound to a real figure is a call graph's job.
+
+The frame-surface list is the one `scripts/api-cost-coverage` uses for the other harness's table,
+kept the same deliberately: two censuses over two denominators would be two numbers nobody can put
+beside each other.
 
 ## This crate is not the validation suite
 

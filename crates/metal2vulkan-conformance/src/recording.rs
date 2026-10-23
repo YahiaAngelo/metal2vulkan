@@ -298,6 +298,22 @@ pub struct Recording {
     /// none, and reads as `Unmeasured`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub costs: Vec<CostRecord>,
+    /// What **each leg** cost in time over the case, per leg and venue ([`crate::times`]): the
+    /// per-call and per-case figures a `times` run measured.
+    ///
+    /// It is here for one reason the counts half does not have: **Metal's own cost on a given
+    /// macOS build cannot be re-taken later.** A measurement of ours is one command away on any
+    /// host; what Metal charged for a call on 26A434 is gone the moment the machine updates. This
+    /// is the plan's standing property — that a year of Metal measurements stops evaporating —
+    /// applied to cost.
+    ///
+    /// Nothing compares a stored figure with a live one. A time comparison is only ever made
+    /// between two legs measured in the same run, on one machine, from the identical transcript
+    /// ([`crate::times::judge`]); off this Mac the stored Metal figures are another machine's, and
+    /// even here they are another moment's. A recording taken before the times half existed holds
+    /// none, which is a reported hole and never a failure.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub times: Vec<crate::times::TimeRecord>,
 }
 
 impl Recording {
@@ -310,6 +326,7 @@ impl Recording {
             shaders,
             answers,
             costs: Vec::new(),
+            times: Vec::new(),
         }
     }
 
@@ -330,6 +347,19 @@ impl Recording {
     #[must_use]
     pub fn without_costs(mut self) -> Self {
         self.costs = Vec::new();
+        self
+    }
+
+    /// The same recording with the times half dropped, for the same reason
+    /// [`Recording::without_costs`] exists and never folded into it, because the two names would
+    /// then each describe half of what the one call does.
+    ///
+    /// A time is our own measurement of a run on a venue, written by the `times` command. A case
+    /// states nothing about it, so a test that ties a committed recording to the answer its case
+    /// states drops this half as well.
+    #[must_use]
+    pub fn without_times(mut self) -> Self {
+        self.times = Vec::new();
         self
     }
 

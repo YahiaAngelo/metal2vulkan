@@ -20,6 +20,9 @@ metal2vulkan-runtime = { path = "../metal2vulkan-runtime" }
 metal2vulkan-devtools = { path = "../metal2vulkan-devtools" }
 ash = { workspace = true, features = ["loaded"] }
 base64 = "0.22"
+# The two CPU clocks the cost table reads: the calling thread's and the whole process's
+# (`src/clocks.rs`). `std` exposes neither.
+libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

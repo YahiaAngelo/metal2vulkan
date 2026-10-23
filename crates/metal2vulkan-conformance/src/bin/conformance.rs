@@ -5,6 +5,8 @@
 //! conformance record [case ...]
 //! conformance replay [--cpu] [--default-policy] [case ...]
 //! conformance cost [--cpu] [--default-policy] [--runs N] [--write] [--show] [--alone] [case ...]
+//! conformance times [--cpu] [--default-policy] [--runs N] [--leg metal|ours] [--write] [--show]
+//!                    [--call NAME] [case ...]
 //! conformance cases
 //! ```
 //!
@@ -25,6 +27,16 @@
 //! The ledger never changes a verdict. A gap it expects is still printed as `Refused` or
 //! `Divergent`, with our answer and Metal's, and still counted, because its rows are open bugs
 //! rather than accepted differences.
+//!
+//! `times` is the cost half's other face ([`metal2vulkan_conformance::times`]): it runs **both**
+//! legs over the same selection on this Mac, back to back, and prints what each call cost on
+//! native Metal beside what it cost on our stack. The figures are reported and gate nothing — a
+//! time is not assertable on a machine running other work — and a ratio is the cost of our whole
+//! chain (translation, runtime, MoltenVK, Metal) against native Metal, attributing to no layer of
+//! it. `--leg` runs one leg alone, which is the only way to read the off-thread attribution with
+//! nothing of the other leg's threads in it; `--write` keeps the figures in the cases' own
+//! recordings, because Metal's cost on a given macOS build is the one half that cannot be re-taken
+//! later.
 //!
 //! `cost` is the other half ([`metal2vulkan_conformance::cost`]): it runs our side alone and says
 //! what the runtime did to answer each case, by count. `--runs N` runs the whole selection N times
@@ -66,6 +78,8 @@ fn command() -> Result<bool, String> {
     let mut write = false;
     let mut show = false;
     let mut alone = false;
+    let mut legs = Legs::Both;
+    let mut call = None;
     let mut words = words.peekable();
     while let Some(word) = words.next() {
         match word.as_str() {
@@ -76,6 +90,18 @@ fn command() -> Result<bool, String> {
             "--write" => write = true,
             "--show" => show = true,
             "--alone" => alone = true,
+            "--call" => {
+                call = Some(words.next().ok_or("--call wants a Side call's name")?);
+            }
+            "--leg" => {
+                let value = words.next().ok_or("--leg wants metal or ours")?;
+                legs = match value.as_str() {
+                    "metal" => Legs::Metal,
+                    "ours" => Legs::Ours,
+                    "both" => Legs::Both,
+                    other => return Err(format!("--leg {other}: expected metal, ours or both")),
+                };
+            }
             "--runs" => {
                 let value = words.next().ok_or("--runs wants a number")?;
                 runs = value
@@ -96,6 +122,19 @@ fn command() -> Result<bool, String> {
         }
         "record" => record(&cases),
         "cost" => cost(venues, policy, &cases, runs, write, show, alone),
+        "times" => times(
+            &cases,
+            Asked {
+                venues,
+                policy,
+                runs,
+                legs,
+                write,
+                show,
+                call: call.as_deref(),
+            },
+        ),
+        "timing-coverage" => timing_coverage(venues, policy, &cases),
         metal2vulkan_conformance::validated::LEG_VERB => validated_leg(&cases),
         "replay" => {
             let report = run::replay_on_under(venues, policy, &cases)?;
@@ -143,7 +182,8 @@ fn command() -> Result<bool, String> {
             Ok(false)
         }
         other => Err(format!(
-            "unknown command {other}: expected record, replay, cost or cases"
+            "unknown command {other}: expected record, replay, cost, times, timing-coverage or \
+             cases"
         )),
     }
 }
@@ -346,4 +386,130 @@ fn validated_leg(cases: &[Box<dyn metal2vulkan_conformance::case::Case>]) -> Res
 #[cfg(not(target_os = "macos"))]
 fn validated_leg(_cases: &[Box<dyn metal2vulkan_conformance::case::Case>]) -> Result<bool, String> {
     Err("Metal's API validation layer is on macOS, where Metal is".to_owned())
+}
+
+/// Which legs a `times` run measures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Legs {
+    /// Both, in two phases, which is what a comparison needs.
+    Both,
+    /// Native Metal alone.
+    Metal,
+    /// Our stack alone.
+    Ours,
+}
+
+/// What a `times` run was asked for: the flags, gathered so the run takes one argument rather
+/// than eight.
+struct Asked<'a> {
+    venues: Venues,
+    policy: Policy,
+    runs: u32,
+    legs: Legs,
+    write: bool,
+    show: bool,
+    /// The one call `--call` names, whose cost is then printed case by case.
+    call: Option<&'a str>,
+}
+
+/// Measure what the selection costs in **time** on each leg and print the table.
+///
+/// The two legs run as two phases of one process rather than case by case, because the off-thread
+/// attribution reads the whole process's CPU and interleaving would put each leg's threads in the
+/// other's readings. `--leg` runs one leg in a process of its own, which is the only way to read
+/// that attribution with nothing of the other leg in it.
+fn times(
+    cases: &[Box<dyn metal2vulkan_conformance::case::Case>],
+    asked: Asked<'_>,
+) -> Result<bool, String> {
+    let Asked {
+        venues,
+        policy,
+        runs,
+        legs,
+        write,
+        show,
+        call,
+    } = asked;
+    let metal = match legs {
+        Legs::Both | Legs::Metal => metal_times(cases, runs)?,
+        Legs::Ours => None,
+    };
+    let ours = match legs {
+        Legs::Both | Legs::Ours => Some(run::times_on_under(venues, policy, cases, runs)?),
+        Legs::Metal => None,
+    };
+    let words = format!(
+        "{runs} round(s) of the whole selection, in the case set's own order, each round on a \
+         fresh device; a figure is the median of the rounds' own medians"
+    );
+    match (&metal, &ours) {
+        (metal, Some(ours)) => print!(
+            "{}",
+            metal2vulkan_conformance::times::render(metal.as_ref(), ours, show)
+        ),
+        // The Metal leg alone: there is nothing to compare it with, so it prints as its own
+        // measurement rather than as half a table.
+        (Some(metal), None) => print!(
+            "{}",
+            metal2vulkan_conformance::times::render(None, metal, show)
+        ),
+        (None, None) => return Err("--leg selected neither leg".to_owned()),
+    }
+    // The triage for a row of the per-call table: a total over a case set says that a call is
+    // expensive, never where.
+    if let (Some(call), Some(metal), Some(ours)) = (call, &metal, &ours) {
+        print!(
+            "{}",
+            metal2vulkan_conformance::times::render_one_call(metal, ours, call)
+        );
+    }
+    if !write {
+        println!("nothing written; pass --write to keep these figures in the recordings");
+        return Ok(true);
+    }
+    let mut all = true;
+    for (case, written) in run::record_times(metal.as_ref(), ours.as_ref(), &words) {
+        match written {
+            Ok(path) => println!("{case}: {}", path.display()),
+            Err(why) => {
+                all = false;
+                println!("{case}: not recorded: {why}");
+            }
+        }
+    }
+    Ok(all)
+}
+
+/// The Metal leg's figures, where this host has Metal.
+#[cfg(target_os = "macos")]
+fn metal_times(
+    cases: &[Box<dyn metal2vulkan_conformance::case::Case>],
+    runs: u32,
+) -> Result<Option<metal2vulkan_conformance::times::Measurement>, String> {
+    run::metal_times(cases, runs).map(Some)
+}
+
+/// There is no Metal to time off macOS, so the run reports our leg alone rather than refusing.
+#[cfg(not(target_os = "macos"))]
+fn metal_times(
+    _cases: &[Box<dyn metal2vulkan_conformance::case::Case>],
+    _runs: u32,
+) -> Result<Option<metal2vulkan_conformance::times::Measurement>, String> {
+    Ok(None)
+}
+
+/// Print the timing-coverage census: which calls the selection times and which it does not.
+fn timing_coverage(
+    venues: Venues,
+    policy: Policy,
+    cases: &[Box<dyn metal2vulkan_conformance::case::Case>],
+) -> Result<bool, String> {
+    // One round is enough: the census asks which calls a case makes, not what they cost. A call a
+    // case makes only sometimes is the one thing a single round can miss, so the census says how
+    // many rounds it took.
+    let measured = run::times_on_under(venues, policy, cases, 1)?;
+    let census = metal2vulkan_conformance::coverage::Census::of(&measured)?;
+    print!("{}", census.render());
+    Ok(true)
 }
