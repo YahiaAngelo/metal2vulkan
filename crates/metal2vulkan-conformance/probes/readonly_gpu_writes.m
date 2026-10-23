@@ -15,20 +15,59 @@
 // says nothing about which one caused it. A fault is a legitimate measurement here; it is why
 // this is a probe and not a conformance case.
 //
-// Every shape runs against four backings, and the plain one is the control that makes the reading
-// mean anything: "the write was dropped" and "my shader wrote nothing" read identically against a
-// read-only buffer alone.
+// EVERY SHAPE RUNS AGAINST A WRITABLE TWIN OF ITS OWN CREATION PATH, and that control is what
+// makes the reading mean anything: "the write was dropped" and "my shader wrote nothing" read
+// identically against a read-only buffer alone, and a control made a different way would be
+// comparing two creation paths as well as two backing states.
 //
-//   plain     newBufferWithBytesNoCopy over the host pages, MTLResourceStorageModeShared.
-//   bit24     the same with Metal's private MTLResourceOptions bit 24, which is the documented
-//             read-only state: `ResourceOptions::PRIVATE_BIT`.
-//   viewed    a read-only alias of the same pages (mach_vm_remap sharing them, then
-//             mprotect PROT_READ), imported by newBufferWithBytesNoCopy with NO bit. This is what
-//             metal2vulkan-runtime does on macOS, so whether it agrees with bit24 on the new
-//             shapes is what says the emulation is faithful.
-//   replaced  a plain buffer whose backing is then replaced read-only through Apple's
-//             replaceBackingWithRanges: SPI, which is the state a real consumer session reached.
-//             Reported as unavailable where the selector is not there.
+// There are TWO read-only states, not one, and the point of the backing list is to compare them:
+//
+//   plain            newBufferWithBytesNoCopy over the host pages, MTLResourceStorageModeShared.
+//                    The writable control for the bit-24 column.
+//   bit24            the same with Metal's private MTLResourceOptions bit 24, which
+//                    metal2vulkan-runtime names `ResourceOptions::PRIVATE_BIT`.
+//   viewed           a read-only alias of the same pages (mach_vm_remap sharing them, then
+//                    mprotect PROT_READ), imported by newBufferWithBytesNoCopy with NO bit. This
+//                    is what metal2vulkan-runtime does on macOS, so whether it agrees with bit24
+//                    is what says the emulation is faithful.
+//   descriptor       a no-copy buffer made through the private MTLBufferDescriptor
+//                    (setContents:, setLength:, setNoCopy:YES, newBufferWithDescriptor:), which
+//                    is how the consuming project makes its own. The writable control for the SPI
+//                    column.
+//   replaced         that descriptor buffer, detachBacking'd and then
+//                    replaceBackingWithRanges:readOnly:YES over the probe's pages. THIS IS THE
+//                    CONSUMING PROJECT'S PRODUCTION PATH, and bit 24 is only a validated stand-in
+//                    for it where the two agree.
+//   nocopy-replaced  the same SPI pair on a newBufferWithBytesNoCopy: buffer, which answers the
+//                    open question of whether the creation path matters to the SPI at all.
+//   detached         the descriptor buffer detachBacking'd and NOT replaced: the reference leg.
+//                    The detached state is already well characterised elsewhere, and without this
+//                    leg a dropped write under `replaced` could be the detach's doing rather than
+//                    the replace's.
+//
+// WHAT THE TWO READ-ONLY STATES MEASURED, eight runs a shape (the M3 Max, macOS 27.0.1):
+// bit 24 and the SPI pair AGREE on all ten shapes measurable under both -- byte for byte, error
+// for error, and flap for flap. So bit 24 is a validated stand-in for the consuming project's
+// production path rather than an assumed one. `nocopy-replaced` agreed too, so the creation path
+// is irrelevant to the SPI. The detach-only leg did NOT agree: it errors BOTH command buffers on
+// every shape, blit fill included, which is how we know the drop under `replaced` is the replace's
+// doing and not the detach's.
+//
+// Depth and stencil are measurable in the bit-24 heap form ONLY, and the reason is measured rather
+// than assumed: `detachBacking` responds on MTLHeap and answers NO for a heap of
+// `newHeapWithDescriptor:`, Private and Shared alike, because there is no Metal route to a heap
+// over the caller's bytes for it to detach -- `MTLHeapDescriptor` answers none of `setContents:`,
+// `setNoCopy:` or `setDeallocator:`, and `MTLDevice` does not respond to
+// `newHeapWithBytesNoCopy:length:options:deallocator:`.
+//
+// Two things about the SPI that cost the first shape of this probe its answer, both now handled:
+// the selector is TWO-part, `replaceBackingWithRanges:readOnly:`, taking the ranges as one
+// `MTLResourceAddressRangeArray` object -- a three-part `...:count:readOnly:` does not exist, and
+// its `respondsToSelector:` NO was misread as the OS not offering the SPI; and the replace answers
+// NO on an object still ATTACHED, so detachBacking goes first and its own answer is reported
+// separately, because otherwise a NO says nothing about which of the two calls refused. The
+// device's `supportsResourceDetachBacking` is reported on every run before any of this, so a
+// negative result is never confused with an unsupported device.
 //
 // Each run prints one flat key=value report on stdout: the backing's protections, the buffer's
 // own facts, each command buffer's status and error, and WHICH BYTES MOVED in three read-backs --
@@ -76,19 +115,147 @@ static const NSUInteger kTargetLength = 0x400;
 static const NSUInteger kTargetSide = 4;
 static const NSUInteger kTargetPitch = 32;
 
-// Apple's backing-replacement SPI, declared so the call is typed. Checked with
-// `respondsToSelector:` before any use.
-@protocol M2VReplaceableBacking <MTLBuffer>
-- (BOOL)replaceBackingWithRanges:(const void *)ranges
-                           count:(NSUInteger)count
-                        readOnly:(BOOL)readOnly;
+// The report line, declared here because the SPI helpers below report as they go and the
+// reporting section itself is further down (it needs none of this).
+static void say(const char *key, NSString *value);
+
+// Apple's backing SPI, in the form the consuming project's own code uses: TWO arguments, the
+// ranges as one `MTLResourceAddressRangeArray` object. An earlier shape of this probe tried a
+// three-part `replaceBackingWithRanges:count:readOnly:`, which does not exist, and read the
+// resulting `respondsToSelector:` NO as the OS not offering the SPI at all. It does offer it.
+//
+// Declared as protocols rather than imported, because no public header has them; every call is
+// behind `respondsToSelector:`, and the device's own `supportsResourceDetachBacking` is checked
+// first so a negative result is never confused with an unsupported device.
+@protocol M2VDetachableBacking <NSObject>
+- (BOOL)replaceBackingWithRanges:(id)ranges readOnly:(BOOL)readOnly;
+- (BOOL)detachBacking;
 @end
 
-// One scattered range of a backing replacement, as the SPI's own shape: a pointer and a length.
+// The private device calls: whether the SPI is offered at all, and the descriptor creation path
+// the consuming project makes its no-copy buffers through.
+@protocol M2VBackingDevice <MTLDevice>
+- (BOOL)supportsResourceDetachBacking;
+- (id<MTLBuffer>)newBufferWithDescriptor:(id)descriptor;
+@end
+
+// The private `MTLBufferDescriptor`, which is the OTHER half of why the first attempt found
+// nothing: the consuming project does not make these buffers with
+// `newBufferWithBytesNoCopy:length:options:deallocator:` at all. Reached through
+// `NSClassFromString`, so a release without the class is a reported absence rather than a link
+// error.
+@protocol M2VBufferDescriptor <NSObject>
+- (void)setContents:(void *)contents;
+- (void)setLength:(NSUInteger)length;
+- (void)setNoCopy:(BOOL)noCopy;
+- (void)setResourceOptions:(NSUInteger)options;
+@end
+
+// One range of a backing replacement, as the SPI's own 16-byte shape: a host virtual address and a
+// byte length. `MTLResourceAddressRangeArray` copies them, so this need not outlive the call.
 typedef struct {
-  void *pointer;
+  uint64_t address;
   uint64_t length;
-} M2VBackingRange;
+} M2VAddressRange;
+
+@protocol M2VAddressRangeArray <NSObject>
+- (instancetype)initWithRanges:(const void *)ranges count:(NSUInteger)count;
+@end
+
+// An `MTLResourceAddressRangeArray` over `count` ranges, or nil where the class is not there.
+static id rangeArray(const M2VAddressRange *ranges, NSUInteger count) {
+  Class class = NSClassFromString(@"MTLResourceAddressRangeArray");
+  if (class == Nil) {
+    say("spi.MTLResourceAddressRangeArray", @"absent");
+    return nil;
+  }
+  id array = [class alloc];
+  if (![array respondsToSelector:@selector(initWithRanges:count:)]) {
+    say("spi.initWithRanges", @"absent");
+    return nil;
+  }
+  return [(id<M2VAddressRangeArray>)array initWithRanges:ranges count:count];
+}
+
+// A no-copy buffer over `pages` made through the private `MTLBufferDescriptor`, which is the path
+// the consuming project uses: nil where the class or any of its setters is not there.
+static id<MTLBuffer> descriptorBuffer(id<MTLDevice> device, void *pages, NSUInteger length,
+                                      NSUInteger options) {
+  Class class = NSClassFromString(@"MTLBufferDescriptor");
+  if (class == Nil) {
+    say("spi.MTLBufferDescriptor", @"absent");
+    return nil;
+  }
+  id descriptor = [class new];
+  for (NSString *name in @[ @"setContents:", @"setLength:", @"setNoCopy:" ]) {
+    if (![descriptor respondsToSelector:NSSelectorFromString(name)]) {
+      say("spi.MTLBufferDescriptor.setter",
+          ([NSString stringWithFormat:@"%@ absent", name]));
+      return nil;
+    }
+  }
+  id<M2VBufferDescriptor> typed = (id<M2VBufferDescriptor>)descriptor;
+  [typed setContents:pages];
+  [typed setLength:length];
+  [typed setNoCopy:YES];
+  if ([descriptor respondsToSelector:@selector(setResourceOptions:)]) {
+    [typed setResourceOptions:options];
+  }
+  id<M2VBackingDevice> backing = (id<M2VBackingDevice>)device;
+  if (![device respondsToSelector:@selector(newBufferWithDescriptor:)]) {
+    say("spi.newBufferWithDescriptor", @"absent");
+    return nil;
+  }
+  return [backing newBufferWithDescriptor:descriptor];
+}
+
+// Say what `object` answers of the two backing selectors, under `prefix`.
+static void sayBackingSelectors(const char *prefix, id object) {
+  char key[160];
+  snprintf(key, sizeof(key), "%s.detachBacking", prefix);
+  say(key, [object respondsToSelector:@selector(detachBacking)] ? @"responds" : @"absent");
+  snprintf(key, sizeof(key), "%s.replaceBackingWithRanges_readOnly", prefix);
+  say(key, [object respondsToSelector:@selector(replaceBackingWithRanges:readOnly:)]
+               ? @"responds"
+               : @"absent");
+}
+
+// Detach `object`'s backing and then replace it, read-only, with the `length` bytes at `pages`.
+//
+// THE ORDER MATTERS and a NO is ambiguous without it: the replace answers NO on an object still
+// attached, so the detach's own answer is reported separately. `detach_only` stops after the
+// detach, which is the reference leg -- the detached state is already well characterised, and
+// without it a dropped write could be the detach's doing rather than the replace's.
+static BOOL detachAndReplace(const char *prefix, id object, void *pages, NSUInteger length,
+                             BOOL detach_only) {
+  char key[160];
+  id<M2VDetachableBacking> typed = (id<M2VDetachableBacking>)object;
+  if (![object respondsToSelector:@selector(detachBacking)]) {
+    snprintf(key, sizeof(key), "%s.detach", prefix);
+    say(key, @"selector-absent");
+    return NO;
+  }
+  BOOL detached = [typed detachBacking];
+  snprintf(key, sizeof(key), "%s.detach", prefix);
+  say(key, detached ? @"yes" : @"no");
+  if (!detached || detach_only) {
+    return detached;
+  }
+  if (![object respondsToSelector:@selector(replaceBackingWithRanges:readOnly:)]) {
+    snprintf(key, sizeof(key), "%s.replace", prefix);
+    say(key, @"selector-absent");
+    return NO;
+  }
+  M2VAddressRange range = {(uint64_t)(uintptr_t)pages, length};
+  id array = rangeArray(&range, 1);
+  if (array == nil) {
+    return NO;
+  }
+  BOOL replaced = [typed replaceBackingWithRanges:array readOnly:YES];
+  snprintf(key, sizeof(key), "%s.replace", prefix);
+  say(key, replaced ? @"yes" : @"no");
+  return replaced;
+}
 
 // The shaders every storing shape runs. Each store writes 0xC0DE0000 plus the index: a word whose
 // every byte differs from kPad and kUnread, so a stored word is unmistakable in a read-back.
@@ -289,6 +456,17 @@ static Backing makeBacking(id<MTLDevice> device, NSString *which) {
   out.pages = (uint8_t *)pages;
   out.imported = pages;
 
+  // Which creation path, and whether the backing SPI is then used on the buffer.
+  //
+  // `descriptor` is the writable CONTROL for the SPI column and is not optional: the control has
+  // to be made the same way as the measurement, or the column is comparing two creation paths as
+  // well as two backing states.
+  BOOL byDescriptor = [which hasPrefix:@"descriptor"] || [which isEqualToString:@"replaced"] ||
+                      [which isEqualToString:@"detached"];
+  BOOL replaces = [which isEqualToString:@"replaced"] ||
+                  [which isEqualToString:@"nocopy-replaced"];
+  BOOL detachesOnly = [which isEqualToString:@"detached"];
+
   NSUInteger options = MTLResourceStorageModeShared;
   if ([which isEqualToString:@"bit24"]) {
     options |= kPrivateBit;
@@ -301,31 +479,35 @@ static Backing makeBacking(id<MTLDevice> device, NSString *which) {
     out.imported = view;
     out.note = @"imported through a read-only alias of the pages";
   }
-  out.buffer = [device newBufferWithBytesNoCopy:out.imported
-                                         length:kRegion
-                                        options:options
-                                    deallocator:nil];
+
+  if (byDescriptor) {
+    out.buffer = descriptorBuffer(device, out.imported, kRegion, options);
+    out.note = @"made through the private MTLBufferDescriptor, setNoCopy:YES";
+  } else {
+    out.buffer = [device newBufferWithBytesNoCopy:out.imported
+                                           length:kRegion
+                                          options:options
+                                      deallocator:nil];
+  }
   if (out.buffer == nil) {
     say("backing", @"nil-buffer");
     return out;
   }
-  if ([which isEqualToString:@"replaced"]) {
-    SEL selector = @selector(replaceBackingWithRanges:count:readOnly:);
-    if (![out.buffer respondsToSelector:selector]) {
-      say("backing", @"replaceBackingWithRanges-unavailable");
+  // Which selectors THIS creation path's buffer answers. Reported for every backing, because
+  // whether a `newBufferWithBytesNoCopy:` buffer answers them at all is an open question the
+  // consuming project has not checked.
+  sayBackingSelectors("buffer", out.buffer);
+
+  if (replaces || detachesOnly) {
+    // The replace answers NO on an object still attached, so the detach goes first and its own
+    // answer is reported: without it a NO here says nothing about which call refused.
+    if (!detachAndReplace("buffer", out.buffer, pages, kRegion, detachesOnly)) {
       out.buffer = nil;
       return out;
     }
-    M2VBackingRange range = {pages, kRegion};
-    BOOL replaced = [(id<M2VReplaceableBacking>)out.buffer replaceBackingWithRanges:&range
-                                                                             count:1
-                                                                          readOnly:YES];
-    say("backing.replaced", replaced ? @"yes" : @"no");
-    if (!replaced) {
-      out.buffer = nil;
-      return out;
-    }
-    out.note = @"backing replaced read-only through the SPI";
+    out.note = detachesOnly
+                   ? @"backing detached and NOT replaced: the reference leg"
+                   : @"backing detached, then replaced read-only over the pages through the SPI";
   }
   return out;
 }
@@ -617,12 +799,21 @@ static BOOL encodeShape(id<MTLCommandBuffer> cb, Probe *probe, NSString *shape) 
 // ---------------------------------------------------------------------------------------------
 
 // A depth or a stencil texture cannot lie over an MTLBuffer at all -- Metal makes a linear texture
-// of colour formats only -- so the read-only backing a depth attachment can have is a HEAP made
-// with bit 24, which is Metal's own documented read-only state for a heap. A buffer placed over
-// the same bytes of the placement heap is how the probe reads them: the heap's own memory, which
-// has no host pointer, so there is no CPU leg for these two and no page protection to report.
+// of colour formats only -- so a depth attachment's read-only backing has to be a HEAP's. Two
+// forms of that, and this is where the SPI buys something bit 24 cannot:
+//
+//   bit24     a heap of Metal's own memory made with bit 24. No host pointer at all, so there is
+//             no CPU leg and no page protection to report.
+//   replaced  a heap whose backing is DETACHED and then replaced, read-only, over the probe's own
+//             pages -- the SPI is on MTLHeap as well as on MTLBuffer. So this form puts a depth
+//             texture over host pages, which the bit-24 form could not, and it has a CPU leg.
+//
+// `plain` and `descriptor` are the writable controls for the two columns.
 static int runDepthOrStencil(id<MTLDevice> device, id<MTLCommandQueue> queue, NSString *shape,
-                             BOOL privateBit, NSMutableArray *answers) {
+                             NSString *which, NSMutableArray *answers) {
+  BOOL privateBit = [which isEqualToString:@"bit24"];
+  BOOL replaces = [which isEqualToString:@"replaced"];
+  BOOL detachesOnly = [which isEqualToString:@"detached"];
   BOOL stencil = [shape isEqualToString:@"stencil-attachment"];
   MTLPixelFormat format = stencil ? MTLPixelFormatStencil8 : MTLPixelFormatDepth32Float;
   MTLTextureDescriptor *descriptor = [MTLTextureDescriptor
@@ -631,18 +822,45 @@ static int runDepthOrStencil(id<MTLDevice> device, id<MTLCommandQueue> queue, NS
                                   height:kTargetSide
                                mipmapped:NO];
   descriptor.usage = MTLTextureUsageRenderTarget;
-  descriptor.storageMode = MTLStorageModePrivate;
+  // The SPI forms need a SHARED heap: `detachBacking` answered NO on a placement heap of PRIVATE
+  // storage, both selectors responding, which is why this follows the backing rather than being
+  // Private throughout. A depth or stencil texture of shared storage is one this chip makes.
+  MTLStorageMode storage =
+      (replaces || detachesOnly) ? MTLStorageModeShared : MTLStorageModePrivate;
+  descriptor.storageMode = storage;
   descriptor.allowGPUOptimizedContents = NO;
+  sayu("heap.storage_mode", (unsigned long long)storage);
   MTLSizeAndAlign sized = [device heapTextureSizeAndAlignWithDescriptor:descriptor];
   sayu("heap.texture_size", sized.size);
   sayu("heap.texture_align", sized.align);
 
   MTLHeapDescriptor *heapDescriptor = [MTLHeapDescriptor new];
   heapDescriptor.type = MTLHeapTypePlacement;
-  heapDescriptor.storageMode = MTLStorageModePrivate;
+  heapDescriptor.storageMode = storage;
   heapDescriptor.size = sized.size + sized.align + 4096;
   heapDescriptor.resourceOptions =
-      MTLResourceStorageModePrivate | (privateBit ? kPrivateBit : 0);
+      (storage == MTLStorageModeShared ? MTLResourceStorageModeShared
+                                       : MTLResourceStorageModePrivate) |
+      (privateBit ? kPrivateBit : 0);
+  // Whether a heap can be made over the CALLER's bytes at all, which is the only shape whose
+  // backing there would be anything to detach: every successful detach measured here was on a
+  // no-copy buffer. Reported as the selectors the descriptor answers, so "no route" is evidence
+  // rather than an assumption.
+  {
+    NSMutableArray *answered = [NSMutableArray array];
+    for (NSString *name in @[ @"setContents:", @"setNoCopy:", @"setDeallocator:" ]) {
+      if ([heapDescriptor respondsToSelector:NSSelectorFromString(name)]) {
+        [answered addObject:name];
+      }
+    }
+    say("heap_descriptor.no_copy_setters",
+        answered.count == 0 ? @"none" : [answered componentsJoinedByString:@" "]);
+    say("device.newHeapWithBytesNoCopy",
+        [device respondsToSelector:NSSelectorFromString(
+                                       @"newHeapWithBytesNoCopy:length:options:deallocator:")]
+            ? @"responds"
+            : @"absent");
+  }
   id<MTLHeap> heap = [device newHeapWithDescriptor:heapDescriptor];
   if (heap == nil) {
     say("heap", @"nil");
@@ -650,6 +868,28 @@ static int runDepthOrStencil(id<MTLDevice> device, id<MTLCommandQueue> queue, NS
   }
   sayx("heap.resource_options", (unsigned long long)heap.resourceOptions);
   sayu("heap.size", heap.size);
+  sayBackingSelectors("heap", heap);
+
+  // The pages the replaced form puts under the heap, and the CPU's own view of them. Mapped
+  // whole-page and filled with the pad, as a buffer backing is, so an untouched byte is visible.
+  uint8_t *pages = NULL;
+  if (replaces || detachesOnly) {
+    void *mapped =
+        mmap(NULL, kRegion, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (mapped == MAP_FAILED) {
+      say("heap.pages", @"mmap-failed");
+      return 2;
+    }
+    memset(mapped, kPad, kRegion);
+    pages = (uint8_t *)mapped;
+    sayProtection("heap_pages", pages);
+    // The detach goes first and answers for itself: the replace refuses an attached object, so a
+    // NO would otherwise not say which call refused. The texture is placed AFTER this, because
+    // the heap's bytes are what the replace swaps.
+    if (!detachAndReplace("heap", heap, pages, kRegion, detachesOnly)) {
+      return 2;
+    }
+  }
 
   id<MTLTexture> target = [heap newTextureWithDescriptor:descriptor offset:0];
   if (target == nil) {
@@ -724,10 +964,15 @@ destinationBytesPerImage:pitch * kTargetSide];
   say("later_cb", later);
   sayu("read.bytes_per_row", pitch);
   sayu("read.row_bytes", readBytes / kTargetSide);
-  say("cpu", @"not-applicable-heap-is-device-memory");
-  [answers addObject:[NSString stringWithFormat:@"status=%@/%@ same=%@ later=%@",
+  NSString *cpu = pages == NULL ? @"not-applicable-heap-is-device-memory"
+                                : changedRuns(pages, kRegion, kPad);
+  say("cpu", cpu);
+  [answers addObject:[NSString stringWithFormat:@"status=%@/%@ same=%@ later=%@ cpu=%@",
                                                 statusWord(cb.status), statusWord(cb2.status),
-                                                same, later]];
+                                                same, later, cpu]];
+  if (pages != NULL) {
+    munmap(pages, kRegion);
+  }
   return 0;
 }
 
@@ -736,7 +981,9 @@ destinationBytesPerImage:pitch * kTargetSide];
 static int usage(void) {
   fprintf(stderr,
           "usage: readonly_gpu_writes <backing> <shape> [runs]\n"
-          "  backing  plain | bit24 | viewed | replaced\n"
+          "  backing  plain | bit24 | viewed        (newBufferWithBytesNoCopy:)\n"
+          "           descriptor | replaced | detached   (private MTLBufferDescriptor)\n"
+          "           nocopy-replaced                    (the SPI on a no-copy buffer)\n"
           "  shape    facts | blit-fill | kernel-store | kernel-store-loaded |\n"
           "           color-attachment | color-attachment-draw | resolve | visibility |\n"
           "           vertex-store | fragment-store | fragment-store-loaded |\n"
@@ -775,11 +1022,9 @@ static int runBufferShape(id<MTLDevice> device, id<MTLCommandQueue> queue, NSStr
   sayProtection("imported", probe.backing.imported);
 
   if ([shape isEqualToString:@"facts"]) {
-    // The facts alone: no GPU work at all, so this arm says whether the backing is what the
-    // owner's report describes without putting a command on the device.
-    SEL selector = @selector(replaceBackingWithRanges:count:readOnly:);
-    say("spi.replaceBackingWithRanges",
-        [probe.backing.buffer respondsToSelector:selector] ? @"responds" : @"absent");
+    // The facts alone: no GPU work at all. Which selectors this creation path's buffer answers is
+    // already said by `sayBackingSelectors` above, for every backing, which is what answers the
+    // open question of whether a `newBufferWithBytesNoCopy:` buffer takes the SPI at all.
     NSString *cpu = changedRuns(probe.backing.pages, kRegion, kPad);
     say("cpu", cpu);
     [answers addObject:[NSString stringWithFormat:@"cpu=%@", cpu]];
@@ -835,8 +1080,10 @@ int main(int argc, const char *argv[]) {
     }
     NSString *which = [NSString stringWithUTF8String:argv[1]];
     NSString *shape = [NSString stringWithUTF8String:argv[2]];
-    if (!([which isEqualToString:@"plain"] || [which isEqualToString:@"bit24"] ||
-          [which isEqualToString:@"viewed"] || [which isEqualToString:@"replaced"])) {
+    NSArray *backings = @[
+      @"plain", @"bit24", @"viewed", @"descriptor", @"replaced", @"nocopy-replaced", @"detached"
+    ];
+    if (![backings containsObject:which]) {
       return usage();
     }
     int runs = argc == 4 ? atoi(argv[3]) : 1;
@@ -850,6 +1097,13 @@ int main(int argc, const char *argv[]) {
       return 2;
     }
     say("device.name", device.name);
+    // Checked FIRST and always, so a negative result from the SPI is never read as the OS not
+    // offering it: that confusion is what made the first shape of this probe report the SPI
+    // absent on this release.
+    say("device.supportsResourceDetachBacking",
+        ![device respondsToSelector:@selector(supportsResourceDetachBacking)]
+            ? @"selector-absent"
+            : ([(id<M2VBackingDevice>)device supportsResourceDetachBacking] ? @"yes" : @"no"));
     say("backing.kind", which);
     say("shape.name", shape);
     sayu("runs.asked", (unsigned long long)runs);
@@ -862,11 +1116,14 @@ int main(int argc, const char *argv[]) {
     id<MTLCommandQueue> queue = [device newCommandQueue];
     NSMutableArray *answers = [NSMutableArray array];
 
-    // The depth and stencil shapes have no buffer backing at all: a heap, and no host pointer.
+    // The depth and stencil shapes are a heap's, not a buffer's. The bit-24 form of such a heap
+    // has no host pointer, so no CPU leg; the replaced form has one, because the SPI is on
+    // MTLHeap too. `viewed` and `nocopy-replaced` are buffer creation paths and mean nothing here.
     BOOL heapShape = [shape isEqualToString:@"depth-attachment"] ||
                      [shape isEqualToString:@"stencil-attachment"];
-    if (heapShape && ([which isEqualToString:@"viewed"] || [which isEqualToString:@"replaced"])) {
-      say("shape", @"depth-and-stencil-have-no-pointer-backing");
+    if (heapShape && ([which isEqualToString:@"viewed"] ||
+                      [which isEqualToString:@"nocopy-replaced"])) {
+      say("shape", @"that backing is a buffer creation path and a heap has none");
       return 2;
     }
 
@@ -886,8 +1143,7 @@ int main(int argc, const char *argv[]) {
     int code = 0;
     for (int run = 0; run < runs && code == 0; run++) {
       gRun = run;
-      code = heapShape ? runDepthOrStencil(device, queue, shape,
-                                           [which isEqualToString:@"bit24"], answers)
+      code = heapShape ? runDepthOrStencil(device, queue, shape, which, answers)
                        : runBufferShape(device, queue, which, shape, library, answers);
     }
     gRun = -1;
