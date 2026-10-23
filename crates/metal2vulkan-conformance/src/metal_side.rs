@@ -137,6 +137,14 @@ pub struct MetalSide {
     planes: Vec<PlaneAt>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
+    /// The host pages this side mapped for a no-copy buffer ([`Side::host_buffer`]), one per such
+    /// buffer, in the order they were made.
+    ///
+    /// **Declared after every resource pool on purpose**, because fields drop in declaration
+    /// order: a no-copy buffer's pages have to stay mapped for as long as the buffer, and
+    /// `buffers` above is dropped before this is. Not a pool a handle names — the buffer itself
+    /// lives in `buffers`, and what this adds is the mapping under it.
+    host_pages: Vec<crate::host_pages::HostPages>,
 }
 
 /// Where one texture handle's plane lies: which surface in [`MetalSide::surfaces`] holds it, and
@@ -590,6 +598,7 @@ impl MetalSide {
             surfaces: Vec::new(),
             planes: Vec::new(),
             scratch: Scratch::new()?,
+            host_pages: Vec::new(),
         })
     }
 
@@ -1123,6 +1132,44 @@ impl Side for MetalSide {
                     format!("{length} bytes returned nil"),
                 )
             })?;
+        Ok(keep(&mut self.buffers, buffer))
+    }
+
+    fn host_buffer(&mut self, spec: &crate::host_pages::HostBufferSpec) -> Answer<Handle> {
+        if let Some(why) = spec.unmappable() {
+            return Err(Failure::named("UnmappableHostBuffer", why));
+        }
+        let length = usize::try_from(spec.bytes)
+            .map_err(|_| Failure::named("UnmappableHostBuffer", "more bytes than a usize"))?;
+        let pages = crate::host_pages::HostPages::of(length, spec.pattern)
+            .ok_or_else(|| Failure::named("MmapFailed", format!("{length} bytes")))?;
+        // Metal's private `MTLResourceOptions` bit 24: the memory takes the GPU's writes nowhere.
+        // Written as the raw bit because no public header names it, which is also why the suite
+        // reaches it as a number rather than through a binding.
+        let private_bit = MTLResourceOptions(1 << 24);
+        let mut options = MTLResourceOptions::StorageModeShared;
+        if spec.read_only {
+            options |= private_bit;
+        }
+        // SAFETY: the pages are this side's own mapping, `length` bytes long, and they stay mapped
+        // for as long as the buffer: `host_pages` is declared after `buffers`, so the buffer is
+        // released first. The deallocator is nil, so Metal frees nothing of ours.
+        let buffer = unsafe {
+            self.device
+                .newBufferWithBytesNoCopy_length_options_deallocator(
+                    pages.pointer().cast(),
+                    length,
+                    options,
+                    None,
+                )
+        }
+        .ok_or_else(|| {
+            Failure::named(
+                "NewBufferWithBytesNoCopy",
+                format!("{length} bytes of options {:#x} returned nil", options.0),
+            )
+        })?;
+        self.host_pages.push(pages);
         Ok(keep(&mut self.buffers, buffer))
     }
 
@@ -3019,6 +3066,44 @@ impl Side for MetalSide {
                 )?,
                 RenderWork::Dispatch(dispatch) => {
                     self.encode_dispatch(&command_buffer, dispatch)?;
+                }
+                RenderWork::CopyBuffer {
+                    from,
+                    from_offset,
+                    into,
+                    into_offset,
+                    length,
+                } => {
+                    let source: Retained<ProtocolObject<dyn MTLBuffer>> =
+                        Retained::from(self.held(*from)?);
+                    let destination: Retained<ProtocolObject<dyn MTLBuffer>> =
+                        Retained::from(self.held(*into)?);
+                    for (buffer, offset, what) in [
+                        (&source, *from_offset, "the source"),
+                        (&destination, *into_offset, "the destination"),
+                    ] {
+                        let held = u64::try_from(buffer.length()).unwrap_or(0);
+                        if offset.checked_add(*length).is_none_or(|end| end > held) {
+                            return Err(Failure::named(
+                                "PastTheBuffer",
+                                format!("{length} bytes at {offset} of {what}, of {held}"),
+                            ));
+                        }
+                    }
+                    let blit = command_buffer.blitCommandEncoder().ok_or_else(|| {
+                        Failure::named("BlitCommandEncoder", "returned nil".to_owned())
+                    })?;
+                    // SAFETY: both ranges lie inside their own buffer, checked just above.
+                    unsafe {
+                        blit.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size(
+                            &source,
+                            *from_offset as usize,
+                            &destination,
+                            *into_offset as usize,
+                            *length as usize,
+                        );
+                    }
+                    blit.endEncoding();
                 }
             }
         }

@@ -10,7 +10,7 @@ The suite reaches Metal through `objc2-metal`, whose Rust name for a binding is 
 
 Its limits, measured rather than asserted:
 
-- **722 of 836 call sites** in the Metal leg resolve to an item of the SDK. 36 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
+- **727 of 841 call sites** in the Metal leg resolve to an item of the SDK. 37 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
 - **114 call sites' receivers did not type.** They cost the count 3 selectors, which the suite calls and which this attributes to no item:
   - `count`, bound by `MTL4CounterHeap`, `MTL4CounterHeapDescriptor`
   - `executeCommandsInBuffer:withRange:`, bound by `MTL4ComputeCommandEncoder`, `MTL4RenderCommandEncoder`, `MTLComputeCommandEncoder`, `MTLRenderCommandEncoder`
@@ -32,7 +32,7 @@ Its limits, measured rather than asserted:
 | of those exercised, a case reaching it loosens some site | 127 |
 | case modules | 90 |
 | committed recordings | 757 |
-| distinct SDK items the Metal leg calls | 403 |
+| distinct SDK items the Metal leg calls | 404 |
 | ledger rows (a case whose gap is recorded) | 21 |
 
 A tolerance names a **site of a transcript**, not an item, so the last two rows are read as written: a case that loosens one site of its own transcript may compare every other field of it exactly, and this derivation cannot tell which of a case's fields came from which Metal call. Where the distinction matters, read the case.
@@ -246,13 +246,13 @@ An implemented container no case's Metal leg touches. These are the families of 
 | loosenings used | `Unchecked`, `Absolute`, `Ulps` |
 | justifications named | `Degradation`, `AcceptedDifference` |
 | modules forbidding a re-record | 8 |
-| `Side` methods (the suite's whole device vocabulary) | 74 |
-| `Side` methods the Metal leg reaches an SDK item through | 69 |
+| `Side` methods (the suite's whole device vocabulary) | 75 |
+| `Side` methods the Metal leg reaches an SDK item through | 70 |
 | SDK items a case's Metal leg reaches, median | 42 |
 | the same, least and most | 0 and 91 |
-| Metal call sites in the leg | 836 |
-| distinct selectors the leg sends | 337 |
-| of those, resolved to an item of the coverage map | 334 |
+| Metal call sites in the leg | 841 |
+| distinct selectors the leg sends | 338 |
+| of those, resolved to an item of the coverage map | 335 |
 | oracles the recordings name | `apple-m3-max` ×757 |
 
 ## By family
@@ -1816,6 +1816,7 @@ An item the Metal leg calls that no case module was found to reach: either a `Si
 | item | status |
 |---|---|
 | `MTLDevice` `name` | implemented |
+| `MTLDevice` `newBufferWithBytesNoCopy:length:options:deallocator:` | implemented |
 | `MTLRenderCommandEncoder` `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:` | implemented |
 
 ## The ledger

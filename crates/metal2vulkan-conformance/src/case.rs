@@ -518,6 +518,27 @@ pub trait Side {
     /// `newBufferWithLength:options:` of shared storage, zeroed.
     fn zeroed_buffer(&mut self, length: usize) -> Answer<Handle>;
 
+    /// `newBufferWithBytesNoCopy:length:options:deallocator:` over pages **the side maps**, every
+    /// byte the spec's pattern ([`crate::host_pages::HostBufferSpec`]).
+    ///
+    /// This is the one buffer in the suite that is not the device's own memory, and it is here for
+    /// one reason: Metal's private `MTLResourceOptions` bit 24 is the only way a Metal program can
+    /// say "the GPU's writes to this memory go nowhere", and whether we drop such a write exactly
+    /// as Metal drops it is the owner's standing rule. A spec with `read_only` off is the control
+    /// that makes the read-only run a measurement rather than a guess about whether the write path
+    /// ran at all.
+    ///
+    /// The pages stay mapped for as long as the buffer, and the side never writes through them
+    /// after the buffer is made: a CPU write through a read-only mapping ends the process, which is
+    /// Metal's own behaviour and not something this suite asks about.
+    /// [`Side::read_buffer`] of the handle is then the **CPU's** view of the pages; a copy the GPU
+    /// makes out of the buffer into an ordinary one ([`crate::render::RenderWork::CopyBuffer`]) is
+    /// the **GPU's**, and the two differing is the whole answer.
+    fn host_buffer(&mut self, spec: &crate::host_pages::HostBufferSpec) -> Answer<Handle> {
+        let _ = spec;
+        Err(Failure::unavailable("newBufferWithBytesNoCopy"))
+    }
+
     /// A 2D texture of `format`, `size` texels, one level, shader-read and shader-write, of shared
     /// storage, whose level 0 is then `bytes` at `row_pitch` bytes a row
     /// (`replaceRegion:mipmapLevel:withBytes:bytesPerRow:`).

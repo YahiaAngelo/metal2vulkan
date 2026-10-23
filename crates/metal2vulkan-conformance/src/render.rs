@@ -1458,6 +1458,22 @@ pub enum RenderWork {
     },
     /// One compute dispatch.
     Dispatch(Dispatch),
+    /// `copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:`.
+    ///
+    /// It is here so that a case can ask what a **read of a buffer taken on the GPU** sees, as
+    /// against what the CPU sees through the buffer's own contents. For memory whose GPU writes
+    /// are dropped those two differ, and they differ again between a copy taken in the same
+    /// command buffer as the write and one taken in a later command buffer: one Metal program's
+    /// own measured behaviour. A whole [`RenderWork`] list is one command buffer, so a case states
+    /// the same-command-buffer read by putting this after the write in one list, and the
+    /// later-command-buffer read by calling [`Side::render`](crate::case::Side::render) again.
+    CopyBuffer {
+        from: Handle,
+        from_offset: u64,
+        into: Handle,
+        into_offset: u64,
+        length: u64,
+    },
 }
 
 impl RenderWork {
@@ -1467,6 +1483,7 @@ impl RenderWork {
             RenderWork::Pass(_) => "renderCommandEncoder",
             RenderWork::ReadTexture { .. } => "copyFromTextureToBuffer",
             RenderWork::Dispatch(_) => "dispatchThreads",
+            RenderWork::CopyBuffer { .. } => "copyFromBufferToBuffer",
         }
     }
 }
@@ -1533,6 +1550,41 @@ mod tests {
     /// one will do here.
     fn handle() -> Handle {
         Handle(0)
+    }
+
+    /// Every piece of work a command buffer can hold names a Metal call no other piece names.
+    ///
+    /// The site a piece's answer is emitted at is its call, and two siblings sharing a name is the
+    /// failure that made one comparison report six cases as differing while comparing no bytes of
+    /// either side. So this holds the property rather than trusting the next author to notice.
+    #[test]
+    fn every_piece_of_work_names_a_call_no_other_piece_names() {
+        let pieces = [
+            RenderWork::Pass(RenderPass::sized([4, 4])),
+            RenderWork::ReadTexture {
+                texture: handle(),
+                into: handle(),
+                offset: 0,
+                row_pitch: 16,
+                size: [4, 4],
+            },
+            RenderWork::Dispatch(Dispatch {
+                pipeline: handle(),
+                buffers: Vec::new(),
+                textures: Vec::new(),
+                grid: [1, 1, 1],
+                threads: [1, 1, 1],
+            }),
+            RenderWork::CopyBuffer {
+                from: handle(),
+                from_offset: 0,
+                into: handle(),
+                into_offset: 0,
+                length: 16,
+            },
+        ];
+        let named: BTreeSet<&str> = pieces.iter().map(RenderWork::call).collect();
+        assert_eq!(named.len(), pieces.len(), "{named:?}");
     }
 
     /// Every step this module's four additions brought names a Metal call no other step names, so
