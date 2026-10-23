@@ -10,8 +10,8 @@ The suite reaches Metal through `objc2-metal`, whose Rust name for a binding is 
 
 Its limits, measured rather than asserted:
 
-- **572 of 678 call sites** in the Metal leg resolve to an item of the SDK. 32 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
-- **106 call sites' receivers did not type.** They cost the count 6 selectors, which the suite calls and which this attributes to no item:
+- **575 of 677 call sites** in the Metal leg resolve to an item of the SDK. 32 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
+- **102 call sites' receivers did not type.** They cost the count 6 selectors, which the suite calls and which this attributes to no item:
   - `count`, bound by `MTL4CounterHeap`, `MTL4CounterHeapDescriptor`
   - `executeCommandsInBuffer:withRange:`, bound by `MTL4ComputeCommandEncoder`, `MTL4RenderCommandEncoder`, `MTLComputeCommandEncoder`, `MTLRenderCommandEncoder`
   - `imageblockSampleLength`, bound by `MTL4RenderPassDescriptor`, `MTLRenderPassDescriptor`, `MTLRenderPipelineState`
@@ -28,14 +28,14 @@ Its limits, measured rather than asserted:
 | | |
 |---|---|
 | implemented Metal items | 958 |
-| of those, exercised by the suite's Metal leg | 306 |
-| of those, not exercised | 652 |
+| of those, exercised by the suite's Metal leg | 310 |
+| of those, not exercised | 648 |
 | share exercised | 32% |
-| of those exercised, no case reaching it loosens anything | 189 |
+| of those exercised, no case reaching it loosens anything | 193 |
 | of those exercised, a case reaching it loosens some site | 117 |
 | case modules | 85 |
 | committed recordings | 716 |
-| distinct SDK items the Metal leg calls | 320 |
+| distinct SDK items the Metal leg calls | 323 |
 | ledger rows (a case whose gap is recorded) | 21 |
 
 A tolerance names a **site of a transcript**, not an item, so the last two rows are read as written: a case that loosens one site of its own transcript may compare every other field of it exactly, and this derivation cannot tell which of a case's fields came from which Metal call. Where the distinction matters, read the case.
@@ -86,7 +86,6 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLFunctionConstantValues` | 5 | 0 | 5 |  |
 | `MTLFunctionDescriptor` | 5 | 0 | 5 |  |
 | `MTLIndirectCommandBuffer` | 6 | 1 | 5 | `mesh_commands` |
-| `MTLTextureReferenceType` | 5 | 0 | 5 |  |
 | `MTLRasterizationRateMap` | 11 | 7 | 4 | `rate_maps` |
 | `MTLRenderPipelineFunctionsDescriptor` | 4 | 0 | 4 |  |
 | `MTLRenderPipelineReflection` | 9 | 5 | 4 | `texture_accesses` |
@@ -141,6 +140,7 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLStructMember` | 9 | 8 | 1 | `function_bindings` |
 | `MTLStructType` | 3 | 2 | 1 | `function_bindings` |
 | `MTLTextureBinding` | 5 | 4 | 1 | `function_bindings` |
+| `MTLTextureReferenceType` | 5 | 4 | 1 | `function_bindings` |
 | `MTLThreadgroupBinding` | 3 | 2 | 1 | `function_bindings` |
 | `MTLTileRenderPipelineColorAttachmentDescriptor` | 2 | 1 | 1 | `tile_threadgroups` |
 | `MTLVertexAttributeDescriptor` | 4 | 3 | 1 | `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`… |
@@ -156,9 +156,9 @@ A container is one Objective-C type; the SDK header it sits in is the family of 
 | `MTLRenderPipeline.h` | 114 | 34 | 80 |
 | `MTLLibrary.h` | 45 | 2 | 43 |
 | `MTLDevice.h` | 73 | 31 | 42 |
-| `MTLArgument.h` | 77 | 42 | 35 |
 | `MTLIndirectCommandEncoder.h` | 35 | 0 | 35 |
 | `MTLComputeCommandEncoder.h` | 36 | 4 | 32 |
+| `MTLArgument.h` | 77 | 46 | 31 |
 | `MTLComputePipeline.h` | 34 | 4 | 30 |
 | `MTLRasterizationRate.h` | 37 | 9 | 28 |
 | `MTLTexture.h` | 57 | 31 | 26 |
@@ -227,14 +227,13 @@ An implemented container no case's Metal leg touches. These are the families of 
 | `MTLSharedEventHandle` | 2 | `MTLEvent.h` |
 | `MTLSharedEventListener` | 2 | `MTLEvent.h` |
 | `MTLSharedTextureHandle` | 2 | `MTLTexture.h` |
-| `MTLTextureReferenceType` | 5 | `MTLArgument.h` |
 | `MTLTextureViewDescriptor` | 6 | `MTLTexture.h` |
 | `MTLType` | 2 | `MTLArgument.h` |
 | `MTLVertexAttribute` | 7 | `MTLLibrary.h` |
 | `MTLVisibleFunctionTable` | 4 | `MTLVisibleFunctionTable.h` |
 | `MTLVisibleFunctionTableDescriptor` | 3 | `MTLVisibleFunctionTable.h` |
 
-35 containers, 202 implemented items.
+34 containers, 197 implemented items.
 
 ## The suite's shape
 
@@ -255,13 +254,13 @@ An implemented container no case's Metal leg touches. These are the families of 
 | loosenings used | `Unchecked`, `Absolute`, `Ulps` |
 | justifications named | `Degradation`, `AcceptedDifference` |
 | modules forbidding a re-record | 8 |
-| `Side` methods (the suite's whole device vocabulary) | 70 |
-| `Side` methods the Metal leg reaches an SDK item through | 56 |
+| `Side` methods (the suite's whole device vocabulary) | 69 |
+| `Side` methods the Metal leg reaches an SDK item through | 55 |
 | SDK items a case's Metal leg reaches, median | 33 |
 | the same, least and most | 0 and 87 |
-| Metal call sites in the leg | 678 |
-| distinct selectors the leg sends | 286 |
-| of those, resolved to an item of the coverage map | 280 |
+| Metal call sites in the leg | 677 |
+| distinct selectors the leg sends | 285 |
+| of those, resolved to an item of the coverage map | 279 |
 | oracles the recordings name | `apple-m3-max` ×716 |
 
 ## By family
@@ -301,7 +300,7 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `format_copies` | 16 | 16 | every field | 31 |
 | `frame_chains` | 1 | 1 | every field | 86 |
 | `fresh_contents` | 87 | 87 | every field | 33 |
-| `function_bindings` | 3 | 3 | every field | 45 |
+| `function_bindings` | 3 | 3 | every field | 49 |
 | `half_output_blends` | 6 | 6 | every field | 69 |
 | `half_read_nans` | 6 | 6 | every field | 19 |
 | `half_storage_writes` | 9 | 9 | every field | 11 |
@@ -1664,10 +1663,10 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLTextureReferenceType` | no | — | — |
-| `textureDataType` | no | — | — |
-| `textureType` | no | — | — |
-| `access` | no | — | — |
-| `isDepthTexture` | no | — | — |
+| `textureDataType` | yes | `function_bindings` | 3 |
+| `textureType` | yes | `function_bindings` | 3 |
+| `access` | yes | `function_bindings` | 3 |
+| `isDepthTexture` | yes | `function_bindings` | 3 |
 
 ### `MTLTextureViewDescriptor`
 
@@ -1819,7 +1818,6 @@ An item the Metal leg calls that no case module was found to reach: either a `Si
 
 | item | status |
 |---|---|
-| `MTLArgumentEncoder` `newArgumentEncoderForBufferAtIndex:` | implemented |
 | `MTLComputeCommandEncoder` `setSamplerState:atIndex:` | implemented |
 | `MTLComputeCommandEncoder` `setStageInRegion:` | implemented |
 | `MTLComputeCommandEncoder` `setStageInRegionWithIndirectBuffer:indirectBufferOffset:` | implemented |

@@ -371,17 +371,27 @@ fn metal_detail(
         return Ok(TypeFacts::Array(Box::new(metal_array(held, depth)?)));
     }
     if let Some(held) = held_reference {
-        return Ok(TypeFacts::TextureReference(ReferenceFacts {
-            data_type: our_data_type(held.textureDataType().0)?,
-            texture_type: our_texture_type(held.textureType().0)?,
-            access: our_access(held.access().0)?,
-            depth: held.isDepthTexture(),
-        }));
+        return Ok(TypeFacts::TextureReference(metal_reference(held)?));
     }
     if let Some(held) = held_pointer {
         return Ok(TypeFacts::Pointer(Box::new(metal_pointer(held, depth)?)));
     }
     Ok(TypeFacts::Plain)
+}
+
+/// What a texture an argument buffer holds says it is.
+///
+/// A function of its own, like the three beside it, rather than four getters read where the type
+/// getter answered: the receiver of a call is typed by what declares it, and a binding an `if let`
+/// pattern made carries no declared type, so reading these four there named their container to
+/// nobody. The same four calls, with the receiver a parameter, resolve to `MTLTextureReferenceType`.
+fn metal_reference(held: &MTLTextureReferenceType) -> Answer<ReferenceFacts> {
+    Ok(ReferenceFacts {
+        data_type: our_data_type(held.textureDataType().0)?,
+        texture_type: our_texture_type(held.textureType().0)?,
+        access: our_access(held.access().0)?,
+        depth: held.isDepthTexture(),
+    })
 }
 
 fn metal_array(held: &MTLArrayType, depth: u32) -> Answer<ArrayFacts> {
@@ -1364,26 +1374,6 @@ impl Side for MetalSide {
             &mut self.argument_encoders,
             ArgumentEncoderAt {
                 encoder,
-                target: None,
-            },
-        ))
-    }
-
-    fn nested_argument_encoder(&mut self, encoder: Handle, index: u32) -> Answer<Handle> {
-        let held = self.held_encoder(encoder)?;
-        // SAFETY: the index is the case's own, and the call answers nil where the argument at it
-        // points to no argument buffer, which is recorded as the answer rather than assumed away.
-        let nested = unsafe { held.newArgumentEncoderForBufferAtIndex(index as usize) }
-            .ok_or_else(|| {
-                Failure::named(
-                    "NewArgumentEncoderForBufferAtIndex",
-                    format!("argument {index} returned nil"),
-                )
-            })?;
-        Ok(keep(
-            &mut self.argument_encoders,
-            ArgumentEncoderAt {
-                encoder: nested,
                 target: None,
             },
         ))

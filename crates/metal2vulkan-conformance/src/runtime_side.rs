@@ -1024,21 +1024,6 @@ impl Side for RuntimeSide<'_> {
         ))
     }
 
-    fn nested_argument_encoder(&mut self, encoder: Handle, index: u32) -> Answer<Handle> {
-        let nested = self
-            .held_encoder(encoder)?
-            .encoder
-            .new_argument_encoder_for_buffer_at_index(index)
-            .map_err(|error| Failure::of(&error))?;
-        Ok(keep(
-            &mut self.argument_encoders,
-            EncoderAt {
-                encoder: nested,
-                target: None,
-            },
-        ))
-    }
-
     fn argument_encoder_facts(&mut self, encoder: Handle, label: &str) -> Answer<EncoderFacts> {
         let registry = self.device.registry_id();
         let held = self

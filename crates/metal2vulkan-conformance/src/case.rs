@@ -686,13 +686,6 @@ pub trait Side {
         Err(Failure::unavailable("argument_encoder_with_arguments"))
     }
 
-    /// `newArgumentEncoderForBufferAtIndex:`: the encoder of the argument buffer the buffer
-    /// argument at `index` points to, with no argument buffer set.
-    fn nested_argument_encoder(&mut self, encoder: Handle, index: u32) -> Answer<Handle> {
-        let _ = (encoder, index);
-        Err(Failure::unavailable("nested_argument_encoder"))
-    }
-
     /// `setLabel:` of `label`, then what the encoder answers of itself
     /// ([`EncoderFacts`](crate::argument_encoders::EncoderFacts)): `label`, `encodedLength`,
     /// `alignment` and whether `device` is the case's own.
