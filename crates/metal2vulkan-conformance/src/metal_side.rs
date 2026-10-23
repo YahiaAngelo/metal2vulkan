@@ -35,7 +35,8 @@ use crate::indirect_commands::{
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
-    Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
+    Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, StepResource,
+    TargetSpec,
 };
 use crate::sparse_query::{
     HeapFacts, QueryPage, SparseHeapSpec, SparseTextureFacts, SparseTextureSpec, SparseTileQuery,
@@ -59,25 +60,26 @@ use objc2_metal::{
     MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus,
     MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder,
     MTLComputePipelineDescriptor, MTLComputePipelineReflection, MTLComputePipelineState,
-    MTLCreateSystemDefaultDevice, MTLDataType, MTLDepthStencilDescriptor, MTLDepthStencilState,
-    MTLDevice, MTLDispatchType, MTLEvent, MTLFunction, MTLFunctionConstant,
-    MTLFunctionConstantValues, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType,
-    MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
-    MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction,
-    MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
+    MTLCreateSystemDefaultDevice, MTLCullMode, MTLDataType, MTLDepthClipMode,
+    MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDispatchType, MTLEvent,
+    MTLFunction, MTLFunctionConstant, MTLFunctionConstantValues, MTLHeap, MTLHeapDescriptor,
+    MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
+    MTLIndirectCommandType, MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary,
+    MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
     MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
     MTLPointerType, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
     MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplePosition,
     MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
-    MTLSamplerState, MTLSharedEvent, MTLSize, MTLSparsePageSize, MTLStageInputOutputDescriptor,
-    MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction,
-    MTLStoreActionOptions, MTLStructMember, MTLStructType, MTLTexture, MTLTextureBinding,
-    MTLTextureDescriptor, MTLTextureReferenceType, MTLTextureSwizzle, MTLTextureSwizzleChannels,
-    MTLTextureType, MTLTextureUsage, MTLThreadgroupBinding, MTLTileRenderPipelineDescriptor,
+    MTLSamplerState, MTLScissorRect, MTLSharedEvent, MTLSize, MTLSparsePageSize,
+    MTLStageInputOutputDescriptor, MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction,
+    MTLStorageMode, MTLStoreAction, MTLStoreActionOptions, MTLStructMember, MTLStructType,
+    MTLTexture, MTLTextureBinding, MTLTextureDescriptor, MTLTextureReferenceType,
+    MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage,
+    MTLThreadgroupBinding, MTLTileRenderPipelineDescriptor, MTLTriangleFillMode,
     MTLVertexAttribute, MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction, MTLViewport,
-    MTLVisibilityResultMode, MTLVisibleFunctionTable,
+    MTLVisibilityResultMode, MTLVisibleFunctionTable, MTLWinding,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -5037,8 +5039,469 @@ impl MetalSide {
                 // was made resident by a step before this one.
                 unsafe { encoder.executeCommandsInBuffer_withRange(&icb, range) };
             }
+            RenderStep::Scissor(rect) => encoder.setScissorRect(scissor(rect)),
+            RenderStep::Scissors(rects) => {
+                let mut held: Vec<MTLScissorRect> = rects.iter().map(scissor).collect();
+                let count = held.len();
+                let at = array_pointer(&mut held, "NoScissorRects")?;
+                // SAFETY: `at` points to `count` rectangles that live for the call, and every one
+                // lies inside the pass's target, which the case's own guard holds.
+                unsafe { encoder.setScissorRects_count(at, count) };
+            }
+            RenderStep::Viewports(rects) => {
+                let mut held: Vec<MTLViewport> = rects.iter().map(viewport).collect();
+                let count = held.len();
+                let at = array_pointer(&mut held, "NoViewports")?;
+                // SAFETY: `at` points to `count` viewports that live for the call.
+                unsafe { encoder.setViewports_count(at, count) };
+            }
+            RenderStep::Cull(mode) => encoder.setCullMode(MTLCullMode(mode.as_raw() as usize)),
+            RenderStep::FrontFacing(winding) => {
+                encoder.setFrontFacingWinding(MTLWinding(winding.as_raw() as usize));
+            }
+            RenderStep::FillMode(mode) => {
+                encoder.setTriangleFillMode(MTLTriangleFillMode(mode.as_raw() as usize));
+            }
+            RenderStep::DepthClip(mode) => {
+                encoder.setDepthClipMode(MTLDepthClipMode(mode.as_raw() as usize));
+            }
+            RenderStep::DepthBias(values) => {
+                encoder.setDepthBias_slopeScale_clamp(
+                    values.bias,
+                    values.slope_scale,
+                    values.clamp,
+                );
+            }
+            RenderStep::StencilReferences { front, back } => {
+                encoder.setStencilFrontReferenceValue_backReferenceValue(*front, *back);
+            }
+            RenderStep::VertexBufferOffset { offset, index } => {
+                // SAFETY: the index holds a buffer a step before this one bound, and the offset
+                // leaves the stage's binding inside it, which the case states as its own input.
+                unsafe {
+                    encoder.setVertexBufferOffset_atIndex(*offset as usize, *index as usize);
+                }
+            }
+            RenderStep::FragmentBufferOffset { offset, index } => {
+                // SAFETY: as the vertex offset's, for the fragment function's binding.
+                unsafe {
+                    encoder.setFragmentBufferOffset_atIndex(*offset as usize, *index as usize);
+                }
+            }
+            RenderStep::FragmentBytes { bytes, index } => {
+                let pointer =
+                    std::ptr::NonNull::new(bytes.as_ptr().cast::<std::ffi::c_void>().cast_mut())
+                        .ok_or_else(|| Failure::named("NoBytes", "an empty inline binding"))?;
+                // SAFETY: `bytes` lives for the call, which copies them, and is at least as long
+                // as the fragment function's binding at that slot.
+                unsafe {
+                    encoder.setFragmentBytes_length_atIndex(pointer, bytes.len(), *index as usize)
+                };
+            }
+            RenderStep::VertexBuffers { buffers, first } => {
+                let mut range = self.buffer_range(buffers)?;
+                let mut pointers = raw_pointers(&range.held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoBuffers")?;
+                let lengths = array_pointer(&mut range.offsets, "NoBuffers")?;
+                // SAFETY: both pointers are to `count` entries that live for the call, over the
+                // buffers `range.held` borrows from the side's pool, and each binding lies inside
+                // its buffer, which the case states as one of its inputs.
+                unsafe {
+                    encoder.setVertexBuffers_offsets_withRange(
+                        at,
+                        lengths,
+                        NSRange::new(*first as usize, count),
+                    );
+                }
+            }
+            RenderStep::FragmentBuffers { buffers, first } => {
+                let mut range = self.buffer_range(buffers)?;
+                let mut pointers = raw_pointers(&range.held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoBuffers")?;
+                let lengths = array_pointer(&mut range.offsets, "NoBuffers")?;
+                // SAFETY: as the vertex range's, for the fragment function's bindings.
+                unsafe {
+                    encoder.setFragmentBuffers_offsets_withRange(
+                        at,
+                        lengths,
+                        NSRange::new(*first as usize, count),
+                    );
+                }
+            }
+            RenderStep::VertexTexture { texture, index } => {
+                let held = self.held_texture(*texture)?;
+                // SAFETY: the texture is of the kind and access the vertex function declares at
+                // that slot, and the encoder outlives the call.
+                unsafe { encoder.setVertexTexture_atIndex(Some(held), *index as usize) };
+            }
+            RenderStep::VertexTextures { textures, first } => {
+                let held = self.texture_range(textures)?;
+                let mut pointers = raw_pointers(&held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoTextures")?;
+                // SAFETY: the pointer is to `count` texture pointers that live for the call, over
+                // the textures `held` borrows from the side's pool.
+                unsafe {
+                    encoder.setVertexTextures_withRange(at, NSRange::new(*first as usize, count));
+                }
+            }
+            RenderStep::FragmentTextures { textures, first } => {
+                let held = self.texture_range(textures)?;
+                let mut pointers = raw_pointers(&held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoTextures")?;
+                // SAFETY: as the vertex range's, for the fragment function's slots.
+                unsafe {
+                    encoder.setFragmentTextures_withRange(at, NSRange::new(*first as usize, count));
+                }
+            }
+            RenderStep::VertexSampler { sampler, index } => {
+                let held = self.held_sampler(*sampler)?;
+                // SAFETY: the vertex function declares a sampler at that slot, and the encoder
+                // outlives the call.
+                unsafe { encoder.setVertexSamplerState_atIndex(Some(held), *index as usize) };
+            }
+            RenderStep::VertexSamplers { samplers, first } => {
+                let held = self.sampler_range(samplers)?;
+                let mut pointers = raw_pointers(&held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoSamplers")?;
+                // SAFETY: the pointer is to `count` sampler pointers that live for the call, over
+                // the states `held` borrows from the side's pool.
+                unsafe {
+                    encoder
+                        .setVertexSamplerStates_withRange(at, NSRange::new(*first as usize, count));
+                }
+            }
+            RenderStep::FragmentSamplers { samplers, first } => {
+                let held = self.sampler_range(samplers)?;
+                let mut pointers = raw_pointers(&held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoSamplers")?;
+                // SAFETY: as the vertex range's, for the fragment function's slots.
+                unsafe {
+                    encoder.setFragmentSamplerStates_withRange(
+                        at,
+                        NSRange::new(*first as usize, count),
+                    );
+                }
+            }
+            RenderStep::VertexSamplerClamped {
+                sampler,
+                clamp,
+                index,
+            } => {
+                let held = self.held_sampler(*sampler)?;
+                // SAFETY: the vertex function declares a sampler at that slot, and the encoder
+                // outlives the call.
+                unsafe {
+                    encoder.setVertexSamplerState_lodMinClamp_lodMaxClamp_atIndex(
+                        Some(held),
+                        clamp.min,
+                        clamp.max,
+                        *index as usize,
+                    );
+                }
+            }
+            RenderStep::FragmentSamplerClamped {
+                sampler,
+                clamp,
+                index,
+            } => {
+                let held = self.held_sampler(*sampler)?;
+                // SAFETY: as the vertex binding's, for the fragment function's slot.
+                unsafe {
+                    encoder.setFragmentSamplerState_lodMinClamp_lodMaxClamp_atIndex(
+                        Some(held),
+                        clamp.min,
+                        clamp.max,
+                        *index as usize,
+                    );
+                }
+            }
+            RenderStep::VertexSamplersClamped { samplers, first } => {
+                let mut range = self.clamped_sampler_range(samplers)?;
+                let mut pointers = raw_pointers(&range.held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoSamplers")?;
+                let lowest = array_pointer(&mut range.minimums, "NoSamplers")?;
+                let highest = array_pointer(&mut range.maximums, "NoSamplers")?;
+                // SAFETY: the three pointers are to `count` entries each, all living for the call,
+                // over the states `range.held` borrows from the side's pool.
+                unsafe {
+                    encoder.setVertexSamplerStates_lodMinClamps_lodMaxClamps_withRange(
+                        at,
+                        lowest,
+                        highest,
+                        NSRange::new(*first as usize, count),
+                    );
+                }
+            }
+            RenderStep::FragmentSamplersClamped { samplers, first } => {
+                let mut range = self.clamped_sampler_range(samplers)?;
+                let mut pointers = raw_pointers(&range.held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoSamplers")?;
+                let lowest = array_pointer(&mut range.minimums, "NoSamplers")?;
+                let highest = array_pointer(&mut range.maximums, "NoSamplers")?;
+                // SAFETY: as the vertex range's, for the fragment function's slots.
+                unsafe {
+                    encoder.setFragmentSamplerStates_lodMinClamps_lodMaxClamps_withRange(
+                        at,
+                        lowest,
+                        highest,
+                        NSRange::new(*first as usize, count),
+                    );
+                }
+            }
+            RenderStep::BarrierScope {
+                scope,
+                after,
+                before,
+            } => encoder.memoryBarrierWithScope_afterStages_beforeStages(
+                MTLBarrierScope(scope.as_raw() as usize),
+                MTLRenderStages(after.as_raw() as usize),
+                MTLRenderStages(before.as_raw() as usize),
+            ),
+            RenderStep::BarrierResources {
+                resources,
+                after,
+                before,
+            } => {
+                let held = self.resource_range(resources)?;
+                let mut pointers = held_pointers(&held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoResources")?;
+                // SAFETY: `at` points to `count` resource pointers, over the resources `held`
+                // borrows from the side's pools for the whole call.
+                unsafe {
+                    encoder.memoryBarrierWithResources_count_afterStages_beforeStages(
+                        at,
+                        count,
+                        MTLRenderStages(after.as_raw() as usize),
+                        MTLRenderStages(before.as_raw() as usize),
+                    );
+                }
+            }
+            // Metal deprecated the four calls below in favour of the ones that name the stages,
+            // and `docs/METAL-COVERAGE.md` records the runtime implementing each as every stage.
+            // They are items of the SDK a program still calls, so the suite exercises them; the
+            // deprecation is Metal's and there is no other selector that makes this call.
+            #[allow(deprecated)]
+            RenderStep::UseResource { resource, usage } => {
+                let held = self.held_resource(*resource)?;
+                encoder.useResource_usage(held, MTLResourceUsage(usage.as_raw() as usize));
+            }
+            RenderStep::UseResourceInStages {
+                resource,
+                usage,
+                stages,
+            } => {
+                let held = self.held_resource(*resource)?;
+                encoder.useResource_usage_stages(
+                    held,
+                    MTLResourceUsage(usage.as_raw() as usize),
+                    MTLRenderStages(stages.as_raw() as usize),
+                );
+            }
+            #[allow(deprecated)]
+            RenderStep::UseResources { resources, usage } => {
+                let held = self.resource_range(resources)?;
+                let mut pointers = held_pointers(&held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoResources")?;
+                // SAFETY: `at` points to `count` resource pointers, over the resources `held`
+                // borrows from the side's pools for the whole call.
+                unsafe {
+                    encoder.useResources_count_usage(
+                        at,
+                        count,
+                        MTLResourceUsage(usage.as_raw() as usize),
+                    );
+                }
+            }
+            RenderStep::UseResourcesInStages {
+                resources,
+                usage,
+                stages,
+            } => {
+                let held = self.resource_range(resources)?;
+                let mut pointers = held_pointers(&held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoResources")?;
+                // SAFETY: as the unstaged range's.
+                unsafe {
+                    encoder.useResources_count_usage_stages(
+                        at,
+                        count,
+                        MTLResourceUsage(usage.as_raw() as usize),
+                        MTLRenderStages(stages.as_raw() as usize),
+                    );
+                }
+            }
+            #[allow(deprecated)]
+            RenderStep::UseHeap(heap) => encoder.useHeap(self.held_heap(*heap)?),
+            RenderStep::UseHeapInStages { heap, stages } => encoder.useHeap_stages(
+                self.held_heap(*heap)?,
+                MTLRenderStages(stages.as_raw() as usize),
+            ),
+            #[allow(deprecated)]
+            RenderStep::UseHeaps(heaps) => {
+                let held = self.heap_range(heaps)?;
+                let mut pointers = held_pointers(&held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoHeaps")?;
+                // SAFETY: `at` points to `count` heap pointers, over the heaps `held` borrows from
+                // the side's pool for the whole call.
+                unsafe { encoder.useHeaps_count(at, count) };
+            }
+            RenderStep::UseHeapsInStages { heaps, stages } => {
+                let held = self.heap_range(heaps)?;
+                let mut pointers = held_pointers(&held);
+                let count = pointers.len();
+                let at = array_pointer(&mut pointers, "NoHeaps")?;
+                // SAFETY: as the unstaged range's.
+                unsafe {
+                    encoder.useHeaps_count_stages(
+                        at,
+                        count,
+                        MTLRenderStages(stages.as_raw() as usize),
+                    );
+                }
+            }
         }
         Ok(())
+    }
+
+    /// The buffers a range step names, with the offsets its call reads beside them.
+    fn buffer_range(&self, buffers: &[(Handle, u64)]) -> Answer<BufferRange<'_>> {
+        Ok(BufferRange {
+            held: buffers
+                .iter()
+                .map(|(handle, _)| self.held(*handle))
+                .collect::<Answer<Vec<_>>>()?,
+            offsets: buffers.iter().map(|(_, offset)| *offset as usize).collect(),
+        })
+    }
+
+    /// The textures a range step names.
+    fn texture_range(&self, textures: &[Handle]) -> Answer<Vec<&ProtocolObject<dyn MTLTexture>>> {
+        textures
+            .iter()
+            .map(|handle| self.held_texture(*handle))
+            .collect()
+    }
+
+    /// The sampler states a range step names.
+    fn sampler_range(
+        &self,
+        samplers: &[Handle],
+    ) -> Answer<Vec<&ProtocolObject<dyn MTLSamplerState>>> {
+        samplers
+            .iter()
+            .map(|handle| self.held_sampler(*handle))
+            .collect()
+    }
+
+    /// The sampler states a clamped range step names, with the two clamp arrays its call reads
+    /// beside them.
+    fn clamped_sampler_range(
+        &self,
+        samplers: &[(Handle, crate::render::LodClamp)],
+    ) -> Answer<ClampedSamplerRange<'_>> {
+        Ok(ClampedSamplerRange {
+            held: samplers
+                .iter()
+                .map(|(handle, _)| self.held_sampler(*handle))
+                .collect::<Answer<Vec<_>>>()?,
+            minimums: samplers.iter().map(|(_, clamp)| clamp.min).collect(),
+            maximums: samplers.iter().map(|(_, clamp)| clamp.max).collect(),
+        })
+    }
+
+    /// The resources a residency or barrier step names, as `MTLResource`s of the side's pools.
+    fn resource_range(
+        &self,
+        resources: &[StepResource],
+    ) -> Answer<Vec<&ProtocolObject<dyn MTLResource>>> {
+        resources
+            .iter()
+            .map(|resource| self.held_resource(*resource))
+            .collect()
+    }
+
+    /// The one resource a residency step names.
+    fn held_resource(&self, resource: StepResource) -> Answer<&ProtocolObject<dyn MTLResource>> {
+        Ok(match resource {
+            StepResource::Buffer(handle) => ProtocolObject::from_ref(self.held(handle)?),
+            StepResource::Texture(handle) => ProtocolObject::from_ref(self.held_texture(handle)?),
+        })
+    }
+
+    /// The heaps a range step names.
+    fn heap_range(&self, heaps: &[Handle]) -> Answer<Vec<&ProtocolObject<dyn MTLHeap>>> {
+        heaps.iter().map(|handle| self.held_heap(*handle)).collect()
+    }
+}
+
+/// The buffers one `setVertexBuffers:offsets:withRange:` or `setFragmentBuffers:offsets:withRange:`
+/// binds, and the offsets beside them.
+///
+/// A named carrier rather than a tuple: the call reads two arrays that must be the same length,
+/// which is what the type says and a pair of `Vec`s does not.
+struct BufferRange<'a> {
+    held: Vec<&'a ProtocolObject<dyn MTLBuffer>>,
+    offsets: Vec<usize>,
+}
+
+/// The sampler states one `set*SamplerStates:lodMinClamps:lodMaxClamps:withRange:` binds, and its
+/// two clamp arrays, which are the same length as the states for the same reason.
+struct ClampedSamplerRange<'a> {
+    held: Vec<&'a ProtocolObject<dyn MTLSamplerState>>,
+    minimums: Vec<f32>,
+    maximums: Vec<f32>,
+}
+
+/// The raw pointers a range-taking binding call reads its objects through. They are valid as long
+/// as `held` borrows them, which is the side's own pool for the whole call.
+fn raw_pointers<T: ?Sized>(held: &[&T]) -> Vec<*const T> {
+    held.iter().map(|object| *object as *const T).collect()
+}
+
+/// The pointers a count-taking residency or barrier call reads its objects through, valid as
+/// `raw_pointers`' are.
+fn held_pointers<T: ?Sized>(held: &[&T]) -> Vec<std::ptr::NonNull<T>> {
+    held.iter().map(|object| (*object).into()).collect()
+}
+
+/// The pointer a count-taking or range-taking call reads an array of `at` through, or the failure
+/// an empty range is: Metal's calls take a pointer and a count, and a zero-length range has no
+/// pointer to give.
+fn array_pointer<T>(at: &mut [T], what: &'static str) -> Answer<std::ptr::NonNull<T>> {
+    std::ptr::NonNull::new(at.as_mut_ptr()).ok_or_else(|| Failure::named(what, "an empty range"))
+}
+
+/// The `MTLScissorRect` a case's rectangle is.
+fn scissor(rect: &crate::render::ScissorBox) -> MTLScissorRect {
+    MTLScissorRect {
+        x: rect.x as usize,
+        y: rect.y as usize,
+        width: rect.width as usize,
+        height: rect.height as usize,
+    }
+}
+
+/// The `MTLViewport` a case's viewport is.
+fn viewport(rect: &crate::render::ViewportRect) -> MTLViewport {
+    MTLViewport {
+        originX: rect.origin[0],
+        originY: rect.origin[1],
+        width: rect.size[0],
+        height: rect.size[1],
+        znear: rect.depth[0],
+        zfar: rect.depth[1],
     }
 }
 

@@ -30,7 +30,8 @@ use crate::indirect_commands::{
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
-    ColorState, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
+    ColorState, LodClamp, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction,
+    StepResource, TargetSpec,
 };
 use crate::sparse_query::{
     HeapFacts, QueryPage, SparseHeapSpec, SparseTextureFacts, SparseTextureSpec, SparseTileQuery,
@@ -59,7 +60,7 @@ use metal2vulkan_runtime::{
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
     LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
     RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState,
-    SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor, Viewport,
+    SamplerStateOptions, ScissorRect, Size, StoreAction, Texture, TextureDescriptor, Viewport,
 };
 use std::time::Duration;
 
@@ -3084,6 +3085,7 @@ impl Side for RuntimeSide<'_> {
             samplers: self.samplers.clone(),
             computes: self.pipelines.clone(),
             indirect: self.command_buffers_indirect.clone(),
+            heaps: self.heaps.clone(),
         };
         let texture = |handle: Handle| pools.texture(handle);
         let buffer = |handle: Handle| pools.buffer(handle);
@@ -4036,6 +4038,7 @@ struct Pools {
     samplers: Vec<SamplerState>,
     computes: Vec<ComputePipelineState>,
     indirect: Vec<IndirectCommandBuffer>,
+    heaps: Vec<Heap>,
 }
 
 impl Pools {
@@ -4069,6 +4072,7 @@ fn encode_pass(command_buffer: &CommandBuffer, pass: &RenderPass, pools: &Pools)
         depth_stencil,
         samplers,
         indirect,
+        heaps,
         ..
     } = pools;
     let sampler = |handle: Handle| -> Answer<&SamplerState> {
@@ -4085,6 +4089,19 @@ fn encode_pass(command_buffer: &CommandBuffer, pass: &RenderPass, pools: &Pools)
         buffers
             .get(handle.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
+    };
+    let heap = |handle: Handle| -> Answer<&Heap> {
+        heaps
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("heap {}", handle.0)))
+    };
+    // A residency or a barrier step names an `MTLResource`, which is a buffer or a texture of the
+    // case's own pools.
+    let resource = |held: StepResource| -> Answer<ResourceRef<'_>> {
+        Ok(match held {
+            StepResource::Buffer(handle) => ResourceRef::Buffer(buffer(handle)?),
+            StepResource::Texture(handle) => ResourceRef::Texture(texture(handle)?),
+        })
     };
     let mut descriptor = RenderPassDescriptor::new();
     if let Some(size) = pass.size {
@@ -4270,6 +4287,222 @@ fn encode_pass(command_buffer: &CommandBuffer, pass: &RenderPass, pools: &Pools)
                     .execute_commands_in_buffer(icb, *first..*first + *count)
                     .map_err(Failure::from_error)?;
             }
+            RenderStep::Scissor(rect) => encoder
+                .set_scissor_rect(scissor(rect))
+                .map_err(Failure::from_error)?,
+            RenderStep::Scissors(rects) => {
+                let held: Vec<ScissorRect> = rects.iter().map(scissor).collect();
+                encoder
+                    .set_scissor_rects(&held)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::Viewports(rects) => {
+                let held: Vec<Viewport> = rects.iter().map(viewport_of).collect();
+                encoder.set_viewports(&held).map_err(Failure::from_error)?;
+            }
+            RenderStep::Cull(mode) => encoder.set_cull_mode(*mode),
+            RenderStep::FrontFacing(winding) => encoder.set_front_facing_winding(*winding),
+            RenderStep::FillMode(mode) => encoder
+                .set_triangle_fill_mode(*mode)
+                .map_err(Failure::from_error)?,
+            RenderStep::DepthClip(mode) => encoder
+                .set_depth_clip_mode(*mode)
+                .map_err(Failure::from_error)?,
+            RenderStep::DepthBias(values) => encoder
+                .set_depth_bias(values.bias, values.slope_scale, values.clamp)
+                .map_err(Failure::from_error)?,
+            RenderStep::StencilReferences { front, back } => {
+                encoder.set_stencil_reference_values(*front, *back);
+            }
+            RenderStep::VertexBufferOffset { offset, index } => encoder
+                .set_vertex_buffer_offset(*offset, *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::FragmentBufferOffset { offset, index } => encoder
+                .set_fragment_buffer_offset(*offset, *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::FragmentBytes { bytes, index } => encoder
+                .set_fragment_bytes(bytes, *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::VertexBuffers {
+                buffers: range,
+                first,
+            } => {
+                let (held, offsets) = buffer_range(&buffer, range)?;
+                let bound: Vec<Option<&Buffer>> = held.iter().copied().map(Some).collect();
+                encoder
+                    .set_vertex_buffers(&bound, &offsets, *first)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::FragmentBuffers {
+                buffers: range,
+                first,
+            } => {
+                let (held, offsets) = buffer_range(&buffer, range)?;
+                let bound: Vec<Option<&Buffer>> = held.iter().copied().map(Some).collect();
+                encoder
+                    .set_fragment_buffers(&bound, &offsets, *first)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::VertexTexture {
+                texture: held,
+                index,
+            } => encoder
+                .set_vertex_texture(Some(texture(*held)?), *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::VertexTextures {
+                textures: range,
+                first,
+            } => {
+                let bound = texture_range(&texture, range)?;
+                encoder
+                    .set_vertex_textures(&bound, *first)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::FragmentTextures {
+                textures: range,
+                first,
+            } => {
+                let bound = texture_range(&texture, range)?;
+                encoder
+                    .set_fragment_textures(&bound, *first)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::VertexSampler {
+                sampler: held,
+                index,
+            } => encoder
+                .set_vertex_sampler_state(Some(sampler(*held)?), *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::VertexSamplers {
+                samplers: range,
+                first,
+            } => {
+                let bound = sampler_range(&sampler, range)?;
+                encoder
+                    .set_vertex_sampler_states(&bound, None, *first)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::FragmentSamplers {
+                samplers: range,
+                first,
+            } => {
+                let bound = sampler_range(&sampler, range)?;
+                encoder
+                    .set_fragment_sampler_states(&bound, None, *first)
+                    .map_err(Failure::from_error)?;
+            }
+            // Metal's one-slot clamped setter, which the runtime offers as a range of one with
+            // clamps (`docs/METAL-COVERAGE.md`): the same call, stated at one index.
+            RenderStep::VertexSamplerClamped {
+                sampler: held,
+                clamp,
+                index,
+            } => encoder
+                .set_vertex_sampler_states(
+                    &[Some(sampler(*held)?)],
+                    Some((&[clamp.min], &[clamp.max])),
+                    *index,
+                )
+                .map_err(Failure::from_error)?,
+            RenderStep::FragmentSamplerClamped {
+                sampler: held,
+                clamp,
+                index,
+            } => encoder
+                .set_fragment_sampler_states(
+                    &[Some(sampler(*held)?)],
+                    Some((&[clamp.min], &[clamp.max])),
+                    *index,
+                )
+                .map_err(Failure::from_error)?,
+            RenderStep::VertexSamplersClamped {
+                samplers: range,
+                first,
+            } => {
+                let (bound, minimums, maximums) = clamped_sampler_range(&sampler, range)?;
+                encoder
+                    .set_vertex_sampler_states(&bound, Some((&minimums, &maximums)), *first)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::FragmentSamplersClamped {
+                samplers: range,
+                first,
+            } => {
+                let (bound, minimums, maximums) = clamped_sampler_range(&sampler, range)?;
+                encoder
+                    .set_fragment_sampler_states(&bound, Some((&minimums, &maximums)), *first)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::BarrierScope {
+                scope,
+                after,
+                before,
+            } => encoder.memory_barrier_with_scope(*scope, *after, *before),
+            RenderStep::BarrierResources {
+                resources,
+                after,
+                before,
+            } => {
+                let over = resource_range(&resource, resources)?;
+                encoder
+                    .memory_barrier_with_resources(&over, *after, *before)
+                    .map_err(Failure::from_error)?;
+            }
+            // Metal's deprecated residency calls name every render stage, which is how the
+            // runtime implements them (`docs/METAL-COVERAGE.md`).
+            RenderStep::UseResource {
+                resource: held,
+                usage,
+            } => encoder
+                .use_resource(resource(*held)?, *usage, RenderStages::ALL_KNOWN)
+                .map_err(Failure::from_error)?,
+            RenderStep::UseResourceInStages {
+                resource: held,
+                usage,
+                stages,
+            } => encoder
+                .use_resource(resource(*held)?, *usage, *stages)
+                .map_err(Failure::from_error)?,
+            RenderStep::UseResources {
+                resources: held,
+                usage,
+            } => {
+                let over = resource_range(&resource, held)?;
+                encoder
+                    .use_resources(&over, *usage, RenderStages::ALL_KNOWN)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::UseResourcesInStages {
+                resources: held,
+                usage,
+                stages,
+            } => {
+                let over = resource_range(&resource, held)?;
+                encoder
+                    .use_resources(&over, *usage, *stages)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::UseHeap(held) => encoder
+                .use_heap(heap(*held)?, RenderStages::ALL_KNOWN)
+                .map_err(Failure::from_error)?,
+            RenderStep::UseHeapInStages { heap: held, stages } => encoder
+                .use_heap(heap(*held)?, *stages)
+                .map_err(Failure::from_error)?,
+            RenderStep::UseHeaps(held) => {
+                let over = heap_range(&heap, held)?;
+                encoder
+                    .use_heaps(&over, RenderStages::ALL_KNOWN)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::UseHeapsInStages {
+                heaps: held,
+                stages,
+            } => {
+                let over = heap_range(&heap, held)?;
+                encoder
+                    .use_heaps(&over, *stages)
+                    .map_err(Failure::from_error)?;
+            }
         }
     }
     encoder.end_encoding().map_err(Failure::from_error)
@@ -4287,6 +4520,84 @@ fn commands_usage(write: bool) -> ResourceUsage {
     } else {
         ResourceUsage::READ
     }
+}
+
+/// The runtime's `ScissorRect` a case's rectangle is.
+fn scissor(rect: &crate::render::ScissorBox) -> ScissorRect {
+    ScissorRect::new(rect.x, rect.y, rect.width, rect.height)
+}
+
+/// The runtime's `Viewport` a case's viewport is.
+fn viewport_of(rect: &crate::render::ViewportRect) -> Viewport {
+    Viewport::new(
+        rect.origin[0],
+        rect.origin[1],
+        rect.size[0],
+        rect.size[1],
+        rect.depth[0],
+        rect.depth[1],
+    )
+}
+
+/// The buffers and offsets a range step names.
+fn buffer_range<'a>(
+    held: &impl Fn(Handle) -> Answer<&'a Buffer>,
+    range: &[(Handle, u64)],
+) -> Answer<(Vec<&'a Buffer>, Vec<u64>)> {
+    let buffers = range
+        .iter()
+        .map(|(handle, _)| held(*handle))
+        .collect::<Answer<Vec<_>>>()?;
+    Ok((buffers, range.iter().map(|(_, offset)| *offset).collect()))
+}
+
+/// The textures a range step names, as the call binds them.
+fn texture_range<'a>(
+    held: &impl Fn(Handle) -> Answer<&'a Texture>,
+    range: &[Handle],
+) -> Answer<Vec<Option<&'a Texture>>> {
+    range.iter().map(|handle| held(*handle).map(Some)).collect()
+}
+
+/// The sampler states a range step names, as the call binds them.
+fn sampler_range<'a>(
+    held: &impl Fn(Handle) -> Answer<&'a SamplerState>,
+    range: &[Handle],
+) -> Answer<Vec<Option<&'a SamplerState>>> {
+    range.iter().map(|handle| held(*handle).map(Some)).collect()
+}
+
+/// The sampler states a clamped range step names, with its two clamp arrays.
+#[allow(clippy::type_complexity)]
+fn clamped_sampler_range<'a>(
+    held: &impl Fn(Handle) -> Answer<&'a SamplerState>,
+    range: &[(Handle, LodClamp)],
+) -> Answer<(Vec<Option<&'a SamplerState>>, Vec<f32>, Vec<f32>)> {
+    let samplers = range
+        .iter()
+        .map(|(handle, _)| held(*handle).map(Some))
+        .collect::<Answer<Vec<_>>>()?;
+    Ok((
+        samplers,
+        range.iter().map(|(_, clamp)| clamp.min).collect(),
+        range.iter().map(|(_, clamp)| clamp.max).collect(),
+    ))
+}
+
+/// The resources a residency or barrier step names.
+fn resource_range<'a>(
+    held: &impl Fn(StepResource) -> Answer<ResourceRef<'a>>,
+    range: &[StepResource],
+) -> Answer<Vec<ResourceRef<'a>>> {
+    range.iter().map(|resource| held(*resource)).collect()
+}
+
+/// The heaps a range step names.
+fn heap_range<'a>(
+    held: &impl Fn(Handle) -> Answer<&'a Heap>,
+    range: &[Handle],
+) -> Answer<Vec<&'a Heap>> {
+    range.iter().map(|handle| held(*handle)).collect()
 }
 
 /// The pixel format [`crate::case::TARGET_FORMAT`] names, as the runtime spells it.

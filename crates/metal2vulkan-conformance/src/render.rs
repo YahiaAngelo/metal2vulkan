@@ -26,9 +26,22 @@
 //!   than once, so the batching is the case's to state rather than the vocabulary's to assume.
 //!
 //! A pass ([`RenderPass`]) holds its color attachments, its **depth** and **stencil** attachments
-//! and its **visibility-result buffer**, and its steps ([`RenderStep`]) are the pipeline and
-//! depth-stencil state, the stencil reference, the vertex and fragment buffer bindings, the
-//! visibility-result mode, and the draws: direct, indexed and indirect.
+//! and its **visibility-result buffer**, and its steps ([`RenderStep`]) are the encoder's own
+//! calls, in the order the case lists them:
+//!
+//! - the **pipeline** and the **depth-stencil state**;
+//! - the **fixed-function state** a draw is decided by: the viewport and the viewports, the
+//!   scissor rectangle and the scissor rectangles, the cull mode, the front-facing winding, the
+//!   triangle fill mode, the depth clip mode, the depth bias with its slope scale and clamp, the
+//!   blend color, and the stencil reference, both faces together or apart;
+//! - the **bindings** each stage reads: a buffer, its offset alone, a range of buffers, inline
+//!   bytes, a texture, a range of textures, a sampler state with or without its lod clamps, and a
+//!   range of either;
+//! - the **visibility-result mode**;
+//! - the **barriers** between two draws of one pass, by scope or by resource;
+//! - the **residency** a draw's functions may reach a resource through, by resource or by heap,
+//!   with the stages it names or in Metal's deprecated form that names them all;
+//! - and the **draws**: direct, indexed and indirect.
 //!
 //! **A multisampled attachment is read one sample at a time through a kernel**, not through a
 //! call of its own: neither side can `getBytes` or blit a multisample texture, so a case makes the
@@ -46,8 +59,9 @@
 use crate::case::Failure;
 use crate::case::Handle;
 use metal2vulkan::metal::{
-    BlendFactor, BlendOperation, ColorWriteMask, IndexType, PixelFormat, PrimitiveType,
-    VertexFormat, VertexStepFunction,
+    BarrierScope, BlendFactor, BlendOperation, ColorWriteMask, CullMode, DepthClipMode, IndexType,
+    PixelFormat, PrimitiveType, RenderStages, ResourceUsage, TriangleFillMode, VertexFormat,
+    VertexStepFunction, Winding,
 };
 use metal2vulkan_runtime::{
     LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, SamplePosition,
@@ -1026,6 +1040,151 @@ impl BlendColorChannels {
     }
 }
 
+/// `MTLScissorRect`: the pixels of the target a draw may write, origin at the top left.
+///
+/// Four whole pixels, so the type is honestly [`Eq`] and the fingerprint reads exactly what the
+/// case wrote ([`ScissorBox::words`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScissorBox {
+    /// `x`, in pixels.
+    pub x: u64,
+    /// `y`, in pixels.
+    pub y: u64,
+    /// `width`, in pixels.
+    pub width: u64,
+    /// `height`, in pixels.
+    pub height: u64,
+}
+
+impl ScissorBox {
+    /// The rectangle of these four numbers.
+    pub const fn new(x: u64, y: u64, width: u64, height: u64) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// Whether the rectangle reaches past a target of `size` texels, which is the one shape of
+    /// `setScissorRect:` Metal's own validation calls a programming error.
+    ///
+    /// Decided from the case's own numbers, so a side reaches the answer without a device. The
+    /// suite never hands Metal such a rectangle: what plain Metal's driver programs for one is
+    /// unmeasured and it reaches the rasterizer's own clip, which is not a thing a committed case
+    /// finds out by trying.
+    pub fn past(&self, size: [u32; 2]) -> bool {
+        self.x + self.width > u64::from(size[0]) || self.y + self.height > u64::from(size[1])
+    }
+
+    /// The words a case's input fingerprint covers.
+    pub fn words(&self) -> Vec<u8> {
+        [self.x, self.y, self.width, self.height]
+            .iter()
+            .flat_map(|number| number.to_le_bytes())
+            .collect()
+    }
+}
+
+/// `setDepthBias:slopeScale:clamp:`'s three numbers.
+///
+/// Its own type for the reason [`BlendColorChannels`] is: two biases are the same bias when their
+/// three numbers hold the same bits, which is how the input fingerprint reads them too, so the
+/// type is honestly [`Eq`] despite holding `f32`s and [`RenderStep`] keeps its `Eq` derive.
+#[derive(Clone, Copy, Debug)]
+pub struct DepthBiasValues {
+    /// `depthBias`: the constant offset, in the depth format's own minimum resolvable difference.
+    pub bias: f32,
+    /// `slopeScale`: what the primitive's largest depth slope is multiplied by.
+    pub slope_scale: f32,
+    /// `clamp`: the bound the whole offset is held to, or 0 for no bound.
+    pub clamp: f32,
+}
+
+impl PartialEq for DepthBiasValues {
+    fn eq(&self, other: &Self) -> bool {
+        self.words() == other.words()
+    }
+}
+
+impl Eq for DepthBiasValues {}
+
+impl DepthBiasValues {
+    /// The bias of these three numbers.
+    pub const fn new(bias: f32, slope_scale: f32, clamp: f32) -> Self {
+        Self {
+            bias,
+            slope_scale,
+            clamp,
+        }
+    }
+
+    /// The words a case's input fingerprint covers: every number by its bits, so a bias one `f32`
+    /// step away is a different input.
+    pub fn words(&self) -> Vec<u8> {
+        [self.bias, self.slope_scale, self.clamp]
+            .iter()
+            .flat_map(|number| number.to_bits().to_le_bytes())
+            .collect()
+    }
+}
+
+/// The `lodMinClamp` and `lodMaxClamp` a sampler binding carries at an encoder slot.
+///
+/// Its own type for the reason [`DepthBiasValues`] is: the pair compares by its bits, so a step
+/// that carries one is honestly [`Eq`].
+#[derive(Clone, Copy, Debug)]
+pub struct LodClamp {
+    pub min: f32,
+    pub max: f32,
+}
+
+impl PartialEq for LodClamp {
+    fn eq(&self, other: &Self) -> bool {
+        self.words() == other.words()
+    }
+}
+
+impl Eq for LodClamp {}
+
+impl LodClamp {
+    /// The clamps `min` to `max`.
+    pub const fn new(min: f32, max: f32) -> Self {
+        Self { min, max }
+    }
+
+    /// The words a case's input fingerprint covers, each by its bits.
+    pub fn words(&self) -> Vec<u8> {
+        [self.min, self.max]
+            .iter()
+            .flat_map(|number| number.to_bits().to_le_bytes())
+            .collect()
+    }
+}
+
+/// A resource a residency or a barrier step names: which pool the handle belongs to.
+///
+/// `useResource:usage:stages:` and `memoryBarrierWithResources:count:afterStages:beforeStages:`
+/// take an `MTLResource`, which a buffer and a texture both are, and a handle alone cannot say
+/// which pool it came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StepResource {
+    Buffer(Handle),
+    Texture(Handle),
+}
+
+impl StepResource {
+    /// The word the fingerprint carries for the pool, so a buffer handle and a texture handle of
+    /// the same number are two different inputs.
+    pub fn word(&self) -> u8 {
+        match self {
+            StepResource::Buffer(_) => 0,
+            StepResource::Texture(_) => 1,
+        }
+    }
+}
+
 /// One command a case encodes into a render pass, in the order it lists them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RenderStep {
@@ -1114,6 +1273,123 @@ pub enum RenderStep {
         first: u64,
         count: u64,
     },
+    /// `setScissorRect:`.
+    Scissor(ScissorBox),
+    /// `setScissorRects:count:`. A draw reads the rectangle its `[[viewport_array_index]]` names,
+    /// and 0 from a vertex function that writes none, which is the fact a case with one such
+    /// function can state.
+    Scissors(Vec<ScissorBox>),
+    /// `setViewports:count:`, read as [`RenderStep::Scissors`] is.
+    Viewports(Vec<ViewportRect>),
+    /// `setCullMode:`.
+    Cull(CullMode),
+    /// `setFrontFacingWinding:`.
+    FrontFacing(Winding),
+    /// `setTriangleFillMode:`.
+    FillMode(TriangleFillMode),
+    /// `setDepthClipMode:`.
+    DepthClip(DepthClipMode),
+    /// `setDepthBias:slopeScale:clamp:`.
+    DepthBias(DepthBiasValues),
+    /// `setStencilFrontReferenceValue:backReferenceValue:`, the two faces' references apart,
+    /// which [`RenderStep::StencilReference`] sets together.
+    StencilReferences { front: u32, back: u32 },
+    /// `setVertexBufferOffset:atIndex:`: the offset of whatever is bound at the index, with the
+    /// binding itself left alone.
+    VertexBufferOffset { offset: u64, index: u32 },
+    /// `setFragmentBufferOffset:atIndex:`.
+    FragmentBufferOffset { offset: u64, index: u32 },
+    /// `setFragmentBytes:length:atIndex:`: a fragment binding whose bytes the call copies.
+    FragmentBytes { bytes: Vec<u8>, index: u32 },
+    /// `setVertexBuffers:offsets:withRange:`: each buffer and its offset, from `first`.
+    VertexBuffers {
+        buffers: Vec<(Handle, u64)>,
+        first: u32,
+    },
+    /// `setFragmentBuffers:offsets:withRange:`.
+    FragmentBuffers {
+        buffers: Vec<(Handle, u64)>,
+        first: u32,
+    },
+    /// `setVertexTexture:atIndex:`.
+    VertexTexture { texture: Handle, index: u32 },
+    /// `setVertexTextures:withRange:`.
+    VertexTextures { textures: Vec<Handle>, first: u32 },
+    /// `setFragmentTextures:withRange:`.
+    FragmentTextures { textures: Vec<Handle>, first: u32 },
+    /// `setVertexSamplerState:atIndex:`.
+    VertexSampler { sampler: Handle, index: u32 },
+    /// `setVertexSamplerStates:withRange:`.
+    VertexSamplers { samplers: Vec<Handle>, first: u32 },
+    /// `setFragmentSamplerStates:withRange:`.
+    FragmentSamplers { samplers: Vec<Handle>, first: u32 },
+    /// `setVertexSamplerState:lodMinClamp:lodMaxClamp:atIndex:`.
+    VertexSamplerClamped {
+        sampler: Handle,
+        clamp: LodClamp,
+        index: u32,
+    },
+    /// `setFragmentSamplerState:lodMinClamp:lodMaxClamp:atIndex:`.
+    FragmentSamplerClamped {
+        sampler: Handle,
+        clamp: LodClamp,
+        index: u32,
+    },
+    /// `setVertexSamplerStates:lodMinClamps:lodMaxClamps:withRange:`.
+    VertexSamplersClamped {
+        samplers: Vec<(Handle, LodClamp)>,
+        first: u32,
+    },
+    /// `setFragmentSamplerStates:lodMinClamps:lodMaxClamps:withRange:`.
+    FragmentSamplersClamped {
+        samplers: Vec<(Handle, LodClamp)>,
+        first: u32,
+    },
+    /// `memoryBarrierWithScope:afterStages:beforeStages:`.
+    BarrierScope {
+        scope: BarrierScope,
+        after: RenderStages,
+        before: RenderStages,
+    },
+    /// `memoryBarrierWithResources:count:afterStages:beforeStages:`.
+    BarrierResources {
+        resources: Vec<StepResource>,
+        after: RenderStages,
+        before: RenderStages,
+    },
+    /// `useResource:usage:`, Metal's deprecated form, which names every render stage.
+    UseResource {
+        resource: StepResource,
+        usage: ResourceUsage,
+    },
+    /// `useResource:usage:stages:`.
+    UseResourceInStages {
+        resource: StepResource,
+        usage: ResourceUsage,
+        stages: RenderStages,
+    },
+    /// `useResources:count:usage:`, Metal's deprecated form.
+    UseResources {
+        resources: Vec<StepResource>,
+        usage: ResourceUsage,
+    },
+    /// `useResources:count:usage:stages:`.
+    UseResourcesInStages {
+        resources: Vec<StepResource>,
+        usage: ResourceUsage,
+        stages: RenderStages,
+    },
+    /// `useHeap:`, Metal's deprecated form.
+    UseHeap(Handle),
+    /// `useHeap:stages:`.
+    UseHeapInStages { heap: Handle, stages: RenderStages },
+    /// `useHeaps:count:`, Metal's deprecated form.
+    UseHeaps(Vec<Handle>),
+    /// `useHeaps:count:stages:`.
+    UseHeapsInStages {
+        heaps: Vec<Handle>,
+        stages: RenderStages,
+    },
 }
 
 impl RenderStep {
@@ -1174,8 +1450,46 @@ impl RenderStep {
             RenderStep::Draw { .. } => "drawPrimitives",
             RenderStep::DrawIndexed { .. } => "drawIndexedPrimitives",
             RenderStep::DrawIndirect { .. } => "drawPrimitivesWithIndirectBuffer",
+            // `UseBuffer` is an indirect command's own residency call and names the same site
+            // as `RenderStep::UseResource` below. No case holds both, and a case that comes to
+            // hold both has to rename one and re-record it: the site a step is emitted at is
+            // this name, and two siblings sharing one compares no bytes of either.
             RenderStep::UseBuffer { .. } => "useResource",
             RenderStep::ExecuteCommands { .. } => "executeCommandsInBuffer",
+            RenderStep::Scissor(_) => "setScissorRect",
+            RenderStep::Scissors(_) => "setScissorRects",
+            RenderStep::Viewports(_) => "setViewports",
+            RenderStep::Cull(_) => "setCullMode",
+            RenderStep::FrontFacing(_) => "setFrontFacingWinding",
+            RenderStep::FillMode(_) => "setTriangleFillMode",
+            RenderStep::DepthClip(_) => "setDepthClipMode",
+            RenderStep::DepthBias(_) => "setDepthBias",
+            RenderStep::StencilReferences { .. } => "setStencilFrontReferenceValue",
+            RenderStep::VertexBufferOffset { .. } => "setVertexBufferOffset",
+            RenderStep::FragmentBufferOffset { .. } => "setFragmentBufferOffset",
+            RenderStep::FragmentBytes { .. } => "setFragmentBytes",
+            RenderStep::VertexBuffers { .. } => "setVertexBuffers",
+            RenderStep::FragmentBuffers { .. } => "setFragmentBuffers",
+            RenderStep::VertexTexture { .. } => "setVertexTexture",
+            RenderStep::VertexTextures { .. } => "setVertexTextures",
+            RenderStep::FragmentTextures { .. } => "setFragmentTextures",
+            RenderStep::VertexSampler { .. } => "setVertexSamplerState",
+            RenderStep::VertexSamplers { .. } => "setVertexSamplerStates",
+            RenderStep::FragmentSamplers { .. } => "setFragmentSamplerStates",
+            RenderStep::VertexSamplerClamped { .. } => "setVertexSamplerStateWithLodClamps",
+            RenderStep::FragmentSamplerClamped { .. } => "setFragmentSamplerStateWithLodClamps",
+            RenderStep::VertexSamplersClamped { .. } => "setVertexSamplerStatesWithLodClamps",
+            RenderStep::FragmentSamplersClamped { .. } => "setFragmentSamplerStatesWithLodClamps",
+            RenderStep::BarrierScope { .. } => "memoryBarrierWithScope",
+            RenderStep::BarrierResources { .. } => "memoryBarrierWithResources",
+            RenderStep::UseResource { .. } => "useResource",
+            RenderStep::UseResourceInStages { .. } => "useResourceWithStages",
+            RenderStep::UseResources { .. } => "useResources",
+            RenderStep::UseResourcesInStages { .. } => "useResourcesWithStages",
+            RenderStep::UseHeap(_) => "useHeap",
+            RenderStep::UseHeapInStages { .. } => "useHeapWithStages",
+            RenderStep::UseHeaps(_) => "useHeaps",
+            RenderStep::UseHeapsInStages { .. } => "useHeapsWithStages",
         }
     }
 
@@ -1255,6 +1569,137 @@ impl RenderStep {
             RenderStep::ExecuteCommands { first, count, .. } => {
                 bytes.extend(first.to_le_bytes());
                 bytes.extend(count.to_le_bytes());
+            }
+            // The state setters below carry no handle, so the whole call is the case's own value
+            // and the fingerprint covers all of it.
+            RenderStep::Scissor(rect) => bytes.extend(rect.words()),
+            RenderStep::Scissors(rects) => {
+                for rect in rects {
+                    bytes.extend(rect.words());
+                }
+            }
+            RenderStep::Viewports(rects) => {
+                for rect in rects {
+                    bytes.extend(rect.words());
+                }
+            }
+            RenderStep::Cull(mode) => bytes.extend(mode.as_raw().to_le_bytes()),
+            RenderStep::FrontFacing(winding) => bytes.extend(winding.as_raw().to_le_bytes()),
+            RenderStep::FillMode(mode) => bytes.extend(mode.as_raw().to_le_bytes()),
+            RenderStep::DepthClip(mode) => bytes.extend(mode.as_raw().to_le_bytes()),
+            RenderStep::DepthBias(values) => bytes.extend(values.words()),
+            RenderStep::StencilReferences { front, back } => {
+                bytes.extend(front.to_le_bytes());
+                bytes.extend(back.to_le_bytes());
+            }
+            RenderStep::VertexBufferOffset { offset, index }
+            | RenderStep::FragmentBufferOffset { offset, index } => {
+                bytes.extend(offset.to_le_bytes());
+                bytes.extend(index.to_le_bytes());
+            }
+            RenderStep::FragmentBytes {
+                bytes: inline,
+                index,
+            } => {
+                bytes.extend(inline);
+                bytes.extend(index.to_le_bytes());
+            }
+            // A buffer, texture or sampler a range names is fingerprinted by the case through its
+            // own bytes or its own descriptor words, as a single binding's is, so the call's own
+            // parameters are the offsets, the clamps, the count and where the range starts. The
+            // count is written because a range of two bindings and a range of three are two
+            // different calls.
+            RenderStep::VertexBuffers { buffers, first }
+            | RenderStep::FragmentBuffers { buffers, first } => {
+                bytes.extend((buffers.len() as u32).to_le_bytes());
+                for (_, offset) in buffers {
+                    bytes.extend(offset.to_le_bytes());
+                }
+                bytes.extend(first.to_le_bytes());
+            }
+            RenderStep::VertexTexture { index, .. } | RenderStep::VertexSampler { index, .. } => {
+                bytes.extend(index.to_le_bytes());
+            }
+            RenderStep::VertexTextures { textures, first }
+            | RenderStep::FragmentTextures { textures, first } => {
+                bytes.extend((textures.len() as u32).to_le_bytes());
+                bytes.extend(first.to_le_bytes());
+            }
+            RenderStep::VertexSamplers { samplers, first }
+            | RenderStep::FragmentSamplers { samplers, first } => {
+                bytes.extend((samplers.len() as u32).to_le_bytes());
+                bytes.extend(first.to_le_bytes());
+            }
+            RenderStep::VertexSamplerClamped { clamp, index, .. }
+            | RenderStep::FragmentSamplerClamped { clamp, index, .. } => {
+                bytes.extend(clamp.words());
+                bytes.extend(index.to_le_bytes());
+            }
+            RenderStep::VertexSamplersClamped { samplers, first }
+            | RenderStep::FragmentSamplersClamped { samplers, first } => {
+                bytes.extend((samplers.len() as u32).to_le_bytes());
+                for (_, clamp) in samplers {
+                    bytes.extend(clamp.words());
+                }
+                bytes.extend(first.to_le_bytes());
+            }
+            RenderStep::BarrierScope {
+                scope,
+                after,
+                before,
+            } => {
+                bytes.extend(scope.as_raw().to_le_bytes());
+                bytes.extend(after.as_raw().to_le_bytes());
+                bytes.extend(before.as_raw().to_le_bytes());
+            }
+            // Which pool each resource came from is the call's own parameter: the handle is a
+            // side's own number, and a buffer and a texture of the same number are two calls.
+            RenderStep::BarrierResources {
+                resources,
+                after,
+                before,
+            } => {
+                bytes.extend((resources.len() as u32).to_le_bytes());
+                bytes.extend(resources.iter().map(StepResource::word));
+                bytes.extend(after.as_raw().to_le_bytes());
+                bytes.extend(before.as_raw().to_le_bytes());
+            }
+            RenderStep::UseResource { resource, usage } => {
+                bytes.push(resource.word());
+                bytes.extend(usage.as_raw().to_le_bytes());
+            }
+            RenderStep::UseResourceInStages {
+                resource,
+                usage,
+                stages,
+            } => {
+                bytes.push(resource.word());
+                bytes.extend(usage.as_raw().to_le_bytes());
+                bytes.extend(stages.as_raw().to_le_bytes());
+            }
+            RenderStep::UseResources { resources, usage } => {
+                bytes.extend((resources.len() as u32).to_le_bytes());
+                bytes.extend(resources.iter().map(StepResource::word));
+                bytes.extend(usage.as_raw().to_le_bytes());
+            }
+            RenderStep::UseResourcesInStages {
+                resources,
+                usage,
+                stages,
+            } => {
+                bytes.extend((resources.len() as u32).to_le_bytes());
+                bytes.extend(resources.iter().map(StepResource::word));
+                bytes.extend(usage.as_raw().to_le_bytes());
+                bytes.extend(stages.as_raw().to_le_bytes());
+            }
+            RenderStep::UseHeap(_) => {}
+            RenderStep::UseHeapInStages { stages, .. } => {
+                bytes.extend(stages.as_raw().to_le_bytes());
+            }
+            RenderStep::UseHeaps(heaps) => bytes.extend((heaps.len() as u32).to_le_bytes()),
+            RenderStep::UseHeapsInStages { heaps, stages } => {
+                bytes.extend((heaps.len() as u32).to_le_bytes());
+                bytes.extend(stages.as_raw().to_le_bytes());
             }
         }
         bytes
