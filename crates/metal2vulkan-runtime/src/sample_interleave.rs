@@ -46,8 +46,8 @@
 //! they move by the multisampled blit copies' own move (`sample_copy.rs`): maintenance8's
 //! `vkCmdCopyImage` where the driver copies such images right, else the sample-rate draws (the
 //! stencil's plane draws, exact; a 32-bit float depth's `FragDepth` draw, exact or the announced
-//! `drawn-depth-copy`; out of the texture, the bits draws). Whatever that move refuses, this copy
-//! refuses.
+//! `drawn-depth-copy`; a 16-bit normalized depth's code draw, exact where the driver keeps every
+//! code; out of the texture, the bits draws). Whatever that move refuses, this copy refuses.
 //!
 //! A device that cannot run the modules (no `sampleRateShading`, no integer multisample color
 //! attachment at the count, no storage/sampled/transfer of the copy format, or a texture without

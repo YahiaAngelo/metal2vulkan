@@ -1541,7 +1541,8 @@ degradations! {
         /// Metal's heaps is not probed), an image that holds other bytes than Metal's elements,
         /// moves past the device's limits, or a multisample texture whose samples the device does
         /// not move to and from a buffer (a 16-bit depth where its multisampled copies go by
-        /// draws), in memory of its own. Also a texture made in any other heap (over the device's
+        /// draws whose codes the driver is not measured to keep), in memory of its own. Also a
+        /// texture made in any other heap (over the device's
         /// memory) whose bytes there are not Metal's layout (`texture/heap.rs`): its image bound
         /// there in the driver's layout, on a driver whose colour images are not measured to lie as
         /// Metal's heap textures

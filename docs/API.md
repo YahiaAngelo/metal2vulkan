@@ -2091,8 +2091,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   layout not measured (a format whose layout in Metal's heaps is not probed), an image that holds
   other bytes than Metal's elements, moves past the device's limits, or a multisample texture whose
   samples the device does not move to and from a buffer (a 16-bit depth where its multisampled
-  copies go by draws), in memory of its own. Also a texture made in any
-  other heap (over the device's memory) whose bytes there are not Metal's layout: its image bound
+  copies go by draws whose codes the driver is not measured to keep), in memory of its own. Also a
+  texture made in any other heap (over the device's memory) whose bytes there are not Metal's
+  layout: its image bound
   there in the driver's layout, on a driver whose colour images are not measured to lie as Metal's
   heap textures (`DriverFact::ColorImagesLieAsMetalHeapTextures`, and
   `DriverFact::MultisampleColorImagesLieAsMetalHeapTextures` for a multisample one) or of a depth or
@@ -3182,8 +3183,11 @@ each item named states the rule in full.
 
 - **Multisampled blit copies between depth or stencil and colour formats** copy each sample's
   bytes as plain Metal does (its validation stops them), through `VK_KHR_maintenance8` or
-  sample-rate draws. The two pairs the draws cannot copy exactly are refused: a 16-bit depth, and a
-  copy into a 32-bit float depth on a driver not measured to store fragment depths unchanged.
+  sample-rate draws. A 16-bit depth crosses as its codes, exact where the driver keeps every code
+  (`DriverFact::FragmentDepthKeepsDepth16Codes`: lavapipe's measured releases, and MoltenVK 1.4.2
+  on the Apple M3 Max) and refused where it is not measured to. A copy into a 32-bit float depth on
+  a driver not measured to store fragment depths unchanged is drawn and announced
+  (`drawn-depth-copy`).
 - **A blit copy of 24-bit depth between textures of different formats is refused**: Apple's
   reference GPUs make no `Depth24Unorm_Stencil8` texture, so there is no Metal answer to match.
 

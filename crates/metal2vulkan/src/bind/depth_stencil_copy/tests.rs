@@ -8,7 +8,8 @@ use crate::spirv::testing::assert_valid;
 use std::path::PathBuf;
 
 /// Every copy draw: each plane of each source, the export of each source, the depth, the
-/// depth's and the stencil's bits into colour, and a depth's magnitude as a depth and as bits.
+/// depth's and the stencil's bits into colour, a depth's magnitude as a depth and as bits, and a
+/// 16-bit depth's code both ways.
 fn every_copy() -> Vec<DepthStencilCopy> {
     let mut copies = Vec::new();
     for source in [CopySource::Aspect, CopySource::Shadow] {
@@ -22,6 +23,8 @@ fn every_copy() -> Vec<DepthStencilCopy> {
     copies.push(DepthStencilCopy::StencilBits);
     copies.push(DepthStencilCopy::DepthMagnitude);
     copies.push(DepthStencilCopy::MagnitudeBits);
+    copies.push(DepthStencilCopy::Depth16Code);
+    copies.push(DepthStencilCopy::Depth16Bits);
     for form in FORMS {
         copies.push(DepthStencilCopy::DepthFromStandIn { form });
     }
@@ -206,4 +209,35 @@ fn the_depth_split_is_valid_where_the_device_has_what_it_needs() {
             }
         }
     }
+}
+
+/// The 16-bit depth pair's arithmetic is exact for **every** code: of all 65536 codes, each one
+/// `Depth16Code` turns into a depth and `Depth16Bits` turns back lands on itself, whether or not
+/// the device contracts the multiply and add into one fused operation, and the margin the
+/// rounding has left over is the module docs' number.
+///
+/// 65536 inputs is a small enough space to check whole, so it is checked whole rather than
+/// sampled. This is the arithmetic the two shaders perform, in the same order and the same
+/// precision; that a real device performs it so is the device test's half of the claim
+/// (`metal2vulkan_runtime`'s multisampled depth round trip).
+///
+/// Its failure mode was exercised while writing it: dropping the `+ 0.5`, so the conversion to
+/// unsigned truncates `d * 65535` instead of rounding it, misses 36442 of the 65536 codes.
+#[test]
+fn every_16_bit_code_survives_the_depth_pair_in_both_directions() {
+    let mut worst = 0.0f64;
+    for code in 0..=u16::MAX {
+        // `Depth16Code`: ConvertUToF then one FDiv by 65535.
+        let depth = f32::from(code) / CODE_SCALE;
+        // `Depth16Bits`: FMul, FAdd, then ConvertFToU, which truncates. Once as the device may
+        // emit it and once contracted into a fused multiply-add, which rounds only once.
+        let plain = (depth * CODE_SCALE + 0.5) as u32;
+        let fused = (f64::from(depth) * f64::from(CODE_SCALE) + 0.5) as u32;
+        assert_eq!(plain, u32::from(code), "code {code} un-fused");
+        assert_eq!(fused, u32::from(code), "code {code} fused");
+        let scaled = f64::from(depth) * f64::from(CODE_SCALE);
+        worst = worst.max((scaled - f64::from(code)).abs());
+    }
+    // The half-step budget is 0.5; the docs quote this margin, so it is held to it.
+    assert!(worst < 2.0e-3, "the largest |depth * 65535 - code| is {worst}");
 }
