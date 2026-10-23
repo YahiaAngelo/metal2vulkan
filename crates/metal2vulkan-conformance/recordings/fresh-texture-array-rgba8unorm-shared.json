@@ -45,7 +45,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "1d8ec495e78d00fb567f628eb5f0f9291b23080333d8e2184b91888b8394c47e"
+                          "hex": "76b68ade160e27c22bf1308e50cb06007082b1d4513931f80dfcc5ec7a6917e0"
                         }
                       }
                     },
