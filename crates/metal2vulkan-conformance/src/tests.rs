@@ -3012,9 +3012,13 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         "primaries_begun_ahead",
         "completed_where_seen",
         "pooled_memory_blocks_freed",
+        "finales_folded",
     ] {
         assert!(racy(count).is_some(), "{count}");
     }
+    // And `finales_apart`, its partner, stays gated for the same reason
+    // `scheduled_where_submitted` does: nothing has been seen to move it.
+    assert!(racy("finales_apart").is_none());
     // And the total `encoder_primaries_begun_ahead` splits stays gated, so no work escapes by it,
     // as does what a case allocates even though what the pool hands back does not.
     assert!(racy("encoder_command_buffers_begun").is_none());

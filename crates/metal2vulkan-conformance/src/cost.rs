@@ -233,6 +233,32 @@ const COMPLEMENT: &str = "which of our own threads ran a command buffer's transi
 const QUIET: &str = "a pooled memory block freed because it had been kept empty past its quiet \
      period, which is a question about elapsed time rather than about the case's work";
 
+/// Why `finales_folded` is reported and never gated: it is one half of a split the **submission
+/// path** decides as it runs, not a count of what the case asked for.
+///
+/// A batch's end is either folded into its last command buffer or submitted in one of its own, and
+/// the runtime's doc for the other half, `finales_apart`, lists what forces it apart: an event
+/// signal that waits for another `VkQueue`'s earlier one, a submission left a segment or a sparse
+/// update, a texture that moves between layouts, or a last command buffer that "does not go to the
+/// queue as recorded". Several of those are about what the queue did with work submitted **before
+/// this case**.
+///
+/// Measured, in both ways it moves. Across the case set it reads 3 with the case alone and 4 in
+/// company in 76 cases. And it moves between replays of the *identical* selection, which
+/// composition alone cannot explain: it reached 2 where the measurement's most was 0 on
+/// `tile-order-even-threadgroups` in one whole-set replay and stayed within bound in the other of
+/// the same pair.
+///
+/// `finales_apart` is its partner and stays **gated**, for the same reason
+/// `scheduled_where_submitted` does: nothing has been seen to move it, and a row here with no
+/// measurement behind it is a claim this half does not make. So work moving from folded to apart
+/// still fires the gate, and work moving the other way fires nothing — the asymmetry is worth
+/// knowing rather than papering over.
+const FOLDED: &str =
+    "whether a batch's end was folded into its last command buffer or sent in one \
+     of its own, which the submission path decides from what the queue did with work submitted \
+     before this case";
+
 /// Why a count of an object made because no spare was free is reported and never gated.
 const POOLED: &str = "an object made because no spare was free, where a spare comes back on \
      another thread: which case has to make one depends on when that thread returned the one \
@@ -266,7 +292,7 @@ const POOLED: &str = "an object made because no spare was free, where a spare co
 /// replays of a larger case set — which reads like a regression and is not one. See [`BORROWED`].
 /// `slot_returns` beside it stays gated: it counts work items, one a command buffer, and has held
 /// still alone and in both case sets.
-const RACY: [(&str, &str); 30] = [
+const RACY: [(&str, &str); 31] = [
     ("fences_made", POOLED),
     // What is alive, parked or waiting at the instant the counts were read.
     ("memory_blocks_live", INSTANTANEOUS),
@@ -295,6 +321,7 @@ const RACY: [(&str, &str); 30] = [
     ("primaries_begun_ahead", AHEAD),
     ("completed_where_seen", COMPLEMENT),
     ("pooled_memory_blocks_freed", QUIET),
+    ("finales_folded", FOLDED),
     ("command_pools_made", POOLED),
     ("spare_command_pools_", POOLED),
     ("live_tables_uploaded", POOLED),
