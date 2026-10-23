@@ -445,6 +445,7 @@
         "draws_settled": 2,
         "driver_diagnostics_withheld": 1,
         "encoder_command_buffers_begun": 4,
+        "encoder_primaries_begun_ahead": 1,
         "finales_folded": 2,
         "graphics_pipelines_looked_up": 1,
         "images_started_on_the_host": 2,
@@ -485,6 +486,9 @@
         "visibility_queries_begun": 5,
         "wakes_completion_waiters": 2,
         "wakes_spared": 12
+      },
+      "moving": {
+        "commands_replayed.begin_command_buffer": 3
       },
       "composed": {
         "addressable_buffers_made": 2,

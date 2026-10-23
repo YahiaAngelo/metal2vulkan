@@ -754,5 +754,59 @@
       ],
       "validated": "ran"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
+      "bounds": {
+        "bare_starts": 12,
+        "batches_with_none_pending": 12,
+        "command_barriers": 20,
+        "command_buffers_begun": 13,
+        "command_buffers_begun_batch_work": 1,
+        "command_buffers_begun_encoders": 12,
+        "command_buffers_deferred": 12,
+        "command_buffers_replayed_inline": 12,
+        "command_buffers_submitted": 13,
+        "commands_replayed.begin_command_buffer": 12,
+        "commands_replayed.cmd_copy_buffer_to_image": 24,
+        "commands_replayed.cmd_copy_image": 2,
+        "commands_replayed.cmd_copy_image_to_buffer": 24,
+        "commands_replayed.cmd_pipeline_barrier": 32,
+        "commands_replayed.end_command_buffer": 12,
+        "commits_handed_off": 12,
+        "completed_waits": 15,
+        "completed_where_seen": 12,
+        "device_memory_allocated": 201326592,
+        "encoder_command_buffers_begun": 12,
+        "finales_folded": 12,
+        "new_buffer_bytes_cleared": 7616,
+        "object_churn.buffers_parked": 48,
+        "object_churn.buffers_recycled": 48,
+        "object_churn.images_evicted": 14,
+        "object_churn.images_own_memory": 14,
+        "object_churn.images_parked": 14,
+        "object_churn.textures_image": 14,
+        "object_churn.vk_image_bindings": 14,
+        "object_churn.vk_images_destroyed": 14,
+        "object_churn.vk_images_made": 14,
+        "queue_submissions": 12,
+        "scheduled_where_submitted": 12,
+        "scheduler_passes": 12,
+        "scheduler_sleeps": 12,
+        "scheduler_wakes_commit": 12,
+        "slot_returns": 12,
+        "spare_command_pools_taken": 24,
+        "submit_infos": 12,
+        "wakes_completion_waiters": 12,
+        "wakes_spared": 72
+      },
+      "composed": {
+        "device_memory_allocated": 201326592
+      }
+    }
   ]
 }

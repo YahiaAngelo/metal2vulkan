@@ -6093,7 +6093,7 @@
         "commands_replayed.cmd_push_constants": 60,
         "commands_replayed.end_command_buffer": 62,
         "commits_handed_off": 60,
-        "completed_waits": 63,
+        "completed_waits": 64,
         "completed_where_seen": 60,
         "creation_pipelines_made": 1,
         "dedicated_memory_blocks_live": 2,
@@ -6120,7 +6120,6 @@
         "object_churn.vk_memory_allocations": 2,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 4,
-        "primaries_begun_ahead": 8,
         "queue_submissions": 60,
         "sampler_sets_made": 1,
         "scheduled_where_submitted": 60,
@@ -6137,14 +6136,12 @@
         "wakes_spared": 360
       },
       "moving": {
-        "commands_replayed.begin_command_buffer": 54,
-        "primaries_begun_ahead": 0
+        "commands_replayed.begin_command_buffer": 54
       },
       "composed": {
         "addressable_buffers_made": 2,
         "device_memory_allocated": 268435840,
-        "pooled_memory_blocks_made": 4,
-        "primaries_begun_ahead": 0
+        "pooled_memory_blocks_made": 4
       }
     }
   ]

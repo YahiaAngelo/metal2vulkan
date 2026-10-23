@@ -3432,7 +3432,7 @@
         "command_buffers_begun_segments": 13,
         "command_buffers_deferred": 54,
         "command_buffers_replayed": 37,
-        "command_buffers_replayed_inline": 29,
+        "command_buffers_replayed_inline": 22,
         "command_buffers_submitted": 68,
         "commands_replayed.begin_command_buffer": 54,
         "commands_replayed.cmd_bind_descriptor_sets": 28,

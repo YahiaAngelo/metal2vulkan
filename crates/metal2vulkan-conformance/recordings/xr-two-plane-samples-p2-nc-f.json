@@ -436,7 +436,6 @@
         "device_memory_allocated": 268435712,
         "dispatch_pipelines_pooled": 2,
         "encoder_command_buffers_begun": 6,
-        "fences_made": 2,
         "finales_apart": 2,
         "images_started_on_the_host": 1,
         "internal_submissions": 2,

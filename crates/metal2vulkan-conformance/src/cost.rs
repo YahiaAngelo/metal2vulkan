@@ -184,9 +184,54 @@ const POOL_STATE: &str = "a reading of how many pieces the device's pipeline poo
 /// inside the 393-case set where the measurement's most was 0, and **0** when each runs alone --
 /// the opposite direction to a pooled making, and the reason a bound measured alone would fail
 /// them for ever.
+///
+/// `primaries_begun_ahead` is the same work counted a step earlier, and the runtime's doc gives it
+/// a second race of its own on top: it counts a primary "taken by an encoder or not yet", "once its
+/// pool is among the spares again". So it moves when a pool comes back, which is a thread of ours
+/// finishing something an earlier case submitted. Measured over the 541-case set: it reached 1
+/// where the measurement's most was 0 in **seven** cases of one whole-set replay —
+/// `border-swizzles-bgra8unorm`, `pixel-downscales-1536x1080`, `two-plane-row-blits`,
+/// `texture-fills-30`, `texture-fills-134`, `texture-fills-236` and `shared-event-rising-value` —
+/// and in **none** of the replay before it.
 const AHEAD: &str = "whether this case's first encoder found a primary command buffer already \
      begun, which the thread that completed an earlier command buffer does ahead when nothing \
      waits for it. Its total, encoder_command_buffers_begun, stays gated, so nothing is lost";
+
+/// Why `completed_where_seen` is reported and never gated: it is the **complement of a count the
+/// rule already names**, so it cannot be deterministic while that one is not.
+///
+/// The runtime documents it as the command buffers whose transition to `Completed` "ran on the queue
+/// waiter that saw their work complete, **with no handler thread woken**". The other outcome of that
+/// same transition is a handler thread being woken, which `wakes_handler_threads` counts and the
+/// rule reports. A count that is one side of a coin whose other side is a thread-arrival count is
+/// the same question asked the other way round.
+///
+/// Measured: it reached 2 where the measurement's most was 1 on `event-held-command-buffer` in one
+/// whole-set replay and stayed within bound in the replay before it.
+///
+/// `scheduled_where_submitted` is the same shape one transition earlier — "ran on the scheduler's
+/// thread as their last batch went, with no handler thread woken" — and is **deliberately left
+/// gated**, because nothing has yet been seen to move it and a row here would be a claim with no
+/// measurement behind it. It is the next false alarm this half is likely to raise; when it raises
+/// one, it belongs here with that reading, and neither it nor `completed_where_seen` has a gated
+/// total covering it, so reporting them is a real loss of reach rather than a free move.
+const COMPLEMENT: &str = "which of our own threads ran a command buffer's transition: this counts \
+     the ones no handler thread was woken for, and waking one is itself a thread-arrival count the \
+     rule reports";
+
+/// Why `pooled_memory_blocks_freed` is reported and never gated: the runtime frees such a block
+/// when it has been "kept empty **past their quiet period**", so whether one is freed inside a
+/// case's window is a question about elapsed time.
+///
+/// Its partner `pooled_memory_blocks_made` stays gated, at the reading of the lone run
+/// (the `MONOTONE` table), so what a case *allocates* is still held; only what the pool got round to
+/// handing back is not.
+///
+/// Measured: it reached 1 where the measurement's most was 0 on `sample-positions-custom-2x` in two
+/// whole-set replays, and both measurement shapes read 0 — a release that lands in the replay's
+/// timing and not in the measurement's is exactly what a quiet period does.
+const QUIET: &str = "a pooled memory block freed because it had been kept empty past its quiet \
+     period, which is a question about elapsed time rather than about the case's work";
 
 /// Why a count of an object made because no spare was free is reported and never gated.
 const POOLED: &str = "an object made because no spare was free, where a spare comes back on \
@@ -221,7 +266,7 @@ const POOLED: &str = "an object made because no spare was free, where a spare co
 /// replays of a larger case set — which reads like a regression and is not one. See [`BORROWED`].
 /// `slot_returns` beside it stays gated: it counts work items, one a command buffer, and has held
 /// still alone and in both case sets.
-const RACY: [(&str, &str); 27] = [
+const RACY: [(&str, &str); 30] = [
     ("fences_made", POOLED),
     // What is alive, parked or waiting at the instant the counts were read.
     ("memory_blocks_live", INSTANTANEOUS),
@@ -247,6 +292,9 @@ const RACY: [(&str, &str); 27] = [
     ("completed_waits", BORROWED),
     ("pipeline_pool_busy", POOL_STATE),
     ("encoder_primaries_begun_ahead", AHEAD),
+    ("primaries_begun_ahead", AHEAD),
+    ("completed_where_seen", COMPLEMENT),
+    ("pooled_memory_blocks_freed", QUIET),
     ("command_pools_made", POOLED),
     ("spare_command_pools_", POOLED),
     ("live_tables_uploaded", POOLED),
@@ -272,6 +320,64 @@ const RACY: [(&str, &str); 27] = [
          depends on whether the release before it has landed",
     ),
 ];
+
+/// The counts whose larger reading is the **no-sharing extreme**, so the gate keeps them at that
+/// extreme instead of reporting them.
+///
+/// A count here is one the two shapes read differently for one reason only: a case with nothing
+/// before it makes the object itself where a case in company finds it already made. Its reading
+/// alone is therefore its ceiling, no composition can exceed it, and a bound taken there does not
+/// go stale when a case lands beside this one. Gating it is the one place the contrast gives back
+/// what it takes away.
+///
+/// **Each name is here on its own measurement and never by analogy to another.** Over all 393
+/// cases in both shapes, every one of these read at or above its in-set reading in every case that
+/// moved it — `below` counts the cases where the lone run read *lower*, which is the direction that
+/// would make the bound wrong:
+///
+/// | count | cases | below | the shapes differ | largest alone |
+/// |---|---:|---:|---:|---:|
+/// | `addressable_buffers_made` | 385 | 0 | 384 | 2 |
+/// | `pooled_memory_blocks_made` | 385 | 0 | 384 | 5 |
+/// | `arena_pools_made` | 215 | 0 | 207 | 30 |
+/// | `creation_pipelines_made` | 181 | 0 | 109 | 64 |
+/// | `variant_pipelines_made` | 196 | 0 | 114 | 128 |
+/// | `shader_modules_made` | 199 | 0 | 160 | 34 |
+/// | `pipeline_layouts_made` | 199 | 0 | 174 | 4 |
+///
+/// **`device_memory_allocated` is monotone over the same 393 cases and is deliberately not here.**
+/// It passed the direction test — 385 cases, 0 below — and fails the other test a bound has to
+/// pass: it counts *bytes*, so the two shapes differ by 268,435,456 where the largest of these
+/// object counts differs by 8. A bound of 256 MiB on a case that allocates nothing in company is a
+/// number no regression can reach, and a bound that cannot fail is worse than no bound. It stays
+/// reported, with both readings, where a reader can see it.
+///
+/// A ninth name earns a row here on data: a measurement over the whole case set in both shapes
+/// showing no case where the lone run reads lower, and a gap small enough that the bound still
+/// bites. Never by resembling one of these.
+const MONOTONE: [(&str, &str); 7] = [
+    ("addressable_buffers_made", "2 alone against 0 in company"),
+    ("pooled_memory_blocks_made", "4 alone against 0 in company"),
+    ("arena_pools_made", "30 alone against 22 in company"),
+    ("creation_pipelines_made", "4 alone against 0 in company"),
+    ("variant_pipelines_made", "6 alone against 0 in company"),
+    ("shader_modules_made", "7 alone against 0 in company"),
+    ("pipeline_layouts_made", "4 alone against 0 in company"),
+];
+
+/// Where `name`'s reading with the case alone is its ceiling, and the worst gap the measurement saw.
+///
+/// The names and the measurement that earned each are in this module's own `MONOTONE` table.
+///
+/// The claim is about a direction, so the code holds it to one: a measurement that finds the lone
+/// run reading *lower* than the in-set run for such a count reports it like any other count the
+/// selection decides, because the fact its row rests on did not hold there.
+pub fn monotone(name: &str) -> Option<&'static str> {
+    MONOTONE
+        .iter()
+        .find(|(count, _)| *count == name)
+        .map(|(_, worst)| *worst)
+}
 
 /// Why `name` is reported and never gated, where it is.
 pub fn racy(name: &str) -> Option<&'static str> {
@@ -867,9 +973,17 @@ pub struct CaseCost {
     /// The degrade-notice codes the runs announced, sorted: what the device could not do exactly,
     /// and so how much of the case the counts are of.
     pub degraded: Vec<String>,
-    /// How long the longest run took, in nanoseconds. **Advisory**: a time is not a fact this
-    /// gate holds, and per-call timing against Metal is its own step. It is printed so a reader
-    /// can see which cases the counts are large for.
+    /// How long the longest run took, in nanoseconds. **Advisory, and it stays advisory.**
+    ///
+    /// *Gate on counters, report on times.* A count is deterministic, so it is assertable on any
+    /// host under any load; a time is not, and that asymmetry is the whole reason the counts carry
+    /// this gate. So no time is stored in a [`CostRecord`], [`judge`] reads none, and
+    /// [`CostVerdict`] has no variant for one. This number is printed so a reader can see which
+    /// cases the counts are large for, and that is all it is for.
+    ///
+    /// A case's recorded timings are a separate half with its own storage on the recording, taken
+    /// by its own leg. Nothing there feeds this gate either. A proposal to make a time fail a run
+    /// is a change to the round's rules and not to this field.
     pub nanos: u64,
 }
 
@@ -879,18 +993,21 @@ impl CaseCost {
     ///
     /// A count whose runs disagreed carries its range and is reported rather than gated.
     pub fn record(&self, venue: &str, measured: String) -> CostRecord {
-        let mut bounds = BTreeMap::new();
-        let mut moving = BTreeMap::new();
-        for (count, most) in self.counts.iter() {
-            bounds.insert(count.to_owned(), most);
-            let least = self.least.get(count);
-            // A count the rule already names as racy is not written here: the rule ungates it
-            // whatever a measurement saw, so an entry would be redundant. What that leaves is the
-            // useful list — a count written here moved for a reason the rule does not explain.
-            if least < most && racy(count).is_none() {
-                moving.insert(count.to_owned(), least);
-            }
-        }
+        let bounds = self
+            .counts
+            .iter()
+            .map(|(count, most)| (count.to_owned(), most))
+            .collect();
+        // The stored list **is** the printed one ([`CaseCost::moved`]), not a second computation of
+        // the same rule. Two paths over one rule drift silently and only one of them is ever
+        // checked: breaking the ceiling exception in `apart_from` alone, where the printed and
+        // stored forms of *that* rule were separate, left every test in this crate passing. A
+        // command's output and a record's value are worth collapsing wherever they can be.
+        let moving = self
+            .moved()
+            .into_iter()
+            .map(|(count, least, _)| (count.to_owned(), least))
+            .collect();
         CostRecord {
             venue: venue.to_owned(),
             runs: self.runs,
@@ -916,26 +1033,22 @@ impl CaseCost {
     pub fn fold_alone_into(&self, held: &CostRecord, measured: String) -> CostRecord {
         let mut folded = held.clone();
         folded.contrasted = Some(measured);
-        let names: std::collections::BTreeSet<&str> = self
-            .counts
-            .iter()
-            .map(|(count, _)| count)
-            .chain(held.bounds.keys().map(String::as_str))
-            .collect();
-        for count in names {
-            // The rule already ungates these whatever either shape read, so an entry would be
-            // redundant and the bound is the gate's own shape's.
+        // The counts the selection decides are the ones the command prints ([`apart_from`]), the
+        // same list and not a second computation of it. The rule it applies — which counts the two
+        // shapes disagree on, less the ones the race rule already reports and the ones whose
+        // ceiling the lone run is — lives there alone.
+        for (count, _, apart) in self.apart_from(held) {
+            folded.composed.insert(count.to_owned(), apart);
+        }
+        // The bound stays the largest either shape saw, so the record's own number is honest about
+        // what was observed. For a gated count the two shapes agree, so only the bounds of counts
+        // that are reported anyway widen. A count the race rule names keeps the gate's own shape's
+        // bound, because the lone run says nothing about a reading that is a thread's arrival.
+        for (count, _) in self.counts.iter() {
             if racy(count).is_some() {
                 continue;
             }
             let apart = self.counts.get(count);
-            let inside = held.bounds.get(count).copied().unwrap_or(0);
-            if apart != inside {
-                folded.composed.insert(count.to_owned(), apart);
-            }
-            // The bound stays the largest either shape saw, so the record's own number is honest
-            // about what was observed. For a gated count the two agree, so only the bounds of
-            // counts that are reported anyway widen.
             let bound = folded.bounds.entry(count.to_owned()).or_insert(apart);
             *bound = (*bound).max(apart);
         }
@@ -945,7 +1058,9 @@ impl CaseCost {
     /// The counts this measurement reads differently from `held`: the ones the selection decides.
     ///
     /// Each is `(count, the other shape's reading, this one's)`. Counts the [`racy`] rule already
-    /// names are left out, because the rule ungates them whatever either shape read.
+    /// names are left out, because the rule ungates them whatever either shape read, and so is a
+    /// count reading higher alone whose ceiling that is ([`monotone`]): the gate keeps it at the
+    /// larger reading rather than giving it up.
     pub fn apart_from<'a>(&'a self, held: &'a CostRecord) -> Vec<(&'a str, u64, u64)> {
         let names: std::collections::BTreeSet<&str> = self
             .counts
@@ -960,7 +1075,9 @@ impl CaseCost {
                     held.bounds.get(count).copied().unwrap_or(0),
                     self.counts.get(count),
                 );
-                (inside != apart && racy(count).is_none()).then_some((count, inside, apart))
+                let its_ceiling = monotone(count).is_some() && apart > inside;
+                (inside != apart && !its_ceiling && racy(count).is_none())
+                    .then_some((count, inside, apart))
             })
             .collect()
     }

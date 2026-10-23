@@ -537,7 +537,7 @@
         "command_buffers_begun_segments": 64,
         "command_buffers_deferred": 2064,
         "command_buffers_replayed": 384,
-        "command_buffers_replayed_inline": 1744,
+        "command_buffers_replayed_inline": 2016,
         "command_buffers_submitted": 3026,
         "commands_replayed.begin_command_buffer": 2064,
         "commands_replayed.cmd_begin_render_pass": 484,
@@ -595,6 +595,16 @@
         "variants_taken_back": 1,
         "wakes_completion_waiters": 8,
         "wakes_spared": 84
+      },
+      "moving": {
+        "command_buffers_begun": 3462,
+        "command_buffers_begun_continuations": 40,
+        "command_buffers_begun_segments": 40,
+        "command_buffers_deferred": 2016,
+        "command_buffers_submitted": 2978,
+        "commands_replayed.begin_command_buffer": 2016,
+        "commands_replayed.end_command_buffer": 2016,
+        "encoder_command_buffers_begun": 2016
       },
       "composed": {
         "addressable_buffers_made": 2,

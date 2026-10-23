@@ -204,7 +204,6 @@
         "completed_where_seen": 1,
         "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 3,
-        "encoder_primaries_begun_ahead": 1,
         "event_waits_met": 1,
         "fills_recorded": 3,
         "finales_folded": 3,
@@ -216,7 +215,7 @@
         "scheduled_where_submitted": 2,
         "scheduler_passes": 4,
         "scheduler_sleep_slices": 1,
-        "scheduler_sleeps": 4,
+        "scheduler_sleeps": 5,
         "scheduler_wakes_commit": 3,
         "scheduler_wakes_host": 1,
         "slot_returns": 3,
@@ -224,11 +223,10 @@
         "submit_infos": 3,
         "wakes_completion_waiters": 2,
         "wakes_handler_threads": 3,
-        "wakes_spared": 16
+        "wakes_spared": 15
       },
       "moving": {
-        "commands_replayed.begin_command_buffer": 2,
-        "primaries_begun_ahead": 1
+        "commands_replayed.begin_command_buffer": 2
       },
       "composed": {
         "addressable_buffers_made": 2,

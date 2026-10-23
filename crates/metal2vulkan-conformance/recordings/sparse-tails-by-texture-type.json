@@ -1050,13 +1050,11 @@
         "object_churn.vk_images_destroyed": 30,
         "object_churn.vk_images_made": 30,
         "object_churn.vk_memory_allocations": 2,
-        "pooled_memory_blocks_freed": 1,
         "pooled_memory_blocks_made": 5
       },
       "composed": {
         "addressable_buffers_made": 2,
         "device_memory_allocated": 335544320,
-        "pooled_memory_blocks_freed": 1,
         "pooled_memory_blocks_made": 5
       }
     }

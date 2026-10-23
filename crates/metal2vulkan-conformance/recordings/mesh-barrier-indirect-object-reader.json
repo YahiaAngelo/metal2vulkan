@@ -397,6 +397,7 @@
         "draws_settled": 2,
         "driver_diagnostics_withheld": 2,
         "encoder_command_buffers_begun": 9,
+        "encoder_primaries_begun_ahead": 1,
         "finales_apart": 1,
         "finales_folded": 1,
         "gpu_pool_blocks_made": 1,
@@ -448,6 +449,9 @@
         "variants_taken_back": 2,
         "wakes_completion_waiters": 1,
         "wakes_spared": 6
+      },
+      "moving": {
+        "commands_replayed.begin_command_buffer": 1
       },
       "composed": {
         "addressable_buffers_made": 2,

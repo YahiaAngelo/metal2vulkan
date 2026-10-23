@@ -191,6 +191,7 @@
         "object_churn.vk_buffer_bindings": 1,
         "object_churn.vk_buffers_made": 1,
         "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 2,
         "scheduled_where_submitted": 2,
         "scheduler_passes": 1,

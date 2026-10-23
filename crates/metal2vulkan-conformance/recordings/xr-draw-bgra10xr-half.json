@@ -380,7 +380,6 @@
         "encoder_command_buffers_begun": 3,
         "finales_folded": 1,
         "graphics_pipelines_looked_up": 1,
-        "memory_blocks_live": 1,
         "new_buffer_bytes_cleared": 131088,
         "object_churn.buffers_evicted": 3,
         "object_churn.buffers_parked": 4,
