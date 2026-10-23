@@ -23,22 +23,28 @@
 //! GA10x), each sample moves by the sample-rate draws that already copy the separate textures'
 //! aspects there (`stencil_copy.rs`, `depth_copy.rs`), through multisampled colour images of
 //! the aspect's bits, the encoder's own: out of a depth or stencil aspect, a bits draw writes
-//! each sample's bits (`R32_UINT` for 32-bit float depth, `R8_UINT` for stencil) where the
-//! region lies in the source; one `vkCmdCopyImage` between colour images of one texel size
-//! moves the region to where it lies in the destination; into a stencil aspect, the plane draws
-//! read it from an `R8_UINT` image, and into a 32-bit float depth, the `FragDepth` draw from an
-//! `R32_SFLOAT` one. A colour side is copied from or into directly. Each phase reads what the
-//! one before wrote, past a barrier. The colour images are mutable, so MoltenVK copies between
-//! them and a colour texture of another format through a view, not its broken temporary buffer.
+//! each sample's bits (`R32_UINT` for 32-bit float depth, `R16_UINT` for a 16-bit normalized
+//! one's codes, `R8_UINT` for stencil) where the region lies in the source; one `vkCmdCopyImage`
+//! between colour images of one texel size moves the region to where it lies in the destination;
+//! into a stencil aspect, the plane draws read it from an `R8_UINT` image, into a 32-bit float
+//! depth the `FragDepth` draw from an `R32_SFLOAT` one, and into a 16-bit normalized depth the
+//! code draw from the `R16_UINT` one (`depth_copy::depth_carrier`). A colour side is copied from
+//! or into directly. Each phase reads what the one before wrote, past a barrier. The colour
+//! images are mutable, so MoltenVK copies between them and a colour texture of another format
+//! through a view, not its broken temporary buffer.
+//!
 //! The plane draws are exact; the bits draws read each sample as the lanes' readbacks do; the
-//! `FragDepth` draw is exact only where the driver stores every depth unchanged
-//! (`depth_copy::copies_exactly`: lavapipe's measured releases). Elsewhere a copy into a 32-bit
-//! float depth runs as a near-equivalent, announced once (`drawn-depth-copy`, `depth_copy::drawn`):
-//! its reason names the values the driver's fragment depth is measured to change (MoltenVK,
-//! NVIDIA's; the orchestrator's ruling of 2026-10-07), or, on a driver not measured, the values
-//! Vulkan leaves to it (outside `[0, 1]`, denormals, -0). Refused as before, `Unsupported` naming
-//! `Feature::Format` and the missing maintenance8 or the defect: every copy of a 16-bit depth,
-//! whose conversions the draws would make (unmeasured), a depth or stencil source the draws
+//! depth draws are exact where the driver stores every depth unchanged, or keeps every 16-bit
+//! code (`depth_copy::copies_exactly`: lavapipe's measured releases for a 32-bit float depth,
+//! and for a 16-bit one its releases and MoltenVK 1.4.2 on the Apple M3 Max). A 16-bit depth
+//! crosses as its codes rather than as floats, so no conversion Vulkan leaves to the device
+//! stands between the two halves. Elsewhere a copy into a 32-bit float depth runs as a
+//! near-equivalent, announced once (`drawn-depth-copy`, `depth_copy::drawn`): its reason names
+//! the values the driver's fragment depth is measured to change (MoltenVK, NVIDIA's; the
+//! orchestrator's ruling of 2026-10-07), or, on a driver not measured, the values Vulkan leaves
+//! to it (outside `[0, 1]`, denormals, -0). Refused as before, `Unsupported` naming
+//! `Feature::Format` and the missing maintenance8 or the defect: a copy into a 16-bit depth on a
+//! driver whose codes the draw is not measured to keep, a depth or stencil source the draws
 //! cannot sample, and a destination they cannot render to.
 //!
 //! Refused, typed, naming `Feature::Format`: a copy of a combined format's two aspects (not
@@ -378,8 +384,8 @@ fn by_draws(
     let refuse = || Error::Unsupported(refused.clone());
     let mut inexact = None;
     let usage = |side: &Side| side.texture.image_plan().map(|plan| plan.usage);
-    // The bits a depth or stencil source's draws write: a stencil's or a 32-bit float depth's,
-    // of an image the draws sample.
+    // The bits a depth or stencil source's draws write: a stencil's value, a 32-bit float
+    // depth's bits, or a 16-bit unsigned normalized depth's code, of an image the draws sample.
     let read_bits = if from.aspect == colour {
         None
     } else if !usage(&from)?.contains(ImageUsageFlags::SAMPLED) {
@@ -388,25 +394,34 @@ fn by_draws(
         Some((Format::R8_UINT, PixelFormat::R8Uint))
     } else if from.aspect == depth && depth_copy::float_depth(from.format) {
         Some((Format::R32_UINT, PixelFormat::R32Uint))
+    } else if from.aspect == depth && depth_copy::unorm16_depth(from.format) {
+        Some((Format::R16_UINT, PixelFormat::R16Uint))
     } else {
         return Err(refuse());
     };
-    // The bits a depth or stencil destination's draws read: a stencil's, or a 32-bit float
-    // depth's where the `FragDepth` draw stores it exactly, into an image they render to.
+    // The bits a depth or stencil destination's draws read: a stencil's, or a depth's where the
+    // `FragDepth` draw stores it exactly, into an image they render to. A 32-bit float depth is
+    // carried as its floats and a 16-bit normalized one as its codes
+    // (`depth_copy::depth_carrier`).
     let write_bits = if to.aspect == colour {
         None
     } else if !usage(&to)?.contains(ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
         return Err(refuse());
     } else if to.aspect == stencil {
         Some((Format::R8_UINT, PixelFormat::R8Uint))
-    } else if to.aspect == depth && depth_copy::float_depth(to.format) {
-        // Exact where the driver stores every depth unchanged; elsewhere the announced
-        // near-equivalent, naming what the driver's fragment depth changes or may change (the one
-        // decision, `depth_copy::drawn`).
+    } else if to.aspect == depth {
+        // Exact where the driver stores every depth unchanged (a 32-bit float depth) or keeps
+        // every code (a 16-bit normalized one); elsewhere the announced near-equivalent, naming
+        // what the driver's fragment depth changes or may change, and a 16-bit depth whose codes
+        // are not measured kept is refused (the one decision, `depth_copy::drawn`).
         if let Drawn::Changes(changes) = depth_copy::drawn(device, to.format).ok_or_else(refuse)? {
             inexact = Some(changes);
         }
-        Some((Format::R32_SFLOAT, PixelFormat::R32Float))
+        let carrier = depth_copy::depth_carrier(to.format).ok_or_else(refuse)?;
+        Some(match carrier {
+            Format::R16_UINT => (Format::R16_UINT, PixelFormat::R16Uint),
+            _ => (Format::R32_SFLOAT, PixelFormat::R32Float),
+        })
     } else {
         return Err(refuse());
     };

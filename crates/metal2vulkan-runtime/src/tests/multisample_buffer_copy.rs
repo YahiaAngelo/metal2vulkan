@@ -269,3 +269,196 @@ fn a_blit_between_a_buffer_and_a_multisampled_texture_round_trips_per_sample() {
     // the test proved nothing, so fail rather than pass vacuously.
     assert!(ran > 0, "the device ran no multisampled buffer copy");
 }
+
+/// A multisampled depth or stencil aspect's copy round trip, where the aspect's samples move by
+/// the sample-rate draws rather than by a `vkCmdCopyImage` Vulkan does not have
+/// (`sample_copy.rs`): the same fill, copy in, copy back out and byte comparison as the colour
+/// cases above.
+fn aspect_round_trip(
+    device: &Device,
+    (pixel_format, bpp): (PixelFormat, u64),
+    samples: u64,
+    (width, height): (u64, u64),
+    fill: impl Fn(usize) -> u8,
+) -> Outcome {
+    let mut descriptor = TextureDescriptor::texture_2d(pixel_format, width, height, false);
+    descriptor.texture_type = TextureType::Type2DMultisample;
+    descriptor.sample_count = samples;
+    descriptor.usage = TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ;
+    descriptor.resource_options = ResourceOptions::private();
+    let texture = match device.new_texture(&descriptor) {
+        Ok(texture) => texture,
+        Err(_) => return Outcome::NoTexture,
+    };
+    let row = width * samples * bpp;
+    let len = row * height;
+    let source = buffer(device, len, fill);
+    let out = buffer(device, len, |_| 0);
+    let queue = device.new_command_queue().unwrap();
+    let origin = Origin::new(0, 0, 0);
+
+    let command_buffer = queue.command_buffer().unwrap();
+    let mut blit = command_buffer.blit_command_encoder().unwrap();
+    let into = blit.copy_from_buffer_to_texture(
+        &source,
+        0,
+        row,
+        len,
+        Size::new(width, height, 1),
+        &texture,
+        0,
+        0,
+        origin,
+        BlitOption::None,
+    );
+    match into {
+        Ok(()) => {}
+        Err(Error::NotImplemented(RuntimeGap::MultisampledBufferCopy)) => return Outcome::Refused,
+        Err(other) => panic!("{pixel_format:?} {samples} into: {other}"),
+    }
+    blit.end_encoding().unwrap();
+    command_buffer.commit().unwrap();
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+
+    let command_buffer = queue.command_buffer().unwrap();
+    let mut blit = command_buffer.blit_command_encoder().unwrap();
+    blit.copy_from_texture_to_buffer(
+        &texture,
+        0,
+        0,
+        origin,
+        Size::new(width, height, 1),
+        &out,
+        0,
+        row,
+        len,
+        BlitOption::None,
+    )
+    .expect("the reverse copy runs once the forward one did");
+    blit.end_encoding().unwrap();
+    command_buffer.commit().unwrap();
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+
+    let (a, b) = (read(&source, len as usize), read(&out, len as usize));
+    let differ = a.iter().zip(&b).filter(|(x, y)| x != y).count();
+    assert_eq!(
+        differ, 0,
+        "{pixel_format:?} {samples} {width}x{height}: {differ} of {len} bytes differ"
+    );
+    Outcome::Ran
+}
+
+/// **Every** one of the 65536 codes of a multisampled `Depth16Unorm` texture survives a copy in
+/// from a buffer and a copy back out, bit for bit, at both sample counts: one code a sample, so
+/// the whole input space is checked rather than sampled.
+///
+/// This is the device half of the claim the 16-bit depth pair makes
+/// (`bind::DepthStencilCopy::Depth16Code` and `Depth16Bits`, whose arithmetic
+/// `every_16_bit_code_survives_the_depth_pair_in_both_directions` checks whole, device-free).
+/// Vulkan copies no multisampled image to or from a buffer, and none into a depth aspect without
+/// maintenance8, so on a device whose depth/colour copies are missing or carry the measured
+/// defect every sample crosses by a sample-rate draw. **That is asserted here and not assumed**:
+/// where the draws are the route, the test says so, and a device whose driver keeps every code
+/// (`DriverFact::FragmentDepthKeepsDepth16Codes`) must run the copy rather than refuse it. Before
+/// the draws existed this refused `MultisampledBufferCopy` at the copy in on every such device.
+///
+/// A device that makes no such texture, or renders no 2 samples (lavapipe), prints its case and
+/// carries on; one whose codes the draws are not measured to keep refuses, honestly, and is
+/// printed too.
+#[test]
+fn every_16_bit_depth_code_survives_a_multisampled_buffer_round_trip() {
+    let scratch = Scratch::new();
+    let device = device(&scratch.0);
+    let defect = metal2vulkan::error::RuntimeDriverDefect::MultisampledDepthStencilColourCopies;
+    let by_draws = device.properties().driver_defects.contains(&defect)
+        || !device
+            .enabled()
+            .features
+            .contains(&metal2vulkan::device::VkFeature::Maintenance8);
+    let keeps = device
+        .properties()
+        .driver_facts
+        .contains(&metal2vulkan::device::DriverFact::FragmentDepthKeepsDepth16Codes);
+    // 65536 samples each run: 128 x 128 at 4 samples and 128 x 256 at 2, one code a sample.
+    let shapes = [(4u64, 128u64, 128u64), (2, 128, 256)];
+    let mut ran = 0;
+    for (samples, width, height) in shapes {
+        // Code `i` in sample `i`, little-endian, by the layout the copy implements.
+        let outcome = aspect_round_trip(
+            &device,
+            (PixelFormat::Depth16Unorm, 2),
+            samples,
+            (width, height),
+            |i| match i % 2 {
+                0 => ((i / 2) & 0xff) as u8,
+                _ => ((i / 2) >> 8) as u8,
+            },
+        );
+        println!(
+            "CASE Depth16Unorm n={samples} {width}x{height} ({} codes, {}): {}",
+            width * height * samples,
+            match by_draws {
+                true => "by draws",
+                false => "by maintenance8's copies",
+            },
+            match outcome {
+                Outcome::Ran => "RAN",
+                Outcome::Refused => "REFUSED",
+                Outcome::NoTexture => "NO-TEXTURE",
+            }
+        );
+        if outcome == Outcome::NoTexture {
+            continue;
+        }
+        // A driver measured to keep every code must copy it, not refuse it.
+        assert!(
+            !keeps || outcome == Outcome::Ran,
+            "Depth16Unorm n={samples}: refused where the driver keeps every code"
+        );
+        if outcome == Outcome::Ran {
+            ran += 1;
+        }
+    }
+    // Where the draws are the route and the driver keeps every code, both shapes must have run:
+    // a vacuous pass would otherwise look the same as a working copy.
+    assert!(
+        !(by_draws && keeps) || ran == shapes.len(),
+        "{ran} of {} shapes ran by draws",
+        shapes.len()
+    );
+    println!("CASES ran {ran} of {}", shapes.len());
+}
+
+/// A multisampled `Stencil8` texture's bytes survive the same round trip, at both sample counts:
+/// the shape the 16-bit depth's rows are held beside, which the plane draws already moved, so a
+/// change to the depth side that broke the stencil's would show here.
+#[test]
+fn a_multisampled_stencil_survives_a_buffer_round_trip() {
+    let scratch = Scratch::new();
+    let device = device(&scratch.0);
+    let mut ran = 0;
+    for samples in [4u64, 2] {
+        let outcome = aspect_round_trip(
+            &device,
+            (PixelFormat::Stencil8, 1),
+            samples,
+            (54, 54),
+            |i| ((i * 37 + 11) & 0xff) as u8,
+        );
+        println!(
+            "CASE Stencil8 n={samples} 54x54: {}",
+            match outcome {
+                Outcome::Ran => "RAN",
+                Outcome::Refused => "REFUSED",
+                Outcome::NoTexture => "NO-TEXTURE",
+            }
+        );
+        if outcome == Outcome::Ran {
+            ran += 1;
+        }
+    }
+    println!("CASES ran {ran} of 2");
+    assert!(ran > 0, "the device ran no multisampled stencil copy");
+}

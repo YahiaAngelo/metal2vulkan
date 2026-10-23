@@ -1958,12 +1958,26 @@ const DYNAMIC_RESTART_WARNING: DriverDiagnostic = DriverDiagnostic {
 /// - lavapipe from Mesa 26.0.8: 26.0.8 on LLVM 21.1.8, x86_64 (the linux-gate container), and Mesa
 ///   26.2.4 on LLVM 23.1.1, x86_64, 2026-10-07: every code kept, 512 of the first reads
 ///   not the code over 65535 as a correctly rounded `float` but each a different value.
+/// - MoltenVK 1.4.2 (`driverVersion` 10402, Homebrew's build) on the Apple M3 Max under macOS
+///   27.0.1, 2026-10-23: 65536 different reads of the 65536 codes, **0** not the code over 65535,
+///   and **0** changed when stored again. The reads being distinct over the whole space makes the
+///   store the identity (the conversion is monotone, so 65536 distinct results of 65536 codes can
+///   only be each code itself), and none of them differing from the code over 65535 makes the
+///   fetch exactly that `float`, which is what a 16-bit depth's drawn copy needs in both
+///   directions (`depth_copy.rs`).
+///
+///   Re-measured on this stack rather than carried: the 1.4.1 reading below was taken on the M4,
+///   a venue this project no longer has, and Homebrew's stock MoltenVK here is 1.4.2. A reading
+///   from another GPU on another driver release cannot carry this row.
 ///
 /// Probed and not listed, since no 16-bit depth's draw is taken there: ANV (the Iris Xe RPL-P),
 /// RADV (the 780M), both Mesa 26.2.4, NVIDIA's 615.71.09 on the RTX 3090, and MoltenVK 1.4.1 on
 /// the M4 kept every code too, each first read exactly the code over 65535. ANV, RADV and lavapipe
 /// make no `D16_UNORM_S8_UINT` attachment, so a separate pair's scratch image is refused there
-/// first.
+/// first -- and so does MoltenVK on the M3 Max, measured 2026-10-23
+/// (`a_separate_multisampled_16_bit_depth_keeps_every_code` refuses there naming
+/// `D16_UNORM_S8_UINT` as a depth/stencil attachment), so listing the fact for it does not reach
+/// that path either.
 ///
 /// `SampledFetchRecoversCodes`, measured by
 /// `runtime_lane::mipmaps_exact::a_first_level_read_in_place_recovers_every_code` at a scratch
@@ -2350,6 +2364,7 @@ pub(crate) const MEASURED: &[Measured<DriverFact>] = &[
         first: mesa(26, 0, 8),
         last: mesa(26, 2, 4),
     },
+    moltenvk_142(DriverFact::FragmentDepthKeepsDepth16Codes),
     Measured {
         fact: DriverFact::SampledFetchRecoversCodes,
         driver: DriverId::MESA_RADV,

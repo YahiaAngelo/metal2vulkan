@@ -28,15 +28,24 @@
 //!   measured kept; elsewhere its consumer refuses, typed.
 //!
 //! - **The bits draws** ([`DepthDraw::bits`]): the other way, a depth or stencil aspect's samples
-//!   into a multisampled unsigned colour image of their bits (`R32_UINT`, `R8_UINT`), for the
-//!   multisampled blit copies between depth/stencil and colour textures (`sample_copy.rs`). A
-//!   render pass of the colour image alone, of one sample-rate draw of
-//!   [`DepthStencilCopy::DepthBits`] or [`DepthStencilCopy::StencilBits`], which fetches each
-//!   sample through a sampled view of the aspect and writes its bits (a depth's `f32` bit-cast, a
-//!   stencil's value) as the sample's colour. Exact wherever the fetch returns the texel: the same
-//!   fetch reads the samples back in every lane and in the `FragmentDepthStoresUnchanged` probe
-//!   above. The `FragDepth` draw also reads its depth from such a colour image (`R32_SFLOAT`,
-//!   [`DepthDraw::from_colour`]).
+//!   into a multisampled unsigned colour image of their bits (`R32_UINT`, `R16_UINT`, `R8_UINT`),
+//!   for the multisampled blit copies between depth/stencil and colour textures
+//!   (`sample_copy.rs`). A render pass of the colour image alone, of one sample-rate draw of
+//!   [`DepthStencilCopy::DepthBits`], [`DepthStencilCopy::Depth16Bits`] or
+//!   [`DepthStencilCopy::StencilBits`], which fetches each sample through a sampled view of the
+//!   aspect and writes its bits (a 32-bit float depth's `f32` bit-cast, a 16-bit normalized
+//!   depth's code, a stencil's value) as the sample's colour. Exact wherever the fetch returns
+//!   the texel: the same fetch reads the samples back in every lane and in the
+//!   `FragmentDepthStoresUnchanged` and `FragmentDepthKeepsDepth16Codes` probes above. The draw
+//!   back reads its depth from such a colour image ([`DepthDraw::from_colour`],
+//!   [`depth_carrier`]): a 32-bit float depth's floats from an `R32_SFLOAT` one, a 16-bit
+//!   normalized depth's codes from the `R16_UINT` one.
+//!
+//!   A 16-bit depth crosses as its **codes** and never as floats, which is what makes both
+//!   halves exact by construction rather than by a measured tolerance: the draw back's
+//!   `code / 65535` is bit for bit the depth the `FragmentDepthKeepsDepth16Codes` probe stores,
+//!   and the bits draw's `round(depth * 65535)` recovers every one of the 65536 codes
+//!   (`bind::depth_stencil_copy`'s module docs carry the margin and the exhaustive check).
 //!
 //! - **The magnitude draws** ([`DepthDraw::magnitude`], [`DepthDraw::magnitude_bits`]): a
 //!   multisampled depth stored without its signs after a pass with depth writes
@@ -88,8 +97,20 @@ pub(super) fn float_depth(format: Format) -> bool {
 }
 
 /// Whether `format`'s depth is a 16-bit unsigned normalized one's.
-fn unorm16_depth(format: Format) -> bool {
+pub(super) fn unorm16_depth(format: Format) -> bool {
     matches!(format, Format::D16_UNORM | Format::D16_UNORM_S8_UINT)
+}
+
+/// The colour format a multisampled colour image carries `format`'s depth in, between the bits
+/// draw that reads the aspect and the draw that writes it back (the module docs): a 32-bit float
+/// depth's own floats in `R32_SFLOAT`, and a 16-bit unsigned normalized depth's **codes** in
+/// `R16_UINT`, which is what makes that pair exact by construction
+/// (`bind::DepthStencilCopy::Depth16Code`). `None` for a depth no draw writes.
+pub(super) fn depth_carrier(format: Format) -> Option<Format> {
+    if float_depth(format) {
+        return Some(Format::R32_SFLOAT);
+    }
+    unorm16_depth(format).then_some(Format::R16_UINT)
 }
 
 /// Whether the draw copies a depth aspect of `format` exactly on `device` (the module docs): a
@@ -816,8 +837,10 @@ impl DepthDraw {
         )
     }
 
-    /// The draw that writes the depths `source`, a multisampled `R32_SFLOAT` colour target,
-    /// holds at each pixel of `area` into `destination`'s depth there.
+    /// The draw that writes the depths `source`, a multisampled colour target, holds at each
+    /// pixel of `area` into `destination`'s depth there: an `R32_SFLOAT` source's floats into a
+    /// 32-bit float depth, or an `R16_UINT` source's codes into a 16-bit unsigned normalized one
+    /// ([`DepthStencilCopy::Depth16Code`], the module docs).
     pub(super) fn from_colour(
         device: &Device,
         source: &Target,
@@ -825,8 +848,14 @@ impl DepthDraw {
         area: DrawArea,
         feature: &Feature,
     ) -> Result<DepthDraw, Error> {
+        let copy = match unorm16_depth(destination.format) {
+            true => DepthStencilCopy::Depth16Code,
+            false => DepthStencilCopy::Depth,
+        };
+        let carrier = depth_carrier(destination.format)
+            .ok_or_else(|| internal("a depth copy into a target of no drawn depth"))?;
         if source.samples != destination.samples
-            || source.format != Format::R32_SFLOAT
+            || source.format != carrier
             || !image_aspects(destination.format).contains(ImageAspectFlags::DEPTH)
         {
             return Err(internal(
@@ -834,19 +863,13 @@ impl DepthDraw {
             ));
         }
         let view = aspect_view(source, ImageAspectFlags::COLOR)?;
-        DepthDraw::of_view(
-            device,
-            DepthStencilCopy::Depth,
-            view,
-            destination,
-            area,
-            feature,
-        )
+        DepthDraw::of_view(device, copy, view, destination, area, feature)
     }
 
-    /// The bits draw that writes the bits of `source`'s `aspect` (a depth's `f32` bit-cast, a
-    /// stencil's value) at each pixel of `area` into `destination` there: a multisampled
-    /// `R32_UINT` colour target for a 32-bit float depth, `R8_UINT` for a stencil.
+    /// The bits draw that writes the bits of `source`'s `aspect` (a 32-bit float depth's `f32`
+    /// bit-cast, a 16-bit unsigned normalized depth's code, a stencil's value) at each pixel of
+    /// `area` into `destination` there: a multisampled `R32_UINT` colour target for a 32-bit
+    /// float depth, `R16_UINT` for a 16-bit one, `R8_UINT` for a stencil.
     pub(super) fn bits(
         device: &Device,
         source: &Target,
@@ -856,6 +879,9 @@ impl DepthDraw {
         feature: &Feature,
     ) -> Result<DepthDraw, Error> {
         let (copy, format) = match aspect {
+            ImageAspectFlags::DEPTH if unorm16_depth(source.format) => {
+                (DepthStencilCopy::Depth16Bits, Format::R16_UINT)
+            }
             ImageAspectFlags::DEPTH => (DepthStencilCopy::DepthBits, Format::R32_UINT),
             _ => (DepthStencilCopy::StencilBits, Format::R8_UINT),
         };

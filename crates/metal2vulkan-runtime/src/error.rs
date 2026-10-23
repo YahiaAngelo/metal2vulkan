@@ -1541,9 +1541,11 @@ pub enum RuntimeGap {
     /// bits and move into or out of the aspect as the multisampled blit copies between
     /// depth/stencil and colour move them (maintenance8's copies, or sample-rate draws); this is
     /// also the refusal where that move refuses: on a device whose maintenance8 copies are missing
-    /// or wrong, a 16-bit depth, or a depth or stencil texture the draws cannot sample or render
-    /// to (a 32-bit float depth on a driver whose fragment depth is not measured is drawn,
-    /// announced as `drawn-depth-copy`). Nothing is recorded, where previously the runtime
+    /// or wrong, a 16-bit depth on a driver whose codes the fragment-depth draw is not measured to
+    /// keep (`DriverFact::FragmentDepthKeepsDepth16Codes`), or a depth or stencil texture the
+    /// draws cannot sample or render to (a 32-bit float depth on a driver whose fragment depth is
+    /// not measured is drawn, announced as `drawn-depth-copy`; a 16-bit depth where its codes are
+    /// kept crosses as its codes, exact). Nothing is recorded, where previously the runtime
     /// recorded invalid Vulkan and some drivers hung instead of failing (the consumer's NVIDIA
     /// Xid 32 stall).
     MultisampledBufferCopy,
