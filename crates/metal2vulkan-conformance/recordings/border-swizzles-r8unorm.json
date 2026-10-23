@@ -6066,7 +6066,9 @@
       "venue": "Apple M3 Max",
       "runs": 8,
       "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
       "bounds": {
+        "addressable_buffers_made": 2,
         "arena_pools_made": 1,
         "argument_objects_retained": 360,
         "argument_tables_retained": 60,
@@ -6081,7 +6083,7 @@
         "command_buffers_begun_segments": 1,
         "command_buffers_deferred": 62,
         "command_buffers_replayed": 3,
-        "command_buffers_replayed_inline": 60,
+        "command_buffers_replayed_inline": 59,
         "command_buffers_submitted": 64,
         "commands_replayed.begin_command_buffer": 62,
         "commands_replayed.cmd_bind_descriptor_sets": 60,
@@ -6095,10 +6097,9 @@
         "completed_where_seen": 60,
         "creation_pipelines_made": 1,
         "dedicated_memory_blocks_live": 2,
-        "device_memory_allocated": 256,
+        "device_memory_allocated": 268435840,
         "dispatch_pipelines_pooled": 1,
         "encoder_command_buffers_begun": 62,
-        "encoder_primaries_begun_ahead": 8,
         "finales_apart": 1,
         "finales_folded": 59,
         "host_texel_copies": 8,
@@ -6118,6 +6119,7 @@
         "object_churn.vk_images_made": 16,
         "object_churn.vk_memory_allocations": 2,
         "pipeline_layouts_made": 1,
+        "pooled_memory_blocks_made": 4,
         "primaries_begun_ahead": 8,
         "queue_submissions": 60,
         "sampler_sets_made": 1,
@@ -6136,7 +6138,12 @@
       },
       "moving": {
         "commands_replayed.begin_command_buffer": 54,
-        "encoder_primaries_begun_ahead": 0,
+        "primaries_begun_ahead": 0
+      },
+      "composed": {
+        "addressable_buffers_made": 2,
+        "device_memory_allocated": 268435840,
+        "pooled_memory_blocks_made": 4,
         "primaries_begun_ahead": 0
       }
     }

@@ -161,25 +161,20 @@ fn cost(
     show: bool,
     alone: bool,
 ) -> Result<bool, String> {
-    // A bound is written from both shapes or not at all: neither bounds the other, and gating a
-    // count the two disagree on is what makes a bound go stale on the next landing.
-    let (venue, measured) = if write {
-        run::cost_contrast_on_under(venues, policy, cases, runs)?
-    } else if alone {
+    let shape = if alone {
+        metal2vulkan_conformance::cost::Shape::Alone
+    } else {
+        metal2vulkan_conformance::cost::Shape::InSet
+    };
+    let (venue, measured) = if alone {
         run::cost_alone_on_under(venues, policy, cases, runs)?
     } else {
         run::cost_on_under(venues, policy, cases, runs)?
     };
-    let words = if write {
+    let words = if alone {
         format!(
-            "{runs} run(s) of the whole selection on {venue}, in the case set's own order, and \
-             {runs} more of each case alone; the largest each count reached, gated only where the \
-             two shapes agreed"
-        )
-    } else if alone {
-        format!(
-            "{runs} run(s) of each case on its own on {venue}, nothing before it, the largest \
-             each count reached"
+            "{runs} run(s) of each case on its own on {venue}, nothing before it on the device, \
+             the largest each count reached"
         )
     } else {
         format!(
@@ -215,16 +210,25 @@ fn cost(
             stopped += 1;
             println!("    the run stopped: {why}");
         }
-        let apart = one.composed();
-        if !apart.is_empty() {
-            composed += apart.len();
-            println!(
-                "    {} count(s) read differently with the case alone, so the selection decides \
-                 them and they are reported and not gated:",
-                apart.len()
-            );
-            for (count, inside, alone) in apart {
-                println!("      {count} {inside} in the selection, {alone} alone");
+        // With the cases measured alone, the contrast against the record the gate's own shape
+        // wrote is what decides which counts it holds, so it is printed where it is read.
+        if alone {
+            let held = metal2vulkan_conformance::recording::read(&one.case)
+                .map(|recording| recording.costs)
+                .unwrap_or_default();
+            if let Some(held) = held.iter().find(|held| held.venue == venue) {
+                let apart = one.apart_from(held);
+                if !apart.is_empty() {
+                    composed += apart.len();
+                    println!(
+                        "    {} count(s) read differently from the whole-set measurement, so the \
+                         selection decides them and no bound of this case holds them:",
+                        apart.len()
+                    );
+                    for (count, inside, alone) in apart {
+                        println!("      {count} {inside} in the case set, {alone} alone");
+                    }
+                }
             }
         }
         let spread = one.moved();
@@ -260,7 +264,7 @@ fn cost(
     println!(
         "\n{} case(s) measured, {stopped} stopped before finishing, {moved} count reading(s) \
          moved between runs for a reason the race rule does not name, {raced} for one it does, \
-         {composed} read differently with the case alone",
+         {composed} read differently from the whole-set measurement",
         measured.len()
     );
     println!(
@@ -272,7 +276,7 @@ fn cost(
         return Ok(true);
     }
     let mut all = true;
-    for (case, written) in run::record_costs(&venue, &measured, &words) {
+    for (case, written) in run::record_costs(&venue, shape, &measured, &words) {
         match written {
             Ok(path) => println!("{case}: {}", path.display()),
             Err(why) => {

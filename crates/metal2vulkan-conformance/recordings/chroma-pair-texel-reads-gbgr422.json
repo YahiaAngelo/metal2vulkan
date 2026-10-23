@@ -268,23 +268,28 @@
       "venue": "Apple M3 Max",
       "runs": 8,
       "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-carried-decoded-twin",
         "metal2vulkan-degrade-cpu-block-decode"
       ],
       "bounds": {
+        "addressable_buffers_made": 2,
+        "arena_pools_made": 1,
         "argument_objects_retained": 3,
         "argument_tables_retained": 1,
         "bare_starts": 1,
         "batches_with_none_pending": 1,
-        "command_buffers_begun": 4,
+        "command_buffers_begun": 5,
         "command_buffers_begun_batch_barriers": 1,
+        "command_buffers_begun_batch_work": 1,
         "command_buffers_begun_continuations": 1,
         "command_buffers_begun_encoders": 1,
         "command_buffers_begun_segments": 1,
         "command_buffers_deferred": 3,
         "command_buffers_replayed": 3,
-        "command_buffers_submitted": 4,
+        "command_buffers_replayed_inline": 1,
+        "command_buffers_submitted": 5,
         "commands_replayed.begin_command_buffer": 3,
         "commands_replayed.cmd_bind_descriptor_sets": 1,
         "commands_replayed.cmd_bind_pipeline": 1,
@@ -296,6 +301,7 @@
         "completed_where_seen": 1,
         "cpu_block_decodes": 1,
         "creation_pipelines_made": 1,
+        "device_memory_allocated": 268435584,
         "dispatch_pipelines_pooled": 1,
         "encoder_command_buffers_begun": 3,
         "finales_apart": 1,
@@ -313,6 +319,7 @@
         "object_churn.vk_images_destroyed": 2,
         "object_churn.vk_images_made": 2,
         "pipeline_layouts_made": 1,
+        "pooled_memory_blocks_made": 4,
         "queue_submissions": 1,
         "scheduled_where_submitted": 1,
         "scheduler_passes": 5,
@@ -325,10 +332,20 @@
         "submit_infos": 2,
         "variant_pipelines_made": 2,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 7
+        "wakes_spared": 6
       },
       "moving": {
         "host_texel_copies": 2
+      },
+      "composed": {
+        "addressable_buffers_made": 2,
+        "arena_pools_made": 1,
+        "command_buffers_begun": 5,
+        "command_buffers_begun_batch_work": 1,
+        "command_buffers_submitted": 5,
+        "device_memory_allocated": 268435584,
+        "host_texel_copies": 2,
+        "pooled_memory_blocks_made": 4
       }
     }
   ]

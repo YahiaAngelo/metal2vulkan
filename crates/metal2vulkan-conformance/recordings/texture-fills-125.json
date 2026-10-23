@@ -124,7 +124,9 @@
       "venue": "Apple M3 Max",
       "runs": 8,
       "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
       "bounds": {
+        "addressable_buffers_made": 2,
         "bare_starts": 20,
         "batches_with_none_pending": 20,
         "command_barriers": 40,
@@ -142,6 +144,7 @@
         "commits_handed_off": 20,
         "completed_waits": 23,
         "completed_where_seen": 20,
+        "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 20,
         "finales_folded": 20,
         "new_buffer_bytes_cleared": 14384,
@@ -155,6 +158,7 @@
         "object_churn.vk_image_bindings": 4,
         "object_churn.vk_images_destroyed": 12,
         "object_churn.vk_images_made": 12,
+        "pooled_memory_blocks_made": 3,
         "queue_submissions": 20,
         "scheduled_where_submitted": 20,
         "scheduler_passes": 20,
@@ -165,6 +169,11 @@
         "submit_infos": 20,
         "wakes_completion_waiters": 20,
         "wakes_spared": 120
+      },
+      "composed": {
+        "addressable_buffers_made": 2,
+        "device_memory_allocated": 201326592,
+        "pooled_memory_blocks_made": 3
       }
     }
   ]

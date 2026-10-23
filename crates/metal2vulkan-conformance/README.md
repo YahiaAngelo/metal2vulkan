@@ -86,10 +86,13 @@ The transcript says what a case **observed**. The cost half says what our implem
 produce it, over the same case set:
 
 ```sh
-conformance cost --runs 8            # measure and print, write nothing
-conformance cost --runs 8 --write    # put the bounds in the cases' recordings
-conformance replay                   # hold each case to them, and report
+conformance cost --runs 8                     # measure the whole set in order, write nothing
+conformance cost --runs 8 --write             # put those bounds in the cases' recordings
+conformance cost --runs 8 --alone --write     # measure each case alone and fold the contrast in
+conformance replay                            # hold each case to them, and report
 ```
+
+Both shapes, as two commands, because a bound is written from both or it is not worth writing.
 
 A case's cost record lives in its own recording file, beside the Metal answers, so a host with no
 Metal reads it with the rest of the case.
@@ -128,22 +131,46 @@ random on honest work. Each reason is written at its site in `cost.rs` with the 
 - `completed_waits`, which charges a case for waits belonging to whatever ran before it.
 
 Totals stay gated where one exists, so nothing is lost: `command_buffers_deferred` holds the two
-replay counts between them, and a `_made` count holds its `_shared` partner — finding one already
-made only ever *lowers* it, and the gate is an upper bound.
+replay counts between them, `encoder_command_buffers_begun` holds the primaries a completion thread
+began ahead, and a `_made` count holds its `_shared` partner — finding one already made only ever
+*lowers* it, and the gate is an upper bound.
 
-**A bound is a bound on the selection it was measured over.** A case's counts depend on what ran
-before it in the same process, so a cost record is evidence for a whole-set run and nothing else; a
-run of fewer cases reads `unmeasured`. When cases land, re-measure. To tell a case's own work from
-what the process handed it, run the contrast:
+### The two shapes, and why a bound needs both
+
+A case's counts depend on what ran before it in the same process, because the runtime pools command
+pools, memory blocks, descriptor sets, pipelines and their layouts across cases. So the same case
+reads differently in the two shapes a measurement can have, and **neither bounds the other**:
+
+- A **pooled making** is largest with the case *alone*: a case with nothing before it makes what a
+  case in company finds already made. A bound taken in company goes stale the moment a case lands
+  beside this one and makes the shared thing first.
+- A count one of **our own background threads** moves is often largest *in company*: the work they
+  do ahead and the waits they borrow come from whatever ran before. A bound taken alone would fail
+  such a count for ever.
+
+Measured over all 393 cases in both shapes, 3,442 readings differ: 3,207 larger alone and 235 larger
+in the set. So the gate holds a count only where the two shapes **agree**, at the larger of the two
+readings, and a count they disagree on is reported with both numbers as the evidence. Each shape is
+measured by its own command, into the same record, because one process cannot measure both cleanly:
+`bc1-rgba` run on its own reads `commands_replayed.cmd_dispatch` 4 in three invocations out of
+three, and 0 when the same leg runs after a whole-set leg in the same process.
+
+That is what stops a bound going stale on a landing, because a reading a landing can change is a
+reading that depends on what ran before the case — which is exactly what the two shapes disagreeing
+means. It is also why the record names both measurements, `measured` and `contrasted`: a record with
+no `contrasted` has had no contrast taken, and claims nothing about composition.
+
+A whole-set record is still evidence for a whole-set run and nothing else, so a run of fewer cases
+reads `unmeasured`. To read one case's two shapes by hand:
 
 ```sh
-conformance cost --runs 2 --show <case>   # a selection of one, on its own fresh device
-conformance cost --runs 1 --show          # the same case inside the whole set
+conformance cost --runs 8 --show <case>           # a selection of one, on its own fresh device
+conformance cost --runs 8 --alone --show <case>   # the same, printed against the record
 ```
 
-A count that differs between the two depends on the selection. That is how `completed_waits` was
-caught charging three cases for four or five waits that were not theirs, after it had held still
-over seven rounds of an earlier measurement.
+That contrast is how `completed_waits` was caught charging three cases for four or five waits that
+were not theirs, after it had held still over seven rounds of an earlier measurement — and how
+`encoder_primaries_begun_ahead` was caught doing the opposite, reading 0 alone and 2 in the set.
 
 **A device's gap is not a cost win.** A count that is lower because the device lacks the exact form,
 so the runtime announced a notice and did something cheaper, is the device's gap and not work we

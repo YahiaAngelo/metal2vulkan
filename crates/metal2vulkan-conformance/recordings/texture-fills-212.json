@@ -124,10 +124,12 @@
       "venue": "Apple M3 Max",
       "runs": 8,
       "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-unpacked-fill-color"
       ],
       "bounds": {
+        "addressable_buffers_made": 2,
         "bare_starts": 25,
         "batches_with_none_pending": 25,
         "command_barriers": 45,
@@ -145,7 +147,9 @@
         "commits_handed_off": 25,
         "completed_waits": 28,
         "completed_where_seen": 25,
+        "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 25,
+        "encoder_primaries_begun_ahead": 1,
         "finales_folded": 25,
         "new_buffer_bytes_cleared": 13504,
         "object_churn.buffers_parked": 70,
@@ -158,6 +162,8 @@
         "object_churn.vk_image_bindings": 4,
         "object_churn.vk_images_destroyed": 4,
         "object_churn.vk_images_made": 4,
+        "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 25,
         "scheduled_where_submitted": 25,
         "scheduler_passes": 25,
@@ -168,6 +174,16 @@
         "submit_infos": 25,
         "wakes_completion_waiters": 25,
         "wakes_spared": 150
+      },
+      "moving": {
+        "commands_replayed.begin_command_buffer": 24,
+        "primaries_begun_ahead": 0
+      },
+      "composed": {
+        "addressable_buffers_made": 2,
+        "device_memory_allocated": 201326592,
+        "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 0
       }
     }
   ]

@@ -616,6 +616,11 @@ pub struct CostRecord {
     /// bounds were taken from it. The suite's rule is that a bound names its measurement, and this
     /// is where a reader finds it.
     pub measured: String,
+    /// The measurement of the same cases **alone**, in words, where one was taken: the contrast
+    /// that decided which counts the gate holds. `None` means no contrast has been taken for this
+    /// venue, and then nothing in the record is claimed to be independent of the selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contrasted: Option<String>,
     /// The degrade-notice codes the measurement's runs announced, sorted.
     ///
     /// **This is what keeps a device's gap from reading as a cost win.** A count that is lower
@@ -824,6 +829,25 @@ pub fn judge(
     }
 }
 
+/// Which shape a cost measurement was taken in.
+///
+/// Neither bounds the other, and that is the whole reason both are taken. A pooled making is
+/// largest with the case **alone**, because a case with nothing before it makes what a case in
+/// company finds already made, so a bound taken in company goes stale the moment a case lands
+/// beside this one and makes the shared thing first. A count one of our own background threads
+/// moves is often largest **in company**, because the work it does ahead and the waits it borrows
+/// come from whatever ran before, so a bound taken alone would fail such a count for ever.
+///
+/// So the gate holds only the counts the two shapes agree on, and each shape is measured by its
+/// own command into the same record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// The whole selection in the case set's own order: the shape the gate itself runs in.
+    InSet,
+    /// Each case on a device nothing else has touched.
+    Alone,
+}
+
 /// What one case's cost run came to: the counts it moved, and how long it took.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CaseCost {
@@ -833,10 +857,6 @@ pub struct CaseCost {
     /// The smallest reading of each count, where several runs were taken: the other end of the
     /// range. Equal to `counts` where every run agreed.
     pub least: Counts,
-    /// The largest reading of each count when the case ran **alone**, with nothing before it on
-    /// the device. Empty where the measurement took only one shape, and then nothing is reported
-    /// for a composition the measurement never looked at.
-    pub alone: Counts,
     /// The runs taken.
     pub runs: u32,
     /// Why the run stopped before the case finished, where it did. Its counts are of a part of the
@@ -859,67 +879,85 @@ impl CaseCost {
     pub fn record(&self, venue: &str, measured: String) -> CostRecord {
         let mut bounds = BTreeMap::new();
         let mut moving = BTreeMap::new();
-        let mut composed = BTreeMap::new();
-        // Every count either shape moved. A count the case moves only alone still needs a bound,
-        // or the gate would hold it at zero on a selection where it is the first to run.
-        let names: std::collections::BTreeSet<&str> = self
-            .counts
-            .iter()
-            .chain(self.alone.iter())
-            .map(|(count, _)| count)
-            .collect();
-        for count in names {
-            let most = self.counts.get(count);
-            let apart = self.alone.get(count);
-            // The bound is the largest the measurement ever saw, in either shape. For a gated
-            // count the two agree, so this only widens the bounds of counts that are reported
-            // anyway — and it keeps the record's own number honest about what was observed.
-            bounds.insert(count.to_owned(), most.max(apart));
-            // A count the rule already names as racy is not written in either map: the rule
-            // ungates it whatever a measurement saw, so an entry would be redundant. What that
-            // leaves is the useful list — a count written here moved for a reason the rule does
-            // not explain.
-            if racy(count).is_some() {
-                continue;
-            }
+        for (count, most) in self.counts.iter() {
+            bounds.insert(count.to_owned(), most);
             let least = self.least.get(count);
-            if least < most {
+            // A count the rule already names as racy is not written here: the rule ungates it
+            // whatever a measurement saw, so an entry would be redundant. What that leaves is the
+            // useful list — a count written here moved for a reason the rule does not explain.
+            if least < most && racy(count).is_none() {
                 moving.insert(count.to_owned(), least);
-            }
-            if !self.alone.is_empty() && apart != most {
-                composed.insert(count.to_owned(), apart);
             }
         }
         CostRecord {
             venue: venue.to_owned(),
             runs: self.runs,
             measured,
+            contrasted: None,
             degraded: self.degraded.clone(),
             bounds,
             moving,
-            composed,
+            composed: BTreeMap::new(),
         }
     }
 
-    /// The counts that read one number inside the case set and another with the case alone: the
-    /// ones the selection decides, which no bound of this case's own can gate.
+    /// Fold this measurement of the cases **alone** into `held`, the record the gate's own shape
+    /// wrote: every count the two shapes read differently becomes one the selection decides.
     ///
-    /// Each is `(count, inside the set, alone)`. Counts the [`racy`] rule already names are left
-    /// out, because the rule ungates them whatever either shape read.
-    pub fn composed(&self) -> Vec<(&str, u64, u64)> {
-        if self.alone.is_empty() {
-            return Vec::new();
-        }
+    /// The two shapes are two commands and not two legs of one, because one process cannot measure
+    /// both cleanly. Measured: `bc1-rgba` run on its own reads `commands_replayed.cmd_dispatch` 4
+    /// and `command_buffers_deferred` 6 in three invocations out of three, and **0** for both when
+    /// the same leg runs after a whole-set leg in the same process — the deferred replay is a
+    /// thread of ours, and whether it lands inside a case's window is not the same question after
+    /// 393 cases have run. So each shape is measured in a process of its own and the record
+    /// accumulates, which is also what lets either shape be re-measured by itself.
+    pub fn fold_alone_into(&self, held: &CostRecord, measured: String) -> CostRecord {
+        let mut folded = held.clone();
+        folded.contrasted = Some(measured);
         let names: std::collections::BTreeSet<&str> = self
             .counts
             .iter()
-            .chain(self.alone.iter())
             .map(|(count, _)| count)
+            .chain(held.bounds.keys().map(String::as_str))
+            .collect();
+        for count in names {
+            // The rule already ungates these whatever either shape read, so an entry would be
+            // redundant and the bound is the gate's own shape's.
+            if racy(count).is_some() {
+                continue;
+            }
+            let apart = self.counts.get(count);
+            let inside = held.bounds.get(count).copied().unwrap_or(0);
+            if apart != inside {
+                folded.composed.insert(count.to_owned(), apart);
+            }
+            // The bound stays the largest either shape saw, so the record's own number is honest
+            // about what was observed. For a gated count the two agree, so only the bounds of
+            // counts that are reported anyway widen.
+            let bound = folded.bounds.entry(count.to_owned()).or_insert(apart);
+            *bound = (*bound).max(apart);
+        }
+        folded
+    }
+
+    /// The counts this measurement reads differently from `held`: the ones the selection decides.
+    ///
+    /// Each is `(count, the other shape's reading, this one's)`. Counts the [`racy`] rule already
+    /// names are left out, because the rule ungates them whatever either shape read.
+    pub fn apart_from<'a>(&'a self, held: &'a CostRecord) -> Vec<(&'a str, u64, u64)> {
+        let names: std::collections::BTreeSet<&str> = self
+            .counts
+            .iter()
+            .map(|(count, _)| count)
+            .chain(held.bounds.keys().map(String::as_str))
             .collect();
         names
             .into_iter()
             .filter_map(|count| {
-                let (inside, apart) = (self.counts.get(count), self.alone.get(count));
+                let (inside, apart) = (
+                    held.bounds.get(count).copied().unwrap_or(0),
+                    self.counts.get(count),
+                );
                 (inside != apart && racy(count).is_none()).then_some((count, inside, apart))
             })
             .collect()

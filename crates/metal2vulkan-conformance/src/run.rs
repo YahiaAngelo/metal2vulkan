@@ -242,7 +242,6 @@ pub fn cost_on_under(
                     case: case.name().to_owned(),
                     counts: moved.clone(),
                     least: moved,
-                    alone: Counts::default(),
                     runs: 1,
                     stopped,
                     degraded: announced,
@@ -306,50 +305,13 @@ pub fn cost_alone_on_under(
     Ok((venue, held))
 }
 
-/// Measure `cases` in **both** shapes — inside the selection and each case alone — and give each
-/// case's measurement both readings.
-///
-/// This is the measurement a bound is written from, and taking both shapes is what makes the bound
-/// worth writing. Neither shape bounds the other:
-///
-/// - A pooled making is largest **alone**, because a case with nothing before it makes what a case
-///   in company finds already made. A bound taken in company goes stale the moment a case lands
-///   beside this one and makes the shared thing first.
-/// - A count our own background threads move is often largest **in company**, because the work
-///   they do ahead, and the waits they borrow, come from whatever ran before. A bound taken alone
-///   would fail such a count for ever.
-///
-/// So the measurement reads each count in both shapes and gates only the counts that agree. A
-/// count that disagrees is a property of the selection rather than of the case, and the two
-/// readings are recorded as the evidence for reporting it ([`crate::cost::CostRecord::composed`]).
-/// That turns the contrast run from a thing a reader does by hand after a breach into the thing the
-/// measurement does before writing a bound.
-pub fn cost_contrast_on_under(
-    venues: Venues,
-    policy: Policy,
-    cases: &[Box<dyn Case>],
-    runs: u32,
-) -> Result<(String, Vec<CaseCost>), String> {
-    let (venue, mut inside) = cost_on_under(venues, policy, cases, runs)?;
-    let (_, apart) = cost_alone_on_under(venues, policy, cases, runs)?;
-    for one in &mut inside {
-        if let Some(alone) = apart.iter().find(|alone| alone.case == one.case) {
-            // A run that stopped measured a part of the case, so its counts are not a reading of
-            // the same work and nothing is recorded from the pair.
-            if alone.stopped.is_none() && one.stopped.is_none() {
-                one.alone = alone.counts.clone();
-            }
-        }
-    }
-    Ok((venue, inside))
-}
-
 /// Write what `measured` says each case cost on `venue` into the cases' own recordings, answering
 /// where each went or why it could not be written.
 ///
 /// A case whose run stopped is **not** recorded: its counts are of a part of the case.
 pub fn record_costs(
     venue: &str,
+    shape: crate::cost::Shape,
     measured: &[CaseCost],
     words: &str,
 ) -> Vec<(String, Result<std::path::PathBuf, String>)> {
@@ -362,7 +324,7 @@ pub fn record_costs(
                      part of the case"
                 ))
             } else {
-                record_one_cost(venue, cost, words)
+                record_one_cost(venue, shape, cost, words)
             };
             (cost.case.clone(), written)
         })
@@ -381,12 +343,38 @@ pub fn record_costs(
 /// the answer. The union only ever stops a count being gated; it never raises a bound.
 fn record_one_cost(
     venue: &str,
+    shape: crate::cost::Shape,
     cost: &CaseCost,
     words: &str,
 ) -> Result<std::path::PathBuf, String> {
     let mut recording = crate::recording::read(&cost.case)?;
+    // A measurement of the cases alone does not replace the gate's own shape: it folds into it,
+    // and what the two read differently becomes the counts the selection decides.
+    if shape == crate::cost::Shape::Alone {
+        let held = recording
+            .costs
+            .iter()
+            .find(|held| held.venue == venue)
+            .ok_or_else(|| {
+                format!(
+                    "no cost record for {venue} to contrast with: measure the whole case set \
+                     first, then the cases alone"
+                )
+            })?;
+        let folded = cost.fold_alone_into(held, words.to_owned());
+        recording.costs.retain(|held| held.venue != venue);
+        recording.costs.push(folded);
+        recording
+            .costs
+            .sort_by(|one, two| one.venue.cmp(&two.venue));
+        return crate::recording::write(&recording);
+    }
     let mut record = cost.record(venue, words.to_owned());
     if let Some(held) = recording.costs.iter().find(|held| held.venue == venue) {
+        // The contrast an earlier command took is kept: re-measuring the gate's own shape says
+        // nothing new about the other one, and dropping it would silently re-gate every count the
+        // selection decides.
+        record.contrasted = held.contrasted.clone();
         for (count, least) in &held.moving {
             if crate::cost::racy(count).is_some() {
                 continue;
