@@ -641,5 +641,103 @@
       ],
       "validated": "ran"
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 74.84 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 309,
+      "times": {
+        "case": "function-bindings-threadgroup-memory",
+        "calls": 2,
+        "in_calls": 47054250,
+        "on_cpu": 1410000,
+        "blocked": 45505958,
+        "elsewhere": 3416,
+        "spend": 47059291,
+        "spend_least": 37441000,
+        "spend_most": 61821417,
+        "per_call": [
+          {
+            "call": "compute_pipeline_bindings",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 259708,
+            "on_cpu": 260250,
+            "blocked": 0,
+            "wall_least": 239375,
+            "wall_most": 465667,
+            "wall_total": 259708,
+            "on_cpu_total": 260250,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 46777041,
+            "on_cpu": 998584,
+            "blocked": 45505958,
+            "wall_least": 37196250,
+            "wall_most": 61354292,
+            "wall_total": 46777041,
+            "on_cpu_total": 998584,
+            "blocked_total": 45505958
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 74.84 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 284,
+      "times": {
+        "case": "function-bindings-threadgroup-memory",
+        "calls": 2,
+        "in_calls": 7212542,
+        "on_cpu": 6981709,
+        "blocked": 258875,
+        "elsewhere": 300167,
+        "spend": 7495500,
+        "spend_least": 7381084,
+        "spend_most": 14622625,
+        "per_call": [
+          {
+            "call": "compute_pipeline_bindings",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 6383000,
+            "on_cpu": 6151042,
+            "blocked": 258875,
+            "wall_least": 6183083,
+            "wall_most": 11967708,
+            "wall_total": 6383000,
+            "on_cpu_total": 6151042,
+            "blocked_total": 258875
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 847500,
+            "on_cpu": 848958,
+            "blocked": 0,
+            "wall_least": 829292,
+            "wall_most": 2170542,
+            "wall_total": 847500,
+            "on_cpu_total": 848958,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
   ]
 }
