@@ -162,6 +162,21 @@ fn surface_bytes(layout: Layout) -> Vec<u8> {
     bytes
 }
 
+/// The SHA-256 of the surface's bytes at each layout, packed then padded.
+const SURFACE_SHA: [&str; 2] = [
+    "21f3f30e8e4b0e04e50dd27376cfe9a6a8ae2dad7fa0c46db76580fe1b1f317c",
+    "c54f5ab40891acc7bd19cda7fd6aad706eaeb87ddead3cf2cd03b62c4d48b3fe",
+];
+
+/// The inputs are the probe's: the surface's bytes at both layouts, before any output claims
+/// Metal's of them.
+#[test]
+fn the_inputs_are_the_probes() {
+    for (layout, want) in [PACKED, PADDED].into_iter().zip(SURFACE_SHA) {
+        assert_eq!(hash(&surface_bytes(layout)), want);
+    }
+}
+
 /// The `YCBCR10_420_2P` texture over plane 0 of an untagged surface (no matrix) at `layout`.
 fn texture(device: &Device, layout: Layout) -> Texture {
     let surface = buffer_with(device, &surface_bytes(layout)).unwrap();

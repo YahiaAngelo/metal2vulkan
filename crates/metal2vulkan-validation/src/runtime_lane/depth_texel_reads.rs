@@ -30,6 +30,17 @@ const SIDE: u64 = 16;
 /// The SHA-256 of Metal's 65,536 `float`s, code by code, read and sampled alike.
 const METAL: &str = "a940e05b402805a0f114a2009566daa556ac9cc732c04127d1cfaf7d98c13b0d";
 
+/// The rule gives Metal's bytes: every code's `float` as `c / 65535` correctly rounded, code by
+/// code, hashes to what the probe printed of Metal's reads, so the rule stands for the 65,536
+/// values rather than a copy of them.
+#[test]
+fn the_rule_is_metals_answer() {
+    let bytes: Vec<u8> = (0..65_536u32)
+        .flat_map(|c| (c as f32 / 65535.0).to_le_bytes())
+        .collect();
+    assert_eq!(sha256_bytes(&bytes), METAL);
+}
+
 /// Synthetic AIR written for this lane: `read_dh` reads, and `sample_dh` samples through sampler
 /// slot 0 at `(g + (0.25, 0.75)) / 16`, the `depth2d<float>` its argument buffer (buffer 0, `{
 /// depth2d<float> d; }`) holds at texel `g`, storing the depth to buffer 1's `float` `16 g.y +

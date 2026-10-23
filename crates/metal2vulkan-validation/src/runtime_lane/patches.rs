@@ -34,6 +34,7 @@ use metal2vulkan_runtime::{
     DrawProblem, Error, Function, Invalid, PipelineOptions, Problem, RenderCommandEncoder,
     RenderPassDescriptor, RenderPipelineState,
 };
+use sha2::Digest;
 
 /// The kind a device without `tessellationShader` takes for its patch draws, which the runtime
 /// emulates (`render/tessellation_scan.rs`).
@@ -374,14 +375,59 @@ pub(super) const TWOS: &[u32] = &[0, 32, 64, 1386, 2080, 2112, 4160];
 /// The cells of a patch of factors 3.
 const THREES: &[u32] = &[0, 21, 43, 64, 924, 946, 1365, 1408, 2354, 2795, 2816, 4160];
 
-/// The `digest` of a patch of the maximum factor, 64, as Metal marked it (for the host's scale:
-/// their probe's grid is the fixture's, its digests of factors 1, 2 and 3 those of `CORNERS`,
-/// `TWOS` and `THREES`).
-pub(super) const MAXIMUM: (usize, u32) = (1815, 0xb267_fce1);
+/// The cells of a patch of the maximum factor, 64, as Metal marked it: each cell's index,
+/// little-endian, ascending (their probe's grid is the fixture's, its digests of factors 1, 2 and
+/// 3 those of `CORNERS`, `TWOS` and `THREES`).
+const MAXIMUM_CELLS: &[u8] = include_bytes!("../../fixtures/public/patches/maximum_cells.bin");
 
-/// The count of `cells` (each a cell's index, ascending) and the FNV-1a hash of their indices'
-/// little-endian bytes, as our probes printed them.
-pub(super) fn digest(cells: &[u32]) -> (usize, u32) {
+/// The SHA-256 of [`MAXIMUM_CELLS`], and the count and FNV-1a of them the probe printed.
+const MAXIMUM_SHA: &str = "bc3b3cd507303a0b45a8e671e18fdbd886bee90d4a393fd65380cad08d863fa8";
+const MAXIMUM_PROBE: (usize, u32) = (1815, 0xb267_fce1);
+
+/// The cells of a patch whose inside factor is `+∞` beside edge factors of 1, as Metal marked it,
+/// laid out as [`MAXIMUM_CELLS`].
+const INSIDE_CELLS: &[u8] = include_bytes!("../../fixtures/public/patches/inside_cells.bin");
+
+/// The SHA-256 of [`INSIDE_CELLS`], and the count and FNV-1a of them the probe printed.
+const INSIDE_SHA: &str = "f93df24eb5f0bdaea72fc0173bcb4f14c50bad7de98ad1bc536fd5c3f221204d";
+const INSIDE_PROBE: (usize, u32) = (1689, 0x540d_bf35);
+
+/// The cells `bytes` hold.
+fn cells_of(bytes: &[u8]) -> Vec<u32> {
+    bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|cell| u32::from_le_bytes(*cell))
+        .collect()
+}
+
+/// The cells Metal marked at the maximum factor, 64 ([`MAXIMUM_CELLS`]).
+pub(super) fn maximum() -> Vec<u32> {
+    cells_of(MAXIMUM_CELLS)
+}
+
+/// How `cells` differ from the `metal` a probe recorded, or `None` where they are alike: the
+/// first cell they part at, with both counts.
+pub(super) fn unlike(cells: &[u32], metal: &[u32]) -> Option<String> {
+    if cells == metal {
+        return None;
+    }
+    let counts = format!("{} cells marked, Metal's {}", cells.len(), metal.len());
+    Some(
+        match cells.iter().zip(metal).position(|(got, want)| got != want) {
+            Some(i) => format!(
+                "{counts}: cell {i} of them is {}, Metal's {}",
+                cells[i], metal[i]
+            ),
+            None => format!("{counts}, the shorter their first"),
+        },
+    )
+}
+
+/// The count of `cells` and the FNV-1a hash of their indices' little-endian bytes, as our probes
+/// printed them.
+fn probe_digest(cells: &[u32]) -> (usize, u32) {
     let hash = cells
         .iter()
         .flat_map(|cell| cell.to_le_bytes())
@@ -389,6 +435,29 @@ pub(super) fn digest(cells: &[u32]) -> (usize, u32) {
             (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
         });
     (cells.len(), hash)
+}
+
+/// The recorded cells are the probes': each list's SHA-256, and the count and FNV-1a hash the
+/// probe printed of its own marks.
+#[test]
+fn the_recorded_cells_are_the_probes() {
+    for (what, bytes, sha, probe) in [
+        (
+            "the maximum factor",
+            MAXIMUM_CELLS,
+            MAXIMUM_SHA,
+            MAXIMUM_PROBE,
+        ),
+        ("an infinite inside", INSIDE_CELLS, INSIDE_SHA, INSIDE_PROBE),
+    ] {
+        let cells = cells_of(bytes);
+        assert_eq!(
+            crate::hash::hex_encode(sha2::Sha256::digest(bytes)),
+            sha,
+            "{what}"
+        );
+        assert_eq!(probe_digest(&cells), probe, "{what}");
+    }
 }
 
 /// Each case and the cells Metal marked (a Metal probe on an M4 with macOS 27.0.1, with and without
@@ -916,7 +985,7 @@ fn read_their_factors_as_metal(path: Path) {
 }
 
 /// A scale that is infinite as a `half` (70000, as the largest `half`, 65504, and 64 do) takes
-/// the factors to the maximum, 64, as Metal's did (the digest `MAXIMUM`), and so does the `float`
+/// the factors to the maximum, 64, as Metal's did ([`MAXIMUM_CELLS`]), and so does the `float`
 /// `+∞`, which Metal's validation stops at the setter and plain Metal takes (a probe
 /// `ts_inf_enabled`: the maximum factor's vertices). A device that cannot make the fixture's
 /// pipeline refuses it, reported as its refusal.
@@ -941,7 +1010,11 @@ fn scale_infinite_draws_the_maximum(path: Path) {
                 ..Case::new("scale_maximum")
             };
             match lane.marked(&case) {
-                Ok(cells) => assert_eq!(digest(&cells), MAXIMUM, "scale {scale} on {name}"),
+                Ok(cells) => {
+                    if let Some(unlike) = unlike(&cells, &maximum()) {
+                        panic!("scale {scale} on {name}: {unlike}");
+                    }
+                }
                 Err(Error::Unsupported(u)) => {
                     let u = refusal_allowed(path, name, Error::Unsupported(u));
                     eprintln!("the maximum scale on {name}: refused, {u:?}");
@@ -953,8 +1026,8 @@ fn scale_infinite_draws_the_maximum(path: Path) {
     });
 }
 
-/// An inside factor of `+∞` beside edge factors of 1 takes the maximum, 64, as Metal's did (1689
-/// cells, their indices' hash 0x540dbf35). A device that cannot make the fixture's pipeline refuses
+/// An inside factor of `+∞` beside edge factors of 1 takes the maximum, 64, as Metal's did
+/// ([`INSIDE_CELLS`]). A device that cannot make the fixture's pipeline refuses
 /// it, reported as its refusal.
 #[test]
 fn an_infinite_inside_factor_draws_the_maximum_inside() {
@@ -977,7 +1050,11 @@ fn infinite_inside_draws_the_maximum(path: Path) {
             ..Case::new("inside_infinite")
         };
         match lane.marked(&case) {
-            Ok(cells) => assert_eq!(digest(&cells), (1689, 0x540d_bf35), "on {name}"),
+            Ok(cells) => {
+                if let Some(unlike) = unlike(&cells, &cells_of(INSIDE_CELLS)) {
+                    panic!("on {name}: {unlike}");
+                }
+            }
             Err(Error::Unsupported(u)) => {
                 let u = refusal_allowed(path, name, Error::Unsupported(u));
                 eprintln!("the infinite inside on {name}: refused, {u:?}")

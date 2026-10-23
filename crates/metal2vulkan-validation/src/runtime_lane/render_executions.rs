@@ -1435,8 +1435,8 @@ fn patch_commands_draw_with_their_own_factors_on(path: Path) {
 /// 1.3 and 2.0005 what 2 marks, 10^-6 and 2^-24 (subnormal `half`s) what factors of 1 mark, 70000
 /// and `+∞` (infinite `half`s) what the maximum factor, 64, marks, and 2^-30 (0 as a `half`)
 /// nothing. The marks for factors of 1 and 2 are `patches.rs`'s (a Metal probe on an M4), those of
-/// the maximum factor the count and FNV-1a hash the probe printed for them (its grid is the
-/// fixture's: its hashes of factors 1, 2 and 3 are those of `patches.rs`'s marks). A device without
+/// the maximum factor its recorded marks (`patches::maximum`; its grid is the
+/// fixture's: its marks of factors 1, 2 and 3 are those of `patches.rs`'s). A device without
 /// tessellation shaders refuses the pipeline, reported as its refusal.
 #[test]
 fn patch_commands_scale_their_factors_as_metal_does() {
@@ -1456,13 +1456,10 @@ fn patch_commands_scale_their_factors_as_metal_does() {
             }
             Err(error) => panic!("the pipeline: {error}"),
         };
-        let none = patches::digest(&[]);
-        let (corners, twos) = (
-            patches::digest(patches::CORNERS),
-            patches::digest(patches::TWOS),
-        );
-        let maximum = patches::MAXIMUM;
-        let cases: [(f32, (usize, u32)); 15] = [
+        let (none, corners, twos) = (&[][..], patches::CORNERS, patches::TWOS);
+        let maximum = patches::maximum();
+        let maximum = &maximum[..];
+        let cases: [(f32, &[u32]); 15] = [
             (1.0, corners),
             (2.0, twos),
             (0.5, corners),
@@ -1518,11 +1515,9 @@ fn patch_commands_scale_their_factors_as_metal_does() {
                     encoder.execute_commands_in_buffer(&icb, index..index + 1)
                 })
                 .unwrap();
-            assert_eq!(
-                patches::digest(&patches::cells(&marks)),
-                expected,
-                "scale {scale}"
-            );
+            if let Some(unlike) = patches::unlike(&patches::cells(&marks), expected) {
+                panic!("scale {scale}: {unlike}");
+            }
             let report = command_buffer.execution_report().unwrap();
             assert_eq!(
                 report.replay_faults,

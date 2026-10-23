@@ -290,6 +290,26 @@ fn coordinates(set: &str, size: Size) -> Vec<[f32; 2]> {
     cells
 }
 
+/// The SHA-256 of every size's texels and of its three coordinate sets' bytes, the sizes in
+/// `SIZES` order and each size's sets in `grid`, `ulp`, `frac` order.
+const INPUTS_SHA: &str = "2e8d095059bdcbb66f74ac0c5f3c98d2dfa6f72c065c5fdfd56debbab9a397dd";
+
+/// The inputs are the probes': every size's texture bytes and coordinate sets.
+#[test]
+fn the_inputs_are_the_probes() {
+    let mut sha = sha2::Sha256::new();
+    for size in SIZES {
+        sha.update(texels(size));
+        for set in ["grid", "ulp", "frac"] {
+            for cell in coordinates(set, size) {
+                sha.update(cell[0].to_le_bytes());
+                sha.update(cell[1].to_le_bytes());
+            }
+        }
+    }
+    assert_eq!(crate::hash::hex_encode(sha.finalize()), INPUTS_SHA);
+}
+
 /// Metal's `1/256` cell of the pixel coordinate `x`, half up (`position::snapped_axis`'s
 /// `AxisSnap::Cell`).
 fn cell(x: f32) -> f32 {

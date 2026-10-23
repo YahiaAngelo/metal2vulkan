@@ -8,11 +8,11 @@
 //! the alpha view with the alpha in every component. Every input code of every channel occurs,
 //! with the bits Metal does not read set.
 //!
-//! Metal's answer: the SHA-256 of each output texture's bytes, for every pairing of the formats,
-//! as an Apple M3 Max (macOS 26.7) and an Apple M4 (macOS 27.0.1) wrote them from the same inputs,
-//! plain and under Metal's validation layer (which keep the bytes). A differing output is printed
-//! whole, on one `XR-PLANES-DIFFERS` line, to compare texel by texel with the bytes the probes
-//! keep.
+//! Metal's answer: every output texture's bytes, for every pairing of the formats, committed in
+//! [`METAL_BYTES`] beside the SHA-256 of each the probes printed (an Apple M3 Max under macOS 26.7
+//! and an Apple M4 under 27.0.1 wrote them from the same inputs, plain and under Metal's
+//! validation layer, which keep the bytes). A differing output names its first differing texel on
+//! an `XR-PLANES-DIFFERS` line.
 
 use super::degrade_notices::on_device;
 use crate::air_library::AirLibrary;
@@ -43,6 +43,13 @@ const ALPHA: PixelFormat = PixelFormat::ARGB8Unorm;
 const INPUT_COLOR: &str = "76bb1c1c9bd72a95199eb8fa090b7efbaf536dc9621b35343e3123356d0dd1c5";
 const INPUT_ALPHA: &str = "0add0982965c72b0d76c77c3d019a78d2e0cfbb61fb8952f9b75d1194d8496dd";
 const INPUT_JOINED: &str = "9e268ae2fa3dfc66242184ae46a352fd93c03f942d83a6022084e74e402b467c";
+
+/// Metal's output bytes, the [`METAL`] rows in order, each row's output texture whole (recovered
+/// on an Apple M3 Max under MoltenVK, each output's SHA-256 the one the probes printed).
+const METAL_BYTES: &[u8] = include_bytes!("../../fixtures/public/xr_planes/metal.bin");
+
+/// The SHA-256 of [`METAL_BYTES`].
+const METAL_BYTES_SHA: &str = "a86b01180e91a1a5c2e12d985e4019dec9f32cf93d91b000ade65a59a8c95899";
 
 /// Metal's outputs: the kernel, plane 0's format, the joined texture's format, the output
 /// texture, and the SHA-256 of its bytes.
@@ -264,22 +271,82 @@ fn digest(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// Metal's digest of `kernel`'s output `texture` for plane 0 in `color` and the joined texture
-/// in `joined`.
-fn metal(kernel: &str, color: PixelFormat, joined: PixelFormat, texture: &str) -> &'static str {
-    METAL
-        .iter()
-        .find(|m| m.0 == kernel && m.1 == color && m.2 == joined && m.3 == texture)
-        .map(|m| m.4)
-        .unwrap_or_else(|| panic!("no Metal digest of {kernel} {color:?} {joined:?} {texture}"))
+/// The bytes of a [`METAL`] row's output texture: `COUNT` texels of the output's own format.
+fn output_bytes(row: &(&str, PixelFormat, PixelFormat, &str, &str)) -> u64 {
+    let format = match row.3 {
+        "joined" => row.2,
+        "color" => row.1,
+        _ => ALPHA,
+    };
+    COUNT as u64 * texel_bytes(format)
 }
 
-/// The generator writes the bytes the probes' Metal harness wrote, by digest.
+/// Metal's bytes of `kernel`'s output `texture` for plane 0 in `color` and the joined texture in
+/// `joined`, and the digest of them the probes printed.
+fn metal(
+    kernel: &str,
+    color: PixelFormat,
+    joined: PixelFormat,
+    texture: &str,
+) -> (&'static [u8], &'static str) {
+    let mut at = 0;
+    for row in &METAL {
+        let bytes = output_bytes(row) as usize;
+        if (row.0, row.1, row.2, row.3) == (kernel, color, joined, texture) {
+            return (&METAL_BYTES[at..at + bytes], row.4);
+        }
+        at += bytes;
+    }
+    panic!("no Metal bytes of {kernel} {color:?} {joined:?} {texture}")
+}
+
+/// The texel `got` and Metal's `want` part at, both as hex, or `None` where they are alike.
+fn unlike_metal(got: &[u8], want: &[u8], texel: usize) -> Option<String> {
+    if got == want {
+        return None;
+    }
+    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() };
+    if got.len() != want.len() {
+        return Some(format!("{} bytes, Metal's {}", got.len(), want.len()));
+    }
+    let at = got
+        .chunks(texel)
+        .zip(want.chunks(texel))
+        .position(|(a, b)| a != b)
+        .expect("a differing texel");
+    let (a, b) = (at * texel, (at + 1) * texel);
+    Some(format!(
+        "texel ({}, {}) is {}, Metal's {}",
+        at as u64 % SIDE,
+        at as u64 / SIDE,
+        hex(&got[a..b]),
+        hex(&want[a..b])
+    ))
+}
+
+/// The generator writes the bytes the probes' Metal harness wrote, and the recorded outputs are
+/// the probes', each by digest.
 #[test]
-fn the_inputs_are_the_harness_s() {
+fn the_inputs_and_the_outputs_are_the_harness_s() {
     assert_eq!(digest(&color_bytes()), INPUT_COLOR);
     assert_eq!(digest(&alpha_bytes()), INPUT_ALPHA);
     assert_eq!(digest(&joined_bytes()), INPUT_JOINED);
+    assert_eq!(digest(METAL_BYTES), METAL_BYTES_SHA, "the outputs");
+    let mut at = 0;
+    for row in &METAL {
+        let bytes = output_bytes(row) as usize;
+        assert_eq!(
+            digest(&METAL_BYTES[at..at + bytes]),
+            row.4,
+            "{} {:?} {:?} {}",
+            row.0,
+            row.1,
+            row.2,
+            row.3
+        );
+        at += bytes;
+    }
+    assert_eq!(at, METAL_BYTES.len(), "the recorded outputs' length");
 }
 
 /// Every output texture of both kernels, for every pairing of plane 0's and the joined texture's
@@ -305,14 +372,14 @@ fn two_extended_range_planes_join_and_split_as_metal_does() {
                 outputs.push(("xr_planes_split", "color", bytes_of(&plane, color)));
                 outputs.push(("xr_planes_split", "alpha", bytes_of(&alpha, ALPHA)));
                 for (kernel, what, bytes) in outputs {
-                    let got = digest(&bytes);
-                    let want = metal(kernel, color, joined, what);
-                    if got != want {
-                        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-                        wrong.push(format!(
-                            "{kernel} {color:?} {joined:?} {what}: {got}, Metal {want}; bytes \
-                             {hex}"
-                        ));
+                    let (want, _) = metal(kernel, color, joined, what);
+                    let texel = match what {
+                        "joined" => texel_bytes(joined),
+                        "color" => texel_bytes(color),
+                        _ => texel_bytes(ALPHA),
+                    };
+                    if let Some(unlike) = unlike_metal(&bytes, want, texel as usize) {
+                        wrong.push(format!("{kernel} {color:?} {joined:?} {what}: {unlike}"));
                     }
                 }
             }

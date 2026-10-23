@@ -6,14 +6,14 @@
 //!
 //! - A kernel's `read()` of every texel is the conversion Metal's reads were measured to follow
 //!   (`metal2vulkan::bind::ycbcr_texel`, after the 9/3/3/1 chroma filter), for both ranges and
-//!   both matrices, and for one surface Metal's own reads: the same digest. A
-//!   nearest sample at each texel's centre reads the same texel, unannounced; a linear one there
-//!   too, and between the texels it is Metal's filter of them, unannounced (the lane's devices
-//!   sample as Metal does). Under native sampling it is Metal's filter under
-//!   `YCbCrFilterPolicy::Exact`, through one pipeline more at the draw, and under the default the
-//!   device's filter of the same texels (on MoltenVK Metal's own sampler's, announced), within
-//!   [`DEVICE_FILTER_BOUND`] of Metal's, through the pipeline the state's creation made. A function
-//!   that samples handles and reaches the texture is refused, typed.
+//!   both matrices, and for one surface Metal's own reads of it texel by texel
+//!   ([`METAL_READS`]). A nearest sample at each texel's centre reads the same texel,
+//!   unannounced; a linear one there too, and between the texels it is Metal's filter of them,
+//!   unannounced (the lane's devices sample as Metal does). Under native sampling it is Metal's
+//!   filter under `YCbCrFilterPolicy::Exact`, through one pipeline more at the draw, and under
+//!   the default the device's filter of the same texels (on MoltenVK Metal's own sampler's,
+//!   announced), within [`DEVICE_FILTER_BOUND`] of Metal's, through the pipeline the state's
+//!   creation made. A function that samples handles and reaches the texture is refused, typed.
 //! - The texture follows writes of its planes' bytes through other textures over them, as a
 //!   decoder writes the planes as `R8Unorm` and `RG8Unorm` textures: in an earlier command
 //!   buffer, an earlier encoder of the same one, an earlier dispatch of the same encoder, and a
@@ -59,6 +59,7 @@ use metal2vulkan_runtime::{
     RenderPassDescriptor, RenderPipelineState, ResourceOptions, RuntimeGap, SamplerState, Size,
     StoreAction, SurfaceYCbCrMatrix, Texture, TextureDescriptor, TextureProblem,
 };
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 const WAIT: Duration = Duration::from_secs(60);
@@ -559,18 +560,72 @@ fn modelled_as(
     out
 }
 
-/// Metal's `read()` of the surface of seed 5 as a `420v` one without a matrix (an Apple M4 under
-/// macOS 27.0.1): the FNV-1a digest of each texel's red, green and blue `v` as little-endian 16-bit
-/// words.
-const METAL_READ_DIGEST: u32 = 0x26e2_da15;
+/// Metal's `read()` of the surface of seed 5 as a `420v` one without a matrix: each texel's red,
+/// green and blue `v` of `v / 2048` as little-endian 16-bit words, row by row (an Apple M3 Max
+/// under macOS 27.0.1, through `fixtures/public/ycbcr/probe.swift` over an IOSurface laid out as
+/// the lane lays its stand-in buffer out; an Apple M4 under 27.0.1 answered the same
+/// [`METAL_READS_FNV`]).
+const METAL_READS: &[u8] = include_bytes!("../../fixtures/public/ycbcr/metal_m3_max.bin");
 
-fn digest(texels: &[[u16; 3]]) -> u32 {
-    texels
+/// The SHA-256 of [`METAL_READS`].
+const METAL_READS_SHA: &str = "88301e8b9aea601017cfc7466ba830c9255fb1875dcb9d62ffd2d4a8e14d8b8e";
+
+/// The FNV-1a of [`METAL_READS`], which the M4's probe printed of its own reads.
+const METAL_READS_FNV: u32 = 0x26e2_da15;
+
+/// The SHA-256 of the surface bytes the generator gives at seed 5, the surface Metal read
+/// ([`METAL_READS`]).
+const SURFACE_5_SHA: &str = "bb42f2090b661a1ef27876d6e3ff2404436756016fbf912cafdb9b35bfc6d3b1";
+
+/// [`METAL_READS`] as each texel's red, green and blue step.
+fn metal_reads() -> Vec<[u16; 3]> {
+    METAL_READS
+        .as_chunks::<6>()
+        .0
         .iter()
-        .flat_map(|t| t.iter().flat_map(|v| v.to_le_bytes()))
-        .fold(2_166_136_261u32, |h, b| {
-            (h ^ u32::from(b)).wrapping_mul(16_777_619)
+        .map(|t| std::array::from_fn(|c| u16::from_le_bytes([t[2 * c], t[2 * c + 1]])))
+        .collect()
+}
+
+/// The texel `read` and Metal's differ at, with both steps, or `None` where they are alike.
+fn unlike_metal(read: &[[u16; 3]]) -> Option<String> {
+    let metal = metal_reads();
+    assert_eq!(read.len(), metal.len(), "the texel count");
+    read.iter()
+        .zip(&metal)
+        .position(|(got, want)| got != want)
+        .map(|i| {
+            let (x, y) = (i as u64 % W, i as u64 / W);
+            format!(
+                "texel ({x}, {y}) reads {:?}, Metal's {:?}",
+                read[i], metal[i]
+            )
         })
+}
+
+/// The FNV-1a of `bytes`.
+fn fnv(bytes: &[u8]) -> u32 {
+    bytes.iter().fold(2_166_136_261u32, |h, &b| {
+        (h ^ u32::from(b)).wrapping_mul(16_777_619)
+    })
+}
+
+/// The inputs and the answers are the probes': the surface the generator gives at seed 5, the
+/// recorded reads of it, their length and their FNV-1a, which the M4's probe printed of its own.
+#[test]
+fn the_inputs_and_the_reads_are_the_probes() {
+    assert_eq!(
+        crate::hash::hex_encode(Sha256::digest(surface_bytes(5))),
+        SURFACE_5_SHA,
+        "the surface of seed 5"
+    );
+    assert_eq!(METAL_READS.len(), (W * H) as usize * 6, "the reads' length");
+    assert_eq!(
+        crate::hash::hex_encode(Sha256::digest(METAL_READS)),
+        METAL_READS_SHA,
+        "the reads"
+    );
+    assert_eq!(fnv(METAL_READS), METAL_READS_FNV, "the M4's digest");
 }
 
 /// The surface's facts for OSType `pixel_format` and `matrix`.
@@ -773,7 +828,9 @@ fn ycbcr_textures_read_the_texels_metal_converts() {
                 "{range:?} {matrix:?}"
             );
             if seed == 5 {
-                assert_eq!(digest(&read), METAL_READ_DIGEST, "Metal's reads");
+                if let Some(unlike) = unlike_metal(&read) {
+                    panic!("Metal's reads: {unlike}");
+                }
             }
             let sampled = grid(&texels_of(
                 device,
