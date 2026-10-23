@@ -73,6 +73,7 @@ fn run() -> DeviceRun {
 
 fn run_restricted_to(restricted_to: Option<String>) -> DeviceRun {
     DeviceRun {
+        timing: crate::observation::test_timing(),
         output: vec![0, 1, 2, 0xff],
         spv_sha256: "ab".repeat(32),
         translator_fingerprint: "cd".repeat(32),

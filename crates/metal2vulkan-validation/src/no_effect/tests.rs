@@ -28,6 +28,7 @@ fn case(no_effect: Option<&str>) -> AuthoredCase {
 
 fn row(case: &AuthoredCase, output: &[u8], status: MetalStatus) -> MetalObservation {
     MetalObservation {
+        timing: Some(crate::observation::test_timing()),
         case_id: case.case_id.clone(),
         air_sha256: case.air_sha256.clone(),
         input_sha256: String::new(),

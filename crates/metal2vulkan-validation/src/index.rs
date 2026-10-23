@@ -2484,6 +2484,7 @@ mod tests {
         let output_b64 = "KgAAAA==";
         let output_sha256 = crate::hash::sha256_bytes(&[42, 0, 0, 0]);
         let metal = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: input_sha256.clone(),
@@ -2495,6 +2496,7 @@ mod tests {
             status: MetalStatus::Qualified,
         };
         let candidate = CandidateObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256,

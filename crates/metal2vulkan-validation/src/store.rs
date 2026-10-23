@@ -387,6 +387,7 @@ impl CorpusStore {
     pub fn upsert_metal(&self, row: MetalObservation) -> Result<(), String> {
         self.recover_transactions()?;
         row.validate_content()?;
+        require_timing("Metal", &row.case_id, &row.environment_id, row.timing)?;
         let index = shard_index_for_hash(&row.air_sha256)?;
         self.validate_observation_case(
             index,
@@ -411,6 +412,7 @@ impl CorpusStore {
     pub fn upsert_candidate(&self, row: CandidateObservation) -> Result<(), String> {
         self.recover_transactions()?;
         row.validate_content()?;
+        require_timing("candidate", &row.case_id, &row.environment_id, row.timing)?;
         let index = shard_index_for_hash(&row.air_sha256)?;
         self.validate_observation_case(
             index,
@@ -1138,6 +1140,29 @@ fn validate_observation_output(case: &AuthoredCase, output_b64: &str) -> Result<
     Ok(())
 }
 
+/// A row this build stores records what its case cost in time, or it is not stored.
+///
+/// The owner's rule is that every suite records timing for every case it runs, not a selection, and
+/// this is where that holds by construction: the two paths that produce a row — a Metal
+/// qualification and a candidate run on a device — each hand their own measurement to the store,
+/// and a path that measured nothing cannot write a row at all. Rows already on disk are kept as
+/// they are: a row recorded before the figure existed carries none, and reading one, or rewriting
+/// its shard around a new row, never goes through here.
+fn require_timing(
+    side: &str,
+    case_id: &str,
+    environment_id: &str,
+    timing: Option<crate::observation::CaseTiming>,
+) -> Result<(), String> {
+    match timing {
+        Some(_) => Ok(()),
+        None => Err(format!(
+            "the {side} row of case {case_id} in {environment_id} records no timing; a run this \
+             build stores measures what its case cost"
+        )),
+    }
+}
+
 fn reject_duplicate_metal_slots<'a>(
     rows: impl IntoIterator<Item = &'a MetalObservation>,
 ) -> Result<(), String> {
@@ -1363,6 +1388,7 @@ mod tests {
         store.put_case(case.clone()).unwrap();
         store.put_case(unrelated.clone()).unwrap();
         let metal = |case: &AuthoredCase, environment_id: &str| MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -1442,6 +1468,7 @@ mod tests {
     ) -> CandidateObservation {
         let output_sha256 = crate::hash::sha256_bytes(&[42, 0, 0, 0]);
         CandidateObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -1588,6 +1615,7 @@ mod tests {
         store.upsert_candidate(old).unwrap();
         store
             .upsert_metal(MetalObservation {
+                timing: Some(crate::observation::test_timing()),
                 case_id: case.case_id.clone(),
                 air_sha256: case.air_sha256.clone(),
                 input_sha256: case.computed_input_sha256().unwrap(),
@@ -1677,6 +1705,7 @@ mod tests {
         for case in [&first, &sibling] {
             store
                 .upsert_metal(MetalObservation {
+                    timing: Some(crate::observation::test_timing()),
                     case_id: case.case_id.clone(),
                     air_sha256: case.air_sha256.clone(),
                     input_sha256: case.computed_input_sha256().unwrap(),
@@ -1724,6 +1753,7 @@ mod tests {
         let case = make_case("slot", "AAAAAA==");
         store.put_case(case.clone()).unwrap();
         let mut row = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -1787,6 +1817,7 @@ mod tests {
 
         let empty_sha256 = crate::hash::sha256_bytes(&[]);
         let empty_metal = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: empty_case.case_id.clone(),
             air_sha256: empty_case.air_sha256.clone(),
             input_sha256: empty_case.computed_input_sha256().unwrap(),
@@ -1811,6 +1842,7 @@ mod tests {
         store.put_case(nonempty_case.clone()).unwrap();
         let nonempty_input_sha256 = nonempty_case.computed_input_sha256().unwrap();
         let empty_for_buffer = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: nonempty_case.case_id.clone(),
             air_sha256: nonempty_case.air_sha256,
             input_sha256: nonempty_input_sha256,
@@ -1838,6 +1870,7 @@ mod tests {
         let message =
             "simdgroup_matrix<T,16,16x16> operations are supported by GPUFamily10 and later";
         let gap = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -2347,6 +2380,7 @@ mod tests {
         observation_store.put_case(case.clone()).unwrap();
         observation_store
             .upsert_metal(MetalObservation {
+                timing: Some(crate::observation::test_timing()),
                 case_id: case.case_id.clone(),
                 air_sha256: case.air_sha256.clone(),
                 input_sha256: case.computed_input_sha256().unwrap(),

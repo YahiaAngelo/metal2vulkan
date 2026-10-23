@@ -68,8 +68,8 @@ use crate::library_module::ResolvedLinkedFunctions;
 use crate::literal::{LiteralResources, LiteralTexture};
 use crate::metal::ORACLE_ABI;
 use crate::observation::{
-    Backend, CandidateDependencies, CandidateObservation, CandidateStatus, MetalObservation,
-    TRANSLATOR_FINGERPRINT,
+    Backend, CandidateDependencies, CandidateObservation, CandidateStatus, CaseTiming,
+    MetalObservation, TRANSLATOR_FINGERPRINT,
 };
 use crate::observation_contract::ComparisonClass;
 use crate::refusal::{Refusal, RefusalObservation};
@@ -2707,8 +2707,18 @@ pub(crate) fn run_on_device(input: &DeviceInput) -> DeviceOutcome {
             }
         }
     };
+    // What the run cost in time, read around the run itself: the case's compiles, its device work
+    // and its readback, with the worker's own admission and preparation of the case outside it, so
+    // the figure a row records is the case on the device and nothing else. The clock is the one
+    // the pipeline-creation ceiling is checked against, so the two can never disagree.
+    let mut took = None;
     let attempt = match prepare_on_device(input) {
-        Ok((prepared, worker)) => run_prepared(&prepared, input.backend, &worker),
+        Ok((prepared, worker)) => {
+            let clock = crate::budgets::CreationClock::start();
+            let attempt = run_prepared(&prepared, input.backend, &worker);
+            took = Some(clock.read());
+            attempt
+        }
         Err(error) => RunAttempt::of(Err(error)),
     };
     let recorded = |mut environment: serde_json::Value| {
@@ -2718,13 +2728,26 @@ pub(crate) fn run_on_device(input: &DeviceInput) -> DeviceOutcome {
         environment
     };
     DeviceOutcome {
-        result: attempt.result.map(|run| DeviceRun {
-            output: run.output,
-            spv_sha256: run.spv_sha256,
-            translator_fingerprint: run.translator_fingerprint,
-            environment: recorded(run.environment),
-            comparison: run.comparison,
-            census: run.census,
+        result: attempt.result.and_then(|run| {
+            // A run the worker reports is a run its clock read: only a case that never reached the
+            // device (its preparation failed) leaves no figure, and that is no run.
+            let timing = took
+                .and_then(|span| CaseTiming::of([span]))
+                .ok_or_else(|| {
+                    ExecutorError::from(format!(
+                        "the device run of case {} reports no timing",
+                        input.case.case_id
+                    ))
+                })?;
+            Ok(DeviceRun {
+                output: run.output,
+                spv_sha256: run.spv_sha256,
+                translator_fingerprint: run.translator_fingerprint,
+                environment: recorded(run.environment),
+                comparison: run.comparison,
+                census: run.census,
+                timing,
+            })
         }),
         refused_on: attempt.refused_on.map(|opened| OpenedDevice {
             environment: recorded(opened.environment),
@@ -3212,6 +3235,7 @@ pub fn execute_prepared(
         executor_abi: ENGINE_EXECUTOR_ABI.into(),
         comparison: run.comparison.clone(),
         census: Some(run.census.clone()),
+        timing: Some(run.timing),
         status,
     };
     // The row contract first, so a refusal (such as a row under an unrequested profiles layer)

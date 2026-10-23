@@ -55,7 +55,7 @@ use crate::gpu::wait::{
     report_incident, set_wait_timeout, wait_timeout, SubmissionBackend, HANG_EXIT_CODE,
 };
 use crate::gpu::DeviceType;
-use crate::observation::{Backend, TRANSLATOR_FINGERPRINT};
+use crate::observation::{Backend, CaseTiming, TRANSLATOR_FINGERPRINT};
 use crate::observation_contract::ComparisonClass;
 use crate::ScratchDir;
 use serde::{Deserialize, Serialize};
@@ -130,6 +130,10 @@ pub struct DeviceRun {
     pub environment: serde_json::Value,
     pub comparison: ComparisonClass,
     pub census: ExecutedCensus,
+    /// What the execution cost in time, measured in the worker around the run itself
+    /// ([`CaseTiming`]), which is the figure the row records. The worker measures every run it
+    /// reports, so this is not optional: the parent has a figure for every row it stores.
+    pub timing: CaseTiming,
 }
 
 /// The device a device worker opened before its run ended in a typed refusal: the facts the row

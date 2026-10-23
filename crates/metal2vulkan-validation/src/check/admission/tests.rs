@@ -185,6 +185,7 @@ fn a_metal_row_from_an_earlier_oracle_needs_metal_qualification() {
     assert_ne!(recorded, crate::metal::ORACLE_ABI);
     crate::store::CorpusStore::new(root.path())
         .upsert_metal(crate::observation::MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
