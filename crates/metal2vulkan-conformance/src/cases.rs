@@ -33,6 +33,7 @@ pub mod stage_in_regions;
 pub mod surface_fills;
 pub mod texture_buffer_fills;
 pub mod texture_fills;
+pub mod tile_threadgroups;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
 pub mod two_plane_samples;
@@ -88,6 +89,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.push(Box::new(mesh_commands::unordered_draws()));
     cases.push(Box::new(surface_fills::over_planes_and_buffers()));
     for case in rate_maps::all() {
+        cases.push(Box::new(case));
+    }
+    for case in tile_threadgroups::all() {
         cases.push(Box::new(case));
     }
     cases

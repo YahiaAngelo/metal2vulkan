@@ -70,7 +70,7 @@
 use crate::case::{
     Answer, Bindings, Fill, Handle, IndirectReadBack, MeshCommand, MeshFunctions, MeshStep,
     PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side,
-    StageInRegion, StageInput, TextureSpec, Venue,
+    StageInRegion, StageInput, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
 use crate::recording::Validated;
 use crate::transcript::Value;
@@ -411,5 +411,25 @@ impl<S: Side> Side for Announcing<S> {
     fn copy_rate_map_parameters(&mut self, map: Handle, into: Handle, offset: u64) -> Answer<()> {
         self.at("copy_rate_map_parameters");
         self.inner.copy_rate_map_parameters(map, into, offset)
+    }
+
+    fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
+        self.at("tile_pipeline");
+        self.inner.tile_pipeline(library, spec)
+    }
+
+    fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
+        self.at("tile_facts");
+        self.inner.tile_facts(state)
+    }
+
+    fn tile_pass(
+        &mut self,
+        targets: &[Handle],
+        tile: [u32; 2],
+        steps: &[TileStep],
+    ) -> Answer<PassOutcome> {
+        self.at("tile_pass");
+        self.inner.tile_pass(targets, tile, steps)
     }
 }

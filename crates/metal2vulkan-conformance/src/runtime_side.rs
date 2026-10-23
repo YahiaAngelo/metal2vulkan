@@ -10,7 +10,8 @@
 use crate::case::{
     Answer, Bindings, CommandDraw, Failure, Fill, Handle, IndirectReadBack, MeshCommand,
     MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec,
-    ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, Venue,
+    ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
+    TilePipelineSpec, TileStep, Venue,
 };
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
@@ -20,7 +21,7 @@ use metal2vulkan::metal::{
 };
 use metal2vulkan::pipeline::{
     ColorAttachmentDescriptor, MeshPipelineDescriptor, StageInputAttributeDescriptor,
-    StageInputDescriptor, StageInputLayoutDescriptor, StageSource,
+    StageInputDescriptor, StageInputLayoutDescriptor, StageSource, TileRenderPipelineDescriptor,
 };
 use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue, ComputePipelineState,
@@ -51,8 +52,9 @@ pub struct RuntimeSide<'a> {
     /// runtime object, not another name for one of the pools above.
     rate_maps: Vec<RasterizationRateMap>,
     command_buffers: Vec<CommandBuffer>,
-    /// The mesh render pipeline states the case has made.
-    mesh_pipelines: Vec<RenderPipelineState>,
+    /// The render pipeline states the case has made. One pool, because a mesh state and a tile
+    /// state are one runtime object (`RenderPipelineState`) made from two descriptors.
+    render_pipelines: Vec<RenderPipelineState>,
     /// The indirect command buffers the case has made.
     command_buffers_indirect: Vec<IndirectCommandBuffer>,
     /// The degrade-notice codes the device has delivered so far, which `announced` takes away.
@@ -73,7 +75,7 @@ impl<'a> RuntimeSide<'a> {
             samplers: Vec::new(),
             rate_maps: Vec::new(),
             command_buffers: Vec::new(),
-            mesh_pipelines: Vec::new(),
+            render_pipelines: Vec::new(),
             command_buffers_indirect: Vec::new(),
             notices: Box::new(notices),
         }
@@ -239,6 +241,7 @@ fn usage_of(role: TextureRole) -> TextureUsage {
         TextureRole::Read => TextureUsage::SHADER_READ,
         TextureRole::Write => TextureUsage::SHADER_WRITE,
         TextureRole::ReadWrite => TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE,
+        TextureRole::RenderTarget => TextureUsage::RENDER_TARGET,
     }
 }
 
@@ -633,7 +636,7 @@ impl Side for RuntimeSide<'_> {
             .device
             .new_mesh_render_pipeline_state(&descriptor, &PipelineOptions::default())
             .map_err(Failure::from_error)?;
-        Ok(keep(&mut self.mesh_pipelines, state))
+        Ok(keep(&mut self.render_pipelines, state))
     }
 
     fn render_target(&mut self, width: u32, height: u32) -> Answer<Handle> {
@@ -657,7 +660,7 @@ impl Side for RuntimeSide<'_> {
             .iter()
             .map(|handle| self.held_texture(*handle).cloned())
             .collect::<Answer<Vec<Texture>>>()?;
-        let states: Vec<RenderPipelineState> = self.mesh_pipelines.clone();
+        let states: Vec<RenderPipelineState> = self.render_pipelines.clone();
         let buffers: Vec<Buffer> = self.buffers.clone();
         let held = |handle: Handle| -> Answer<&Buffer> {
             buffers
@@ -810,7 +813,7 @@ impl Side for RuntimeSide<'_> {
             .device
             .new_mesh_render_pipeline_state(&descriptor, &PipelineOptions::default())
             .map_err(Failure::from_error)?;
-        Ok(keep(&mut self.mesh_pipelines, state))
+        Ok(keep(&mut self.render_pipelines, state))
     }
 
     fn mesh_command_buffer(&mut self, commands: &[MeshCommand]) -> Answer<Handle> {
@@ -834,7 +837,7 @@ impl Side for RuntimeSide<'_> {
                 .indirect_render_command_at(at as u64)
                 .map_err(Failure::from_error)?;
             let state = self
-                .mesh_pipelines
+                .render_pipelines
                 .get(command.pipeline.0 as usize)
                 .ok_or_else(|| {
                     Failure::named(
@@ -1100,6 +1103,133 @@ impl Side for RuntimeSide<'_> {
         map.copy_parameter_data_to_buffer(&buffer, offset)
             .map_err(Failure::from_error)?;
         Ok(())
+    }
+
+    fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .new_function_with_name(spec.entry)
+            .map_err(Failure::from_error)?;
+        let mut descriptor = TileRenderPipelineDescriptor::new(StageSource::Function(
+            function.function_descriptor(),
+        ));
+        for (slot, format) in descriptor
+            .color_attachment_formats
+            .iter_mut()
+            .zip(spec.attachments)
+        {
+            *slot = Some(*format);
+        }
+        descriptor.max_total_threads_per_threadgroup = spec.max_total_threads_per_threadgroup;
+        descriptor.threadgroup_size_matches_tile_size = spec.threadgroup_size_matches_tile_size;
+        let state = self
+            .device
+            .new_tile_render_pipeline_state(&descriptor, &PipelineOptions::default())
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.render_pipelines, state))
+    }
+
+    fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
+        let state = self
+            .render_pipelines
+            .get(state.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0)))?;
+        Ok(TileFacts {
+            max_total_threads_per_threadgroup: u64::from(state.max_total_threads_per_threadgroup()),
+            threadgroup_size_matches_tile_size: state.threadgroup_size_matches_tile_size(),
+            imageblock_sample_length: state.imageblock_sample_length().ok(),
+        })
+    }
+
+    fn tile_pass(
+        &mut self,
+        targets: &[Handle],
+        tile: [u32; 2],
+        steps: &[TileStep],
+    ) -> Answer<PassOutcome> {
+        let attachments: Vec<Texture> = targets
+            .iter()
+            .map(|handle| self.held_texture(*handle).cloned())
+            .collect::<Answer<Vec<Texture>>>()?;
+        let states: Vec<RenderPipelineState> = self.render_pipelines.clone();
+        let buffers: Vec<Buffer> = self.buffers.clone();
+        let textures: Vec<Texture> = self.textures.clone();
+        let mut pass = RenderPassDescriptor::new();
+        for (attachment, target) in pass.color_attachments.iter_mut().zip(&attachments) {
+            attachment.texture = Some(target.clone());
+            attachment.load_action = LoadAction::Load;
+            attachment.store_action = StoreAction::Store;
+        }
+        pass.tile_width = u64::from(tile[0]);
+        pass.tile_height = u64::from(tile[1]);
+        let command_buffer = self
+            .queue()?
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        let mut encoder = command_buffer
+            .render_command_encoder(&pass)
+            .map_err(Failure::from_error)?;
+        let mut refused = Vec::with_capacity(steps.len());
+        for step in steps {
+            let answered = match step {
+                TileStep::Pipeline(state) => states
+                    .get(state.0 as usize)
+                    .ok_or_else(|| {
+                        Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0))
+                    })
+                    .and_then(|state| {
+                        encoder
+                            .set_render_pipeline_state(state)
+                            .map_err(Failure::from_error)
+                    }),
+                TileStep::TileBuffer {
+                    buffer,
+                    offset,
+                    index,
+                } => buffers
+                    .get(buffer.0 as usize)
+                    .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", buffer.0)))
+                    .and_then(|buffer| {
+                        encoder
+                            .set_tile_buffer(Some(buffer), *offset, *index)
+                            .map_err(Failure::from_error)
+                    }),
+                TileStep::TileBytes { bytes, index } => encoder
+                    .set_tile_bytes(bytes, *index)
+                    .map_err(Failure::from_error),
+                TileStep::TileTexture { texture, index } => textures
+                    .get(texture.0 as usize)
+                    .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", texture.0)))
+                    .and_then(|texture| {
+                        encoder
+                            .set_tile_texture(Some(texture), *index)
+                            .map_err(Failure::from_error)
+                    }),
+                TileStep::DispatchThreadsPerTile(threads) => encoder
+                    .dispatch_threads_per_tile(size(*threads))
+                    .map_err(Failure::from_error),
+            };
+            refused.push(answered.err());
+        }
+        encoder.end_encoding().map_err(Failure::from_error)?;
+        command_buffer.commit().map_err(Failure::from_error)?;
+        if command_buffer.wait_until_completed_for(WAIT).is_err() {
+            return Ok(PassOutcome {
+                refused,
+                status: Value::Nothing(Negative::NeverReturned),
+                error: None,
+            });
+        }
+        Ok(PassOutcome {
+            refused,
+            status: status_value(command_buffer.status()),
+            error: command_buffer
+                .error()
+                .map(|error| Value::unit_variant(format!("{error:?}"))),
+        })
     }
 }
 
