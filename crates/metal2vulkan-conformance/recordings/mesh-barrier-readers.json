@@ -1319,7 +1319,7 @@
         "command_buffers_begun_segments": 6,
         "command_buffers_deferred": 54,
         "command_buffers_replayed": 18,
-        "command_buffers_replayed_inline": 36,
+        "command_buffers_replayed_inline": 45,
         "command_buffers_submitted": 28,
         "commands_replayed.begin_command_buffer": 54,
         "commands_replayed.cmd_begin_render_pass": 12,
@@ -1406,7 +1406,7 @@
         "variant_pipelines_made": 27,
         "wakes_completion_waiters": 6,
         "wakes_handler_threads": 2,
-        "wakes_spared": 37
+        "wakes_spared": 36
       },
       "composed": {
         "addressable_buffers_made": 2,

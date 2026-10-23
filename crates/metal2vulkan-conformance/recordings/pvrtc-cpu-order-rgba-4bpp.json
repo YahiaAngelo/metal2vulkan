@@ -783,7 +783,6 @@
         "completed_where_seen": 24,
         "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 24,
-        "fences_made": 1,
         "finales_folded": 24,
         "internal_submissions": 12,
         "new_buffer_bytes_cleared": 4320,
