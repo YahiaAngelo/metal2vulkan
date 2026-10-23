@@ -533,6 +533,22 @@ fn the_accepted_differences_are_read_from_the_document() {
     assert!(!entries.contains(&"nothing-of-the-sort".to_owned()));
 }
 
+/// An entry whose bold lead-in wraps onto the next line is an entry. Reading the first line alone
+/// made those invisible, so an allowance naming one could never be justified. The first of these
+/// wraps in the document today; the second, on one line, is the control.
+#[test]
+fn an_entry_whose_lead_in_wraps_is_read_whole() {
+    let entries = accepted_differences();
+    for lead_in in [
+        "An object grid of more than 2^29 threadgroups fails its command buffer by its count, at \
+         once",
+        "A mesh grid of 1,048,577 to 2,097,151 threadgroups draws nothing",
+    ] {
+        let slug = accepted_slug(lead_in);
+        assert!(entries.contains(&slug), "{slug} is not an entry");
+    }
+}
+
 #[test]
 fn a_typed_error_where_metal_answered_is_refused_not_divergent() {
     let case = WordsCase::new("words", 2);

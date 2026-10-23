@@ -52,7 +52,7 @@
 //!   left. (A resource ID is a device-local 64-bit value and must never enter a transcript; it is
 //!   an input to the kernel and nothing else.)
 
-use crate::allowance::Allowance;
+use crate::allowance::{Allowance, Justification, Loosening};
 use crate::case::{
     Abort, Case, CommandDraw, Failure, Input, MeshCommand, MeshFunctions, MetalSource, Side,
     TARGET_TEXEL,
@@ -365,17 +365,19 @@ impl Case for MeshCommands {
 /// also every run: the emulation records the reader's object dispatch after the writer's mesh
 /// dispatch, so the reader reads `(3, 2, 1, 7)`, draws its 3 by 2 threadgroups and `drawn` is 7.
 ///
-/// So the reader's texels are **not observed**. A recording can only sample an order Metal's own
-/// contract leaves open, and comparing against one sample would make this chip's scheduling of
-/// the moment into our requirement; the outcome set the plan gives racy rows cannot close that,
-/// because it can hold only the orders Metal happened to produce. What the contract *does*
-/// determine is compared, exactly: the writer's own texel at (7, 7), the control words the pass
-/// leaves behind, the calls of the pass, and the command buffer's status and error.
+/// So the reader's texels are **recorded but not compared**. A recording can only sample an order
+/// Metal's own contract leaves open, and comparing against one sample would make this chip's
+/// scheduling of the moment into our requirement; the outcome set the plan gives racy rows cannot
+/// close that, because it can hold only the orders Metal happened to produce. What the contract
+/// *does* determine is compared, exactly: the writer's own texel at (7, 7), the control words the
+/// pass leaves behind, the calls of the pass, and the command buffer's status and error.
 ///
-/// The difference in the reader's texels is a finding, not an allowance: it is reported with these
-/// numbers, and closing it means either announcing that the emulation orders what Metal leaves
-/// unordered, or writing it down as an accepted difference. Neither is this case's to decide, and
-/// until one of them happens no case may compare that field.
+/// The whole attachment is still a site of the transcript, loosened to [`Loosening::Unchecked`]
+/// and justified by the accepted difference `docs/API.md` section 10 now carries for the order
+/// ([`ORDER_IS_ACCEPTED`]). Two reasons it is a site rather than nothing: the recording then holds
+/// **Metal's own texels** for every one of the 30 runs, so the next macOS is read against them
+/// instead of against a memory of them; and the loosening has to name a document entry, so the day
+/// we announce the order or withdraw the entry, this case fails and says which.
 pub const UNORDERED_DRAWS: &str = "mesh-commands-unordered-draws";
 
 /// The owned fixture the racy row runs: `mesh_barrier`'s writer and object reader, the same
@@ -405,6 +407,15 @@ const UNORDERED_ROW: &str = "cpu_nobarrier";
 /// The texel the writer's fragment function covers, whichever order the two draws run in.
 const COVER: [u32; 2] = [7, 7];
 
+/// The bold lead-in of the accepted difference in `docs/API.md` section 10 that the order rests
+/// on: the runtime's emulation of mesh draws orders two unbarriered draws of one pass, where Metal
+/// orders nothing. The slug of these words must be an entry of the document or the case fails.
+const ORDER_IS_ACCEPTED: &str =
+    "Two mesh draws of one pass with no barrier between them run in order.";
+
+/// The site the whole attachment is recorded at, under the row.
+const ATTACHMENT_SITE: &str = "attachment";
+
 /// The layout the writer's own texel is read under: the one texel at [`COVER`] of level 0 of
 /// slice 0, as four 32-bit words, so a diff names the word inside the texel the writer wrote.
 fn cover_layout() -> ByteLayout {
@@ -423,6 +434,29 @@ fn cover_layout() -> ByteLayout {
         row_pitch: TARGET_TEXEL,
         rows: 1,
         image_pitch: TARGET_TEXEL,
+        images: 1,
+        gaps: Gaps::Compared,
+    }
+}
+
+/// The layout the whole attachment is read under: level 0 of slice 0, 8 by 8 texels of four
+/// 32-bit words each, rows adjacent, so a diff names the texel and the word inside it.
+fn whole_layout() -> ByteLayout {
+    ByteLayout {
+        region: Region::Texture {
+            level: 0,
+            slice: 0,
+            aspect: Aspect::Color,
+            sample: 0,
+            origin: [0, 0, 0],
+            size: [SIDE, SIDE, 1],
+        },
+        element: Element::U32,
+        row_offset: 0,
+        row_elements: SIDE * TARGET_TEXEL / 4,
+        row_pitch: SIDE * TARGET_TEXEL,
+        rows: SIDE,
+        image_pitch: SIDE * SIDE * TARGET_TEXEL,
         images: 1,
         gaps: Gaps::Compared,
     }
@@ -487,7 +521,13 @@ impl Case for UnorderedDraws {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        super::mesh_draws::mesh_notice_allowances()
+        let mut allowances = super::mesh_draws::mesh_notice_allowances();
+        allowances.push(Allowance::new(
+            format!("case/{UNORDERED_ROW}/{ATTACHMENT_SITE}"),
+            Loosening::Unchecked,
+            Justification::accepted(crate::allowance::accepted_slug(ORDER_IS_ACCEPTED)),
+        ));
+        allowances
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -629,9 +669,11 @@ impl Case for UnorderedDraws {
         let texels = side
             .read_texture(target, [SIDE, SIDE], SIDE * TARGET_TEXEL)
             .map_err(|failure| stop(format!("{UNORDERED_ROW}/attachment"), failure))?;
-        // Only the writer's own texel is compared, and the reader's are not observed at all: see
-        // the case's documentation. The whole level is read, as the probe read it, and the texel
-        // is named by its origin so a reader of a diff sees which texel this is.
+        // Only the writer's own texel is compared; the whole level is a site of its own, loosened
+        // by the accepted difference the order rests on, so the recording keeps Metal's texels
+        // without this chip's scheduling becoming a requirement. See the case's documentation.
+        // The whole level is read, as the probe read it, and the texel is named by its origin so
+        // a reader of a diff sees which texel this is.
         let at = (COVER[1] * SIDE + COVER[0]) as usize * TARGET_TEXEL as usize;
         let cover = texels
             .get(at..at + TARGET_TEXEL as usize)
@@ -646,6 +688,10 @@ impl Case for UnorderedDraws {
             })?
             .to_vec();
         node = node.with(Node::leaf("cover", Observed::bytes(cover, cover_layout())));
+        node = node.with(Node::leaf(
+            ATTACHMENT_SITE,
+            Observed::bytes(texels, whole_layout()),
+        ));
         let after = side
             .read_buffer(control, 0, words.len())
             .map_err(|failure| stop(format!("{UNORDERED_ROW}/control-after"), failure))?;
