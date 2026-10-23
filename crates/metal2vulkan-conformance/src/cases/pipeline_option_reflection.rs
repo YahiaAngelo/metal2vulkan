@@ -1,13 +1,13 @@
 //! Every `MTLPipelineOption` value against the reflection it makes a creation answer.
 //!
-//! [`crate::pipeline_options`] states the sweep and the two claims it is pointed at: that
+//! [`crate::pipeline_option_reflection`] states the sweep and the two claims it is pointed at: that
 //! `MTLPipelineOptionBufferTypeInfo` answers what `MTLPipelineOptionBindingInfo` answers, and that
 //! `MTLPipelineOptionFailOnBinaryArchiveMiss` changes nothing where no archive is listed. Before
 //! this family the suite had reached one of the enumeration's eight values.
 //!
 //! # The sweep: 8 of 8 values, over three kernels
 //!
-//! Every row of [`crate::pipeline_options::MASKS`] is taken against each of the three
+//! Every row of [`crate::pipeline_option_reflection::MASKS`] is taken against each of the three
 //! kernels [`crate::cases::function_bindings`] reads a reflection off, because the three cover the
 //! three binding kinds the reflection has fields for and the option under test is claimed to be
 //! about one of them:
@@ -43,7 +43,7 @@
 
 use crate::case::{Abort, Case, Failure, Input, MetalSource, Side};
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
-use crate::pipeline_options::MASKS;
+use crate::pipeline_option_reflection::MASKS;
 use crate::recording::ShaderRef;
 use crate::transcript::{Digest, Node, Observed, Sites};
 

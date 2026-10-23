@@ -595,7 +595,7 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         library: Handle,
         entry: &str,
         options: u64,
-    ) -> Answer<crate::pipeline_options::UnderOptions> {
+    ) -> Answer<crate::pipeline_option_reflection::UnderOptions> {
         let _span = self.watch("compute_pipeline_reflection_under");
         self.inner
             .compute_pipeline_reflection_under(library, entry, options)

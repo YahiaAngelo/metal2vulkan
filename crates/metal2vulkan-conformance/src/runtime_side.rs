@@ -49,7 +49,7 @@ use crate::pipeline_handlers::{
     BothPaths, Delivered, Form as PipelineForm, Handled, StateFacts,
     IMAGEBLOCK as HANDLER_IMAGEBLOCK,
 };
-use crate::pipeline_options::UnderOptions;
+use crate::pipeline_option_reflection::UnderOptions;
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     ColorState, LodClamp, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction,

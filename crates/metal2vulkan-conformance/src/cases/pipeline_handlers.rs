@@ -18,7 +18,7 @@
 //!   or a handler that is simply never called.
 //! - **the options value** — `newComputePipelineStateWithFunction:options:completionHandler:` is
 //!   taken with **all eight** combinations of the three bits Apple's header names
-//!   ([`crate::pipeline_options::MASKS`]' own value space), so the asynchronous path's reflection
+//!   ([`crate::pipeline_option_reflection::MASKS`]' own value space), so the asynchronous path's reflection
 //!   rule is swept whole. `MTLPipelineOptionFailOnBinaryArchiveMiss` alone is the row that
 //!   matters: Metal fills the handler's reflection for it, which Apple's documentation for that
 //!   bit does not say, and reading only the two information bits answered nil there. The other
@@ -231,7 +231,7 @@ fn mesh_with(mesh: &'static str) -> MeshFunctions<'static> {
 /// rows sweep, with the case name each takes.
 ///
 /// All eight combinations of the three bits Apple's header names, in
-/// [`crate::pipeline_options::MASKS`]' order, so the two families sweep the same value space and a
+/// [`crate::pipeline_option_reflection::MASKS`]' order, so the two families sweep the same value space and a
 /// row of one reads against the matching row of the other. The names are fixed strings rather than
 /// built from the mask, because a case's name is what a recording is keyed by.
 const COMPUTE_FUNCTION_MASKS: [(u64, &str); 8] = [
@@ -356,7 +356,7 @@ pub fn all() -> Vec<PipelineHandlerCase> {
     // **All eight `MTLPipelineOption` values on one form**, so the asynchronous path's reflection
     // rule is swept whole and not only at the bit Apple's documentation describes.
     // `MTLPipelineOptionFailOnBinaryArchiveMiss` alone is the row that matters: Metal fills the
-    // handler's reflection for it, which `pipeline_options` found through the synchronous call,
+    // handler's reflection for it, which `pipeline_option_reflection` found through the synchronous call,
     // and these rows are what hold the same rule through the block.
     for (options, name) in COMPUTE_FUNCTION_MASKS {
         cases.push(PipelineHandlerCase {

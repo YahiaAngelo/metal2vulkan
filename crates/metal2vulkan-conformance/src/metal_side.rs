@@ -54,7 +54,7 @@ use crate::pipeline_handlers::{
     BothPaths, Delivered, Form as PipelineForm, Handled, StateFacts,
     IMAGEBLOCK as HANDLER_IMAGEBLOCK, WAIT as HANDLER_WAIT,
 };
-use crate::pipeline_options::UnderOptions;
+use crate::pipeline_option_reflection::UnderOptions;
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, StepResource,
@@ -2984,7 +2984,7 @@ impl Side for MetalSide {
         let mut reflection = None;
         // SAFETY: the function is of this device's library, and `reflection` is this call's own
         // out-parameter. The options are bits Apple's header names
-        // ([`crate::pipeline_options::MASKS`]), so nothing undefined reaches Metal here.
+        // ([`crate::pipeline_option_reflection::MASKS`]), so nothing undefined reaches Metal here.
         let made = unsafe {
             self.device
                 .newComputePipelineStateWithFunction_options_reflection_error(

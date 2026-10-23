@@ -1297,7 +1297,7 @@ pub trait Side {
 
     /// `newComputePipelineStateWithFunction:options:reflection:error:` of the library's `entry`
     /// under the raw `MTLPipelineOption` bits `options`, and the whole reflection it answered
-    /// ([`crate::pipeline_options`]).
+    /// ([`crate::pipeline_option_reflection`]).
     ///
     /// One call for the creation and the reading, because Metal answers a reflection **only** at
     /// the creation: there is no getter to ask the state for one afterwards. The options are the
@@ -1305,7 +1305,7 @@ pub trait Side {
     /// the choice [`crate::device_queries`]' heap query already makes for `MTLResourceOptions`.
     ///
     /// A refused creation is an `Ok` whose answer says it was refused
-    /// ([`UnderOptions::refused`](crate::pipeline_options::UnderOptions::refused)), not an `Err`:
+    /// ([`UnderOptions::refused`](crate::pipeline_option_reflection::UnderOptions::refused)), not an `Err`:
     /// the case is asking what each options value does, and "this value is refused" is one of the
     /// answers it compares rather than a call the side could not make.
     fn compute_pipeline_reflection_under(
@@ -1313,7 +1313,7 @@ pub trait Side {
         library: Handle,
         entry: &str,
         options: u64,
-    ) -> Answer<crate::pipeline_options::UnderOptions> {
+    ) -> Answer<crate::pipeline_option_reflection::UnderOptions> {
         let _ = (library, entry, options);
         Err(Failure::unavailable("compute_pipeline_reflection_under"))
     }
