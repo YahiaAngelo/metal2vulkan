@@ -14,10 +14,11 @@
 
 use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
-    Answer, ArgumentSlot, Bindings, CommandDraw, Failure, FragmentFill, FragmentFilled, Handle,
-    MeshCommand, MeshFunctions, MeshStep, PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec,
-    ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
-    TilePipelineSpec, TileStep, Venue,
+    Answer, ArgumentSlot, Bindings, CommandDraw, CoordinateProbe, Failure, FragmentFill,
+    FragmentFilled, Handle, MappedCoordinates, MeshCommand, MeshFunctions, MeshStep, PassOutcome,
+    RateMapFacts, RateMapForm, RateMapLayer, RateMapRequest, SamplerSpec, ShaderSource, Side,
+    StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep,
+    Venue,
 };
 use crate::command_buffer_facts::CommandBufferFacts;
 use crate::compute_descriptors::{
@@ -81,7 +82,7 @@ use metal2vulkan::metal::{
 use metal2vulkan_runtime::{PurgeableState, SparsePageSize};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::AnyThread;
+use objc2::{AnyThread, ClassType};
 use objc2_foundation::{NSArray, NSDictionary, NSObjectProtocol, NSRange, NSString, NSURL};
 use objc2_metal::{
     MTLArgumentDescriptor, MTLArgumentEncoder, MTLArrayType, MTLAttribute, MTLAttributeFormat,
@@ -3927,47 +3928,169 @@ impl Side for MetalSide {
     }
 
     fn rate_map(&mut self, request: &RateMapRequest<'_>) -> Answer<Handle> {
-        let descriptor = unsafe {
-            MTLRasterizationRateMapDescriptor::rasterizationRateMapDescriptorWithScreenSize(
-                MTLSize {
-                    width: request.screen[0] as usize,
-                    height: request.screen[1] as usize,
-                    depth: 0,
-                },
-            )
+        if !request.form.takes(request.layers.len()) {
+            return Err(Failure::named(
+                "FormTakesAnotherLayerCount",
+                format!(
+                    "{:?} cannot build a descriptor of {} layers",
+                    request.form,
+                    request.layers.len()
+                ),
+            ));
+        }
+        let screen = MTLSize {
+            width: request.screen[0] as usize,
+            height: request.screen[1] as usize,
+            depth: 0,
+        };
+        let layers = request
+            .layers
+            .iter()
+            .map(layer_descriptor)
+            .collect::<Answer<Vec<_>>>()?;
+        let descriptor = match request.form {
+            // The two class methods that take their layers with them. Each is one call, so there
+            // is no intermediate state for a setter to leave wrong, which is what makes them worth
+            // comparing against the setter forms at all.
+            RateMapForm::ScreenSizeAndLayer => {
+                let layer = layers
+                    .first()
+                    .ok_or_else(|| Failure::named("NoLayer", "the one-layer form has no layer"))?;
+                // SAFETY: the screen size is inside Metal's own validation bound, which
+                // `rate_map_space` holds every shape to.
+                unsafe {
+                    MTLRasterizationRateMapDescriptor::
+                        rasterizationRateMapDescriptorWithScreenSize_layer(screen, layer)
+                }
+            }
+            RateMapForm::ScreenSizeLayerCountLayers => {
+                // `objc2-metal` 0.3.2 binds neither this constructor nor
+                // `MTLRasterizationRateLayerDescriptor`'s `sampleCount` getter, though the SDK
+                // declares both, so the selector goes by hand. Apple's signature is
+                // `(MTLSize, NSUInteger, MTLRasterizationRateLayerDescriptor * const *)`, and the
+                // array must hold `layerCount` non-null pointers.
+                let pointers: Vec<*const MTLRasterizationRateLayerDescriptor> =
+                    layers.iter().map(|layer| &**layer as *const _).collect();
+                let class = MTLRasterizationRateMapDescriptor::class();
+                // SAFETY: the selector is the SDK's, the receiver is its class, and `pointers`
+                // holds exactly `layers.len()` non-null pointers to live layer descriptors that
+                // outlive the call.
+                let made: Option<Retained<MTLRasterizationRateMapDescriptor>> = unsafe {
+                    objc2::msg_send![
+                        class,
+                        rasterizationRateMapDescriptorWithScreenSize: screen,
+                        layerCount: pointers.len(),
+                        layers: pointers.as_ptr(),
+                    ]
+                };
+                made.ok_or_else(|| {
+                    Failure::named("RateMapDescriptorWithLayers", "returned nil".to_owned())
+                })?
+            }
+            // The three forms that start from an empty descriptor and set their layers into it.
+            _ => {
+                // SAFETY: as above, the screen size is inside Metal's validation bound.
+                let descriptor = unsafe {
+                    MTLRasterizationRateMapDescriptor::rasterizationRateMapDescriptorWithScreenSize(
+                        screen,
+                    )
+                };
+                let holed = request.form == RateMapForm::Holed;
+                for (at, layer) in layers.iter().enumerate() {
+                    // The holed form sets every layer one index up, leaving index 0 nil: the shape
+                    // whose `layerCount` Metal answers 0 for.
+                    let index = if holed { at + 1 } else { at };
+                    match request.form {
+                        // Apple's header calls `layers[i] = layer` identical to
+                        // `setLayer:atIndex:`; comparing the compiled map of each is what holds it
+                        // to that.
+                        RateMapForm::LayersSubscript => {
+                            let array = descriptor.layers();
+                            // SAFETY: the index is inside the array the descriptor grows on
+                            // demand.
+                            unsafe { array.setObject_atIndexedSubscript(Some(layer), index) };
+                        }
+                        // SAFETY: as above.
+                        _ => unsafe { descriptor.setLayer_atIndex(Some(layer), index) },
+                    }
+                }
+                descriptor
+            }
         };
         if let Some(label) = request.label {
             descriptor.setLabel(Some(&NSString::from_str(label)));
         }
-        for (at, layer) in request.layers.iter().enumerate() {
-            // `initWithSampleCount:horizontal:vertical:` reads `width` samples from `horizontal`
-            // and `height` from `vertical`, and answers nil for an axis of none, which is why
-            // `RateMapLayer` holds at least one sample on each.
-            let count = MTLSize {
-                width: layer.horizontal.len(),
-                height: layer.vertical.len(),
-                depth: 0,
-            };
-            // SAFETY: each pointer is to at least as many floats as its axis's count, and Metal
-            // copies the samples during the call.
-            let made = unsafe {
-                MTLRasterizationRateLayerDescriptor::initWithSampleCount_horizontal_vertical(
-                    MTLRasterizationRateLayerDescriptor::alloc(),
-                    count,
-                    std::ptr::NonNull::new(layer.horizontal.as_ptr().cast_mut())
-                        .ok_or_else(|| Failure::named("NoSamples", "a layer axis of none"))?,
-                    std::ptr::NonNull::new(layer.vertical.as_ptr().cast_mut())
-                        .ok_or_else(|| Failure::named("NoSamples", "a layer axis of none"))?,
-                )
-            };
-            // SAFETY: the index is inside the array the descriptor grows on demand.
-            unsafe { descriptor.setLayer_atIndex(Some(&made), at) };
+        // What the form actually built, read off the descriptor itself. This is a check on the
+        // leg, not a compared site: a form that reached another state than the case asked for
+        // would compile another map, and the comparison would then read as a difference of
+        // Metal's. `layerCount` counts the layers from index 0 contiguously, so the holed form's
+        // own answer is 0 with a layer still in it.
+        let built = descriptor.layerCount();
+        let wanted = match request.form {
+            RateMapForm::Holed => 0,
+            _ => request.layers.len(),
+        };
+        if built != wanted {
+            return Err(Failure::named(
+                "FormBuiltAnotherDescriptor",
+                format!(
+                    "{:?} built a descriptor of {built} layers, not {wanted}",
+                    request.form
+                ),
+            ));
         }
         let map = self
             .device
             .newRasterizationRateMapWithDescriptor(&descriptor)
             .ok_or_else(|| Failure::named("NewRasterizationRateMap", "returned nil".to_owned()))?;
         Ok(keep(&mut self.rate_maps, map))
+    }
+
+    fn rate_map_coordinates(
+        &mut self,
+        map: Handle,
+        probes: &[CoordinateProbe],
+    ) -> Answer<Vec<MappedCoordinates>> {
+        let map = self.held_rate_map(map)?;
+        let mut out = Vec::with_capacity(probes.len());
+        for probe in probes {
+            // SAFETY: neither call is bounds-checked on the layer index, and a case asks only
+            // inside the map's own `layerCount`. The two shapes where the screen-to-physical call
+            // ends Metal's process — a map of no layers and a map of a zero screen extent — are
+            // the case's to keep away from, and `rate_map_space` holds every swept shape to that.
+            let physical = unsafe {
+                map.mapScreenToPhysicalCoordinates_forLayer(
+                    // `MTLCoordinate2D` is `MTLSamplePosition` in `objc2-metal`, one struct of two
+                    // `f32` under two SDK names.
+                    MTLSamplePosition {
+                        x: probe.screen[0],
+                        y: probe.screen[1],
+                    },
+                    probe.layer as usize,
+                )
+            };
+            // SAFETY: as above.
+            let back = unsafe {
+                map.mapPhysicalToScreenCoordinates_forLayer(
+                    MTLSamplePosition {
+                        x: probe.physical[0],
+                        y: probe.physical[1],
+                    },
+                    probe.layer as usize,
+                )
+            };
+            out.push(MappedCoordinates {
+                screen_to_physical: [physical.x.to_bits(), physical.y.to_bits()],
+                physical_to_screen: [back.x.to_bits(), back.y.to_bits()],
+            });
+        }
+        Ok(out)
+    }
+
+    fn rate_map_device_is_the_sides(&mut self, map: Handle) -> Answer<bool> {
+        let map = self.held_rate_map(map)?;
+        let device = map.device();
+        Ok(std::ptr::eq(&*device, &*self.device))
     }
 
     fn rate_map_facts(&mut self, map: Handle, layers: &[u64]) -> Answer<RateMapFacts> {
@@ -8689,4 +8812,36 @@ fn clear_pass_attachments(descriptor: &MTLRenderPassDescriptor) {
     }
     descriptor.setDepthAttachment(None);
     descriptor.setStencilAttachment(None);
+}
+
+/// One `MTLRasterizationRateLayerDescriptor` holding a layer's quality samples.
+///
+/// `initWithSampleCount:horizontal:vertical:` reads `width` samples from `horizontal` and `height`
+/// from `vertical` and answers nil for an axis of none, which is why [`RateMapLayer`] holds at
+/// least one sample on each.
+///
+/// The other initializer, `initWithSampleCount:`, zero-fills both axes (measured on an Apple M3
+/// Max: `maxSampleCount` and `sampleCount` both read the count it was given, and every sample of
+/// `horizontalSampleStorage` and of `horizontal` reads 0). Nothing here uses it, because a layer
+/// built that way and then filled through `horizontal[i] = q` reaches the same state this reaches
+/// in one call, and a case comparing the two would be comparing two spellings of one Metal state
+/// rather than anything Metal derives.
+fn layer_descriptor(layer: &RateMapLayer) -> Answer<Retained<MTLRasterizationRateLayerDescriptor>> {
+    let count = MTLSize {
+        width: layer.horizontal.len(),
+        height: layer.vertical.len(),
+        depth: 0,
+    };
+    // SAFETY: each pointer is to at least as many floats as its axis's count, and Metal copies the
+    // samples during the call.
+    Ok(unsafe {
+        MTLRasterizationRateLayerDescriptor::initWithSampleCount_horizontal_vertical(
+            MTLRasterizationRateLayerDescriptor::alloc(),
+            count,
+            std::ptr::NonNull::new(layer.horizontal.as_ptr().cast_mut())
+                .ok_or_else(|| Failure::named("NoSamples", "a layer axis of none"))?,
+            std::ptr::NonNull::new(layer.vertical.as_ptr().cast_mut())
+                .ok_or_else(|| Failure::named("NoSamples", "a layer axis of none"))?,
+        )
+    })
 }

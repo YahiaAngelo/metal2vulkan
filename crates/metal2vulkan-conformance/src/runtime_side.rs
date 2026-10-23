@@ -9,10 +9,11 @@
 
 use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
-    Answer, ArgumentSlot, Bindings, CommandDraw, Failure, Fill, FragmentFill, FragmentFilled,
-    Handle, IndirectReadBack, MeshCommand, MeshFunctions, MeshStep, PassOutcome, PlaneTexture,
-    RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion, StageInput,
-    TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
+    Answer, ArgumentSlot, Bindings, CommandDraw, CoordinateProbe, Failure, Fill, FragmentFill,
+    FragmentFilled, Handle, IndirectReadBack, MappedCoordinates, MeshCommand, MeshFunctions,
+    MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapForm, RateMapRequest, SamplerSpec,
+    ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
+    TilePipelineSpec, TileStep, Venue,
 };
 use crate::command_buffer_facts::CommandBufferFacts;
 use crate::compute_descriptors::{
@@ -84,8 +85,8 @@ use metal2vulkan::pipeline::{
 };
 use metal2vulkan_runtime::{
     ArgumentEncoder, BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus,
-    CommandQueue, ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Fence, Heap,
-    HeapDescriptor, HeapType, HostMemory, IndirectCommand, IndirectCommandBuffer,
+    CommandQueue, ComputePipelineState, Coordinate2D, DepthStencilState, Device, DrawPrimitiveType,
+    Fence, Heap, HeapDescriptor, HeapType, HostMemory, IndirectCommand, IndirectCommandBuffer,
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
     LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, Origin,
     PipelineOption, PipelineOptions, PurgeableState, RasterizationRateMap, Region,
@@ -3436,13 +3437,27 @@ impl Side for RuntimeSide<'_> {
     fn rate_map(&mut self, request: &RateMapRequest<'_>) -> Answer<Handle> {
         let mut descriptor = RateMapDescriptor::new(request.screen);
         descriptor.label = request.label.map(str::to_owned);
-        descriptor.layers = request
-            .layers
-            .iter()
-            .map(|layer| {
-                RateMapLayerDescriptor::new(layer.horizontal.clone(), layer.vertical.clone())
-            })
-            .collect();
+        // The form is how **Metal's** descriptor object is built, and the runtime has no
+        // descriptor object: its `RateMapDescriptor` is a plain struct, so every form but one
+        // reaches it the same way. That is the comparison — four Metal construction paths against
+        // one struct, judged on what the compiled map derives.
+        //
+        // `Holed` is the exception, and it is the one claim this side makes rather than echoes:
+        // Metal's `layerCount` counts layers from index 0 contiguously, so a descriptor with a
+        // layer at index 1 and nil at index 0 answers 0 and compiles a map of **no** layers. The
+        // runtime's `layers` is a `Vec`, which cannot hold that hole, so a consumer cannot reach
+        // the shape at all — and the honest statement of what the runtime would do with it is an
+        // empty `Vec`. A case of this form is the suite asking whether those two are the same map.
+        descriptor.layers = match request.form {
+            RateMapForm::Holed => Vec::new(),
+            _ => request
+                .layers
+                .iter()
+                .map(|layer| {
+                    RateMapLayerDescriptor::new(layer.horizontal.clone(), layer.vertical.clone())
+                })
+                .collect(),
+        };
         let map = self
             .device
             .new_rasterization_rate_map(&descriptor)
@@ -3474,6 +3489,47 @@ impl Side for RuntimeSide<'_> {
         map.copy_parameter_data_to_buffer(&buffer, offset)
             .map_err(Failure::from_error)?;
         Ok(())
+    }
+
+    fn rate_map_coordinates(
+        &mut self,
+        map: Handle,
+        probes: &[CoordinateProbe],
+    ) -> Answer<Vec<MappedCoordinates>> {
+        let map = self.held_rate_map(map)?.clone();
+        let mut out = Vec::with_capacity(probes.len());
+        for probe in probes {
+            // A refusal here is reported as one, per site, and is never worked around: the
+            // runtime refuses the screen-to-physical map over a map of no layers and over a map of
+            // a zero screen extent, which are the two shapes Metal's own call is measured to end
+            // its process over. A case that reaches either has asked for a shape the suite says is
+            // not a case.
+            let physical = map
+                .map_screen_to_physical_coordinates(
+                    Coordinate2D::new(probe.screen[0], probe.screen[1]),
+                    probe.layer,
+                )
+                .map_err(Failure::from_error)?;
+            let back = map
+                .map_physical_to_screen_coordinates(
+                    Coordinate2D::new(probe.physical[0], probe.physical[1]),
+                    probe.layer,
+                )
+                .map_err(Failure::from_error)?;
+            out.push(MappedCoordinates {
+                screen_to_physical: [physical.x.to_bits(), physical.y.to_bits()],
+                physical_to_screen: [back.x.to_bits(), back.y.to_bits()],
+            });
+        }
+        Ok(out)
+    }
+
+    fn rate_map_device_is_the_sides(&mut self, map: Handle) -> Answer<bool> {
+        let map = self.held_rate_map(map)?;
+        // `registry_id` is the public identity of a device; `Device::same` is the runtime's own
+        // crate-private one. Two handles of one device answer one registry ID, which is the whole
+        // of what `device` promises.
+        Ok(map.device().registry_id() == self.device.registry_id())
     }
 
     fn read_texture_over(

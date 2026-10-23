@@ -30,10 +30,10 @@
 
 use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
-    Answer, ArgumentSlot, Bindings, Fill, FragmentFill, FragmentFilled, Handle, IndirectReadBack,
-    MeshCommand, MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest,
-    SamplerSpec, ShaderSource, Side, StageInRegion, StageInput, TextureSpec, TileFacts,
-    TilePipelineSpec, TileStep, Venue,
+    Answer, ArgumentSlot, Bindings, CoordinateProbe, Fill, FragmentFill, FragmentFilled, Handle,
+    IndirectReadBack, MappedCoordinates, MeshCommand, MeshFunctions, MeshStep, PassOutcome,
+    PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion,
+    StageInput, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
 use crate::function_bindings::BindingFacts;
 use crate::indirect_commands::{CommandsMade, EncodedCommand, IcbDescriptor};
@@ -555,6 +555,20 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
     fn copy_rate_map_parameters(&mut self, map: Handle, into: Handle, offset: u64) -> Answer<()> {
         let _span = self.watch("copy_rate_map_parameters");
         self.inner.copy_rate_map_parameters(map, into, offset)
+    }
+
+    fn rate_map_coordinates(
+        &mut self,
+        map: Handle,
+        probes: &[CoordinateProbe],
+    ) -> Answer<Vec<MappedCoordinates>> {
+        let _span = self.watch("rate_map_coordinates");
+        self.inner.rate_map_coordinates(map, probes)
+    }
+
+    fn rate_map_device_is_the_sides(&mut self, map: Handle) -> Answer<bool> {
+        let _span = self.watch("rate_map_device_is_the_sides");
+        self.inner.rate_map_device_is_the_sides(map)
     }
 
     fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {

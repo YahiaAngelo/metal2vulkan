@@ -1,0 +1,3227 @@
+{
+  "format": 1,
+  "case": "rate-map-layer-sweep",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "descriptors",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "5872738e19f583e9e1abcbd003058fdf07149c60700f31f9b66ff3b0953e49b3"
+                        }
+                      }
+                    },
+                    {
+                      "name": "coordinate-grid",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "1c4ab259214ef77abad5850fc94fbfffc52fbbb76ca2d37d94bfb3bafe2ffda7"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "one-layer",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "device-is-ours",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "facts",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "label",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "None",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "screen_size",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 256
+                                },
+                                "width": {
+                                  "uint": 256
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_granularity",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 32
+                                },
+                                "width": {
+                                  "uint": 32
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer_count",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        },
+                        {
+                          "name": "parameter_size",
+                          "observed": {
+                            "value": {
+                              "uint": 24624
+                            }
+                          }
+                        },
+                        {
+                          "name": "parameter_align",
+                          "observed": {
+                            "value": {
+                              "uint": 4
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_size_for_layer/0",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 132
+                                },
+                                "width": {
+                                  "uint": 256
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "coordinates",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "layer-0-probe-0",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-1",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1065353216,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1057097761,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-2",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1106771968,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1098641344,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-3",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1107296256,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1099040801,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-4",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1107558400,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1099307106,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-5",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1124073472,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1115818017,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-6",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-7",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1124073472,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1124200447,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-8",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "two-layers-horizontal",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "device-is-ours",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "facts",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "label",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "None",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "screen_size",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 256
+                                },
+                                "width": {
+                                  "uint": 256
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_granularity",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 32
+                                },
+                                "width": {
+                                  "uint": 32
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer_count",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "parameter_size",
+                          "observed": {
+                            "value": {
+                              "uint": 24624
+                            }
+                          }
+                        },
+                        {
+                          "name": "parameter_align",
+                          "observed": {
+                            "value": {
+                              "uint": 4
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_size_for_layer/0",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 132
+                                },
+                                "width": {
+                                  "uint": 256
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_size_for_layer/1",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 132
+                                },
+                                "width": {
+                                  "uint": 66
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "coordinates",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "layer-0-probe-0",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-1",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1065353216,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1057097761,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-2",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1106771968,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1098641344,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-3",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1107296256,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1099040801,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-4",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1107558400,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1099307106,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-5",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1124073472,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1115818017,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-6",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-7",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1124073472,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1124200447,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-8",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-9",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-10",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1048709152,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1057097761,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-11",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1090252734,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1098641344,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-12",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1090652192,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1099040801,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-13",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1090918497,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1099307106,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-14",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1107429408,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1115818017,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-15",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-16",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1124200449,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1124200447,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-17",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "two-layers-vertical-differ",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "device-is-ours",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "facts",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "label",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "None",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "screen_size",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 256
+                                },
+                                "width": {
+                                  "uint": 256
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_granularity",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 32
+                                },
+                                "width": {
+                                  "uint": 32
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer_count",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "parameter_size",
+                          "observed": {
+                            "value": {
+                              "uint": 24624
+                            }
+                          }
+                        },
+                        {
+                          "name": "parameter_align",
+                          "observed": {
+                            "value": {
+                              "uint": 4
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_size_for_layer/0",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 256
+                                },
+                                "width": {
+                                  "uint": 132
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_size_for_layer/1",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 256
+                                },
+                                "width": {
+                                  "uint": 132
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "coordinates",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "layer-0-probe-0",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-1",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1057097761,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1065353216,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-2",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1098641344,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1106771968,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-3",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1099040801,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1107296256,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-4",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1099307106,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1107558400,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-5",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1115818017,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1124073472,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-6",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-7",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1124200447,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1124073472,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-8",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-9",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-10",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1057097761,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1065353216,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-11",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1098641344,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1106771968,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-12",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1099040801,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1107296256,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-13",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1099307106,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1107558400,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-14",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1115818017,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1124073472,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-15",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-16",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1124200447,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1124073472,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-17",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "two-layers-equal",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "device-is-ours",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "facts",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "label",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "None",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "screen_size",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 256
+                                },
+                                "width": {
+                                  "uint": 256
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_granularity",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 32
+                                },
+                                "width": {
+                                  "uint": 32
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer_count",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "parameter_size",
+                          "observed": {
+                            "value": {
+                              "uint": 24624
+                            }
+                          }
+                        },
+                        {
+                          "name": "parameter_align",
+                          "observed": {
+                            "value": {
+                              "uint": 4
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_size_for_layer/0",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 132
+                                },
+                                "width": {
+                                  "uint": 132
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "physical_size_for_layer/1",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "depth": {
+                                  "uint": 1
+                                },
+                                "height": {
+                                  "uint": 132
+                                },
+                                "width": {
+                                  "uint": 132
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "coordinates",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "layer-0-probe-0",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-1",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1057097761,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1057097761,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-2",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1098641344,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1098641344,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-3",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1099040801,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1099040801,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-4",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1099307106,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1099307106,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-5",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1115818017,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1115818017,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-6",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-7",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1124200447,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1124200447,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-0-probe-8",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-9",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-10",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1057097761,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1057097761,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-11",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1098641344,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1098641344,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-12",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1099040801,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1099040801,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-13",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1099307106,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1099307106,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-14",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1115818017,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1115818017,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-15",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-16",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1124200447,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1124200447,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "layer-1-probe-17",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "physical_to_screen": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 1132462080,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "screen_to_physical": {
+                                  "list": [
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    },
+                                    {
+                                      "float": {
+                                        "bits": 0,
+                                        "width": "single"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

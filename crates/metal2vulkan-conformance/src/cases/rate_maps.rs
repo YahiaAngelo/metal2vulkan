@@ -124,6 +124,10 @@ impl RateMapCase {
             screen: self.screen,
             layers: &self.layers,
             label: Some(self.label),
+            // The form every case of this family took before the others existed
+            // (`rasterizationRateMapDescriptorWithScreenSize:` then `setLayer:atIndex:`). The
+            // other four are swept by `rate_map_sweeps`, which compares the map each compiles.
+            form: crate::case::RateMapForm::ScreenSizeThenSetLayer,
         }
     }
 }

@@ -14,7 +14,7 @@ Columns:
   - `none`: no public API path: malformed or non-Metal input, Apple-private calls, or a cap no valid program of ordinary size meets;
   - `?`: not assessed yet.
 
-Generated at `6cb381cf2`.
+Generated at `914b431a9`.
 
 ## Totals
 

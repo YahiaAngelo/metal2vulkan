@@ -1249,6 +1249,35 @@ pub trait Side {
         Err(Failure::unavailable("copy_rate_map_parameters"))
     }
 
+    /// `mapScreenToPhysicalCoordinates:forLayer:` and `mapPhysicalToScreenCoordinates:forLayer:`
+    /// at each of `probes`, in order.
+    ///
+    /// Both are CPU arithmetic over the map's own parameter data: no command buffer is made and no
+    /// queue is reached. **Two shapes end Metal's process** at the screen-to-physical call and are
+    /// a case's to avoid, never this method's to guess at: a map of no layers, and a map of a zero
+    /// screen extent (both measured, SIGSEGV with no validation layer). A probe's layer index is
+    /// the case's to keep inside the map's `layerCount`, for the reason
+    /// [`crate::cases::rate_maps`] gives of `physicalSizeForLayer:` — past its own layer table
+    /// Metal reads whatever lies there.
+    fn rate_map_coordinates(
+        &mut self,
+        map: Handle,
+        probes: &[CoordinateProbe],
+    ) -> Answer<Vec<MappedCoordinates>> {
+        let _ = (map, probes);
+        Err(Failure::unavailable("rate_map_coordinates"))
+    }
+
+    /// Whether the map's `device` is the one this side made it on.
+    ///
+    /// The identity of a device is not a value a transcript can hold — a pointer is this process's
+    /// and a name is the host's — so the comparable fact is whether the map points back at the
+    /// device that compiled it, which is the whole of what `device` promises.
+    fn rate_map_device_is_the_sides(&mut self, map: Handle) -> Answer<bool> {
+        let _ = map;
+        Err(Failure::unavailable("rate_map_device_is_the_sides"))
+    }
+
     /// `newRenderPipelineStateWithTileDescriptor:options:reflection:error:` of the library's tile
     /// function, over the color attachments `spec` names ([`TilePipelineSpec`]).
     ///
@@ -2058,6 +2087,67 @@ impl RateMapLayer {
     }
 }
 
+/// How the descriptor a rate map is compiled from is **built**.
+///
+/// Metal's descriptor is an object with four ways to reach the same state, and a program that
+/// reaches it one way must get the map it would have got another way. The runtime has no descriptor
+/// object — its [`RateMapDescriptor`](metal2vulkan::bind::RateMapDescriptor) is a plain struct a
+/// consumer fills — so a form is a **Metal-side construction path** whose answer the runtime's one
+/// struct has to match. That is what makes a form a comparison rather than a readback: nothing of
+/// the descriptor's own surface is compared, because our side would only be reading back the struct
+/// the case just handed it. What is compared is what the compiled map **derives**.
+///
+/// [`RateMapForm::Holed`] is the one form whose state the runtime's struct cannot express, and that
+/// is the measurement: Metal's `layerCount` counts the layers from index 0 **contiguously**, so a
+/// descriptor holding a layer at index 1 and nil at index 0 answers 0 and compiles a map of no
+/// layers (measured on an Apple M3 Max under macOS 27.0.1, where `layerAtIndex:1` is still
+/// non-nil). A consumer of the runtime cannot build that shape, so the case says a holed descriptor
+/// is, to Metal, a descriptor of no layers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RateMapForm {
+    /// `rasterizationRateMapDescriptorWithScreenSize:` then `setLayer:atIndex:` per layer. The
+    /// form every case of this family used before the others existed.
+    ScreenSizeThenSetLayer,
+    /// `rasterizationRateMapDescriptorWithScreenSize:layer:`, the one-layer convenience. A request
+    /// of any other layer count cannot take this form.
+    ScreenSizeAndLayer,
+    /// `rasterizationRateMapDescriptorWithScreenSize:layerCount:layers:`, the whole descriptor in
+    /// one call. `objc2-metal` 0.3.2 does not bind it, so the Metal side sends the selector by
+    /// hand.
+    ScreenSizeLayerCountLayers,
+    /// `rasterizationRateMapDescriptorWithScreenSize:` then `layers[i] = layer`
+    /// (`MTLRasterizationRateLayerArray`'s `setObject:atIndexedSubscript:`), which Apple's header
+    /// calls identical to `setLayer:atIndex:`.
+    LayersSubscript,
+    /// The request's layers set from index 1 up, with index 0 left nil: the shape whose
+    /// `layerCount` Metal answers 0 for. The runtime's side builds a descriptor of **no** layers,
+    /// which is what the case claims the two are.
+    Holed,
+}
+
+impl RateMapForm {
+    /// Whether this form can build a descriptor of `layers` layers. The one-layer convenience
+    /// takes exactly one; the holed form needs a layer to leave a hole under.
+    pub fn takes(self, layers: usize) -> bool {
+        match self {
+            RateMapForm::ScreenSizeAndLayer => layers == 1,
+            RateMapForm::Holed => layers >= 1,
+            _ => true,
+        }
+    }
+
+    /// The name the form's site carries.
+    pub fn at(self) -> &'static str {
+        match self {
+            RateMapForm::ScreenSizeThenSetLayer => "form-set-layer-at-index",
+            RateMapForm::ScreenSizeAndLayer => "form-with-screen-size-and-layer",
+            RateMapForm::ScreenSizeLayerCountLayers => "form-with-layer-count-and-layers",
+            RateMapForm::LayersSubscript => "form-layers-subscript",
+            RateMapForm::Holed => "form-holed-at-index-zero",
+        }
+    }
+}
+
 /// A rasterization-rate map's descriptor, as both sides take it.
 #[derive(Clone, Copy, Debug)]
 pub struct RateMapRequest<'a> {
@@ -2067,6 +2157,45 @@ pub struct RateMapRequest<'a> {
     pub layers: &'a [RateMapLayer],
     /// `label`, which the map keeps.
     pub label: Option<&'a str>,
+    /// How the Metal side builds the descriptor ([`RateMapForm`]). The runtime has one way, so
+    /// this moves only Metal's leg — which is the point: every form must compile one map.
+    pub form: RateMapForm,
+}
+
+impl<'a> RateMapRequest<'a> {
+    /// A request taking the form every case of this family took before the others existed.
+    pub fn new(screen: [u32; 2], layers: &'a [RateMapLayer]) -> RateMapRequest<'a> {
+        RateMapRequest {
+            screen,
+            layers,
+            label: None,
+            form: RateMapForm::ScreenSizeThenSetLayer,
+        }
+    }
+}
+
+/// A coordinate to map, and the layer to map it in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CoordinateProbe {
+    /// The screen coordinate `mapScreenToPhysicalCoordinates:forLayer:` is asked at.
+    pub screen: [f32; 2],
+    /// The physical coordinate `mapPhysicalToScreenCoordinates:forLayer:` is asked at.
+    pub physical: [f32; 2],
+    /// The layer both are asked in, which a case keeps inside the map's own `layerCount`.
+    pub layer: u64,
+}
+
+/// What a map's two coordinate maps answered at one probe, by their bits.
+///
+/// A rate map's coordinate maps are `f32` arithmetic over the parameter data, so an answer is kept
+/// as bits: a signed zero and a one-ulp difference are both real, and the runtime's own claim is
+/// that it reproduces Apple's bit for bit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MappedCoordinates {
+    /// `mapScreenToPhysicalCoordinates:forLayer:` of the probe's screen coordinate.
+    pub screen_to_physical: [u32; 2],
+    /// `mapPhysicalToScreenCoordinates:forLayer:` of the probe's physical coordinate.
+    pub physical_to_screen: [u32; 2],
 }
 
 /// What a rasterization-rate map answers. Each field is a Metal getter's answer, and a size's

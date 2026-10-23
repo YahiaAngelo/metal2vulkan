@@ -110,6 +110,7 @@ pub mod pixel_downscales;
 pub mod pixel_samplers;
 pub mod pvrtc_cpu_order;
 pub mod pvrtc_rows;
+pub mod rate_map_sweeps;
 pub mod rate_maps;
 pub mod render_chains;
 pub mod render_depth_stencil_state;
@@ -308,6 +309,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.push(Box::new(mesh_commands::unordered_draws()));
     cases.push(Box::new(surface_fills::over_planes_and_buffers()));
     for case in rate_maps::all() {
+        cases.push(Box::new(case));
+    }
+    for case in rate_map_sweeps::all() {
+        cases.push(Box::new(case));
+    }
+    for case in rate_map_sweeps::parameter_data() {
         cases.push(Box::new(case));
     }
     for case in tile_threadgroups::all() {
