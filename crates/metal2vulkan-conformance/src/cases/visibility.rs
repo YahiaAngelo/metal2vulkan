@@ -369,6 +369,108 @@ fn depths(shape: &Shape) -> Vec<f32> {
     found
 }
 
+/// One parameter of a call, little-endian.
+fn word(out: &mut Vec<u8>, value: u64) {
+    out.extend(value.to_le_bytes());
+}
+
+/// The calls a shape's passes make, in order: each act keyed by **the name of the Metal call it
+/// makes and the values handed that call**, with each pass opening on the encoder that runs it.
+///
+/// This replaced `format!("{:?}", shape.passes)`, which keyed a case by the printed text of
+/// [`Act`]: that text moves on any change to the type, including one that changes no call these
+/// cases make, and would stale every recording of the family at once with nothing to say so.
+///
+/// [`Act`] is this module's own type, so the match is **exhaustive with no `..`** — a field added
+/// to one of its variants is a compile error here, and a new variant must name its own call. The
+/// pass delimiter is a call too (`renderCommandEncoderWithDescriptor:`) rather than a bracket, so
+/// the nesting is keyed by something Metal does.
+///
+/// The pipeline and the depth/stencil state each pass sets are not here: they are the case's own
+/// `render-pipeline` and `depth-stencil-state` inputs, which key them in full.
+fn act_words(shape: &Shape) -> Vec<u8> {
+    let mut out = Vec::new();
+    for acts in shape.passes {
+        out.extend(b"renderCommandEncoderWithDescriptor");
+        for act in *acts {
+            match act {
+                Act::Mode(mode, offset) => {
+                    out.extend(b"setVisibilityResultModeOffset");
+                    word(&mut out, mode.raw());
+                    word(&mut out, *offset);
+                }
+                Act::Draw {
+                    z,
+                    covering,
+                    instances,
+                } => {
+                    // The draw reads the vertex buffer holding this depth. The bits name which of
+                    // the case's own `buffer:0@<bits>` inputs that is, and those inputs carry the
+                    // bytes; nothing of a side's handle is keyed.
+                    out.extend(b"setVertexBufferOffsetAtIndex");
+                    word(&mut out, u64::from(z.to_bits()));
+                    word(&mut out, 0);
+                    word(&mut out, 0);
+                    out.extend(b"drawPrimitivesVertexStartVertexCountInstanceCount");
+                    word(&mut out, u64::from(PrimitiveType::Triangle.as_raw()));
+                    word(&mut out, if *covering { 0 } else { 3 });
+                    word(&mut out, 3);
+                    word(&mut out, u64::from(*instances));
+                }
+                Act::DrawIndirect => {
+                    out.extend(b"setVertexBufferOffsetAtIndex");
+                    word(&mut out, u64::from(DEPTH.to_bits()));
+                    word(&mut out, 0);
+                    word(&mut out, 0);
+                    // The vertex and instance counts are the arguments buffer's, which the case
+                    // states as its own `arguments` input, so the call itself takes the primitive
+                    // type and the offset alone.
+                    out.extend(b"drawPrimitivesIndirectBufferIndirectBufferOffset");
+                    word(&mut out, u64::from(PrimitiveType::Triangle.as_raw()));
+                    word(&mut out, 0);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The `MTLDepthStencilDescriptor` the state is made from: the call's name and the one field this
+/// family states.
+///
+/// This replaced `format!("{state:?}")`, which was the worse of the two `Debug` keys here and the
+/// reason this packet exists: [`DepthStencilDescriptor`] is a **public type of the published
+/// `metal2vulkan` crate**, so a field added to it in another crate staled these recordings, and
+/// nothing in either crate connected the two.
+///
+/// It cannot take the protection the rest of this module's keys take. `DepthStencilDescriptor` and
+/// `StencilDescriptor` are `#[non_exhaustive]`, so this crate **cannot** destructure them field by
+/// field — the compiler requires a `..` — and there is no compile error to be had across that
+/// boundary. The substitute is to state the fields this family sets and **prove the rest are
+/// Metal's own defaults**: the descriptor is compared with `DepthStencilDescriptor::default()`
+/// carrying only those fields, and one that differs anywhere else is refused rather than keyed. So
+/// a field this family starts setting cannot be quietly left out of the key, while a field it
+/// leaves at the default writes nothing — which is what keeps a widened descriptor from staling
+/// these recordings at all.
+fn depth_state_words(state: &DepthStencilDescriptor) -> Result<Vec<u8>, String> {
+    let mut stated = DepthStencilDescriptor::default();
+    stated.depth_compare_function = state.depth_compare_function;
+    if *state != stated {
+        return Err(
+            "the depth/stencil state of this family names its depth compare function alone, and \
+             this descriptor differs from Metal's defaults in some other field: name that field \
+             here, or its recordings are keyed against a state they were not taken from"
+                .to_owned(),
+        );
+    }
+    let mut out = b"newDepthStencilStateWithDescriptor".to_vec();
+    // `depthWriteEnabled` is off and both faces carry Metal's default stencil, which the
+    // comparison above has just proved, so the compare function is the whole of it.
+    out.extend(b"depthCompareFunction");
+    word(&mut out, u64::from(state.depth_compare_function.as_raw()));
+    Ok(out)
+}
+
 /// Whether any act of `shape` draws indirectly.
 fn draws_indirect(shape: &Shape) -> bool {
     shape
@@ -406,6 +508,42 @@ impl Visibility {
             state.depth_write_enabled = false;
             state
         })
+    }
+
+    /// The depth attachment one pass takes for `depth`, exactly as the pass encodes it: a 4 by 4
+    /// texture of the shape's format, cleared to the shape's depth and not stored.
+    ///
+    /// One function, read by both the pass and the input fingerprint, so a change to the load or
+    /// the store action moves the key as it must instead of leaving a recording matching a program
+    /// it was not taken from. `PassDepth::words` fingerprints nothing of the handle, so the key may
+    /// pass any.
+    fn pass_depth(&self, texture: Handle, depth: &Depth) -> PassDepth {
+        PassDepth::cleared(texture, depth.clear).stored(StoreAction::DontCare)
+    }
+
+    /// The depth attachment's own bytes: the texture it is over, and the actions the pass takes on
+    /// it.
+    ///
+    /// `Depth` is this module's own type and is destructured with **no `..`**, deliberately: a
+    /// field added to it is then a compile error here, where the `format!("{:?}")` this replaced
+    /// would have changed the key for a field no call takes and staled both recordings. The
+    /// texture is keyed in the same encoding the colour `target` input uses rather than in one
+    /// invented here, and the actions come from [`Visibility::pass_depth`], which the pass itself
+    /// reads.
+    fn depth_attachment_words(&self, depth: &Depth) -> Vec<u8> {
+        let Depth {
+            format,
+            clear: _,
+            // The clear depth is in `pass_depth`'s own words below, and the compare function
+            // belongs to the depth/stencil state, which `depth_state_words` keys. Both are named
+            // here so that adding a field to `Depth` still stops this compiling.
+            compare: _,
+        } = depth;
+        let mut out = b"depthAttachmentTexture".to_vec();
+        out.extend(TargetSpec::plain(*format, [SIDE, SIDE]).words());
+        out.extend(b"depthAttachmentActions");
+        out.extend(self.pass_depth(Handle(0), depth).words());
+        out
     }
 
     /// The target the shape's passes render into: a 4 by 4 `RGBA8Unorm` render target, shared and
@@ -473,18 +611,18 @@ impl Case for Visibility {
             Input::bytes("render-pipeline", &self.pipeline_spec(&colors).words()),
             Input::bytes("target", &self.target_spec().words()),
             Input::bytes("visibility", &start(self.shape.words)),
-            Input::bytes("acts", format!("{:?}", self.shape.passes).as_bytes()),
+            Input::bytes("acts", &act_words(self.shape)),
         ];
         if let Some(state) = self.depth_state() {
             inputs.push(Input::bytes(
                 "depth-stencil-state",
-                format!("{state:?}").as_bytes(),
+                &depth_state_words(&state)?,
             ));
         }
         if let Some(depth) = self.shape.depth {
             inputs.push(Input::bytes(
                 "depth-attachment",
-                format!("{:?} cleared to {}", depth.format, depth.clear).as_bytes(),
+                &self.depth_attachment_words(&depth),
             ));
         }
         for z in depths(self.shape) {
@@ -622,9 +760,7 @@ impl Case for Visibility {
                     &format!("{at}/depth"),
                     side.target(&TargetSpec::plain(depth.format, [SIDE, SIDE])),
                 )?;
-                pass = pass.with_depth(
-                    PassDepth::cleared(attachment, depth.clear).stored(StoreAction::DontCare),
-                );
+                pass = pass.with_depth(self.pass_depth(attachment, &depth));
             }
             let outcome = side
                 .render(&[RenderWork::Pass(pass)])
@@ -804,6 +940,189 @@ mod tests {
                     other => panic!("{}: an unexpected tolerance: {other:?}", case.name()),
                 }
             }
+        }
+    }
+
+    /// **Every byte of the `acts` key is a Metal call's name and the values it takes.** Each pass
+    /// opens on the encoder that runs it and each act on the call it makes, so nothing here is
+    /// keyed by a position or by the printed text of [`Act`] — which is what staled nothing yet
+    /// only because no stream had touched the type.
+    #[test]
+    fn the_acts_key_names_the_metal_calls_and_holds_no_debug_text() {
+        for shape in SHAPES {
+            let words = act_words(shape);
+            assert!(
+                words.starts_with(b"renderCommandEncoderWithDescriptor"),
+                "{}: the key does not open on the pass's encoder",
+                shape.name
+            );
+            // A derived `Debug` of `&[&[Act]]` prints braces, field names and the variants' own
+            // spellings. None of them can be in a key of call names and little-endian numbers.
+            for print in [
+                &b" { "[..],
+                b"Mode(",
+                b"Draw {",
+                b"covering",
+                b"instances",
+                b"DrawIndirect",
+            ] {
+                assert!(
+                    !words.windows(print.len()).any(|window| window == print),
+                    "{}: the key holds {:?}",
+                    shape.name,
+                    String::from_utf8_lossy(print)
+                );
+            }
+            // One `renderCommandEncoderWithDescriptor` a pass, so the nesting really is keyed.
+            let passes = words
+                .windows(b"renderCommandEncoderWithDescriptor".len())
+                .filter(|window| *window == b"renderCommandEncoderWithDescriptor")
+                .count();
+            assert_eq!(passes, shape.passes.len(), "{}", shape.name);
+        }
+    }
+
+    /// No two shapes key alike, and a shape's acts key moves when its program does. Without this
+    /// the whole re-key could have collapsed ten cases onto one fingerprint and every recording
+    /// would still have matched something.
+    #[test]
+    fn the_acts_key_tells_the_shapes_apart() {
+        let keyed: Vec<(&str, Vec<u8>)> = SHAPES
+            .iter()
+            .map(|shape| (shape.name, act_words(shape)))
+            .collect();
+        for (at, (name, words)) in keyed.iter().enumerate() {
+            for (other, theirs) in &keyed[at + 1..] {
+                assert_ne!(words, theirs, "{name} keys as {other}");
+            }
+        }
+        // And the three things an act carries each move it: the mode, the offset, and whether the
+        // draw covers anything. Each program is a `const` because a shape's passes are `'static`.
+        const BASE: &[&[Act]] = &[&[Act::Mode(BOOL, 0), Act::draw()]];
+        const MODE: &[&[Act]] = &[&[Act::Mode(COUNT, 0), Act::draw()]];
+        const OFFSET: &[&[Act]] = &[&[Act::Mode(BOOL, 8), Act::draw()]];
+        const NOTHING: &[&[Act]] = &[&[Act::Mode(BOOL, 0), Act::draw_nothing()]];
+        // Two passes are not one pass of the same acts: the encoder delimiter is what says so.
+        const SPLIT: &[&[Act]] = &[&[Act::Mode(BOOL, 0)], &[Act::draw()]];
+        let one = |acts: &'static [&'static [Act]]| {
+            act_words(&Shape {
+                name: "probe",
+                words: 1,
+                passes: acts,
+                depth: None,
+                samples: 1,
+            })
+        };
+        let base = one(BASE);
+        for (named, other) in [
+            ("the mode", MODE),
+            ("the offset", OFFSET),
+            ("whether the draw covers", NOTHING),
+            ("the pass boundary", SPLIT),
+        ] {
+            assert_ne!(base, one(other), "{named} does not move the key");
+        }
+    }
+
+    /// **The depth/stencil key names the compare function alone, and refuses a descriptor that
+    /// differs from Metal's defaults anywhere else.**
+    ///
+    /// This is the substitute for the protection the rest of this module's keys get from the
+    /// compiler. `DepthStencilDescriptor` is `#[non_exhaustive]` and belongs to another crate, so
+    /// no exhaustive destructure is possible here and a field added to it cannot be a compile
+    /// error. The refusal is what stands in for one: a field this family starts setting shows up
+    /// as an error from `inputs()`, not as a key quietly missing it.
+    #[test]
+    fn the_depth_state_key_names_the_compare_function_alone() {
+        let mut state = DepthStencilDescriptor::default();
+        state.depth_compare_function = CompareFunction::Less;
+        let mut expected = b"newDepthStencilStateWithDescriptor".to_vec();
+        expected.extend(b"depthCompareFunction");
+        expected.extend(u64::from(CompareFunction::Less.as_raw()).to_le_bytes());
+        assert_eq!(depth_state_words(&state).unwrap(), expected);
+        // The compare function is in it, so two states do not key alike.
+        let mut greater = state;
+        greater.depth_compare_function = CompareFunction::Greater;
+        assert_ne!(depth_state_words(&greater).unwrap(), expected);
+        // And any other field off Metal's default is refused rather than keyed.
+        let mut written = state;
+        written.depth_write_enabled = true;
+        assert!(depth_state_words(&written).is_err(), "a depth write");
+        let mut masked = state;
+        masked.front_face_stencil.write_mask = 0;
+        assert!(depth_state_words(&masked).is_err(), "a front stencil mask");
+        let mut back = state;
+        back.back_face_stencil.stencil_compare_function = CompareFunction::Never;
+        assert!(depth_state_words(&back).is_err(), "a back stencil compare");
+        // Every state this family in fact builds is one the key states.
+        for shape in SHAPES {
+            let case = Visibility { shape };
+            if let Some(held) = case.depth_state() {
+                depth_state_words(&held).unwrap_or_else(|why| panic!("{}: {why}", shape.name));
+            }
+        }
+    }
+
+    /// The attachment key holds the texture's format and the actions the pass takes on it, so a
+    /// recording cannot be read as one of another format or another store action.
+    #[test]
+    fn the_depth_attachment_key_holds_its_format_and_its_actions() {
+        let depth = Depth {
+            format: PixelFormat::Depth32Float,
+            clear: 0.25,
+            compare: CompareFunction::Less,
+        };
+        let case = Visibility { shape: &SHAPES[0] };
+        let words = case.depth_attachment_words(&depth);
+        let other = Depth {
+            format: PixelFormat::Depth16Unorm,
+            ..depth
+        };
+        assert_ne!(words, case.depth_attachment_words(&other), "the format");
+        let cleared = Depth {
+            clear: 0.5,
+            ..depth
+        };
+        assert_ne!(words, case.depth_attachment_words(&cleared), "the clear");
+        // The texture is keyed in the same encoding the colour `target` input uses.
+        let texture = TargetSpec::plain(PixelFormat::Depth32Float, [SIDE, SIDE]).words();
+        assert!(
+            words.windows(texture.len()).any(|window| window == texture),
+            "the attachment's texture is not keyed as a target"
+        );
+        // And the pass's own actions are the ones the pass encodes, from the one function both
+        // read, so the key cannot drift from the program.
+        let actions = case.pass_depth(Handle(0), &depth).words();
+        assert!(
+            words.windows(actions.len()).any(|window| window == actions),
+            "the attachment's actions are not the pass's"
+        );
+    }
+
+    /// Only the two occluded shapes carry a depth attachment, which is what makes their two inputs
+    /// the one place a `DepthStencilDescriptor` reached a fingerprint at all.
+    #[test]
+    fn the_two_occluded_shapes_are_the_ones_with_a_depth_attachment() {
+        let named: Vec<&str> = SHAPES
+            .iter()
+            .filter(|shape| shape.depth.is_some())
+            .map(|shape| shape.name)
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                "visibility-boolean-occluded",
+                "visibility-counting-occluded"
+            ]
+        );
+        for case in all() {
+            let inputs = case.inputs().unwrap();
+            let depth_inputs = inputs
+                .iter()
+                .filter(|input| input.name.starts_with("depth-"))
+                .count();
+            let wants = usize::from(case.shape.depth.is_some()) * 2;
+            assert_eq!(depth_inputs, wants, "{}", case.name());
         }
     }
 }
