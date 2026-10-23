@@ -10,9 +10,10 @@ The suite reaches Metal through `objc2-metal`, whose Rust name for a binding is 
 
 Its limits, measured rather than asserted:
 
-- **451 of 546 call sites** in the Metal leg resolve to an item of the SDK. 30 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
-- **95 call sites' receivers did not type.** They cost the count 7 selectors, which the suite calls and which this attributes to no item:
+- **485 of 584 call sites** in the Metal leg resolve to an item of the SDK. 31 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
+- **99 call sites' receivers did not type.** They cost the count 8 selectors, which the suite calls and which this attributes to no item:
   - `type`, bound by `MTLArgument`, `MTLArgumentDescriptor`, `MTLBinding`, `MTLPointerType`, `MTLTensorReferenceType`, `MTLTextureReferenceType`
+  - `count`, bound by `MTL4CounterHeap`, `MTL4CounterHeapDescriptor`
   - `executeCommandsInBuffer:withRange:`, bound by `MTL4ComputeCommandEncoder`, `MTL4RenderCommandEncoder`, `MTLComputeCommandEncoder`, `MTLRenderCommandEncoder`
   - `imageblockSampleLength`, bound by `MTL4RenderPassDescriptor`, `MTLRenderPassDescriptor`, `MTLRenderPipelineState`
   - `index`, bound by `MTLArgument`, `MTLArgumentDescriptor`, `MTLBinding`, `MTLFunctionConstant`
@@ -29,14 +30,14 @@ Its limits, measured rather than asserted:
 | | |
 |---|---|
 | implemented Metal items | 958 |
-| of those, exercised by the suite's Metal leg | 231 |
-| of those, not exercised | 727 |
+| of those, exercised by the suite's Metal leg | 232 |
+| of those, not exercised | 726 |
 | share exercised | 24% |
-| of those exercised, no case reaching it loosens anything | 114 |
+| of those exercised, no case reaching it loosens anything | 115 |
 | of those exercised, a case reaching it loosens some site | 117 |
-| case modules | 76 |
-| committed recordings | 686 |
-| distinct SDK items the Metal leg calls | 243 |
+| case modules | 78 |
+| committed recordings | 696 |
+| distinct SDK items the Metal leg calls | 245 |
 | ledger rows (a case whose gap is recorded) | 19 |
 
 A tolerance names a **site of a transcript**, not an item, so the last two rows are read as written: a case that loosens one site of its own transcript may compare every other field of it exactly, and this derivation cannot tell which of a case's fields came from which Metal call. Where the distinction matters, read the case.
@@ -50,13 +51,13 @@ Every container with an implemented item, by how much of it the suite reaches.
 | container | implemented | exercised | unexercised | families |
 |---|---|---|---|---|
 | `MTLRenderCommandEncoder` | 119 | 23 | 96 | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`… |
-| `MTLDevice` | 63 | 22 | 41 | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`… |
+| `MTLDevice` | 63 | 22 | 41 | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`… |
 | `MTLComputeCommandEncoder` | 36 | 4 | 32 | `extended_range_blends`, `extended_range_targets` |
 | `MTLRenderPipelineDescriptor` | 35 | 8 | 27 | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`… |
 | `MTLArgumentEncoder` | 23 | 0 | 23 |  |
 | `MTLIndirectRenderCommand` | 23 | 0 | 23 |  |
 | `MTLArgument` | 17 | 0 | 17 |  |
-| `MTLBlitCommandEncoder` | 22 | 5 | 17 | `buffer_blits`, `chroma_pairs`, `compressed_blits`, `compressed_views`… |
+| `MTLBlitCommandEncoder` | 22 | 5 | 17 | `buffer_blits`, `buffer_depth_samples`, `chroma_pairs`, `compressed_blits`… |
 | `MTLRenderPipelineState` | 15 | 0 | 15 |  |
 | `MTLComputePipelineDescriptor` | 16 | 2 | 14 | `stage_in_regions` |
 | `MTLComputePipelineState` | 15 | 1 | 14 | `compute_threadgroups` |
@@ -67,12 +68,12 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLHeap` | 17 | 5 | 12 | `compressed_moves`, `sparse_heaps`, `texture_fills`, `two_plane_copies`… |
 | `MTLIndirectComputeCommand` | 12 | 0 | 12 |  |
 | `MTLTileRenderPipelineDescriptor` | 15 | 4 | 11 | `tile_threadgroups` |
-| `MTLLibrary` | 11 | 1 | 10 | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`… |
+| `MTLLibrary` | 11 | 1 | 10 | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`… |
 | `MTLRasterizationRateLayerDescriptor` | 10 | 0 | 10 |  |
-| `MTLTexture` | 29 | 19 | 10 | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`… |
+| `MTLTexture` | 29 | 19 | 10 | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`… |
 | `MTLArrayType` | 9 | 0 | 9 |  |
-| `MTLCommandBuffer` | 21 | 12 | 9 | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`… |
-| `MTLRenderPassDescriptor` | 17 | 8 | 9 | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`… |
+| `MTLCommandBuffer` | 21 | 12 | 9 | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`… |
+| `MTLRenderPassDescriptor` | 17 | 8 | 9 | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`… |
 | `MTLResource` | 12 | 3 | 9 | `buffer_textures` |
 | `MTLSamplerDescriptor` | 16 | 7 | 9 | `border_swizzles`, `chroma_pairs`, `depth_texel_reads`, `discard_hoist`… |
 | `MTLStructMember` | 9 | 0 | 9 |  |
@@ -81,13 +82,13 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLRasterizationRateMapDescriptor` | 10 | 2 | 8 | `rate_maps` |
 | `MTLAttribute` | 7 | 0 | 7 |  |
 | `MTLBinaryArchive` | 7 | 0 | 7 |  |
-| `MTLRenderPassAttachmentDescriptor` | 12 | 5 | 7 | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`… |
 | `MTLResourceStateCommandEncoder` | 7 | 0 | 7 |  |
-| `MTLTextureDescriptor` | 19 | 12 | 7 | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`… |
+| `MTLTextureDescriptor` | 19 | 12 | 7 | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`… |
 | `MTLVertexAttribute` | 7 | 0 | 7 |  |
 | `MTLBinding` | 7 | 1 | 6 | `texture_accesses` |
 | `MTLBufferBinding` | 6 | 0 | 6 |  |
 | `MTLLinkedFunctions` | 6 | 0 | 6 |  |
+| `MTLRenderPassAttachmentDescriptor` | 12 | 6 | 6 | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`… |
 | `MTLTextureViewDescriptor` | 6 | 0 | 6 |  |
 | `MTLDynamicLibrary` | 5 | 0 | 5 |  |
 | `MTLFunctionConstant` | 5 | 0 | 5 |  |
@@ -100,14 +101,14 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLRenderPipelineFunctionsDescriptor` | 4 | 0 | 4 |  |
 | `MTLRenderPipelineReflection` | 9 | 5 | 4 | `texture_accesses` |
 | `MTLVisibleFunctionTable` | 4 | 0 | 4 |  |
-| `MTLBuffer` | 6 | 3 | 3 | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`… |
-| `MTLCommandQueue` | 4 | 1 | 3 | `buffer_blits`, `chroma_pairs`, `color_write_masks`, `command_queues`… |
+| `MTLBuffer` | 6 | 3 | 3 | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`… |
+| `MTLCommandQueue` | 4 | 1 | 3 | `buffer_blits`, `buffer_depth_samples`, `chroma_pairs`, `color_write_masks`… |
 | `MTLComputePipelineReflection` | 3 | 0 | 3 |  |
 | `MTLDepthStencilState` | 3 | 0 | 3 |  |
 | `MTLFence` | 3 | 0 | 3 |  |
 | `MTLFunctionHandle` | 3 | 0 | 3 |  |
 | `MTLFunctionReflection` | 3 | 0 | 3 |  |
-| `MTLHeapDescriptor` | 8 | 5 | 3 | `buffer_blits`, `buffer_textures`, `chroma_pairs`, `compressed_blits`… |
+| `MTLHeapDescriptor` | 8 | 5 | 3 | `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`… |
 | `MTLObjectPayloadBinding` | 3 | 0 | 3 |  |
 | `MTLPipelineBufferDescriptorArray` | 3 | 0 | 3 |  |
 | `MTLRasterizationRateLayerArray` | 3 | 0 | 3 |  |
@@ -136,11 +137,11 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLAllocation` | 1 | 0 | 1 |  |
 | `MTLAttributeDescriptor` | 4 | 3 | 1 | `stage_in_regions` |
 | `MTLBufferLayoutDescriptor` | 4 | 3 | 1 | `stage_in_regions` |
-| `MTLCommandEncoder` | 2 | 1 | 1 | `color_write_masks`, `discard_hoist`, `event_orders`, `extended_range_blends`… |
+| `MTLCommandEncoder` | 2 | 1 | 1 | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `event_orders`… |
 | `MTLDepthStencilDescriptor` | 5 | 4 | 1 | `shader_stencil`, `srgb_fetch`, `visibility` |
 | `MTLRenderPassColorAttachmentDescriptor` | 2 | 1 | 1 | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`… |
-| `MTLRenderPassDepthAttachmentDescriptor` | 3 | 2 | 1 | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`… |
-| `MTLRenderPassStencilAttachmentDescriptor` | 3 | 2 | 1 | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`… |
+| `MTLRenderPassDepthAttachmentDescriptor` | 3 | 2 | 1 | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`… |
+| `MTLRenderPassStencilAttachmentDescriptor` | 3 | 2 | 1 | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`… |
 | `MTLRenderPipelineColorAttachmentDescriptor` | 10 | 9 | 1 | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`… |
 | `MTLStencilDescriptor` | 7 | 6 | 1 | `shader_stencil`, `srgb_fetch`, `visibility` |
 | `MTLTileRenderPipelineColorAttachmentDescriptor` | 2 | 1 | 1 | `tile_threadgroups` |
@@ -164,7 +165,7 @@ A container is one Objective-C type; the SDK header it sits in is the family of 
 | `MTLRasterizationRate.h` | 37 | 9 | 28 |
 | `MTLTexture.h` | 57 | 31 | 26 |
 | `MTLArgumentEncoder.h` | 23 | 0 | 23 |
-| `MTLRenderPass.h` | 41 | 19 | 22 |
+| `MTLRenderPass.h` | 41 | 20 | 21 |
 | `MTLIndirectCommandBuffer.h` | 26 | 6 | 20 |
 | `MTLBlitCommandEncoder.h` | 22 | 5 | 17 |
 | `MTLHeap.h` | 25 | 10 | 15 |
@@ -252,13 +253,13 @@ An implemented container no case's Metal leg touches. These are the families of 
 
 | | |
 |---|---|
-| case modules | 76 |
-| committed recordings | 686 |
+| case modules | 78 |
+| committed recordings | 696 |
 | recorded runs behind a case, median | 3 |
 | recorded runs, least and most | 1 and 30 |
 | cases whose recording holds more than one outcome | 0 |
-| cases running a committed shader fixture | 360 |
-| cases whose Metal answer is `metal_run` | 602 |
+| cases running a committed shader fixture | 370 |
+| cases whose Metal answer is `metal_run` | 612 |
 | cases whose Metal answer is `carried` | 80 |
 | cases whose Metal answer is `never_returned` | 4 |
 | modules that loosen a measured value | 11 |
@@ -271,10 +272,10 @@ An implemented container no case's Metal leg touches. These are the families of 
 | `Side` methods the Metal leg reaches an SDK item through | 48 |
 | SDK items a case's Metal leg reaches, median | 31 |
 | the same, least and most | 0 and 83 |
-| Metal call sites in the leg | 546 |
-| distinct selectors the leg sends | 227 |
-| of those, resolved to an item of the coverage map | 220 |
-| oracles the recordings name | `apple-m3-max` ×686 |
+| Metal call sites in the leg | 584 |
+| distinct selectors the leg sends | 230 |
+| of those, resolved to an item of the coverage map | 222 |
+| oracles the recordings name | `apple-m3-max` ×696 |
 
 ## By family
 
@@ -285,6 +286,7 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `astc_textures` | 28 | 28 | 1 tolerance(s): `Degradation` | 22 |
 | `border_swizzles` | 8 | 8 | 1 tolerance(s): `Degradation` | 30 |
 | `buffer_blits` | 4 | 4 | every field | 15 |
+| `buffer_depth_samples` | 3 | 3 | every field | 40 |
 | `buffer_textures` | 3 | 2 | every field | 41 |
 | `chroma_pairs` | 6 | 6 | every field | 41 |
 | `color_write_masks` | 3 | 3 | every field | 68 |
@@ -322,6 +324,7 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `mesh_commands` | 2 | 2 | 1 tolerance(s): `AcceptedDifference` | 31 |
 | `mesh_draws` | 6 | 6 | every field | 27 |
 | `nearest_positions` | 1 | 1 | every field | 19 |
+| `norm_storage_writes` | 7 | 7 | every field | 23 |
 | `pass_bytes` | 4 | 4 | 1 tolerance(s): `Degradation` | 7 |
 | `pixel_downscales` | 7 | 7 | every field | 21 |
 | `pixel_samplers` | 16 | 16 | every field | 21 |
@@ -532,9 +535,9 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `synchronizeTexture:slice:level:` | no | — | — |
 | `copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:` | yes | `chroma_pairs`, `compressed_blits`, `format_copies`, `pvrtc_rows`, `two_plane_heap_blits` | 35 |
 | `copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:` | no | — | — |
-| `copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:options:` | yes | `chroma_pairs`, `compressed_blits`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies` | 144 |
+| `copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:options:` | yes | `buffer_depth_samples`, `chroma_pairs`, `compressed_blits`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies` | 147 |
 | `copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:` | no | — | — |
-| `copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:options:` | yes | `chroma_pairs`, `compressed_blits`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies` | 130 |
+| `copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:options:` | yes | `buffer_depth_samples`, `chroma_pairs`, `compressed_blits`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies` | 133 |
 | `generateMipmapsForTexture:` | no | — | — |
 | `fillBuffer:range:value:` | yes | `buffer_blits`, `event_orders`, `fresh_contents`, `scheduled_handlers` | 96 |
 | `copyFromTexture:sourceSlice:sourceLevel:toTexture:destinationSlice:destinationLevel:sliceCount:levelCount:` | no | — | — |
@@ -555,10 +558,10 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLBuffer` | no | — | — |
-| `length` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_texel_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `nearest_positions`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rate_maps`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 476 |
-| `contents` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `event_orders`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rate_maps`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 502 |
+| `length` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_texel_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rate_maps`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 486 |
+| `contents` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `event_orders`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rate_maps`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 512 |
 | `didModifyRange:` | no | — | — |
-| `newTextureWithDescriptor:offset:bytesPerRow:` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_minify`, `ycbcr_textures` | 256 |
+| `newTextureWithDescriptor:offset:bytesPerRow:` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_minify`, `ycbcr_textures` | 266 |
 | `gpuAddress` | no | — | — |
 
 ### `MTLBufferBinding`
@@ -604,11 +607,11 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `addScheduledHandler:` | yes | `event_orders`, `scheduled_handlers` | 5 |
 | `waitUntilScheduled` | yes | `scheduled_handlers` | 1 |
 | `addCompletedHandler:` | yes | `event_orders`, `scheduled_handlers` | 5 |
-| `waitUntilCompleted` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `nearest_positions`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_events`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 483 |
-| `status` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `event_orders`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `nearest_positions`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `scheduled_handlers`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 487 |
+| `waitUntilCompleted` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_events`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 493 |
+| `status` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `event_orders`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `scheduled_handlers`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 497 |
 | `error` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 127 |
-| `blitCommandEncoder` | yes | `buffer_blits`, `chroma_pairs`, `compressed_blits`, `compressed_views`, `event_orders`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `scheduled_handlers`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 154 |
-| `renderCommandEncoderWithDescriptor:` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 145 |
+| `blitCommandEncoder` | yes | `buffer_blits`, `buffer_depth_samples`, `chroma_pairs`, `compressed_blits`, `compressed_views`, `event_orders`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `scheduled_handlers`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 157 |
+| `renderCommandEncoderWithDescriptor:` | yes | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 148 |
 | `computeCommandEncoder` | yes | `extended_range_blends`, `extended_range_targets` | 40 |
 | `computeCommandEncoderWithDispatchType:` | no | — | — |
 | `encodeWaitForEvent:value:` | yes | `event_orders` | 4 |
@@ -620,7 +623,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLCommandEncoder` | no | — | — |
-| `endEncoding` | yes | `color_write_masks`, `discard_hoist`, `event_orders`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `scheduled_handlers`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 140 |
+| `endEncoding` | yes | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `event_orders`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `scheduled_handlers`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 143 |
 
 ### `MTLCommandQueue`
 
@@ -629,7 +632,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `MTLCommandQueue` | no | — | — |
 | `label` | no | — | — |
 | `device` | no | — | — |
-| `commandBuffer` | yes | `buffer_blits`, `chroma_pairs`, `color_write_masks`, `command_queues`, `compressed_blits`, `compressed_views`, `discard_hoist`, `event_orders`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `scheduled_handlers`, `shader_stencil`, `shared_events`, `snorm_tile_store`, `srgb_fetch`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `visibility`, `wide_points` | 301 |
+| `commandBuffer` | yes | `buffer_blits`, `buffer_depth_samples`, `chroma_pairs`, `color_write_masks`, `command_queues`, `compressed_blits`, `compressed_views`, `discard_hoist`, `event_orders`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `scheduled_handlers`, `shader_stencil`, `shared_events`, `snorm_tile_store`, `srgb_fetch`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `visibility`, `wide_points` | 304 |
 
 ### `MTLComputeCommandEncoder`
 
@@ -757,12 +760,12 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `newCommandQueueWithMaxCommandBufferCount:` | yes | `command_queues` | 1 |
 | `heapTextureSizeAndAlignWithDescriptor:` | yes | `compressed_moves`, `heap_metal_sizes`, `two_plane_copies`, `ycbcr_textures` | 24 |
 | `heapBufferSizeAndAlignWithLength:options:` | no | — | — |
-| `newHeapWithDescriptor:` | yes | `buffer_blits`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `sparse_heaps`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 171 |
-| `newBufferWithLength:options:` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `event_orders`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rate_maps`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `scheduled_handlers`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 503 |
+| `newHeapWithDescriptor:` | yes | `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `sparse_heaps`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 174 |
+| `newBufferWithLength:options:` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `event_orders`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rate_maps`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `scheduled_handlers`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 513 |
 | `newBufferWithBytes:length:options:` | no | — | — |
 | `newBufferWithBytesNoCopy:length:options:deallocator:` | no | — | — |
 | `newDepthStencilStateWithDescriptor:` | yes | `shader_stencil`, `srgb_fetch`, `visibility` | 14 |
-| `newTextureWithDescriptor:` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `heap_metal_sizes`, `level_sizes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `snorm_tile_store`, `srgb_fetch`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `textures`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_textures` | 554 |
+| `newTextureWithDescriptor:` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `heap_metal_sizes`, `level_sizes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `norm_storage_writes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `snorm_tile_store`, `srgb_fetch`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `textures`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_textures` | 564 |
 | `newSharedTextureWithDescriptor:` | no | — | — |
 | `newSharedTextureWithHandle:` | no | — | — |
 | `newSamplerStateWithDescriptor:` | yes | `border_swizzles`, `chroma_pairs`, `depth_texel_reads`, `discard_hoist`, `extended_swizzles`, `half_read_nans`, `nearest_positions`, `pixel_downscales`, `pixel_samplers`, `rgb10a2_srgb`, `two_plane_samples`, `ycbcr_minify` | 87 |
@@ -771,7 +774,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `newRenderPipelineStateWithDescriptor:options:reflection:error:` | yes | `texture_accesses` | 1 |
 | `newRenderPipelineStateWithDescriptor:completionHandler:` | no | — | — |
 | `newRenderPipelineStateWithDescriptor:options:completionHandler:` | no | — | — |
-| `newComputePipelineStateWithFunction:error:` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `format_copies`, `fresh_contents`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `level_sizes`, `math_routines`, `nearest_positions`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `shared_exponent_storage`, `simdgroup_lockstep`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `ycbcr_minify`, `ycbcr_textures` | 394 |
+| `newComputePipelineStateWithFunction:error:` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `format_copies`, `fresh_contents`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `level_sizes`, `math_routines`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `shared_exponent_storage`, `simdgroup_lockstep`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `ycbcr_minify`, `ycbcr_textures` | 404 |
 | `newComputePipelineStateWithFunction:options:reflection:error:` | no | — | — |
 | `newComputePipelineStateWithFunction:completionHandler:` | no | — | — |
 | `newComputePipelineStateWithFunction:options:completionHandler:` | no | — | — |
@@ -923,13 +926,13 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLHeapDescriptor` | no | — | — |
-| `size` | yes | `buffer_blits`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `sparse_heaps`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 171 |
+| `size` | yes | `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `sparse_heaps`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 174 |
 | `storageMode` | yes | `sparse_heaps` | 6 |
 | `cpuCacheMode` | no | — | — |
 | `sparsePageSize` | yes | `sparse_heaps` | 6 |
 | `hazardTrackingMode` | no | — | — |
-| `resourceOptions` | yes | `buffer_blits`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 165 |
-| `type` | yes | `buffer_blits`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `sparse_heaps`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 171 |
+| `resourceOptions` | yes | `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 168 |
+| `type` | yes | `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `sparse_heaps`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 174 |
 
 ### `MTLIndirectCommandBuffer`
 
@@ -1017,7 +1020,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 |---|---|---|---|
 | `MTLLibrary` | no | — | — |
 | `device` | no | — | — |
-| `newFunctionWithName:` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_accesses`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 501 |
+| `newFunctionWithName:` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_accesses`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 511 |
 | `newFunctionWithName:constantValues:error:` | no | — | — |
 | `newFunctionWithName:constantValues:completionHandler:` | no | — | — |
 | `reflectionForFunctionWithName:` | no | — | — |
@@ -1288,16 +1291,16 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLRenderPassAttachmentDescriptor` | no | — | — |
-| `texture` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 145 |
+| `texture` | yes | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 148 |
 | `level` | no | — | — |
-| `slice` | no | — | — |
+| `slice` | yes | `buffer_depth_samples` | 3 |
 | `depthPlane` | no | — | — |
 | `resolveTexture` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 127 |
 | `resolveLevel` | no | — | — |
 | `resolveSlice` | no | — | — |
 | `resolveDepthPlane` | no | — | — |
-| `loadAction` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 145 |
-| `storeAction` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 145 |
+| `loadAction` | yes | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 148 |
+| `storeAction` | yes | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 148 |
 | `storeActionOptions` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 127 |
 
 ### `MTLRenderPassColorAttachmentDescriptor`
@@ -1320,7 +1323,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLRenderPassDepthAttachmentDescriptor` | no | — | — |
-| `clearDepth` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 127 |
+| `clearDepth` | yes | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 130 |
 | `depthResolveFilter` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 127 |
 
 ### `MTLRenderPassDescriptor`
@@ -1330,8 +1333,8 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `MTLRenderPassDescriptor` | no | — | — |
 | `renderPassDescriptor` | no | — | — |
 | `colorAttachments` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 145 |
-| `depthAttachment` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 127 |
-| `stencilAttachment` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 127 |
+| `depthAttachment` | yes | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 130 |
+| `stencilAttachment` | yes | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 130 |
 | `visibilityResultBuffer` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 127 |
 | `renderTargetArrayLength` | no | — | — |
 | `imageblockSampleLength` | no | — | — |
@@ -1350,7 +1353,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLRenderPassStencilAttachmentDescriptor` | no | — | — |
-| `clearStencil` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 127 |
+| `clearStencil` | yes | `buffer_depth_samples`, `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 130 |
 | `stencilResolveFilter` | yes | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `int_attributes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 127 |
 
 ### `MTLRenderPipelineColorAttachmentDescriptor`
@@ -1616,9 +1619,9 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `tailSizeInBytes` | yes | `sparse_heaps` | 6 |
 | `isSparse` | yes | `sparse_heaps` | 6 |
 | `allowGPUOptimizedContents` | yes | `buffer_textures` | 2 |
-| `gpuResourceID` | yes | `half_storage_writes`, `pixel_downscales`, `pixel_samplers` | 32 |
+| `gpuResourceID` | yes | `half_storage_writes`, `norm_storage_writes`, `pixel_downscales`, `pixel_samplers` | 39 |
 | `getBytes:bytesPerRow:bytesPerImage:fromRegion:mipmapLevel:slice:` | yes | `buffer_textures`, `chroma_pairs`, `compressed_blits`, `pvrtc_cpu_order`, `two_plane_copies` | 19 |
-| `replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 238 |
+| `replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 248 |
 | `getBytes:bytesPerRow:fromRegion:mipmapLevel:` | no | — | — |
 | `replaceRegion:mipmapLevel:withBytes:bytesPerRow:` | yes | `chroma_pairs`, `depth_texel_reads`, `discard_hoist`, `extended_range_two_planes`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `nearest_positions`, `pixel_downscales`, `pixel_samplers`, `rgb10a2_srgb`, `textures`, `tile_threadgroups`, `two_plane_samples` | 164 |
 | `newTextureViewWithPixelFormat:` | no | — | — |
@@ -1626,7 +1629,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `newSharedTextureHandle` | no | — | — |
 | `newTextureViewWithDescriptor:` | no | — | — |
 | `swizzle` | no | — | — |
-| `newTextureViewWithPixelFormat:textureType:levels:slices:swizzle:` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 238 |
+| `newTextureViewWithPixelFormat:textureType:levels:slices:swizzle:` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 248 |
 
 ### `MTLTextureBinding`
 
@@ -1646,21 +1649,21 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `texture2DDescriptorWithPixelFormat:width:height:mipmapped:` | no | — | — |
 | `textureCubeDescriptorWithPixelFormat:size:mipmapped:` | no | — | — |
 | `textureBufferDescriptorWithPixelFormat:width:resourceOptions:usage:` | no | — | — |
-| `textureType` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `heap_metal_sizes`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `snorm_tile_store`, `sparse_heaps`, `srgb_fetch`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 381 |
-| `pixelFormat` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_minify`, `ycbcr_textures` | 255 |
-| `width` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_minify`, `ycbcr_textures` | 255 |
-| `height` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_minify`, `ycbcr_textures` | 255 |
-| `depth` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_textures` | 253 |
-| `mipmapLevelCount` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_textures` | 253 |
+| `textureType` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `heap_metal_sizes`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `snorm_tile_store`, `sparse_heaps`, `srgb_fetch`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 391 |
+| `pixelFormat` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_minify`, `ycbcr_textures` | 265 |
+| `width` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_minify`, `ycbcr_textures` | 265 |
+| `height` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_minify`, `ycbcr_textures` | 265 |
+| `depth` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_textures` | 263 |
+| `mipmapLevelCount` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_textures` | 263 |
 | `sampleCount` | yes | `buffer_textures`, `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `half_output_blends`, `heap_metal_sizes`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `sparse_heaps`, `srgb_fetch`, `visibility`, `wide_points`, `ycbcr_textures` | 143 |
-| `arrayLength` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_textures` | 253 |
+| `arrayLength` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `heap_metal_sizes`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `sparse_heaps`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_textures` | 263 |
 | `resourceOptions` | no | — | — |
 | `cpuCacheMode` | no | — | — |
-| `storageMode` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `heap_metal_sizes`, `level_sizes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `snorm_tile_store`, `sparse_heaps`, `srgb_fetch`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `textures`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 548 |
+| `storageMode` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `heap_metal_sizes`, `level_sizes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `norm_storage_writes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `snorm_tile_store`, `sparse_heaps`, `srgb_fetch`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `textures`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 558 |
 | `hazardTrackingMode` | no | — | — |
-| `usage` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `heap_metal_sizes`, `level_sizes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `snorm_tile_store`, `sparse_heaps`, `srgb_fetch`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `textures`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 548 |
-| `allowGPUOptimizedContents` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 238 |
-| `swizzle` | yes | `astc_textures`, `border_swizzles`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 238 |
+| `usage` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `heap_metal_sizes`, `level_sizes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `norm_storage_writes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `snorm_tile_store`, `sparse_heaps`, `srgb_fetch`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `textures`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 558 |
+| `allowGPUOptimizedContents` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 248 |
+| `swizzle` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 248 |
 
 ### `MTLTextureReferenceType`
 
@@ -1812,8 +1815,9 @@ An item the suite's Metal leg calls whose coverage-map status is not implemented
 
 | item | status | note | families |
 |---|---|---|---|
-| `MTL4LibraryFunctionDescriptor` `library` | missing | Metal 4's command model (`MTL4CommandQueue`, `MTL4CommandBuffer`, argument tables, the compiler, `RuntimeGap::Metal4Api`) | `buffer_blits`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` |
-| `MTLDevice` `newLibraryWithURL:error:` | missing | a metallib read from a file URL | `astc_textures`, `border_swizzles`, `chroma_pairs`, `color_write_masks`, `compressed_decode`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_accesses`, `tile_threadgroups`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` |
+| `MTL4LibraryDescriptor` `source` | missing | Metal 4's command model (`MTL4CommandQueue`, `MTL4CommandBuffer`, argument tables, the compiler, `RuntimeGap::Metal4Api`) | `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` |
+| `MTL4LibraryFunctionDescriptor` `library` | missing | Metal 4's command model (`MTL4CommandQueue`, `MTL4CommandBuffer`, argument tables, the compiler, `RuntimeGap::Metal4Api`) | `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` |
+| `MTLDevice` `newLibraryWithURL:error:` | missing | a metallib read from a file URL | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_accesses`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` |
 
 ## Called, attributed to no family
 
