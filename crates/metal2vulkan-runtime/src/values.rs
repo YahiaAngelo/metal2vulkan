@@ -127,9 +127,14 @@ impl ResourceOptions {
     /// pass it). [`from_raw`](Self::from_raw) takes it. What Metal does with it (the M3 Max under
     /// macOS 27.0.1), and the runtime:
     /// - a no-copy buffer and a heap are made with it, and report their options without it: Metal
-    ///   keeps the GPU's writes from their memory (a kernel's stores and a blit's fill reach
-    ///   neither the CPU nor a later command buffer; a blit into a texture over or in the memory
-    ///   faults the command buffer). The runtime makes them as without it, and announces
+    ///   keeps the GPU's writes from their memory, and which writes it keeps out and which it
+    ///   faults on splits by the engine that writes (`read_only_view.rs`). What a shader or the
+    ///   blit engine writes is dropped with no error -- a blit's fill, a kernel's stores, a vertex-
+    ///   or fragment-stage store, a store through an address loaded out of an argument buffer, a
+    ///   pass's visibility result -- and reaches neither the CPU nor a later command buffer. What a
+    ///   render pass's own machinery writes faults the command buffer: a colour attachment over
+    ///   that memory, a resolve into it, a depth or stencil attachment in a heap of the bit, and a
+    ///   blit into a texture over or in it. The runtime makes them as without it, and announces
     ///   `metal2vulkan-degrade-private-resource-option` once; so does an indirect command buffer
     ///   made with it, which Metal makes and whose GPU-written records under it are not measured;
     /// - a buffer placed in a heap without it is made as without it, as Metal's is, announcing

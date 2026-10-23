@@ -3,13 +3,31 @@
 //! through one, so that the GPU's writes to it are dropped, as Metal drops them.
 //!
 //! - **What Metal does.** Measured on an M3 Max under macOS 27.0.1: a no-copy buffer, or a heap
-//!   over the caller's bytes, made with bit 24 takes the GPU's writes nowhere. A kernel's stores
-//!   and a blit's fill reach neither the CPU nor a later command buffer, which reads the CPU's
-//!   bytes; later commands of the same command buffer may read some back from the GPU's caches.
-//!   The pages' protection is unchanged, and the resource's options leave the bit out.
+//!   over the caller's bytes, made with bit 24 takes the GPU's writes nowhere. The pages'
+//!   protection is unchanged, and the resource's options leave the bit out. Which writes it takes
+//!   nowhere, and which it faults on, splits by the engine that writes
+//!   (`metal2vulkan-conformance`'s `probes/readonly_gpu_writes.m`, eleven shapes against a
+//!   writable twin of each, eight runs a shape):
+//!   - **What a shader or the blit engine writes is dropped and nothing is said.** A blit fill, a
+//!     kernel's stores, a vertex-stage store, a fragment-stage store, a kernel or fragment store
+//!     through an address loaded out of an argument buffer, and a pass's visibility result all
+//!     complete with no error, and neither the CPU nor a later command buffer sees any of it.
+//!   - **What a render pass's own machinery writes faults the command buffer.** A colour
+//!     attachment over such memory, a resolve into it, and a depth or stencil attachment in a heap
+//!     made with the bit end their command buffer with `MTLCommandBufferErrorDomain` /
+//!     `kIOGPUCommandBufferCallbackErrorPageFault`, on the first command buffer of a fresh
+//!     process, every run — and every later command buffer of that process then errors too.
+//!   - **Later commands of the same command buffer may read a dropped write back** from the GPU's
+//!     caches, and whether they do is not stable: a blit fill and both compute stores were visible
+//!     there in every run including the first of a fresh process, while the visibility result and
+//!     the three draw-stage stores were not visible there in the first run of a fresh process
+//!     (twelve of twelve) and were in seven runs of eight once the process had run them. It is not
+//!     a contract to reproduce.
 //! - **How.** A no-copy buffer made without the bit over a read-only view of the same pages
 //!   (`mach_vm_remap` sharing them, then `mprotect` read-only) behaved the same on every count
-//!   measured. On macOS the device's import of a host pointer is such a buffer (MoltenVK hands
+//!   measured, and the probe above found it agreeing with bit 24 on **every one of its eleven
+//!   shapes**, the five that fault included, with the same stability. So the view reproduces
+//!   Metal here rather than approximating it. On macOS the device's import of a host pointer is such a buffer (MoltenVK hands
 //!   the range to Metal), so the runtime imports the view in place of the caller's pointer
 //!   (`Device::buffer_over_host_memory`), while the CPU reads and writes the caller's own
 //!   (`Buffer::contents`). The view shares the pages, so the GPU reads what the CPU

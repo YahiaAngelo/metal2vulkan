@@ -74,11 +74,7 @@ static const NSUInteger kTargetLength = 0x400;
 // of 16 bytes at a pitch of 32, so half the target's span is padding no texel covers and a store
 // that wrote whole pitches shows.
 static const NSUInteger kTargetSide = 4;
-static const NSUInteger kTargetRowBytes = 16;
 static const NSUInteger kTargetPitch = 32;
-
-// The word a store writes, plus the index: a value neither kPad nor kUnread repeats.
-static const uint32_t kStoreBase = 0xC0DE0000u;
 
 // Apple's backing-replacement SPI, declared so the call is typed. Checked with
 // `respondsToSelector:` before any use.
@@ -94,6 +90,8 @@ typedef struct {
   uint64_t length;
 } M2VBackingRange;
 
+// The shaders every storing shape runs. Each store writes 0xC0DE0000 plus the index: a word whose
+// every byte differs from kPad and kUnread, so a stored word is unmistakable in a read-back.
 static NSString *const kShaders =
     @"#include <metal_stdlib>\n"
     @"using namespace metal;\n"
@@ -144,8 +142,16 @@ static NSString *const kShaders =
 // Reporting
 // ---------------------------------------------------------------------------------------------
 
+// The run a report line belongs to, so repeated runs of one shape are told apart. -1 is a line
+// about the process rather than a run.
+static int gRun = -1;
+
 static void say(const char *key, NSString *value) {
-  printf("%s=%s\n", key, value.UTF8String);
+  if (gRun >= 0) {
+    printf("run%d.%s=%s\n", gRun, key, value.UTF8String);
+  } else {
+    printf("%s=%s\n", key, value.UTF8String);
+  }
   fflush(stdout);
 }
 
@@ -189,14 +195,6 @@ static NSString *changedRuns(const uint8_t *bytes, size_t length, uint8_t expect
   }
   return [NSString stringWithFormat:@"%zu-runs %zu-bytes %@%s", runs, changed, out,
                                     runs > 8 ? " ..." : ""];
-}
-
-static void sayRead(const char *key, NSData *data, uint8_t expected) {
-  if (data == nil) {
-    say(key, @"not-read");
-    return;
-  }
-  say(key, changedRuns((const uint8_t *)data.bytes, data.length, expected));
 }
 
 static NSString *statusWord(MTLCommandBufferStatus status) {
@@ -624,7 +622,7 @@ static BOOL encodeShape(id<MTLCommandBuffer> cb, Probe *probe, NSString *shape) 
 // the same bytes of the placement heap is how the probe reads them: the heap's own memory, which
 // has no host pointer, so there is no CPU leg for these two and no page protection to report.
 static int runDepthOrStencil(id<MTLDevice> device, id<MTLCommandQueue> queue, NSString *shape,
-                             BOOL privateBit) {
+                             BOOL privateBit, NSMutableArray *answers) {
   BOOL stencil = [shape isEqualToString:@"stencil-attachment"];
   MTLPixelFormat format = stencil ? MTLPixelFormatStencil8 : MTLPixelFormatDepth32Float;
   MTLTextureDescriptor *descriptor = [MTLTextureDescriptor
@@ -720,11 +718,16 @@ destinationBytesPerImage:pitch * kTargetSide];
   [cb2 waitUntilCompleted];
   sayCommandBuffer("cb2", cb2);
 
-  sayRead("same_cb", [NSData dataWithBytes:out.contents length:out.length], kUnread);
-  sayRead("later_cb", [NSData dataWithBytes:out2.contents length:out2.length], kUnread);
+  NSString *same = changedRuns((const uint8_t *)out.contents, out.length, kUnread);
+  NSString *later = changedRuns((const uint8_t *)out2.contents, out2.length, kUnread);
+  say("same_cb", same);
+  say("later_cb", later);
   sayu("read.bytes_per_row", pitch);
   sayu("read.row_bytes", readBytes / kTargetSide);
   say("cpu", @"not-applicable-heap-is-device-memory");
+  [answers addObject:[NSString stringWithFormat:@"status=%@/%@ same=%@ later=%@",
+                                                statusWord(cb.status), statusWord(cb2.status),
+                                                same, later]];
   return 0;
 }
 
@@ -732,25 +735,112 @@ destinationBytesPerImage:pitch * kTargetSide];
 
 static int usage(void) {
   fprintf(stderr,
-          "usage: readonly_gpu_writes <backing> <shape>\n"
+          "usage: readonly_gpu_writes <backing> <shape> [runs]\n"
           "  backing  plain | bit24 | viewed | replaced\n"
           "  shape    facts | blit-fill | kernel-store | kernel-store-loaded |\n"
           "           color-attachment | color-attachment-draw | resolve | visibility |\n"
           "           vertex-store | fragment-store | fragment-store-loaded |\n"
           "           depth-attachment | stencil-attachment\n"
-          "One shape per process: a shape Metal faults on must not take the others with it.\n");
+          "  runs     how many times to repeat the shape in this process (default 1)\n"
+          "One shape per process: a shape Metal faults on must not take the others with it.\n"
+          "Several runs per process because Metal's answer to a question of this kind has been\n"
+          "measured flapping between runs, so a single reading establishes nothing. Each run\n"
+          "makes its own pages, its own buffer and its own command buffers; the last line tallies\n"
+          "the distinct answers seen, and more than one of them IS the measurement.\n");
   return 2;
+}
+
+// One run of a buffer-backed shape: its own pages, its own buffer, its own two command buffers.
+//
+// Appends the run's three answers to `answers` as one string, so the tally at the end can say
+// whether Metal gave the same answer every time. `library` is made once for the process, because
+// compiling the shaders each run would be work the measurement does not need and Metal's shader
+// compiler is the thing that wedges this device.
+static int runBufferShape(id<MTLDevice> device, id<MTLCommandQueue> queue, NSString *which,
+                          NSString *shape, id<MTLLibrary> library, NSMutableArray *answers) {
+  Probe probe = {device, queue, library, {nil, NULL, NULL, @"none"}, nil, nil};
+  probe.backing = makeBacking(device, which);
+  if (probe.backing.buffer == nil) {
+    return 2;
+  }
+  say("backing.note", probe.backing.note);
+  sayx("buffer.resource_options", (unsigned long long)probe.backing.buffer.resourceOptions);
+  sayu("buffer.storage_mode", (unsigned long long)probe.backing.buffer.storageMode);
+  sayu("buffer.length", probe.backing.buffer.length);
+  say("buffer.contents_is_imported",
+      probe.backing.buffer.contents == probe.backing.imported ? @"yes" : @"no");
+  say("buffer.contents_is_pages",
+      probe.backing.buffer.contents == probe.backing.pages ? @"yes" : @"no");
+  sayProtection("pages", probe.backing.pages);
+  sayProtection("imported", probe.backing.imported);
+
+  if ([shape isEqualToString:@"facts"]) {
+    // The facts alone: no GPU work at all, so this arm says whether the backing is what the
+    // owner's report describes without putting a command on the device.
+    SEL selector = @selector(replaceBackingWithRanges:count:readOnly:);
+    say("spi.replaceBackingWithRanges",
+        [probe.backing.buffer respondsToSelector:selector] ? @"responds" : @"absent");
+    NSString *cpu = changedRuns(probe.backing.pages, kRegion, kPad);
+    say("cpu", cpu);
+    [answers addObject:[NSString stringWithFormat:@"cpu=%@", cpu]];
+    return 0;
+  }
+
+  probe.sameCb = [device newBufferWithLength:kRegion options:MTLResourceStorageModeShared];
+  probe.laterCb = [device newBufferWithLength:kRegion options:MTLResourceStorageModeShared];
+  memset(probe.sameCb.contents, kUnread, kRegion);
+  memset(probe.laterCb.contents, kUnread, kRegion);
+
+  // One command buffer: the write, then the read-back. Metal orders a command buffer's encoders,
+  // so the copy sees whatever the write left for a later command of the same command buffer --
+  // which is the surprising half of the fact already written down, and the reason both halves of
+  // the round trip are in ONE command buffer here.
+  id<MTLCommandBuffer> cb = [queue commandBuffer];
+  if (!encodeShape(cb, &probe, shape)) {
+    return 2;
+  }
+  encodeReadBack(cb, &probe, probe.sameCb);
+  [cb commit];
+  [cb waitUntilCompleted];
+  sayCommandBuffer("cb1", cb);
+
+  // A second command buffer, which is where the fact says the GPU's write is gone.
+  id<MTLCommandBuffer> cb2 = [queue commandBuffer];
+  encodeReadBack(cb2, &probe, probe.laterCb);
+  [cb2 commit];
+  [cb2 waitUntilCompleted];
+  sayCommandBuffer("cb2", cb2);
+
+  NSString *same =
+      changedRuns((const uint8_t *)probe.sameCb.contents, kRegion, kPad);
+  NSString *later =
+      changedRuns((const uint8_t *)probe.laterCb.contents, kRegion, kPad);
+  // The CPU's own view of the pages it owns. Read only: a CPU WRITE through a read-only mapping
+  // ends the process, which is Metal's own behaviour and is not in scope here.
+  NSString *cpu = changedRuns(probe.backing.pages, kRegion, kPad);
+  say("same_cb", same);
+  say("later_cb", later);
+  say("cpu", cpu);
+  sayProtection("pages_after", probe.backing.pages);
+  [answers addObject:[NSString stringWithFormat:@"status=%@/%@ same=%@ later=%@ cpu=%@",
+                                                statusWord(cb.status), statusWord(cb2.status),
+                                                same, later, cpu]];
+  return 0;
 }
 
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
-    if (argc != 3) {
+    if (argc != 3 && argc != 4) {
       return usage();
     }
     NSString *which = [NSString stringWithUTF8String:argv[1]];
     NSString *shape = [NSString stringWithUTF8String:argv[2]];
     if (!([which isEqualToString:@"plain"] || [which isEqualToString:@"bit24"] ||
           [which isEqualToString:@"viewed"] || [which isEqualToString:@"replaced"])) {
+      return usage();
+    }
+    int runs = argc == 4 ? atoi(argv[3]) : 1;
+    if (runs < 1 || runs > 64) {
       return usage();
     }
 
@@ -762,6 +852,7 @@ int main(int argc, const char *argv[]) {
     say("device.name", device.name);
     say("backing.kind", which);
     say("shape.name", shape);
+    sayu("runs.asked", (unsigned long long)runs);
     sayu("region.bytes", kRegion);
     sayx("target.offset", kTargetOffset);
     sayx("target.length", kTargetLength);
@@ -769,81 +860,52 @@ int main(int argc, const char *argv[]) {
     sayu("unread.byte", kUnread);
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
+    NSMutableArray *answers = [NSMutableArray array];
 
     // The depth and stencil shapes have no buffer backing at all: a heap, and no host pointer.
-    if ([shape isEqualToString:@"depth-attachment"] ||
-        [shape isEqualToString:@"stencil-attachment"]) {
-      if ([which isEqualToString:@"viewed"] || [which isEqualToString:@"replaced"]) {
-        say("shape", @"depth-and-stencil-have-no-pointer-backing");
+    BOOL heapShape = [shape isEqualToString:@"depth-attachment"] ||
+                     [shape isEqualToString:@"stencil-attachment"];
+    if (heapShape && ([which isEqualToString:@"viewed"] || [which isEqualToString:@"replaced"])) {
+      say("shape", @"depth-and-stencil-have-no-pointer-backing");
+      return 2;
+    }
+
+    // The shaders, compiled once for the process. The two shapes that need no function skip it,
+    // so a clear-only measurement never waits on Metal's shader compiler.
+    id<MTLLibrary> library = nil;
+    if (!heapShape && ![shape isEqualToString:@"facts"] &&
+        ![shape isEqualToString:@"blit-fill"] && ![shape isEqualToString:@"color-attachment"]) {
+      NSError *error = nil;
+      library = [device newLibraryWithSource:kShaders options:nil error:&error];
+      if (library == nil) {
+        say("library", ([NSString stringWithFormat:@"failed: %@", error]));
         return 2;
       }
-      return runDepthOrStencil(device, queue, shape, [which isEqualToString:@"bit24"]);
     }
 
-    Probe probe = {device, queue, nil, {nil, NULL, NULL, @"none"}, nil, nil};
-    probe.backing = makeBacking(device, which);
-    if (probe.backing.buffer == nil) {
-      return 2;
+    int code = 0;
+    for (int run = 0; run < runs && code == 0; run++) {
+      gRun = run;
+      code = heapShape ? runDepthOrStencil(device, queue, shape,
+                                           [which isEqualToString:@"bit24"], answers)
+                       : runBufferShape(device, queue, which, shape, library, answers);
     }
-    say("backing.note", probe.backing.note);
-    sayx("buffer.resource_options", (unsigned long long)probe.backing.buffer.resourceOptions);
-    sayu("buffer.storage_mode", (unsigned long long)probe.backing.buffer.storageMode);
-    sayu("buffer.length", probe.backing.buffer.length);
-    say("buffer.contents_is_imported",
-        probe.backing.buffer.contents == probe.backing.imported ? @"yes" : @"no");
-    say("buffer.contents_is_pages",
-        probe.backing.buffer.contents == probe.backing.pages ? @"yes" : @"no");
-    sayProtection("pages", probe.backing.pages);
-    sayProtection("imported", probe.backing.imported);
+    gRun = -1;
 
-    if ([shape isEqualToString:@"facts"]) {
-      // The facts alone: no GPU work at all, so this arm is safe on a held device and says
-      // whether the backing is what the owner's report describes.
-      SEL selector = @selector(replaceBackingWithRanges:count:readOnly:);
-      say("spi.replaceBackingWithRanges",
-          [probe.backing.buffer respondsToSelector:selector] ? @"responds" : @"absent");
-      say("cpu", changedRuns(probe.backing.pages, kRegion, kPad));
-      return 0;
+    // The tally, which is the measurement when Metal's answer is not stable. The consuming
+    // project's own control case for a nearby question came out negative in 248 of 800 runs
+    // against 39 of 40 on an earlier date, so a shape read once has established nothing. More
+    // than one distinct answer here is a FLAPPING result and is reported as one, never resolved
+    // into a majority.
+    NSCountedSet *distinct = [NSCountedSet setWithArray:answers];
+    sayu("runs.completed", (unsigned long long)answers.count);
+    sayu("answers.distinct", (unsigned long long)distinct.count);
+    say("answers.stable", distinct.count <= 1 ? @"yes" : @"NO-FLAPPING");
+    for (NSString *answer in distinct) {
+      printf("answer[%lu/%lu]=%s\n", (unsigned long)[distinct countForObject:answer],
+             (unsigned long)answers.count, answer.UTF8String);
     }
-
-    NSError *error = nil;
-    probe.library = [device newLibraryWithSource:kShaders options:nil error:&error];
-    if (probe.library == nil) {
-      say("library", ([NSString stringWithFormat:@"failed: %@", error]));
-      return 2;
-    }
-
-    probe.sameCb = [device newBufferWithLength:kRegion options:MTLResourceStorageModeShared];
-    probe.laterCb = [device newBufferWithLength:kRegion options:MTLResourceStorageModeShared];
-    memset(probe.sameCb.contents, kUnread, kRegion);
-    memset(probe.laterCb.contents, kUnread, kRegion);
-
-    // One command buffer: the write, then the read-back. Metal orders a command buffer's
-    // encoders, so the copy sees whatever the write left for a later command of the same command
-    // buffer -- which is the surprising half of the fact already written down, and the reason both
-    // halves of the round trip are in ONE command buffer here.
-    id<MTLCommandBuffer> cb = [queue commandBuffer];
-    if (!encodeShape(cb, &probe, shape)) {
-      return 2;
-    }
-    encodeReadBack(cb, &probe, probe.sameCb);
-    [cb commit];
-    [cb waitUntilCompleted];
-    sayCommandBuffer("cb1", cb);
-
-    // A second command buffer, which is where the fact says the GPU's write is gone.
-    id<MTLCommandBuffer> cb2 = [queue commandBuffer];
-    encodeReadBack(cb2, &probe, probe.laterCb);
-    [cb2 commit];
-    [cb2 waitUntilCompleted];
-    sayCommandBuffer("cb2", cb2);
-
-    sayRead("same_cb", [NSData dataWithBytes:probe.sameCb.contents length:kRegion], kPad);
-    sayRead("later_cb", [NSData dataWithBytes:probe.laterCb.contents length:kRegion], kPad);
-    // The CPU's own view of the pages it owns. Read only: a CPU WRITE through a read-only
-    // mapping ends the process, which is Metal's own behaviour and is not in scope here.
-    say("cpu", changedRuns(probe.backing.pages, kRegion, kPad));
-    sayProtection("pages_after", probe.backing.pages);
-    return 0;
+    fflush(stdout);
+    return code;
   }
 }
