@@ -36,14 +36,27 @@
 //! here is the part Metal can answer. The lane's three further seeded draws (`seed + 1` to
 //! `seed + 3`) are left for the same reason.
 //!
-//! **Tolerances.** Only an EAC 11-bit format has one. Under the default
-//! `DecodedTexelsPolicy::Compact` an 11-bit channel is read from a 16-bit normalized twin, which
-//! `docs/FAST-PATHS.md` bounds at half a 16-bit step — **1/131070 unsigned, 1/65534 signed** — and
-//! the runtime announces `decoded-texel-precision` where such a texture is made. Those are the
-//! ledger's own numbers, named per format, not a round number. The six 8-bit formats
-//! (`ETC2_RGB8`, `ETC2_RGB8A1`, `EAC_RGBA8` and their sRGB forms) hold their twin's codes exactly
-//! under either value and name **no tolerance at all**, and neither does any format under
-//! `DecodedTexelsPolicy::Exact`, where the twin holds Metal's values as `float`s.
+//! **Tolerances.** Two, each the ledger's own number for a fast default, and each one that fails
+//! where the notice it names did not fire.
+//!
+//! Under the default `DecodedTexelsPolicy::Compact` an 11-bit channel is read from a 16-bit
+//! normalized twin, which `docs/FAST-PATHS.md` bounds at half a 16-bit step — **1/131070
+//! unsigned, 1/65534 signed** — and the runtime announces `decoded-texel-precision` where such a
+//! texture is made. Those are the ledger's own numbers, named per format, not a round number.
+//!
+//! Under the default `TexelConversionPolicy::Device` the `float` a function reads of a twin's
+//! 8-bit code is the **device's** conversion of that code, not Metal's `c / 255` correctly
+//! rounded, which `docs/FAST-PATHS.md` bounds at **one `f32` ulp** for 8- and 16-bit codes and the
+//! runtime announces as `device-texel-conversion`. It reaches the three **linear** 8-bit formats
+//! (`ETC2_RGB8`, `ETC2_RGB8A1`, `EAC_RGBA8`): their twin holds Metal's codes exactly and the
+//! device converts them. It does not reach their sRGB forms, whose colour the function decodes
+//! from the raw code through Metal's twelve-bit table itself and whose alpha it converts by the
+//! format's class, so no device arithmetic stands between the twin's codes and the answer.
+//!
+//! No format names either tolerance under `DecodedTexelsPolicy::Exact` with
+//! `TexelConversionPolicy::Exact`, where the twin holds Metal's values as `float`s and the
+//! function converts a code by the bound format's class: neither notice fires, neither
+//! justification holds, and every texel is compared exactly.
 //!
 //! Nothing here can fault a GPU: one compute pass a read, one read-only texture, one buffer, one
 //! thread a texel inside the texture, no loop and no sampling.
@@ -92,6 +105,12 @@ const LEDGERS_UNSIGNED_BOUND: f64 = 1.0 / 131_070.0;
 /// The same for a signed 11-bit texel, whose twin holds a 16-bit **signed** normalized code, so
 /// half a step is twice as wide ([`LEDGERS_UNSIGNED_BOUND`]).
 const LEDGERS_SIGNED_BOUND: f64 = 1.0 / 65_534.0;
+
+/// The bound `docs/FAST-PATHS.md` states for `texel_conversion = TexelConversionPolicy::Device`:
+/// one `f32` ulp for 8- and 16-bit codes. It is the ledger's number, copied here so a run that
+/// exceeds it fails rather than being re-fitted to whatever a device answers, and it is the same
+/// number [`crate::cases::compressed_decode`] names for the same read path over a BC twin's codes.
+const LEDGERS_TEXEL_CONVERSION_ULPS: u32 = 1;
 
 /// One format the lane reads: the case's name and the `MTLPixelFormat`. How its blocks decode and
 /// whether its colour is sRGB follow from the format ([`EtcDecode::of`], [`srgb_raw_twin`]), so
@@ -264,6 +283,22 @@ impl EtcTextures {
         }
     }
 
+    /// Whether a device's own arithmetic stands between this format's twin and the `float` the
+    /// function answers, so that under `TexelConversionPolicy::Device` the texel is the device's
+    /// conversion of an 8-bit code rather than Metal's `c / 255` correctly rounded.
+    ///
+    /// Decided from the format's own shape, never from the device or the case's name: the twin
+    /// holds 8-bit codes ([`EtcDecode::eleven_bit`] is false — an 11-bit format's compact twin
+    /// holds 16-bit codes, whose own, wider bound `compact_bound` already covers) and the format
+    /// is not an sRGB form ([`srgb_raw_twin`]), whose colour the function decodes from the raw
+    /// code through Metal's table and whose alpha it converts by the format's class, so no device
+    /// conversion is involved either way. It is the same test the translator's read path makes
+    /// (`lower::texture`: an sRGB slot's raw codes are converted exactly, so its access records
+    /// no `PrecisionNote::DeviceTexelConversion`).
+    fn device_converts_codes(&self) -> bool {
+        !self.decode().eleven_bit() && srgb_raw_twin(self.format().format).is_none()
+    }
+
     /// The layout a round's texels read back under: one row of the layout per row of texels, four
     /// `float` channels a texel, so a diff names the texel and the channel rather than an offset.
     fn layout() -> ByteLayout {
@@ -307,12 +342,33 @@ impl Case for EtcTextures {
         let mut all = vec![crate::replay::notice_allowance(
             Degradation::CarriedDecodedTwin.code(),
         )];
-        // An 8-bit format's twin holds Metal's own codes, so its texels compare exactly under
-        // either policy and it names nothing further. An EAC 11-bit format's compact twin holds
-        // the 16-bit normalized code nearest Metal's value, which the runtime announces as
-        // `decoded-texel-precision` and `docs/FAST-PATHS.md` bounds at half a 16-bit step. The
-        // bound here is the ledger's number for this format's signedness, so a run that exceeds
-        // it is the ledger's claim failing. Under `DecodedTexelsPolicy::Exact` the twin holds
+        // An 8-bit format's twin holds Metal's own codes, but under the default
+        // `TexelConversionPolicy::Device` the `float` the function answers is the **device's**
+        // conversion of a code, not Metal's `c / 255` correctly rounded: lavapipe multiplies by
+        // the reciprocal. The runtime announces that as `device-texel-conversion`, and
+        // `docs/FAST-PATHS.md`'s row for the policy bounds it at one `f32` ulp for 8- and 16-bit
+        // codes, so the bound here is the ledger's number and not a measurement of one driver: a
+        // run that exceeds one ulp is the ledger's claim failing, which is what this allowance
+        // exists to catch. It is the same allowance `cases::compressed_decode` names for the same
+        // read path over a BC twin's codes. Under `TexelConversionPolicy::Exact` the function
+        // recovers the code from the device's value by the bound format's class
+        // (`PackedTexels::Argb8`) and converts it itself, the notice does not fire, the
+        // justification does not hold, and every texel is compared exactly.
+        if self.device_converts_codes() {
+            for round in ROUNDS {
+                all.push(Allowance::new(
+                    format!("case/{round}/texels"),
+                    Loosening::Ulps(LEDGERS_TEXEL_CONVERSION_ULPS),
+                    Justification::notice(Degradation::DeviceTexelConversion),
+                ));
+            }
+        }
+        // An EAC 11-bit format's compact twin holds the 16-bit normalized code nearest Metal's
+        // value, which the runtime announces as `decoded-texel-precision` and
+        // `docs/FAST-PATHS.md` bounds at half a 16-bit step. The bound here is the ledger's
+        // number for this format's signedness, so a run that exceeds it is the ledger's claim
+        // failing. It is wider than the conversion ulp above and covers it, which is why an
+        // 11-bit format names this one alone. Under `DecodedTexelsPolicy::Exact` the twin holds
         // Metal's values as `float`s, the notice does not fire, the justification does not hold,
         // and every texel is compared exactly.
         if let Some(bound) = self.compact_bound() {
@@ -439,6 +495,7 @@ impl Case for EtcTextures {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcript::Transcript;
     use std::collections::BTreeSet;
 
     /// The cases name distinct recordings, since a case's name is its recording's file name.
@@ -500,15 +557,25 @@ mod tests {
         }
     }
 
-    /// Only the EAC 11-bit formats name a tolerance, and each names the bound
-    /// `docs/FAST-PATHS.md` states for its signedness.
+    /// Each format loosens the texel its own `docs/FAST-PATHS.md` row names, and nothing else.
     ///
     /// This is the ruling that a notice declaration is not a tolerance, held as a test: the
-    /// `carried-decoded-twin` declaration is on every case and loosens no value, while the one
-    /// allowance that loosens a texel is named only where the ledger says a texel moves.
+    /// `carried-decoded-twin` declaration is on every case and loosens no value, while an
+    /// allowance that loosens a texel is named only where a fast default puts a device's own
+    /// arithmetic between the twin's codes and the answer. Three groups, each format named in its
+    /// own, so a format moving between them fails here:
+    ///
+    /// - the three **linear** 8-bit formats, whose codes the device converts under
+    ///   `TexelConversionPolicy::Device`: one `f32` ulp, both rounds;
+    /// - their **sRGB** forms, whose colour the function decodes from the raw code through Metal's
+    ///   twelve-bit table itself: **nothing at all**;
+    /// - the four EAC **11-bit** formats, read from a compact 16-bit twin under
+    ///   `DecodedTexelsPolicy::Compact`: half a 16-bit step by the format's signedness.
     #[test]
-    fn only_the_eleven_bit_formats_loosen_a_texel() {
+    fn each_format_loosens_the_texel_its_ledger_row_names() {
         let mut loosened = Vec::new();
+        let mut ulps = Vec::new();
+        let mut exact = Vec::new();
         for (at, format) in FORMATS.iter().enumerate() {
             let case = EtcTextures { at };
             let bounds: Vec<Loosening> = case
@@ -519,7 +586,26 @@ mod tests {
                 .collect();
             let decode = case.decode();
             if !decode.eleven_bit() {
-                assert!(bounds.is_empty(), "{}: {bounds:?}", format.name);
+                match case.device_converts_codes() {
+                    true => {
+                        // The literal 1 is deliberate, not `LEDGERS_TEXEL_CONVERSION_ULPS`:
+                        // asserting against the constant the allowance is built from makes the
+                        // number unfalsifiable here, and widening it would pass. The ledger's
+                        // figure is written out, so moving the constant fails this test as well
+                        // as `the_texel_allowance_holds_one_ulp_only_where_the_notice_fired`.
+                        assert_eq!(
+                            bounds,
+                            vec![Loosening::Ulps(1); ROUNDS.len()],
+                            "{}",
+                            format.name
+                        );
+                        ulps.push(format.name);
+                    }
+                    false => {
+                        assert!(bounds.is_empty(), "{}: {bounds:?}", format.name);
+                        exact.push(format.name);
+                    }
+                }
                 continue;
             }
             let signed = matches!(decode, EtcDecode::R11Snorm | EtcDecode::Rg11Snorm);
@@ -535,6 +621,11 @@ mod tests {
             );
             loosened.push(format.name);
         }
+        assert_eq!(ulps, ["etc2-rgb8", "etc2-rgb8a1", "eac-rgba8"]);
+        assert_eq!(
+            exact,
+            ["etc2-rgb8-srgb", "etc2-rgb8a1-srgb", "eac-rgba8-srgb"]
+        );
         assert_eq!(
             loosened,
             [
@@ -544,6 +635,98 @@ mod tests {
                 "eac-rg11-snorm"
             ]
         );
+    }
+
+    /// A round's texels as a transcript, every channel the `f32` word `word`.
+    fn texels_transcript(round: &str, word: u32) -> Transcript {
+        let mut bytes = Vec::with_capacity(TEXELS * TEXEL_BYTES);
+        for _ in 0..TEXELS * TEXEL_BYTES / 4 {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        Transcript::new(vec![Node::branch(round.to_owned(), Vec::new()).with(
+            Node::leaf("texels", Observed::bytes(bytes, EtcTextures::layout())),
+        )])
+    }
+
+    /// The case at `at`, its seeded round's texels compared against Metal's `word` where our run
+    /// answered `answered` and the device announced `announced`.
+    fn compared(
+        at: usize,
+        word: u32,
+        answered: u32,
+        announced: &[String],
+    ) -> crate::compare::Comparison {
+        let round = ROUNDS[1];
+        crate::compare::compare(
+            &texels_transcript(round, word),
+            &texels_transcript(round, answered),
+            &EtcTextures { at }.allowances(),
+            crate::allowance::Offered::notices(announced),
+        )
+    }
+
+    /// The place of the first format whose codes the device converts, and of the first 8-bit sRGB
+    /// one, taken from the cases' own test rather than from their names.
+    fn linear_and_srgb() -> (usize, usize) {
+        let linear = (0..FORMATS.len())
+            .find(|&at| EtcTextures { at }.device_converts_codes())
+            .expect("a linear 8-bit format");
+        let srgb = (0..FORMATS.len())
+            .find(|&at| {
+                let case = EtcTextures { at };
+                !case.decode().eleven_bit() && !case.device_converts_codes()
+            })
+            .expect("an 8-bit sRGB format");
+        (linear, srgb)
+    }
+
+    /// The one-ulp texel allowance is a claim about what the runtime **said**, not a blanket
+    /// tolerance, and the comparison is exercised in the four directions that decide that.
+    ///
+    /// Metal's word here is the one this M3 Max answered at `etc2-rgb8`'s first differing channel
+    /// (`0x3ee4e4e5`) and ours the word arm64 lavapipe answered there under the default policy
+    /// (`0x3ee4e4e6`, one ulp above). With no device in sight:
+    ///
+    /// 1. with `device-texel-conversion` announced the difference reads **announced**;
+    /// 2. with **nothing** announced the same difference reads **divergent** and the allowance is
+    ///    reported bad as `NoticeNotAnnounced` — so the day the read path stops announcing, this
+    ///    allowance stops excusing anything;
+    /// 3. **two** ulps apart fails even with the notice announced, so the ledger's bound binds and
+    ///    the notice is no licence;
+    /// 4. an 8-bit **sRGB** format, which names no texel allowance, is divergent at one ulp
+    ///    whatever was announced, so the partition above is load-bearing.
+    #[test]
+    fn the_texel_allowance_holds_one_ulp_only_where_the_notice_fired() {
+        let (linear, srgb) = linear_and_srgb();
+        let metal = 0x3ee4_e4e5;
+        let code = Degradation::DeviceTexelConversion.code().to_owned();
+        let announced = [code.clone()];
+
+        let found = compared(linear, metal, metal + 1, &announced);
+        assert!(found.divergences.is_empty(), "{found:?}");
+        assert!(found.bad_allowances.is_empty(), "{found:?}");
+        assert_eq!(found.announced.len(), 1, "{found:?}");
+        assert_eq!(
+            found.announced[0].count,
+            TEXELS * TEXEL_BYTES / 4,
+            "{found:?}"
+        );
+
+        let found = compared(linear, metal, metal + 1, &[]);
+        assert_eq!(found.divergences.len(), 1, "{found:?}");
+        assert_eq!(found.bad_allowances.len(), 1, "{found:?}");
+        assert_eq!(
+            found.bad_allowances[0].why,
+            crate::allowance::Unjustified::NoticeNotAnnounced(code)
+        );
+
+        let found = compared(linear, metal, metal + 2, &announced);
+        assert_eq!(found.divergences.len(), 1, "{found:?}");
+        assert!(found.announced.is_empty(), "{found:?}");
+
+        let found = compared(srgb, metal, metal + 1, &announced);
+        assert_eq!(found.divergences.len(), 1, "{found:?}");
+        assert!(found.announced.is_empty(), "{found:?}");
     }
 
     /// The layout covers the whole read-back and no more, so the comparison reads every texel.
