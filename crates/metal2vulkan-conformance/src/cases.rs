@@ -67,6 +67,7 @@ pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
 pub mod two_plane_samples;
 pub mod visibility;
+pub mod wide_points;
 pub mod ycbcr_minify;
 pub mod ycbcr_textures;
 
@@ -99,6 +100,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in nearest_positions::all() {
+        cases.push(Box::new(case));
+    }
+    for case in wide_points::all() {
         cases.push(Box::new(case));
     }
     for case in extended_range_planes::all() {
