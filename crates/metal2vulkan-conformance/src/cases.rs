@@ -64,6 +64,7 @@ pub mod rgb10a2_srgb;
 pub mod sample_fills;
 pub mod sample_positions;
 pub mod scheduled_handlers;
+pub mod shader_stencil;
 pub mod shared_events;
 pub mod simdgroup_lockstep;
 pub mod snorm_tile_store;
@@ -240,6 +241,11 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.extend(fresh_contents::all());
     cases.extend(sample_positions::all());
+    cases.extend(
+        shader_stencil::all()
+            .into_iter()
+            .map(|case| Box::new(case) as Box<dyn Case>),
+    );
     cases
 }
 
