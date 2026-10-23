@@ -2,9 +2,9 @@
 //!
 //! The consumer's ask of 2026-10-09: a texture drawn at an eighth of its size through a runtime
 //! sampler of linear filters, no mip filter, clamp to edge and pixel coordinates. One case a
-//! texture size ([`SIZES`], the sizes the consumer's passes were found at, none of them a power of
+//! texture size (`SIZES`, the sizes the consumer's passes were found at, none of them a power of
 //! two), each sampling the downscale's rectangle of texel centres three ways
-//! ([`coordinates`]): `grid`, the centres `8i + 4`; `ulp`, one ulp off each; and `frac`, a random
+//! (`coordinates`): `grid`, the centres `8i + 4`; `ulp`, one ulp off each; and `frac`, a random
 //! fraction of the eight-texel cell past each.
 //!
 //! Each set runs twice. `slot` is the texture at texture slot 0 through the pixel state at sampler
@@ -22,7 +22,7 @@
 //! **Why these sites are not whole values.** A set is 24,300 `float4`s at the largest size, so a
 //! case's six sets would be 2.3 MiB and its recording far past the 512-KiB whole-value rule. Each
 //! set therefore records as the rule's second form: the digest of all its results, with a window of
-//! [`WINDOW`] results at each end — the rectangle's first rows and its last, which is where a
+//! `WINDOW` results at each end — the rectangle's first rows and its last, which is where a
 //! downscale's edge clamping shows. The digest is the whole claim and the windows name a sample
 //! when one moves.
 //!

@@ -1,7 +1,7 @@
 //! Samples through pixel-coordinate samplers, every way a kernel can reach one.
 //!
 //! A 5 by 3 texture — neither side a power of two — of `RGBA8Unorm` or `RGBA16Float` is sampled at
-//! 800 coordinates in and past it ([`grid`]: per integer from -1 to 6 the texel edge and one ulp
+//! 800 coordinates in and past it (`grid`: per integer from -1 to 6 the texel edge and one ulp
 //! either side, `i + 1/512`, the quarter, the centre and one ulp either side, three quarters and
 //! `255/256`, across ten rows from -0.5 to 3.25). Each case is one format, one filter and one
 //! address mode, and holds a site per **source** — the four ways the lane sweeps:
@@ -24,9 +24,9 @@
 //! configurations on native Metal and keeps every one of the 800 results of each, so a comparison
 //! names the coordinate and the lane rather than saying a hash moved.
 //!
-//! The digest stays beside each value as a projection of it, which is what lets
-//! [`tests::the_recorded_digests_are_the_lanes_m4_answers`] hold the recorded M3 answers against
-//! the lane's M4 constants: same question, two chips.
+//! The digest stays beside each value as a projection of it, which is what lets the module's own
+//! `the_recorded_digests_are_the_lanes_m4_answers` hold the recorded M3 answers against the lane's
+//! M4 constants: same question, two chips.
 //!
 //! **What may differ, and what justifies it.** On a device with Metal's own sampler
 //! (`VkProperty::MetalSampler`, MoltenVK here) every source is Metal's and nothing is announced.
@@ -142,8 +142,8 @@ fn coordinates(normalized: bool) -> Vec<u8> {
 
 /// The half of `value`, where a half holds `value` exactly: the single's exponent rebiased and the
 /// top ten bits of its mantissa. The texels are quarters of magnitude at most 3.5, which is what
-/// [`tests::the_texels_are_the_probes_quarters`] holds of every one of them, so nothing here
-/// rounds.
+/// the module's own `the_texels_are_the_probes_quarters` holds of every one of them, so nothing
+/// here rounds.
 fn half_bits(value: f32) -> u16 {
     if value == 0.0 {
         return 0;
@@ -967,7 +967,7 @@ mod tests {
                     let k = ((x * 7 + y * 13 + c * 5 + 3) % 29) as i32 - 14;
                     let half = u16::from_le_bytes([bytes[at], bytes[at + 1]]);
                     assert_eq!(
-                        f32::from(half_to_f32(half)),
+                        half_to_f32(half),
                         k as f32 / 4.0,
                         "texel ({x}, {y}) channel {c}"
                     );
