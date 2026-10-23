@@ -4,7 +4,7 @@
 //! ```text
 //! conformance record [case ...]
 //! conformance replay [--cpu] [--default-policy] [case ...]
-//! conformance cost [--cpu] [--default-policy] [--runs N] [--write] [--show] [case ...]
+//! conformance cost [--cpu] [--default-policy] [--runs N] [--write] [--show] [--alone] [case ...]
 //! conformance cases
 //! ```
 //!
@@ -64,6 +64,7 @@ fn command() -> Result<bool, String> {
     let mut runs = 8;
     let mut write = false;
     let mut show = false;
+    let mut alone = false;
     let mut words = words.peekable();
     while let Some(word) = words.next() {
         match word.as_str() {
@@ -73,6 +74,7 @@ fn command() -> Result<bool, String> {
             "--exact-policy" => policy = Policy::Exact,
             "--write" => write = true,
             "--show" => show = true,
+            "--alone" => alone = true,
             "--runs" => {
                 let value = words.next().ok_or("--runs wants a number")?;
                 runs = value
@@ -92,7 +94,7 @@ fn command() -> Result<bool, String> {
             Ok(true)
         }
         "record" => record(&cases),
-        "cost" => cost(venues, policy, &cases, runs, write, show),
+        "cost" => cost(venues, policy, &cases, runs, write, show, alone),
         metal2vulkan_conformance::validated::LEG_VERB => validated_leg(&cases),
         "replay" => {
             let report = run::replay_on_under(venues, policy, &cases)?;
@@ -145,6 +147,11 @@ fn command() -> Result<bool, String> {
 /// The whole selection runs `--runs` times in order, because a case's counts depend on what ran
 /// before it in the same process: the runtime pools command pools, memory blocks and descriptor
 /// sets across cases, so the measurement must have the shape the gate will have.
+///
+/// `--alone` measures the other shape instead ([`run::cost_alone_on_under`]): each case on a
+/// device nothing else has touched. That is where a pooled count is at its largest, so it is the
+/// bound a later landing cannot invalidate — and the contrast between the two shapes is what says
+/// whether a count is the case's own work or the selection's.
 fn cost(
     venues: Venues,
     policy: Policy,
@@ -152,12 +159,34 @@ fn cost(
     runs: u32,
     write: bool,
     show: bool,
+    alone: bool,
 ) -> Result<bool, String> {
-    let (venue, measured) = run::cost_on_under(venues, policy, cases, runs)?;
-    let words = format!(
-        "{runs} run(s) of the whole selection on {venue}, in the case set's own order, the \
-         largest each count reached"
-    );
+    // A bound is written from both shapes or not at all: neither bounds the other, and gating a
+    // count the two disagree on is what makes a bound go stale on the next landing.
+    let (venue, measured) = if write {
+        run::cost_contrast_on_under(venues, policy, cases, runs)?
+    } else if alone {
+        run::cost_alone_on_under(venues, policy, cases, runs)?
+    } else {
+        run::cost_on_under(venues, policy, cases, runs)?
+    };
+    let words = if write {
+        format!(
+            "{runs} run(s) of the whole selection on {venue}, in the case set's own order, and \
+             {runs} more of each case alone; the largest each count reached, gated only where the \
+             two shapes agreed"
+        )
+    } else if alone {
+        format!(
+            "{runs} run(s) of each case on its own on {venue}, nothing before it, the largest \
+             each count reached"
+        )
+    } else {
+        format!(
+            "{runs} run(s) of the whole selection on {venue}, in the case set's own order, the \
+             largest each count reached"
+        )
+    };
     println!(
         "cost on {venue}, over {runs} run(s) of {} case(s)",
         cases.len()
@@ -165,6 +194,7 @@ fn cost(
     println!("{words}\n");
     let mut moved = 0;
     let mut raced = 0;
+    let mut composed = 0;
     let mut stopped = 0;
     for one in &measured {
         let regions = metal2vulkan_conformance::cost::by_region(&one.counts);
@@ -184,6 +214,18 @@ fn cost(
         if let Some(why) = &one.stopped {
             stopped += 1;
             println!("    the run stopped: {why}");
+        }
+        let apart = one.composed();
+        if !apart.is_empty() {
+            composed += apart.len();
+            println!(
+                "    {} count(s) read differently with the case alone, so the selection decides \
+                 them and they are reported and not gated:",
+                apart.len()
+            );
+            for (count, inside, alone) in apart {
+                println!("      {count} {inside} in the selection, {alone} alone");
+            }
         }
         let spread = one.moved();
         if !spread.is_empty() {
@@ -217,7 +259,8 @@ fn cost(
     }
     println!(
         "\n{} case(s) measured, {stopped} stopped before finishing, {moved} count reading(s) \
-         moved between runs for a reason the race rule does not name, {raced} for one it does",
+         moved between runs for a reason the race rule does not name, {raced} for one it does, \
+         {composed} read differently with the case alone",
         measured.len()
     );
     println!(

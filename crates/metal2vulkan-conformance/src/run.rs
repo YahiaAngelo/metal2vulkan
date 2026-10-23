@@ -128,6 +128,7 @@ fn cost_row(
                 },
                 counts: Counts::default(),
                 nanos,
+                reported: [0; 3],
             }
         }
     };
@@ -153,11 +154,30 @@ fn cost_row(
         stopped.as_deref(),
         degraded,
     );
+    let reported = records
+        .iter()
+        .find(|record| record.venue == venue)
+        .map(|record| {
+            let held = record.held();
+            [
+                held.iter().filter(|one| one.racy.is_some()).count(),
+                held.iter()
+                    .filter(|one| one.racy.is_none() && one.range.is_some())
+                    .count(),
+                held.iter()
+                    .filter(|one| {
+                        one.racy.is_none() && one.range.is_none() && one.composed.is_some()
+                    })
+                    .count(),
+            ]
+        })
+        .unwrap_or([0; 3]);
     CostRow {
         case: case.name().to_owned(),
         verdict,
         counts,
         nanos,
+        reported,
     }
 }
 
@@ -222,6 +242,7 @@ pub fn cost_on_under(
                     case: case.name().to_owned(),
                     counts: moved.clone(),
                     least: moved,
+                    alone: Counts::default(),
                     runs: 1,
                     stopped,
                     degraded: announced,
@@ -252,6 +273,75 @@ pub fn cost_on_under(
         }
     }
     Ok((venue, held))
+}
+
+/// Measure each of `cases` on its own: a selection of one, on a device no other case has touched,
+/// over `runs` rounds.
+///
+/// This is the other shape a cost measurement can have, and it answers a different question.
+/// [`cost_on_under`] measures a case where the gate will run it, after everything before it in the
+/// set; this measures the case with nothing before it at all. The difference matters for every
+/// count the runtime pools, because a case that runs alone makes what a case in company finds
+/// already made: alone is where a `*_made` count is at its largest and a `*_shared` count at its
+/// smallest.
+///
+/// A bound taken alone is therefore an upper bound that no composition can exceed — and so it does
+/// not go stale when a case lands beside it, which a bound taken over one particular set does. It
+/// buys that with looseness: for a count that pooling lowers a lot, a bound measured alone sits
+/// well above what the case does in company, and a gate holding it will not notice a smaller
+/// regression.
+pub fn cost_alone_on_under(
+    venues: Venues,
+    policy: Policy,
+    cases: &[Box<dyn Case>],
+    runs: u32,
+) -> Result<(String, Vec<CaseCost>), String> {
+    let mut venue = String::new();
+    let mut held = Vec::with_capacity(cases.len());
+    for case in cases {
+        let (name, measured) = cost_on_under(venues, policy, std::slice::from_ref(case), runs)?;
+        venue = name;
+        held.extend(measured);
+    }
+    Ok((venue, held))
+}
+
+/// Measure `cases` in **both** shapes — inside the selection and each case alone — and give each
+/// case's measurement both readings.
+///
+/// This is the measurement a bound is written from, and taking both shapes is what makes the bound
+/// worth writing. Neither shape bounds the other:
+///
+/// - A pooled making is largest **alone**, because a case with nothing before it makes what a case
+///   in company finds already made. A bound taken in company goes stale the moment a case lands
+///   beside this one and makes the shared thing first.
+/// - A count our own background threads move is often largest **in company**, because the work
+///   they do ahead, and the waits they borrow, come from whatever ran before. A bound taken alone
+///   would fail such a count for ever.
+///
+/// So the measurement reads each count in both shapes and gates only the counts that agree. A
+/// count that disagrees is a property of the selection rather than of the case, and the two
+/// readings are recorded as the evidence for reporting it ([`crate::cost::CostRecord::composed`]).
+/// That turns the contrast run from a thing a reader does by hand after a breach into the thing the
+/// measurement does before writing a bound.
+pub fn cost_contrast_on_under(
+    venues: Venues,
+    policy: Policy,
+    cases: &[Box<dyn Case>],
+    runs: u32,
+) -> Result<(String, Vec<CaseCost>), String> {
+    let (venue, mut inside) = cost_on_under(venues, policy, cases, runs)?;
+    let (_, apart) = cost_alone_on_under(venues, policy, cases, runs)?;
+    for one in &mut inside {
+        if let Some(alone) = apart.iter().find(|alone| alone.case == one.case) {
+            // A run that stopped measured a part of the case, so its counts are not a reading of
+            // the same work and nothing is recorded from the pair.
+            if alone.stopped.is_none() && one.stopped.is_none() {
+                one.alone = alone.counts.clone();
+            }
+        }
+    }
+    Ok((venue, inside))
 }
 
 /// Write what `measured` says each case cost on `venue` into the cases' own recordings, answering
@@ -309,6 +399,18 @@ fn record_one_cost(
             *bound = (*bound).max(most);
             let seen = record.moving.entry(count.clone()).or_insert(*least);
             *seen = (*seen).min(*least);
+        }
+        // The same for a count an earlier measurement found the selection decides. A measurement
+        // that took only one shape has nothing to say about the contrast, so what an earlier one
+        // established is kept rather than silently dropped and the count re-gated.
+        for (count, apart) in &held.composed {
+            if crate::cost::racy(count).is_some() {
+                continue;
+            }
+            let most = held.bounds.get(count).copied().unwrap_or(0);
+            let bound = record.bounds.entry(count.clone()).or_insert(most);
+            *bound = (*bound).max(most).max(*apart);
+            record.composed.entry(count.clone()).or_insert(*apart);
         }
     }
     recording.costs.retain(|held| held.venue != venue);
