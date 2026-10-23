@@ -4,7 +4,7 @@
 //! device is whatever Vulkan the host has, so the whole leg runs on a Linux host with lavapipe as
 //! it runs on this Mac with MoltenVK.
 
-use crate::allowance::Justification;
+use crate::allowance::{Justification, Offered};
 use crate::case::{inputs_node, Case, MetalSource, Side, Venue, INPUTS_SITE};
 use crate::compare::compare_run;
 use crate::recording::{self, Answer, Lookup, Recording};
@@ -196,7 +196,8 @@ fn verdict_over(
             ));
             continue;
         }
-        let found = compare_run(&outcome.transcript, ours, &allowances, announced, stopped);
+        let offered = Offered::new(announced, &answer.validated);
+        let found = compare_run(&outcome.transcript, ours, &allowances, offered, stopped);
         best = Some(better(best, Verdict::of(&found, validation.clone())));
     }
     best.unwrap_or(Verdict::Unrecorded {

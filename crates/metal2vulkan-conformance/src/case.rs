@@ -16,7 +16,7 @@
 
 use crate::allowance::Allowance;
 use crate::recording::ShaderRef;
-use crate::transcript::{Node, Observed, Sites, Transcript, Value};
+use crate::transcript::{Node, NodeName, Observed, Sites, Transcript, Value};
 use crate::verdict::device_gap;
 use metal2vulkan::metal::{AttributeFormat, IndexType, PixelFormat, StepFunction};
 
@@ -433,6 +433,127 @@ pub trait Side {
     fn fill_texture(&mut self, texture: Handle, fill: &Fill) -> Answer<Value> {
         let _ = (texture, fill);
         Err(Failure::unavailable("fill_texture"))
+    }
+
+    /// `newRasterizationRateMapWithDescriptor:` of `request`.
+    ///
+    /// Nothing about a rate map reaches the GPU until a render pass takes one, and no case here
+    /// opens such a pass, so the whole family is a CPU-side call: the descriptor is compiled, the
+    /// map answers its queries, and its parameter data is copied by the CPU.
+    fn rate_map(&mut self, request: &RateMapRequest<'_>) -> Answer<Handle> {
+        let _ = request;
+        Err(Failure::unavailable("rate_map"))
+    }
+
+    /// What the map answers: its label, screen size, granularity, layer count, parameter size and
+    /// alignment, and `physicalSizeForLayer:` of each index in `layers`.
+    fn rate_map_facts(&mut self, map: Handle, layers: &[u64]) -> Answer<RateMapFacts> {
+        let _ = (map, layers);
+        Err(Failure::unavailable("rate_map_facts"))
+    }
+
+    /// `copyParameterDataToBuffer:offset:` into the buffer `into` at `offset`. The bytes are read
+    /// back with [`Side::read_buffer`], so the copy itself observes nothing of its own.
+    fn copy_rate_map_parameters(&mut self, map: Handle, into: Handle, offset: u64) -> Answer<()> {
+        let _ = (map, into, offset);
+        Err(Failure::unavailable("copy_rate_map_parameters"))
+    }
+}
+
+/// One layer of a rasterization-rate map's descriptor
+/// (`MTLRasterizationRateLayerDescriptor`), as its quality samples along each axis.
+///
+/// Both axes hold at least one sample, because Metal's
+/// `initWithSampleCount:horizontal:vertical:` answers nil for an axis of none (verified while
+/// porting this family). A descriptor of **no layers** is the shape whose `layerCount` is 0, and a
+/// case says that by holding no layer at all rather than by a layer with an empty axis.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RateMapLayer {
+    pub horizontal: Vec<f32>,
+    pub vertical: Vec<f32>,
+}
+
+impl RateMapLayer {
+    /// A layer of one quality sample on each axis.
+    pub fn uniform(horizontal: f32, vertical: f32) -> Self {
+        Self {
+            horizontal: vec![horizontal],
+            vertical: vec![vertical],
+        }
+    }
+}
+
+/// A rasterization-rate map's descriptor, as both sides take it.
+#[derive(Clone, Copy, Debug)]
+pub struct RateMapRequest<'a> {
+    /// `screenSize`'s width and height in screen pixels.
+    pub screen: [u32; 2],
+    /// `layers`, from layer 0.
+    pub layers: &'a [RateMapLayer],
+    /// `label`, which the map keeps.
+    pub label: Option<&'a str>,
+}
+
+/// What a rasterization-rate map answers. Each field is a Metal getter's answer, and a size's
+/// depth is kept because Metal's is 1 where its own documentation says 0.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RateMapFacts {
+    pub label: Option<String>,
+    pub screen_size: [u64; 3],
+    pub physical_granularity: [u64; 3],
+    pub layer_count: u64,
+    /// `physicalSizeForLayer:` of each index the case asked about, in that order.
+    pub physical_sizes: Vec<[u64; 3]>,
+    pub parameter_size: u64,
+    pub parameter_align: u64,
+}
+
+impl RateMapFacts {
+    /// The facts as the sites a case emits under one node, so both sides emit one shape.
+    pub fn node(&self, name: impl Into<NodeName>) -> Node {
+        let size = |axes: &[u64; 3]| {
+            Value::fields([
+                ("width", Value::Uint(axes[0])),
+                ("height", Value::Uint(axes[1])),
+                ("depth", Value::Uint(axes[2])),
+            ])
+        };
+        let label = match &self.label {
+            Some(label) => Value::Variant {
+                name: "Some".to_owned(),
+                payload: Box::new(Value::Lines(vec![label.clone()])),
+            },
+            None => Value::unit_variant("None"),
+        };
+        let mut node = Node::branch(name, Vec::new())
+            .with(Node::leaf("label", Observed::value(label)))
+            .with(Node::leaf(
+                "screen_size",
+                Observed::value(size(&self.screen_size)),
+            ))
+            .with(Node::leaf(
+                "physical_granularity",
+                Observed::value(size(&self.physical_granularity)),
+            ))
+            .with(Node::leaf(
+                "layer_count",
+                Observed::value(Value::Uint(self.layer_count)),
+            ))
+            .with(Node::leaf(
+                "parameter_size",
+                Observed::value(Value::Uint(self.parameter_size)),
+            ))
+            .with(Node::leaf(
+                "parameter_align",
+                Observed::value(Value::Uint(self.parameter_align)),
+            ));
+        for (at, axes) in self.physical_sizes.iter().enumerate() {
+            node = node.with(Node::leaf(
+                format!("physical_size_for_layer/{at}"),
+                Observed::value(size(axes)),
+            ));
+        }
+        node
     }
 }
 

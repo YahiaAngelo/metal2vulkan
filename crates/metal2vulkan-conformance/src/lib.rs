@@ -13,6 +13,10 @@
 //!   where that entry is gone or the notice did not fire ([`allowance`]).
 //! - The **verdicts** stay apart ([`verdict`]): exact, announced, divergent, refused, unrecorded,
 //!   and per venue "lacks the device feature".
+//! - **Two Metal oracles** ([`validated`]). Plain Metal is the behavioural oracle, because that is
+//!   how a consumer runs the runtime. The same case under Metal's own API validation layer is a
+//!   second recorded fact, taken in a child process so no assertion of Apple's can end a record
+//!   run, and it is the only thing that may justify our refusing a call plain Metal answered.
 //! - **Record mode** ([`record`]) takes Metal's answer on this Mac and writes one recording per
 //!   case, keyed by chip, macOS build and Metal level, with the runs behind it and the set of
 //!   outcomes where behaviour varies. **Replay** ([`mod@replay`]) reads the recording, runs our side
@@ -44,6 +48,7 @@ pub mod run;
 pub mod runtime_side;
 pub mod runtime_work;
 pub mod transcript;
+pub mod validated;
 pub mod verdict;
 pub mod work;
 

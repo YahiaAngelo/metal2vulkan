@@ -9,7 +9,7 @@
 //! divergence: the owner's rule keeps that outcome visible instead of burying it in a failure
 //! count.
 
-use crate::allowance::{Allowance, Loosening, Unjustified};
+use crate::allowance::{Allowance, Loosening, Offered, Unjustified};
 use crate::diff::{Divergence, DivergenceKind, Side};
 use crate::transcript::{ByteLayout, Gaps, Node, Observed, Shape, Transcript, Value};
 
@@ -59,6 +59,25 @@ pub struct Comparison {
 }
 
 impl Comparison {
+    /// Note that the allowance at `path` does not hold, unless the same fault is already held.
+    ///
+    /// The same allowance is examined twice — once before the walk, so an allowance naming a
+    /// justification that is gone fails whether or not it fires, and again where it does fire —
+    /// and one fault reported twice reads as two.
+    fn note_bad(&mut self, path: &str, why: Unjustified) {
+        if self
+            .bad_allowances
+            .iter()
+            .any(|held| held.path == path && held.why == why)
+        {
+            return;
+        }
+        self.bad_allowances.push(BadAllowance {
+            path: path.to_owned(),
+            why,
+        });
+    }
+
     /// Whether every field matched exactly and every allowance held unused.
     pub fn is_exact(&self) -> bool {
         self.announced.is_empty()
@@ -68,15 +87,15 @@ impl Comparison {
     }
 }
 
-/// Compare `ours` against the recorded `metal`, under a case's `allowances`, with `announced` the
-/// degrade-notice codes our run delivered.
+/// Compare `ours` against the recorded `metal`, under a case's `allowances`, with `offered` what
+/// the run and its recording offer to justify a difference.
 pub fn compare(
     metal: &Transcript,
     ours: &Transcript,
     allowances: &[Allowance],
-    announced: &[String],
+    offered: Offered<'_>,
 ) -> Comparison {
-    compare_run(metal, ours, allowances, announced, false)
+    compare_run(metal, ours, allowances, offered, false)
 }
 
 /// [`compare`] where `stopped` says the run stopped at a call that did not answer.
@@ -88,34 +107,33 @@ pub fn compare_run(
     metal: &Transcript,
     ours: &Transcript,
     allowances: &[Allowance],
-    announced: &[String],
+    offered: Offered<'_>,
     stopped: bool,
 ) -> Comparison {
     let mut found = Comparison::default();
     // Every allowance names a justification that must exist, whether or not the allowance fires.
-    // A case that keeps an allowance for a notice kind or a documented difference that has since
-    // gone fails here rather than comparing under it.
+    // A case that keeps an allowance for a notice kind, a documented difference or a Metal
+    // validation check that has since gone fails here rather than comparing under it.
     for allowance in allowances {
         let missing = match &allowance.justified_by {
             justification @ crate::allowance::Justification::Degradation(code) => {
-                match justification.unjustified(std::slice::from_ref(code)) {
+                let announced = std::slice::from_ref(code);
+                match justification.unjustified(&Offered::new(announced, offered.metal_validation))
+                {
                     // The run's own notices are checked where the allowance fires, not here.
                     Some(Unjustified::NoticeNotAnnounced(_)) | None => None,
                     other => other,
                 }
             }
-            justification => justification.unjustified(announced),
+            justification => justification.unjustified(&offered),
         };
         if let Some(why) = missing {
-            found.bad_allowances.push(BadAllowance {
-                path: allowance.path.clone(),
-                why,
-            });
+            found.note_bad(&allowance.path, why);
         }
     }
     let mut walk = Walk {
         allowances,
-        announced,
+        offered,
         stopped,
         found: &mut found,
     };
@@ -126,7 +144,8 @@ pub fn compare_run(
 /// The comparison's state as it descends.
 struct Walk<'a> {
     allowances: &'a [Allowance],
-    announced: &'a [String],
+    /// What the run and its recording offer to justify a difference.
+    offered: Offered<'a>,
     /// Whether the run stopped before the end: a site only Metal reached is then no divergence.
     stopped: bool,
     found: &'a mut Comparison,
@@ -457,7 +476,7 @@ impl Walk<'_> {
         let mut first_unjustified = None;
         let mut held = None;
         for allowance in covering {
-            match allowance.justified_by.unjustified(self.announced) {
+            match allowance.justified_by.unjustified(&self.offered) {
                 None => {
                     held = Some(allowance);
                     break;
@@ -469,10 +488,8 @@ impl Walk<'_> {
         }
         let Some(allowance) = held else {
             let (allowance, why) = first_unjustified.expect("a covering allowance");
-            self.found.bad_allowances.push(BadAllowance {
-                path: allowance.path.clone(),
-                why,
-            });
+            let path = allowance.path.clone();
+            self.found.note_bad(&path, why);
             return false;
         };
         let difference = crate::allowance::difference(metal, ours);

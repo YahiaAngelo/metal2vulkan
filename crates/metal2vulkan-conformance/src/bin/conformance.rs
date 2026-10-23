@@ -7,6 +7,9 @@
 //! conformance cases
 //! ```
 //!
+//! `record` runs each case on Metal twice: plain, which is the behavioural oracle, and once under
+//! Metal's own API validation layer, in a child of this command ([`metal2vulkan_conformance::validated`]).
+//!
 //! With no case named, the whole case set is selected. `--cpu` replays on a CPU Vulkan
 //! implementation (lavapipe), which is how the no-Metal leg is proven. A replay holds the runtime
 //! to exact answers by default; `--default-policy` replays under the runtime's own defaults, the
@@ -57,6 +60,7 @@ fn command() -> Result<bool, String> {
             Ok(true)
         }
         "record" => record(&cases),
+        metal2vulkan_conformance::validated::LEG_VERB => validated_leg(&cases),
         "replay" => {
             let report = run::replay_on_under(venues, policy, &cases)?;
             print!("{}", report.render());
@@ -88,4 +92,24 @@ fn record(cases: &[Box<dyn metal2vulkan_conformance::case::Case>]) -> Result<boo
 #[cfg(not(target_os = "macos"))]
 fn record(_cases: &[Box<dyn metal2vulkan_conformance::case::Case>]) -> Result<bool, String> {
     Err("record mode runs on macOS, where Metal is".to_owned())
+}
+
+/// Take one case's validated leg: the body of the child process record mode spawns with Metal's
+/// API validation layer on. It is not part of the command's documented surface.
+#[cfg(target_os = "macos")]
+fn validated_leg(cases: &[Box<dyn metal2vulkan_conformance::case::Case>]) -> Result<bool, String> {
+    let [case] = cases else {
+        return Err(format!(
+            "{}: one case at a time",
+            metal2vulkan_conformance::validated::LEG_VERB
+        ));
+    };
+    run::validated_leg(case.as_ref())?;
+    Ok(true)
+}
+
+/// There is no Metal to validate against off macOS.
+#[cfg(not(target_os = "macos"))]
+fn validated_leg(_cases: &[Box<dyn metal2vulkan_conformance::case::Case>]) -> Result<bool, String> {
+    Err("Metal's API validation layer is on macOS, where Metal is".to_owned())
 }

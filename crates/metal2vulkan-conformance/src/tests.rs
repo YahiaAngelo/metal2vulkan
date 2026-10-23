@@ -2,7 +2,9 @@
 //! transcript, the comparison, the justification rule, the verdicts, the recording's staleness and
 //! the report are all checked where there is neither Metal nor Vulkan.
 
-use crate::allowance::{accepted_differences, accepted_slug, Allowance, Justification, Loosening};
+use crate::allowance::{
+    accepted_differences, accepted_slug, Allowance, Justification, Loosening, Offered, Unjustified,
+};
 use crate::case::{
     call, made, Abort, Answer, Case, Failure, Handle, Input, MetalSource, ReRecord, ShaderSource,
     Side, Venue,
@@ -716,7 +718,7 @@ fn a_set_diff_prints_what_is_missing_and_what_is_extra() {
         "kinds",
         Observed::value(Value::set(["b", "c", "d"])),
     )]);
-    let found = compare(&metal, &ours, &[], &[]);
+    let found = compare(&metal, &ours, &[], Offered::notices(&[]));
     assert_eq!(found.divergences.len(), 1);
     let printed = found.divergences[0].to_string();
     assert!(printed.contains("2 in both"), "{printed}");
@@ -736,7 +738,7 @@ fn an_ordered_list_of_lines_names_the_line_that_moved() {
         &lines(&["one", "two", "three"]),
         &lines(&["one", "TWO", "three"]),
         &[],
-        &[],
+        Offered::notices(&[]),
     );
     assert_eq!(found.divergences.len(), 1);
     let printed = found.divergences[0].to_string();
@@ -751,7 +753,7 @@ fn a_negative_fact_differs_from_a_value_rather_than_from_an_absent_field() {
         Observed::value(Value::Nothing(Negative::DidNotBlock)),
     )]);
     let ours = Transcript::new(vec![Node::leaf("blocked", Observed::value(Value::Uint(3)))]);
-    let found = compare(&metal, &ours, &[], &[]);
+    let found = compare(&metal, &ours, &[], Offered::notices(&[]));
     assert_eq!(found.divergences.len(), 1);
     assert!(matches!(
         found.divergences[0].kind,
@@ -773,7 +775,12 @@ fn the_tree_descends_to_the_leaf_that_moved() {
             )],
         )])
     };
-    let found = compare(&tree(Value::Uint(1)), &tree(Value::Uint(2)), &[], &[]);
+    let found = compare(
+        &tree(Value::Uint(1)),
+        &tree(Value::Uint(2)),
+        &[],
+        Offered::notices(&[]),
+    );
     assert_eq!(found.divergences.len(), 1);
     assert_eq!(found.divergences[0].path, "case/level-0/level-1/level-2");
 }
@@ -804,7 +811,7 @@ fn the_gaps_between_rows_compare_where_the_case_asks() {
             "bytes",
             Observed::bytes(bytes(0x00), layout(gaps)),
         )]);
-        let found = compare(&metal, &ours, &[], &[]);
+        let found = compare(&metal, &ours, &[], Offered::notices(&[]));
         assert_eq!(found.divergences.len(), divergences, "{gaps:?}");
     }
 }
@@ -823,8 +830,19 @@ fn a_digest_only_recording_compares_by_its_digest() {
             Observed::value(Value::Bytes(bytes.to_vec())).digested(Digest::sha256(bytes)),
         )])
     };
-    assert!(compare(&digested(b"same"), &ours(b"same"), &[], &[]).is_exact());
-    let found = compare(&digested(b"same"), &ours(b"other"), &[], &[]);
+    assert!(compare(
+        &digested(b"same"),
+        &ours(b"same"),
+        &[],
+        Offered::notices(&[])
+    )
+    .is_exact());
+    let found = compare(
+        &digested(b"same"),
+        &ours(b"other"),
+        &[],
+        Offered::notices(&[]),
+    );
     assert!(matches!(
         found.divergences.first().map(|d| &d.kind),
         Some(DivergenceKind::Digest { .. })
@@ -900,4 +918,253 @@ fn the_carried_table_of_the_private_type_getters_is_metals_measured_one() {
     // The command type of an indexed draw of type 9 is none, and its record keeps type 9.
     assert_eq!(answers(9, "indexed"), (Value::Uint(0), some(0), some(9)));
     assert_eq!(answers(9, "direct"), (Value::Uint(1), some(0), some(9)));
+}
+
+/// The validated oracle's reader attributes a complaint to the call the marker before it named,
+/// strips `NSLog`'s host-specific prefix, and drops the layer's own banner.
+#[test]
+fn the_validated_leg_reads_metals_own_words() {
+    let said = format!(
+        "2026-10-23 07:33:40.512 conformance[51249:39389017] {}\n\
+         {}rate_map\n\
+         2026-10-23 07:33:40.513 conformance[51249:39389017] RasterizationRateMap Layers \
+         Validation\n\
+         layerCount (0) must be >0 and <=2.\n\
+         layers must not be nil.\n",
+        "Metal API Validation Enabled",
+        crate::validated::MARKER,
+    );
+    let read = crate::validated::read(&said).expect("a complaint");
+    let Validated::Stopped { call, message } = &read else {
+        panic!("{read:?}");
+    };
+    assert_eq!(call, "rate_map");
+    // The complaint keeps Metal's words and none of this host's: no process id, no timestamp.
+    assert_eq!(
+        message,
+        "RasterizationRateMap Layers Validation\nlayerCount (0) must be >0 and <=2.\n\
+         layers must not be nil."
+    );
+    assert!(!message.contains("51249"), "{message}");
+    // A leg the layer complained about nothing in is not a stop.
+    assert_eq!(
+        crate::validated::read(&format!(
+            "2026-10-23 07:33:40.512 conformance[1:2] Metal API Validation Enabled\n{}rate_map\n",
+            crate::validated::MARKER
+        )),
+        None
+    );
+}
+
+/// A refusal the recording's validated oracle justifies holds, and the same allowance holds for
+/// nothing else: not where the validated leg let the call run, not where it was never taken, and
+/// not where Apple's check has moved.
+#[test]
+fn metals_validation_justifies_a_refusal_and_only_a_recorded_one() {
+    let says = "screenSize.width (0) must be >0 and <=32768.";
+    let justification = Justification::metal_validation(says);
+    let stopped = Validated::Stopped {
+        call: "rate_map".to_owned(),
+        message: format!("RasterizationRateMap Layers Validation\n{says}"),
+    };
+    assert_eq!(
+        justification.unjustified(&Offered::new(&[], &stopped)),
+        None
+    );
+    assert_eq!(
+        justification.unjustified(&Offered::new(&[], &Validated::Ran)),
+        Some(Unjustified::MetalValidationRan)
+    );
+    // The one the whole axis turns on: an unexercised validated leg justifies nothing.
+    assert_eq!(
+        justification.unjustified(&Offered::notices(&[])),
+        Some(Unjustified::MetalValidationNotRun)
+    );
+    let moved = Validated::Stopped {
+        call: "rate_map".to_owned(),
+        message: "screenSize.width (0) must be >0 and <=16384.".to_owned(),
+    };
+    assert!(matches!(
+        justification.unjustified(&Offered::new(&[], &moved)),
+        Some(Unjustified::MetalValidationSaysOtherwise { .. })
+    ));
+}
+
+/// A case that refuses a call plain Metal answered is `Announced` where its allowance names
+/// Metal's validated refusal, and `Refused` where the recording holds no such fact. The recorded
+/// validated answer is what decides, so the verdict is the same on a host with no Metal.
+#[test]
+fn a_refusal_reads_by_what_metals_validation_did() {
+    let says = "screenSize.width (0) must be >0 and <=32768.";
+    let metal = Transcript::new(vec![Node::leaf(
+        "map",
+        Observed::value(Value::ok(Value::Absent)),
+    )]);
+    let ours = Transcript::new(vec![Node::leaf(
+        "map",
+        Observed::value(Value::error("Error::Invalid", Value::Absent)),
+    )]);
+    let allowances = vec![Allowance::new(
+        "case/map",
+        Loosening::Unchecked,
+        Justification::metal_validation(says),
+    )];
+    let stopped = Validated::Stopped {
+        call: "rate_map".to_owned(),
+        message: says.to_owned(),
+    };
+    let found = crate::compare::compare_run(
+        &metal,
+        &ours,
+        &allowances,
+        Offered::new(&[], &stopped),
+        true,
+    );
+    assert!(found.refusals.is_empty(), "{found:?}");
+    assert_eq!(found.announced.len(), 1, "{found:?}");
+    assert_eq!(Verdict::of(&found, stopped.stopped()).word(), "announced");
+
+    // Without the validated leg the same refusal is a failing case, named as unjustified rather
+    // than quietly passing or quietly diverging.
+    let found =
+        crate::compare::compare_run(&metal, &ours, &allowances, Offered::notices(&[]), true);
+    assert_eq!(found.bad_allowances.len(), 1, "{found:?}");
+    assert_eq!(
+        found.bad_allowances[0].why,
+        Unjustified::MetalValidationNotRun
+    );
+    assert_eq!(Verdict::of(&found, None).word(), "divergent");
+}
+
+/// The rate-map cases state the descriptor they feed, name the words Metal's validation used, and
+/// keep the refusal's allowance to the call's own site.
+#[test]
+fn the_rate_map_cases_name_what_justifies_them() {
+    let cases = crate::cases::rate_maps::all();
+    let names: Vec<&str> = cases.iter().map(|case| case.name()).collect();
+    assert_eq!(
+        names,
+        vec![
+            crate::cases::rate_maps::NO_LAYERS,
+            crate::cases::rate_maps::ZERO_SCREEN_WIDTH
+        ]
+    );
+    for case in &cases {
+        // Record mode runs both on Metal: neither can fault the GPU, because neither reaches it.
+        assert_eq!(case.metal_source(), MetalSource::Run);
+        assert!(case.metal_source().forbidden().is_none());
+        // Every case states its own inputs, and the descriptor is what it feeds.
+        let inputs = case.inputs().unwrap();
+        assert!(
+            inputs.iter().any(|input| input.name == "descriptor"),
+            "{inputs:?}"
+        );
+        // Every allowance names something that exists.
+        for allowance in case.allowances() {
+            match &allowance.justified_by {
+                Justification::Degradation(code) => assert!(
+                    Degradation::ALL.iter().any(|kind| kind.code() == code),
+                    "{code}"
+                ),
+                Justification::MetalValidation { says } => {
+                    assert_eq!(says, crate::cases::rate_maps::ZERO_WIDTH_SAYS);
+                    // Loosened at the refused call alone, so every other answer still compares.
+                    assert_eq!(allowance.path, "case/map");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+    // Only the refusal case rests on the validated oracle.
+    let resting = |case: &crate::cases::rate_maps::RateMapCase| {
+        case.allowances().iter().any(|allowance| {
+            matches!(
+                allowance.justified_by,
+                Justification::MetalValidation { .. }
+            )
+        })
+    };
+    assert!(!resting(&cases[0]));
+    assert!(resting(&cases[1]));
+}
+
+/// The announcing side forwards **every** `Side` call, and this is what keeps it from rotting.
+///
+/// `Side` gives most of its calls a default that answers `Failure::unavailable`, so a method the
+/// announcing wrapper forgets to forward makes `Announcing<MetalSide>` answer "no such call" where
+/// `MetalSide` answers perfectly well — and the compiler says nothing, because the default is
+/// there to be inherited. The trait grows with every ported batch, so the guard must be mechanical
+/// rather than a list somebody remembers to extend.
+///
+/// Comparing transcripts through a stub does not do it: a stub that does not implement the method
+/// either inherits the same default, so both sides agree and the check is vacuous. (Verified by
+/// removing a forward and watching such a check pass.) So the guard reads the two sources and
+/// compares the method names directly: a call `Side` declares and `Announcing` does not forward
+/// fails here, naming it.
+#[test]
+fn the_announcing_side_forwards_every_call() {
+    /// The names of the `fn` items `block` declares at one level of indentation.
+    fn methods(source: &str, opening: &str) -> std::collections::BTreeSet<String> {
+        let from = source
+            .find(opening)
+            .unwrap_or_else(|| panic!("no {opening} in the source"))
+            + opening.len();
+        let rest = &source[from..];
+        // The block ends at the first `}` in the first column, which closes it.
+        let to = rest.find("\n}\n").unwrap_or(rest.len());
+        rest[..to]
+            .lines()
+            .filter_map(|line| {
+                line.strip_prefix("    fn ")
+                    .or(line.strip_prefix("    pub fn "))
+            })
+            .filter_map(|rest| rest.split('(').next())
+            .map(|name| name.trim().to_owned())
+            .collect()
+    }
+    let declared = methods(include_str!("case.rs"), "\npub trait Side {");
+    let forwarded = methods(
+        include_str!("validated.rs"),
+        "\nimpl<S: Side> Side for Announcing<S> {",
+    );
+    assert!(declared.len() > 10, "the trait was not found: {declared:?}");
+    let missing: Vec<&String> = declared.difference(&forwarded).collect();
+    assert!(
+        missing.is_empty(),
+        "validated::Announcing does not forward {missing:?}, so it answers Unavailable where the \
+         side it wraps answers. Forward each of them."
+    );
+    let extra: Vec<&String> = forwarded.difference(&declared).collect();
+    assert!(
+        extra.is_empty(),
+        "Announcing forwards {extra:?}, which Side no longer declares"
+    );
+}
+
+/// Wrapping a side changes nothing a case observes: the announcing wrapper is a marker on standard
+/// error and nothing else. This catches a forward wired to the wrong inner call, which the
+/// name-set check above cannot see.
+#[test]
+fn announcing_a_side_changes_no_transcript() {
+    let transcript_of = |case: &dyn Case, announcing: bool| {
+        let inputs = case.inputs().unwrap_or_default();
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&inputs));
+        if announcing {
+            let mut side = crate::validated::Announcing::new(StubSide::new(vec![0; 4096]));
+            let _ = case.run(&mut side, &mut sites);
+        } else {
+            let mut side = StubSide::new(vec![0; 4096]);
+            let _ = case.run(&mut side, &mut sites);
+        }
+        sites.finish()
+    };
+    for case in crate::cases::all() {
+        assert_eq!(
+            transcript_of(case.as_ref(), false),
+            transcript_of(case.as_ref(), true),
+            "{}: the announcing side answered otherwise than the side it wraps",
+            case.name()
+        );
+    }
 }

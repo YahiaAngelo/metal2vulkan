@@ -7,6 +7,7 @@
 //! into "we match except where we don't": the degrade catalogue and the accepted-difference list
 //! are checked by execution, not by discipline.
 
+use crate::recording::Validated;
 use crate::transcript::{FloatWidth, Value};
 use metal2vulkan_runtime::Degradation;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,19 @@ pub enum Justification {
     /// An entry of `docs/API.md`'s accepted differences, by the slug of its bold lead-in
     /// ([`accepted_slug`]). The entry must be in the document.
     AcceptedDifference(String),
+    /// **Metal's own API validation refuses the call**, which is the recording's second Metal
+    /// fact ([`Validated::Stopped`]). This is the one justification that rests on the recording's
+    /// validated oracle rather than on anything of ours, and it is the only thing that may
+    /// justify our refusing a call plain Metal answered.
+    ///
+    /// The case names the words Metal's validation used, and the recording's message must hold
+    /// them, so the justification cannot decay into "Metal probably objects to this": if Apple
+    /// changes the check, or the validated leg was never taken, the allowance fails and the case
+    /// fails with it.
+    MetalValidation {
+        /// A fragment of the validation's own message, which the recording must contain.
+        says: String,
+    },
 }
 
 impl Justification {
@@ -41,6 +55,11 @@ impl Justification {
         Self::AcceptedDifference(slug.into())
     }
 
+    /// Metal's API validation refusing the call, by the words it used.
+    pub fn metal_validation(says: impl Into<String>) -> Self {
+        Self::MetalValidation { says: says.into() }
+    }
+
     /// What the report prints for it.
     pub fn describe(&self) -> String {
         match self {
@@ -48,18 +67,22 @@ impl Justification {
             Justification::AcceptedDifference(slug) => {
                 format!("the accepted difference {slug} (docs/API.md section 10)")
             }
+            Justification::MetalValidation { says } => {
+                format!("Metal's own API validation refuses the call: {says:?}")
+            }
         }
     }
 
     /// Why the justification does not hold: the code names no degrade kind, the slug names no
-    /// entry, or the notice the code names was not announced among `announced`.
-    pub fn unjustified(&self, announced: &[String]) -> Option<Unjustified> {
+    /// entry, the notice the code names was not announced among `offered`'s notices, or the
+    /// recording's validated oracle does not say what the case claims it says.
+    pub fn unjustified(&self, offered: &Offered<'_>) -> Option<Unjustified> {
         match self {
             Justification::Degradation(code) => {
                 if !Degradation::ALL.iter().any(|kind| kind.code() == code) {
                     return Some(Unjustified::NoSuchDegradation(code.clone()));
                 }
-                if !announced.iter().any(|notice| notice == code) {
+                if !offered.announced.iter().any(|notice| notice == code) {
                     return Some(Unjustified::NoticeNotAnnounced(code.clone()));
                 }
                 None
@@ -68,6 +91,49 @@ impl Justification {
                 (!accepted_differences().iter().any(|entry| entry == slug))
                     .then(|| Unjustified::NoSuchAcceptedDifference(slug.clone()))
             }
+            Justification::MetalValidation { says } => match offered.metal_validation {
+                Validated::Stopped { message, .. } if message.contains(says) => None,
+                Validated::Stopped { message, .. } => {
+                    Some(Unjustified::MetalValidationSaysOtherwise {
+                        wanted: says.clone(),
+                        said: message.clone(),
+                    })
+                }
+                Validated::Ran => Some(Unjustified::MetalValidationRan),
+                Validated::NotRun => Some(Unjustified::MetalValidationNotRun),
+            },
+        }
+    }
+}
+
+/// What a run and its recording offer to justify a loosened field: the degrade notices our side
+/// announced, and what Metal's API validation did with the same case.
+///
+/// The two are kept in one place because they are the only two things that may justify a
+/// difference, and because a case that names one must not be able to reach the other by accident.
+#[derive(Clone, Copy, Debug)]
+pub struct Offered<'a> {
+    /// The degrade-notice codes our run announced.
+    pub announced: &'a [String],
+    /// The recording's second Metal fact. On a host without Metal this is what the file says, so
+    /// the validated oracle is as portable as the rest of the recording.
+    pub metal_validation: &'a Validated,
+}
+
+impl<'a> Offered<'a> {
+    /// What a run with `announced` offers, where the recording holds no validated answer.
+    pub fn notices(announced: &'a [String]) -> Self {
+        Self {
+            announced,
+            metal_validation: &Validated::NotRun,
+        }
+    }
+
+    /// What a run with `announced` offers, beside the recording's `metal_validation`.
+    pub fn new(announced: &'a [String], metal_validation: &'a Validated) -> Self {
+        Self {
+            announced,
+            metal_validation,
         }
     }
 }
@@ -82,6 +148,14 @@ pub enum Unjustified {
     NoticeNotAnnounced(String),
     /// `docs/API.md`'s accepted differences hold no such entry.
     NoSuchAcceptedDifference(String),
+    /// Metal's API validation refused the call, but not with the words the case names: Apple's
+    /// check moved, so what the case claims is justified is no longer what Metal objects to.
+    MetalValidationSaysOtherwise { wanted: String, said: String },
+    /// Metal's API validation let the call run, so nothing of Metal's justifies the difference.
+    MetalValidationRan,
+    /// The case was never run under Metal's API validation, so the recording holds no such fact.
+    /// This is the one the whole axis turns on: an unexercised validated leg justifies nothing.
+    MetalValidationNotRun,
 }
 
 impl std::fmt::Display for Unjustified {
@@ -97,6 +171,18 @@ impl std::fmt::Display for Unjustified {
             Unjustified::NoSuchAcceptedDifference(slug) => write!(
                 out,
                 "docs/API.md section 10 holds no accepted difference {slug}"
+            ),
+            Unjustified::MetalValidationSaysOtherwise { wanted, said } => write!(
+                out,
+                "Metal's API validation does not say {wanted:?} any more; it says {said:?}"
+            ),
+            Unjustified::MetalValidationRan => out.write_str(
+                "Metal's API validation let the call run, so nothing of Metal's justifies the \
+                 difference",
+            ),
+            Unjustified::MetalValidationNotRun => out.write_str(
+                "the recording holds no validated Metal answer, so Metal's API validation \
+                 justifies nothing: re-record the case on a Mac",
             ),
         }
     }

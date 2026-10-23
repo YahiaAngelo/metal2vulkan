@@ -81,14 +81,23 @@ pub fn record_all(cases: &[Box<dyn Case>]) -> Vec<(String, Result<std::path::Pat
 }
 
 /// Take one case's answer and write its recording.
+///
+/// A case record mode runs on Metal is run **twice**: plain, which is the behavioural oracle and
+/// the transcript comparison uses, and once more under Metal's own API validation layer, in a
+/// child process of its own ([`crate::validated`]). The second run is a fact of its own and is
+/// never compared with our behaviour.
+///
+/// A case whose answer is carried was never run here, so its validated answer is
+/// [`Validated::NotRun`]: the absence is recorded, not guessed at.
 #[cfg(target_os = "macos")]
 fn record_one(case: &dyn Case) -> Result<std::path::PathBuf, String> {
     use crate::recording::Validated;
     let level = metal2vulkan_runtime::MetalLevel::NEWEST;
     let answer = match case.metal_source() {
         crate::case::MetalSource::Run => {
+            let validated = crate::validated::take(case).map_err(|error| error.to_string())?;
             let mut side = crate::metal_side::MetalSide::new()?;
-            crate::record::record(case, &mut side, RECORD_RUNS, level, Validated::NotRun)
+            crate::record::record(case, &mut side, RECORD_RUNS, level, validated)
                 .map_err(|error| error.to_string())?
         }
         crate::case::MetalSource::Carried { from, .. } => {
@@ -106,4 +115,20 @@ fn record_one(case: &dyn Case) -> Result<std::path::PathBuf, String> {
         }
     };
     crate::record::write(case, vec![answer])
+}
+
+/// Run one case on native Metal once, announcing each call, and say nothing of what it observed.
+///
+/// This is the body of the child process [`crate::validated::take`] spawns: the parent reads what
+/// this run's Metal said on its standard error. A call that did not answer is not a failure here —
+/// the point is what the validation layer printed, whatever the call went on to do.
+#[cfg(target_os = "macos")]
+pub fn validated_leg(case: &dyn Case) -> Result<(), String> {
+    use crate::transcript::Sites;
+    let inputs = case.inputs()?;
+    let mut side = crate::validated::Announcing::new(crate::metal_side::MetalSide::new()?);
+    let mut sites = Sites::new();
+    sites.push(crate::case::inputs_node(&inputs));
+    let _ = case.run(&mut side, &mut sites);
+    Ok(())
 }
