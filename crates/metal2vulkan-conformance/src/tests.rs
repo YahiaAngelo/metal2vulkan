@@ -936,6 +936,33 @@ fn a_declared_notice_does_not_excuse_an_undeclared_one() {
     );
 }
 
+/// `announced_notices` is `announced_at` totalled, so the rule is read in one place: the comparison
+/// needs each notice's **site** to say where an undeclared one was announced, and the notice census
+/// needs the totals. Worth its own test because blinding that walk fails nothing else in the crate's
+/// no-device tests but the undeclared-notice case.
+#[test]
+fn the_notice_walk_names_its_site_and_totals_its_codes() {
+    let mut sites = Sites::new();
+    sites.notices(NOTICES_SITE, &["b-code", "a-code", "b-code"]);
+    let transcript = sites.finish();
+    let announced = transcript.announced_at();
+    let seen: Vec<(&str, &str, u64)> = announced
+        .iter()
+        .map(|at| (at.path.as_str(), at.code.as_str(), at.times))
+        .collect();
+    assert_eq!(
+        seen,
+        vec![("case/notices", "a-code", 1), ("case/notices", "b-code", 2)],
+        "{announced:?}"
+    );
+    assert_eq!(
+        transcript.announced_notices(),
+        [("a-code".to_owned(), 1), ("b-code".to_owned(), 2)]
+            .into_iter()
+            .collect()
+    );
+}
+
 /// Two shapes the subset check must not fail, because both are honest. A case may name a code its
 /// own run never announced -- a notice is announced once per device per kind -- and that is an
 /// unfired declaration, not an undeclared notice. And a case that loosens a *value* by a notice's
