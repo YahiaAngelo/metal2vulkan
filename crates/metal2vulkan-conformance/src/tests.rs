@@ -176,6 +176,19 @@ impl Side for StubSide {
         Ok(Value::unit_variant(self.status))
     }
 
+    /// A copy-and-fill program, which answers nothing of its own: the refusal a test scripts here
+    /// is the interesting half, because a program is where one call stands for a whole list of
+    /// steps and a refusal at one of them has to reach the verdict as a refusal.
+    fn work(&mut self, _work: &crate::work::Work) -> Answer<crate::work::Done> {
+        match self.refusal("work") {
+            Some(failure) => Err(failure),
+            None => Ok(crate::work::Done {
+                reads: Vec::new(),
+                statuses: Vec::new(),
+            }),
+        }
+    }
+
     fn read_buffer(&mut self, _buffer: Handle, _offset: u64, length: usize) -> Answer<Vec<u8>> {
         let mut bytes = self.output.clone();
         bytes.resize(length, 0);
@@ -401,6 +414,199 @@ impl Case for LedgerCase {
         word.copy_from_slice(&bytes[..4]);
         sites.value("output", Value::Uint(u64::from(u32::from_le_bytes(word))));
         Ok(())
+    }
+}
+
+/// A case whose whole work is one [`crate::work::Work`] program, which is the shape a refusal used
+/// to disappear in: the program's many steps are one [`Side::work`] call, so a step's refusal
+/// reaches the transcript through that one site.
+struct ProgramCase {
+    name: &'static str,
+}
+
+impl ProgramCase {
+    fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+
+    /// The transcript a side that ran the program emits: Metal's answer for this case.
+    fn metal(&self) -> Transcript {
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&self.inputs().unwrap()));
+        sites.value("work", Value::ok(Value::Absent));
+        sites.notices(NOTICES_SITE, &[] as &[&str]);
+        sites.finish()
+    }
+}
+
+impl Case for ProgramCase {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::Run
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        Ok(vec![Input::bytes("calls", b"one program of no steps")])
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        let program = crate::work::Work::new();
+        call(sites, "work", side.work(&program), |_| Value::Absent)?;
+        Ok(())
+    }
+}
+
+/// A refusal at one **step of a program** is [`Verdict::Refused`] at the program's site, and the
+/// known-gaps ledger holds a row for it in both directions.
+///
+/// The gap this closes, which was live until this test: each work interpreter named the step a
+/// refusal came from by wrapping a fields value **around** the call's `Err`. The comparison reads a
+/// refusal out of one shape alone — Metal answered and we answered `Err` — so what it saw instead
+/// was "Metal observed a variant, we observed a fields": a structural divergence. The refusal was
+/// therefore invisible to the refused count *and* to the ledger, which covers a refusal by its site
+/// and its typed answer and had neither. Two real rows could not be written down because of it.
+///
+/// Both halves are exercised over fabricated ledgers, as `stale_set_diff` is: with the committed
+/// ledger holding no row of this shape, a test that only read a passing run could not reach the
+/// second direction at all.
+#[test]
+fn a_refusal_at_a_step_of_a_program_is_refused_and_the_ledger_holds_it() {
+    use crate::known_gaps::{against, Expectation, Expects, KnownGap, EVERY_VENUE};
+    let case = ProgramCase::new("program-step-refusal");
+    let recording = recording_of(&case, case.metal(), 3);
+    // The failure a work interpreter gives: the runtime's typed error, said to have happened at
+    // step 1 of the program, through the one annotation both interpreters share.
+    let refused = Failure::named(
+        "Error::NotImplemented",
+        "the runtime does not implement MultisampledBufferCopy",
+    )
+    .at_step(1);
+    let mut side = StubSide::new(Vec::new()).refusing("work", refused);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert_eq!(replayed.verdict.word(), "refused", "{}", replayed.verdict);
+    assert!(!replayed.verdict.is_compliant());
+    let Verdict::Refused { at, .. } = &replayed.verdict else {
+        panic!("{}", replayed.verdict);
+    };
+    let [printed] = at.as_slice() else {
+        panic!("{at:?}");
+    };
+    let (site, answer) = printed.split_once(": ").expect("a site and an answer");
+    let (site, answer) = (site.to_owned(), answer.to_owned());
+    assert_eq!(site, "case/work");
+    // The answer identifies the gap: the typed error the code path gave, and which step of the
+    // program gave it. Neither is readable from a kind mismatch.
+    assert!(answer.contains("Error::NotImplemented"), "{answer}");
+    assert!(answer.contains("MultisampledBufferCopy"), "{answer}");
+    assert!(answer.contains("step: 1"), "{answer}");
+
+    // Direction one: a gap nothing has written down fails the run, and the row to add is printed
+    // ready to paste rather than reconstructed by hand.
+    let rows = vec![replayed];
+    let found = against(&rows, &[]);
+    let [unlisted @ Expectation::Unlisted { expects, .. }] = found.as_slice() else {
+        panic!("{found:?}");
+    };
+    assert_eq!(*expects, Expects::Refused);
+    let row = unlisted.row().expect("a row to paste");
+    let fields: Vec<&str> = row.split('\t').collect();
+    assert_eq!(fields.len(), 6, "{row}");
+    assert_eq!(fields[0], "program-step-refusal");
+    assert_eq!(fields[2], "refused");
+    assert_eq!(fields[3], "case/work");
+
+    // Written down exactly: nothing unexpected, and the run may exit 0 with the gap still printed
+    // and still counted as a refusal.
+    let listed = vec![KnownGap {
+        case: "program-step-refusal".to_owned(),
+        venue: EVERY_VENUE.to_owned(),
+        expects: Expects::Refused,
+        site: site.clone(),
+        answer: answer.clone(),
+        waiting_on: "the stub refuses the program's second step, which is the point of the stub"
+            .to_owned(),
+    }];
+    assert_eq!(against(&rows, &listed), Vec::new());
+
+    // Direction two, the one that keeps the file from rotting into a silencer: the same row
+    // against a run that ran the program fails, and says the row must go.
+    let mut ran = StubSide::new(Vec::new());
+    let passed = replay_against(&case, &mut ran, &recording).unwrap();
+    assert_eq!(passed.verdict.word(), "exact", "{}", passed.verdict);
+    let found = against(std::slice::from_ref(&passed), &listed);
+    let [gone @ Expectation::NoLongerHeld { gap, .. }] = found.as_slice() else {
+        panic!("{found:?}");
+    };
+    assert_eq!(gap.case, "program-step-refusal");
+    let printed = gone.to_string();
+    assert!(printed.contains("no longer refuses"), "{printed}");
+    assert!(printed.contains("drop the row"), "{printed}");
+
+    // And the row's identity is the step as well as the site: the same program refusing at
+    // another step is another gap, so the listed row no longer holds and the new one is unlisted.
+    let elsewhere = Failure::named(
+        "Error::NotImplemented",
+        "the runtime does not implement MultisampledBufferCopy",
+    )
+    .at_step(2);
+    let mut other = StubSide::new(Vec::new()).refusing("work", elsewhere);
+    let moved = replay_against(&case, &mut other, &recording).unwrap();
+    assert_eq!(moved.verdict.word(), "refused");
+    let found = against(std::slice::from_ref(&moved), &listed);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .any(|why| matches!(why, Expectation::Unlisted { .. })),
+        "{found:?}"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|why| matches!(why, Expectation::NoLongerHeld { .. })),
+        "{found:?}"
+    );
+}
+
+/// A failure records as the `Err` the comparison reads a refusal from, however it is annotated.
+///
+/// The invariant [`Failure`] exists to hold, checked rather than described: every way the suite
+/// builds a failure, and the annotation on top of each, records a value
+/// [`Value::is_error`](crate::transcript::Value::is_error) answers for. Without it a refusal
+/// reaches the comparison as two sides observing different kinds of value, which is a divergence
+/// and not a refusal, and the refused count and the ledger both lose it.
+#[test]
+fn every_failure_records_as_an_error_however_it_is_named() {
+    let built = [
+        (
+            "Error::NotImplemented",
+            Failure::of(&metal2vulkan_runtime::Error::NotImplemented(
+                metal2vulkan_runtime::RuntimeGap::MultisampledBufferCopy,
+            )),
+        ),
+        ("Unavailable", Failure::unavailable("work")),
+        (
+            "CommandBufferStatus",
+            Failure::named("CommandBufferStatus", "the status was not Completed"),
+        ),
+    ];
+    for (variant, failure) in built {
+        let plain = failure.recorded();
+        assert!(plain.is_error(), "{plain:?}");
+        // The annotation names the step and the resource **inside** the error, so the layer the
+        // comparison reads stays outermost however many times a failure is named.
+        let step = failure.clone().at_step(3).recorded();
+        assert!(step.is_error(), "{step:?}");
+        let both = failure.at_resource(0).at_step(1).recorded();
+        assert!(both.is_error(), "{both:?}");
+        // And the typed error is still in what a ledger row would carry, which is what makes the
+        // row identify the code path rather than the harness's wrapper.
+        let printed = crate::diff::print(&step);
+        assert!(printed.contains(variant), "{printed}");
+        assert!(printed.contains("step: 3"), "{printed}");
     }
 }
 
@@ -732,10 +938,8 @@ fn a_refusal_with_no_validated_leg_says_the_fact_is_missing() {
 fn a_venue_that_lacks_the_feature_is_its_own_outcome() {
     let case = WordsCase::new("words", 2);
     let recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
-    let lacking = Failure {
-        value: Value::error("Error::Unsupported", Value::Absent),
-        lacks: Some("the device enables no such capability".to_owned()),
-    };
+    let mut lacking = Failure::named("Error::Unsupported", "no such capability");
+    lacking.lacks = Some("the device enables no such capability".to_owned());
     let mut side = StubSide::new(Vec::new()).refusing("pipeline", lacking);
     let replayed = replay_against(&case, &mut side, &recording).unwrap();
     assert!(
@@ -2529,7 +2733,7 @@ impl Case for DiedOnMetal {
         }
         sites.push(Node::leaf(
             DIED_AT,
-            Observed::value(Failure::named("Unsupported", "this call is not built").value),
+            Observed::value(Failure::named("Unsupported", "this call is not built").recorded()),
         ));
         Ok(())
     }

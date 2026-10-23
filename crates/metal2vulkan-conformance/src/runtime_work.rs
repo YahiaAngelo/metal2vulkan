@@ -50,7 +50,7 @@ struct Pending {
 pub fn run(device: &Device, queue: &CommandQueue, work: &Work) -> Answer<Done> {
     let mut made: Vec<Made> = Vec::with_capacity(work.resources.len());
     for (at, resource) in work.resources.iter().enumerate() {
-        made.push(make(device, &made, resource).map_err(|failure| at_resource(at, failure))?);
+        made.push(make(device, &made, resource).map_err(|failure| failure.at_resource(at))?);
     }
     let mut state = Run {
         device,
@@ -66,7 +66,7 @@ pub fn run(device: &Device, queue: &CommandQueue, work: &Work) -> Answer<Done> {
         statuses: Vec::new(),
     };
     for (at, step) in work.steps.iter().enumerate() {
-        state.step(step).map_err(|failure| at_step(at, failure))?;
+        state.step(step).map_err(|failure| failure.at_step(at))?;
     }
     state.close()?;
     let reads = state
@@ -81,28 +81,6 @@ pub fn run(device: &Device, queue: &CommandQueue, work: &Work) -> Answer<Done> {
         reads,
         statuses: state.statuses,
     })
-}
-
-/// The failure a resource's refusal is, naming which resource.
-fn at_resource(at: usize, failure: Failure) -> Failure {
-    Failure {
-        value: crate::transcript::Value::fields([
-            ("resource", crate::transcript::Value::Uint(at as u64)),
-            ("refused", failure.value),
-        ]),
-        lacks: failure.lacks,
-    }
-}
-
-/// The failure a step's refusal is, naming which step.
-fn at_step(at: usize, failure: Failure) -> Failure {
-    Failure {
-        value: crate::transcript::Value::fields([
-            ("step", crate::transcript::Value::Uint(at as u64)),
-            ("refused", failure.value),
-        ]),
-        lacks: failure.lacks,
-    }
 }
 
 /// The descriptor `spec` names.

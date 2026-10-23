@@ -402,7 +402,7 @@ impl Case for ShaderStencil {
             if let Some(failure) = refused {
                 program = program.with(Node::leaf(
                     piece.call(),
-                    Observed::value(failure.value.clone()),
+                    Observed::value(failure.recorded()),
                 ));
             }
         }

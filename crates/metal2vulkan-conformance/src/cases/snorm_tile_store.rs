@@ -251,7 +251,7 @@ impl SnormTileStore {
             calls = calls.with(Node::leaf(
                 format!("{index}-render"),
                 Observed::value(match refused {
-                    Some(failure) => failure.value.clone(),
+                    Some(failure) => failure.recorded(),
                     None => Value::ok(Value::Absent),
                 }),
             ));

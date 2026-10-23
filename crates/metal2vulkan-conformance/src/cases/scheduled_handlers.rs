@@ -100,7 +100,7 @@ impl Case for HandlerOrder {
             Ok(order) => sites.push(order.node(AT)),
             // The row records the failure and the run ends: every fact the case has is in the one
             // call, so there is nothing after it to read.
-            Err(failure) => sites.push(Node::leaf(AT, Observed::value(failure.value))),
+            Err(failure) => sites.push(Node::leaf(AT, Observed::value(failure.recorded()))),
         }
         Ok(())
     }

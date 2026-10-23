@@ -396,9 +396,9 @@ impl Case for SparseHeapCase {
             let (answered, lacks) = match side.heap_texture(heap, texture) {
                 Ok(made) => match side.sparse_texture_facts(made) {
                     Ok(facts) => (Value::ok(facts.value()), None),
-                    Err(failure) => (failure.value, failure.lacks),
+                    Err(failure) => (failure.recorded(), failure.lacks),
                 },
-                Err(failure) => (failure.value, failure.lacks),
+                Err(failure) => (failure.recorded(), failure.lacks),
             };
             node = node.with(Node::leaf(site::TEXTURE, Observed::value(answered)));
             sites.push(node);
@@ -421,7 +421,7 @@ impl Case for SparseHeapCase {
 fn emit_heap(side: &mut dyn Side, sites: &mut Sites, heap: Handle, at: &str) {
     let (answered, lacks) = match side.heap_facts(heap) {
         Ok(facts) => (Value::ok(facts.value()), None),
-        Err(failure) => (failure.value, failure.lacks),
+        Err(failure) => (failure.recorded(), failure.lacks),
     };
     sites.push(Node::leaf(at, Observed::value(answered)));
     // As above: a venue that cannot answer these getters at all is its own gap here.
@@ -487,7 +487,7 @@ mod tests {
             // A device that cannot make a sparse heap at all has nothing to say about Metal's
             // validation of the textures, and its own refusal is a recorded value.
             Err(failure) => {
-                println!("this venue refuses a sparse heap: {:?}", failure.value);
+                println!("this venue refuses a sparse heap: {:?}", failure.recorded());
                 return;
             }
         };
@@ -496,12 +496,12 @@ mod tests {
                 if let Err(failure) = side.heap_texture(heap, texture) {
                     // `Error::Invalid` alone: the refusals that are ours to answer for, and `Nil`,
                     // leave Metal's process alive and are recorded values.
-                    if is_invalid(&failure.value) {
+                    if is_invalid(&failure.recorded()) {
                         stopped.push(format!(
                             "{} {}: {:?}",
                             case.name,
                             texture.site(),
-                            failure.value
+                            failure.recorded()
                         ));
                     }
                 }

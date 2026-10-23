@@ -326,10 +326,27 @@ pub type Answer<T> = Result<T, Failure>;
 
 /// A call that did not answer: the typed error as the transcript records it, and whether it is the
 /// venue's honest gap rather than ours.
+///
+/// # Why the `Err` is not stored
+///
+/// The comparison reads a **refusal** out of one shape and one only: Metal's site answered and
+/// ours is an `Err` variant ([`crate::compare`]). So a failure whose recorded value is anything
+/// else is a refusal the suite cannot see — it reads as two sides observing different kinds of
+/// value, which is a divergence, which the known-gaps ledger cannot carry as a refusal and the
+/// refused count never sees.
+///
+/// That had happened twice, in two files, for the same reason: a helper that **named where** a
+/// failure came from wrapped a fields value around the whole `Err`. So the `Err` layer is not a
+/// field here at all. A failure carries the typed error alone, [`Failure::recorded`] adds the
+/// `Err` as the site is written, and the annotation ([`Failure::at_step`]) can only reach the
+/// inside of it. Nothing a failure carries, now or later, can displace the layer the comparison
+/// reads.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Failure {
-    /// The error, as a `Value::error` of the variant's path and its payload.
-    pub value: Value,
+    /// The typed error **inside** the call's `Err`: a `Value::Variant` of the error's variant
+    /// path and its payload. Private, so the `Err` layer cannot be lost: see the type's own
+    /// documentation.
+    error: Value,
     /// What the venue lacks, where the typed refusal names capabilities a device could enable or
     /// a measured driver defect ([`device_gap`]). `None` where the refusal is ours to answer for.
     pub lacks: Option<String>,
@@ -339,7 +356,10 @@ impl Failure {
     /// The failure a typed runtime error is.
     pub fn of(error: &metal2vulkan_runtime::Error) -> Self {
         Self {
-            value: Value::error(error_variant(error), Value::Lines(vec![error.to_string()])),
+            error: Value::Variant {
+                name: error_variant(error),
+                payload: Box::new(Value::Lines(vec![error.to_string()])),
+            },
             lacks: device_gap(error),
         }
     }
@@ -348,21 +368,63 @@ impl Failure {
     /// refusal: it says the side cannot be asked, and a case whose Metal side answers it carries
     /// its Metal answer instead.
     pub fn unavailable(call: &str) -> Self {
-        Self {
-            value: Value::error(
-                "Unavailable",
-                Value::fields([("call", Value::Lines(vec![call.to_owned()]))]),
-            ),
-            lacks: None,
-        }
+        Self::of_variant(
+            "Unavailable",
+            Value::fields([("call", Value::Lines(vec![call.to_owned()]))]),
+        )
     }
 
     /// A failure of `variant` with `detail`, for a side whose call failed outside the runtime's
     /// typed errors.
     pub fn named(variant: &str, detail: impl Into<String>) -> Self {
+        Self::of_variant(variant, Value::Lines(vec![detail.into()]))
+    }
+
+    /// A failure of the typed variant `variant` carrying `payload`.
+    fn of_variant(variant: &str, payload: Value) -> Self {
         Self {
-            value: Value::error(variant, Value::Lines(vec![detail.into()])),
+            error: Value::Variant {
+                name: variant.to_owned(),
+                payload: Box::new(payload),
+            },
             lacks: None,
+        }
+    }
+
+    /// What the transcript records at a site the call did not answer: `Err` of the typed error.
+    ///
+    /// The only way out of a failure into a value, so every site a failure reaches holds the shape
+    /// the comparison reads a refusal from.
+    pub fn recorded(&self) -> Value {
+        Value::err(self.error.clone())
+    }
+
+    /// The same failure, said to have happened at step `index` of a [`crate::work::Work`]
+    /// program.
+    #[must_use]
+    pub fn at_step(self, index: usize) -> Self {
+        self.inside("step", index)
+    }
+
+    /// The same failure, said to have happened while making resource `index` of one.
+    #[must_use]
+    pub fn at_resource(self, index: usize) -> Self {
+        self.inside("resource", index)
+    }
+
+    /// [`Failure::at_step`] and [`Failure::at_resource`], which differ only in the field they
+    /// name.
+    ///
+    /// One implementation for both sides of the harness. Each interpreter used to carry its own
+    /// copy, with a comment saying the two must agree — and the shape they agreed on was the one
+    /// that hid the refusal, so the agreement proved nothing. A program's part is named **inside**
+    /// the typed error, never around it.
+    fn inside(self, part: &'static str, index: usize) -> Self {
+        // Both fields are named, with no `..`, so the next field anyone adds to a failure is a
+        // compile error here rather than a field silently dropped as a failure is annotated.
+        Self {
+            error: Value::fields([(part, Value::Uint(index as u64)), ("refused", self.error)]),
+            lacks: self.lacks,
         }
     }
 }
@@ -1876,7 +1938,7 @@ pub fn call<T>(
             Ok(value)
         }
         Err(failure) => {
-            sites.push(Node::leaf(at, Observed::value(failure.value.clone())));
+            sites.push(Node::leaf(at, Observed::value(failure.recorded())));
             // A device's honest gap is recorded at the site, not only where it stops the case.
             // The whole-case `LacksFeature` verdict comes from an abort, so without this a case
             // that carries on past an unsupported call would have that site read as a refusal of
@@ -1914,7 +1976,7 @@ pub fn probe<T>(
             Some(value)
         }
         Err(failure) => {
-            sites.push(Node::leaf(at, Observed::value(failure.value.clone())));
+            sites.push(Node::leaf(at, Observed::value(failure.recorded())));
             if let Some(needs) = &failure.lacks {
                 sites.device_gap(at, needs.clone());
             }

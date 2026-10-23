@@ -372,6 +372,18 @@ pub fn print(value: &Value) -> String {
             Value::Absent => name.clone(),
             _ => format!("{name}({})", print(payload)),
         },
-        Value::Fields(fields) => format!("{} fields", fields.len()),
+        // The fields are printed with their names, for the same reason one line is: a refusal's
+        // row is a bug report, and "2 fields" names neither the typed error a call gave nor the
+        // step of a program it gave it at. Every value under a failure's fields is itself one
+        // line, so the whole stays one — these are a typed error's payload, never a case's own
+        // observation, which the comparison descends into field by field and never prints whole.
+        Value::Fields(fields) => format!(
+            "{{{}}}",
+            fields
+                .iter()
+                .map(|(name, held)| format!("{name}: {}", print(held)))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
     }
 }

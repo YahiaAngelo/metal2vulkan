@@ -158,6 +158,10 @@ pub enum Value {
     Fields(BTreeMap<String, Value>),
 }
 
+/// The variant name a call that did not answer records under, and the one the comparison reads a
+/// refusal from.
+const ERR: &str = "Err";
+
 impl Value {
     /// `Ok(payload)`, a call's answer.
     pub fn ok(payload: Value) -> Self {
@@ -170,12 +174,23 @@ impl Value {
     /// `Err(payload)`, a call's typed error: `name` is the variant's path and `payload` its
     /// fields.
     pub fn error(name: impl Into<String>, payload: Value) -> Self {
+        Self::err(Self::Variant {
+            name: name.into(),
+            payload: Box::new(payload),
+        })
+    }
+
+    /// `Err(error)`, where `error` is already whatever the typed error is.
+    ///
+    /// The one place the `Err` name is spelled, because the comparison reads a **refusal** out of
+    /// exactly this shape — Metal answering a call and us answering `Err`
+    /// ([`crate::compare`]) — so a value that means "we did not answer" and is not an `Err` is a
+    /// refusal the suite cannot see. [`crate::case::Failure`] keeps the typed error alone and adds
+    /// this layer as it records, so nothing a failure carries can displace it.
+    pub fn err(error: Value) -> Self {
         Self::Variant {
-            name: "Err".to_owned(),
-            payload: Box::new(Self::Variant {
-                name: name.into(),
-                payload: Box::new(payload),
-            }),
+            name: ERR.to_owned(),
+            payload: Box::new(error),
         }
     }
 
@@ -204,7 +219,7 @@ impl Value {
 
     /// Whether the value is a call's `Err`.
     pub fn is_error(&self) -> bool {
-        matches!(self, Value::Variant { name, .. } if name == "Err")
+        matches!(self, Value::Variant { name, .. } if name == ERR)
     }
 
     /// The word the report prints for the value's kind.

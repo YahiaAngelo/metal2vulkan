@@ -384,13 +384,13 @@ impl Case for HeapSizeCase {
             // instead of being lost behind an abort.
             let answered = match side.heap_texture_size_and_align(query) {
                 Ok(answered) => Value::ok(answered.value()),
-                Err(failure) => failure.value,
+                Err(failure) => failure.recorded(),
             };
             node = node.with(Node::leaf(site::QUERY, Observed::value(answered)));
             if self.asks_texture {
                 let made = match side.makes_texture(query) {
                     Ok(made) => Value::ok(Value::Bool(made)),
-                    Err(failure) => failure.value,
+                    Err(failure) => failure.recorded(),
                 };
                 node = node.with(Node::leaf(site::TEXTURE, Observed::value(made)));
             }
@@ -441,7 +441,7 @@ mod tests {
                         "{} {}: {:?}",
                         case.name,
                         query.site(),
-                        failure.value
+                        failure.recorded()
                     ));
                 }
                 if case.asks_texture {
@@ -450,7 +450,7 @@ mod tests {
                             "{} {} makes_texture: {:?}",
                             case.name,
                             query.site(),
-                            failure.value
+                            failure.recorded()
                         ));
                     }
                 }

@@ -290,7 +290,7 @@ impl Case for MeshCommands {
             emitted = emitted.with(Node::leaf(
                 format!("{index}-{name}"),
                 Observed::value(match refused {
-                    Some(failure) => failure.value.clone(),
+                    Some(failure) => failure.recorded(),
                     None => Value::ok(Value::Absent),
                 }),
             ));
@@ -634,7 +634,7 @@ impl Case for UnorderedDraws {
             emitted = emitted.with(Node::leaf(
                 format!("{index}-{name}"),
                 Observed::value(match refused {
-                    Some(failure) => failure.value.clone(),
+                    Some(failure) => failure.recorded(),
                     None => Value::ok(Value::Absent),
                 }),
             ));

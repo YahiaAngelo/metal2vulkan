@@ -358,7 +358,7 @@ impl Case for WidePoints {
             // rather than a divergence.
             for (piece, what) in [(2 * at, "pass"), (2 * at + 1, "read")] {
                 if let Some(Some(failure)) = outcome.refused.get(piece) {
-                    row = row.with(Node::leaf(what, Observed::value(failure.value.clone())));
+                    row = row.with(Node::leaf(what, Observed::value(failure.recorded())));
                 }
             }
             sites.push(row);

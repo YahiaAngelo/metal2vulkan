@@ -149,7 +149,7 @@ pub fn run(
 ) -> Answer<Done> {
     let mut made: Vec<Made> = Vec::with_capacity(work.resources.len());
     for (at, resource) in work.resources.iter().enumerate() {
-        let one = make(device, &made, resource).map_err(|failure| at_resource(at, failure))?;
+        let one = make(device, &made, resource).map_err(|failure| failure.at_resource(at))?;
         made.push(one);
     }
     let mut state = Run {
@@ -184,7 +184,7 @@ pub fn run(
             for (index, step) in work.steps[at..end].iter().enumerate() {
                 state
                     .step(step)
-                    .map_err(|failure| at_step(at + index, failure))?;
+                    .map_err(|failure| failure.at_step(at + index))?;
             }
             // A group the case left open is committed here, as `run` has always committed what the
             // last step left open, so the pool drains with no command buffer live.
@@ -205,29 +205,6 @@ pub fn run(
         reads,
         statuses: state.statuses,
     })
-}
-
-/// The failure a resource's refusal is, naming which resource. The shape is
-/// [`crate::runtime_work`]'s, so a refusal reads the same whichever side gave it.
-fn at_resource(at: usize, failure: Failure) -> Failure {
-    Failure {
-        value: crate::transcript::Value::fields([
-            ("resource", crate::transcript::Value::Uint(at as u64)),
-            ("refused", failure.value),
-        ]),
-        lacks: failure.lacks,
-    }
-}
-
-/// The failure a step's refusal is, naming which step.
-fn at_step(at: usize, failure: Failure) -> Failure {
-    Failure {
-        value: crate::transcript::Value::fields([
-            ("step", crate::transcript::Value::Uint(at as u64)),
-            ("refused", failure.value),
-        ]),
-        lacks: failure.lacks,
-    }
 }
 
 /// The storage mode and resource options a [`Storage`] takes, which is
@@ -1165,8 +1142,11 @@ mod tests {
 
     /// The variant a refusal records as, so a test names the hazard rather than its prose.
     fn variant(refusal: &Failure) -> String {
-        let Value::Variant { payload, .. } = &refusal.value else {
-            panic!("a refusal records as an error variant: {:?}", refusal.value);
+        let Value::Variant { payload, .. } = &refusal.recorded() else {
+            panic!(
+                "a refusal records as an error variant: {:?}",
+                refusal.recorded()
+            );
         };
         match payload.as_ref() {
             Value::Variant { name, .. } => name.clone(),

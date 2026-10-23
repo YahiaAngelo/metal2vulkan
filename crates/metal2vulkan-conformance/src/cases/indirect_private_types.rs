@@ -185,7 +185,7 @@ impl Case for IndirectPrivateTypes {
                         sites.push(node);
                         sites.push(Node::leaf(
                             form(indexed),
-                            Observed::value(failure.value.clone()),
+                            Observed::value(failure.recorded()),
                         ));
                         return Err(Abort { at, failure });
                     }

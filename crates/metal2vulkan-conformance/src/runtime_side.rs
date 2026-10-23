@@ -2374,7 +2374,7 @@ impl Side for RuntimeSide<'_> {
         let _ = release.send(());
         let wait_answered = match answer.recv_timeout(ARRIVAL) {
             Ok(None) => Returned::Ok,
-            Ok(Some(failure)) => Returned::Err(failure.value),
+            Ok(Some(failure)) => Returned::Err(failure.recorded()),
             Err(_) => Returned::NotWithinTheWindow,
         };
         let inside_the_completed_handler = match completing.recv_timeout(ARRIVAL) {

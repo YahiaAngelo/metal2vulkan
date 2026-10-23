@@ -154,13 +154,13 @@ impl Case for FormatDescriptors {
             // being lost behind an abort.
             let answered = match side.heap_texture_size_and_align(&query) {
                 Ok(answer) => Value::ok(answer.value()),
-                Err(failure) => failure.value,
+                Err(failure) => failure.recorded(),
             };
             node = node.with(Node::leaf(site::QUERY, Observed::value(answered)));
             if asks_texture {
                 let made_one = match side.makes_texture(&query) {
                     Ok(made_one) => Value::ok(Value::Bool(made_one)),
-                    Err(failure) => failure.value,
+                    Err(failure) => failure.recorded(),
                 };
                 node = node.with(Node::leaf(site::TEXTURE, Observed::value(made_one)));
             }
@@ -647,14 +647,14 @@ mod device_tests {
         let mut stopped = Vec::new();
         for (query, asks_texture) in FormatDescriptors.queries() {
             if let Err(failure) = side.heap_texture_size_and_align(&query) {
-                stopped.push(format!("{}: {:?}", query.site(), failure.value));
+                stopped.push(format!("{}: {:?}", query.site(), failure.recorded()));
             }
             if asks_texture {
                 if let Err(failure) = side.makes_texture(&query) {
                     stopped.push(format!(
                         "{} makes_texture: {:?}",
                         query.site(),
-                        failure.value
+                        failure.recorded()
                     ));
                 }
             }
