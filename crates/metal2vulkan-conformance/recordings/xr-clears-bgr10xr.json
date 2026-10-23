@@ -518,8 +518,8 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 3,
-      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "bounds": {
         "argument_objects_retained": 1452,
         "argument_tables_retained": 484,
@@ -586,7 +586,7 @@
         "variant_pipelines_made": 1,
         "variants_taken_back": 1,
         "wakes_completion_waiters": 8,
-        "wakes_spared": 48
+        "wakes_spared": 76
       }
     }
   ]

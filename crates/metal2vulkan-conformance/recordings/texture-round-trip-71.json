@@ -204,8 +204,8 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 3,
-      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "bounds": {
         "host_texel_copies": 3,
         "images_started_on_the_host": 1,
@@ -213,7 +213,9 @@
         "object_churn.textures_image": 1,
         "object_churn.vk_image_bindings": 1,
         "object_churn.vk_images_destroyed": 3,
-        "object_churn.vk_images_made": 3
+        "object_churn.vk_images_made": 3,
+        "scheduler_sleep_slices": 1,
+        "scheduler_sleeps": 1
       }
     }
   ]

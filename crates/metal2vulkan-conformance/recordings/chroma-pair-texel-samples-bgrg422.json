@@ -287,8 +287,8 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 3,
-      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-carried-decoded-twin",
         "metal2vulkan-degrade-cpu-block-decode"
@@ -331,7 +331,7 @@
         "queue_submissions": 1,
         "scheduled_where_submitted": 1,
         "scheduler_passes": 3,
-        "scheduler_sleeps": 2,
+        "scheduler_sleeps": 3,
         "scheduler_wakes_commit": 1,
         "scheduler_wakes_host": 2,
         "slot_returns": 1,
@@ -339,7 +339,7 @@
         "submit_infos": 1,
         "variants_taken_back": 1,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 7
+        "wakes_spared": 6
       },
       "moving": {
         "host_texel_copies": 2

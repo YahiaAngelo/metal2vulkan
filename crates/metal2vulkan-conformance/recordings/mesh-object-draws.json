@@ -1494,8 +1494,8 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 3,
-      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-emulated-mesh-draws",
         "metal2vulkan-degrade-fast-math-rewrites"
@@ -1562,13 +1562,13 @@
         "inline_passes": 5,
         "live_tables_uploaded": 3,
         "new_buffer_bytes_cleared": 33280,
-        "object_churn.buffers_evicted": 3,
+        "object_churn.buffers_evicted": 21,
         "object_churn.buffers_parked": 17,
         "object_churn.buffers_recycled": 14,
         "object_churn.images_own_memory": 16,
         "object_churn.textures_image": 16,
         "object_churn.vk_buffer_bindings": 4,
-        "object_churn.vk_buffers_destroyed": 4,
+        "object_churn.vk_buffers_destroyed": 22,
         "object_churn.vk_buffers_made": 4,
         "object_churn.vk_image_bindings": 16,
         "object_churn.vk_image_views_made": 16,
@@ -1586,7 +1586,8 @@
         "render_passes_begun_instances": 3,
         "scheduled_where_submitted": 8,
         "scheduler_passes": 8,
-        "scheduler_sleeps": 8,
+        "scheduler_sleep_slices": 1,
+        "scheduler_sleeps": 9,
         "scheduler_wakes_commit": 8,
         "shader_modules_made": 3,
         "shader_modules_shared": 1,

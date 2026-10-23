@@ -513,8 +513,8 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 3,
-      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-half-output-fast-math-blend",
         "metal2vulkan-degrade-unreached-tiles-rewritten"
@@ -536,7 +536,6 @@
         "command_buffers_begun_segments": 2,
         "command_buffers_deferred": 11,
         "command_buffers_replayed": 9,
-        "command_buffers_replayed_inline": 1,
         "command_buffers_submitted": 15,
         "commands_replayed.begin_command_buffer": 9,
         "commands_replayed.cmd_begin_render_pass": 1,

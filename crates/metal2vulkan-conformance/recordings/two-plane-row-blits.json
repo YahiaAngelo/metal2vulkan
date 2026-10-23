@@ -1844,8 +1844,8 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 3,
-      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-shadowed-texture"
       ],
@@ -1876,6 +1876,7 @@
         "completed_where_seen": 24,
         "copy_regions_split": 4,
         "encoder_command_buffers_begun": 24,
+        "fences_made": 1,
         "finales_folded": 24,
         "images_started_on_the_host": 18,
         "internal_submissions": 52,
