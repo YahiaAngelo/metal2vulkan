@@ -119,9 +119,9 @@ use objc2_metal::{
     MTLRenderPipelineDescriptor, MTLRenderPipelineFunctionsDescriptor, MTLRenderPipelineReflection,
     MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions,
     MTLResourceStateCommandEncoder, MTLResourceUsage, MTLSamplePosition, MTLSamplerAddressMode,
-    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
-    MTLScissorRect, MTLSharedEvent, MTLSharedEventHandle, MTLSize, MTLSparsePageSize,
-    MTLSparseTextureMappingMode, MTLSparseTextureRegionAlignmentMode,
+    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerMipFilter,
+    MTLSamplerReductionMode, MTLSamplerState, MTLScissorRect, MTLSharedEvent, MTLSharedEventHandle,
+    MTLSize, MTLSparsePageSize, MTLSparseTextureMappingMode, MTLSparseTextureRegionAlignmentMode,
     MTLStageInputOutputDescriptor, MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction,
     MTLStorageMode, MTLStoreAction, MTLStoreActionOptions, MTLStructMember, MTLStructType,
     MTLTessellationControlPointIndexType, MTLTessellationFactorFormat,
@@ -2530,10 +2530,20 @@ impl Side for MetalSide {
         let descriptor = MTLSamplerDescriptor::new();
         descriptor.setMinFilter(filter(spec.min_filter));
         descriptor.setMagFilter(filter(spec.mag_filter));
+        descriptor.setMipFilter(MTLSamplerMipFilter(spec.mip_filter.as_raw() as usize));
         descriptor.setSAddressMode(address(spec.s_address_mode));
         descriptor.setTAddressMode(address(spec.t_address_mode));
+        descriptor.setRAddressMode(address(spec.r_address_mode));
         descriptor.setBorderColor(MTLSamplerBorderColor(spec.border_color.as_raw() as usize));
         descriptor.setNormalizedCoordinates(spec.normalized_coordinates);
+        descriptor.setLodMinClamp(spec.lod_min_clamp);
+        descriptor.setLodMaxClamp(spec.lod_max_clamp);
+        descriptor.setLodAverage(spec.lod_average);
+        descriptor.setMaxAnisotropy(spec.max_anisotropy as usize);
+        descriptor.setCompareFunction(compare_function(spec.compare_function));
+        descriptor.setReductionMode(MTLSamplerReductionMode(
+            spec.reduction_mode.as_raw() as usize
+        ));
         descriptor.setSupportArgumentBuffers(spec.support_argument_buffers);
         let sampler = self
             .device

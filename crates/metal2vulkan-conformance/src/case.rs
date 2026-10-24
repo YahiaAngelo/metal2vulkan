@@ -20,8 +20,9 @@ use crate::transcript::{Node, NodeName, Observed, Sites, Transcript, Value};
 use crate::verdict::device_gap;
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{
-    AttributeFormat, BindingAccess, IndexType, PixelFormat, RenderStages, SamplerAddressMode,
-    SamplerBorderColor, SamplerMinMagFilter, StepFunction,
+    AttributeFormat, BindingAccess, CompareFunction, IndexType, PixelFormat, RenderStages,
+    SamplerAddressMode, SamplerBorderColor, SamplerMinMagFilter, SamplerMipFilter,
+    SamplerReductionMode, StepFunction,
 };
 
 /// A shader as both sides can take it.
@@ -164,18 +165,41 @@ pub enum ArgumentSlot {
 /// A sampler state a case makes: `MTLSamplerDescriptor`'s facts a sampled case states.
 ///
 /// The vocabulary is Metal's own enumerations as the translator's public API names them, so a value
-/// a case writes reaches `MTLSamplerMinMagFilter`, `MTLSamplerAddressMode` and
-/// `MTLSamplerBorderColor` by their raw ordinals and reaches the runtime's descriptor unchanged.
-/// There is no second spelling to keep in step.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// a case writes reaches `MTLSamplerMinMagFilter`, `MTLSamplerMipFilter`, `MTLSamplerAddressMode`,
+/// `MTLSamplerBorderColor`, `MTLCompareFunction` and `MTLSamplerReductionMode` by their raw
+/// ordinals and reaches the runtime's descriptor unchanged. There is no second spelling to keep in
+/// step.
+///
+/// Every field of the descriptor is here, and both sides set every one of them, so a field a case
+/// leaves alone is Metal's own default **set by the case** rather than a field one leg never
+/// touched. The one Metal property left out is `lodBias`, which the runtime's
+/// `SamplerDescriptor` has no counterpart for, so a case stating it could reach only one leg.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SamplerSpec {
     pub min_filter: SamplerMinMagFilter,
     pub mag_filter: SamplerMinMagFilter,
+    /// `mipFilter`: which level, or which pair of levels, a sample reads.
+    pub mip_filter: SamplerMipFilter,
     pub s_address_mode: SamplerAddressMode,
     pub t_address_mode: SamplerAddressMode,
+    /// `rAddressMode`: the third axis, which only a 3D or a cube sample consults.
+    pub r_address_mode: SamplerAddressMode,
     pub border_color: SamplerBorderColor,
     /// `normalizedCoordinates`: `false` is a pixel-coordinate sampler.
     pub normalized_coordinates: bool,
+    /// `lodMinClamp`: the level a sample is raised to, explicit levels included.
+    pub lod_min_clamp: f32,
+    /// `lodMaxClamp`: the level a sample is then lowered to.
+    pub lod_max_clamp: f32,
+    /// `lodAverage`: whether a fragment's level is averaged over the quad.
+    pub lod_average: bool,
+    /// `maxAnisotropy`: Metal's validation refuses anything outside 1 to 16, so a case states one
+    /// inside it.
+    pub max_anisotropy: u32,
+    /// `compareFunction`: what a `sample_compare` compares its reference against the texel with.
+    pub compare_function: CompareFunction,
+    /// `reductionMode`: how a linear footprint's texels are combined.
+    pub reduction_mode: SamplerReductionMode,
     /// `supportArgumentBuffers`: whether the state has a GPU resource ID, which is what an
     /// argument buffer needs of it ([`ArgumentSlot::Sampler`]). Metal gives a state made without
     /// it no resource ID at all.
@@ -183,16 +207,25 @@ pub struct SamplerSpec {
 }
 
 impl SamplerSpec {
-    /// `MTLSamplerDescriptor`'s defaults: nearest filtering without mipmaps, clamp to edge,
-    /// transparent black borders, normalized coordinates.
+    /// `MTLSamplerDescriptor`'s defaults: nearest filtering without mipmaps, clamp to edge on all
+    /// three axes, transparent black borders, normalized coordinates, LOD clamps `[0, FLT_MAX]`,
+    /// no quad-averaged level, no anisotropy, no comparison, and weighted-average reduction.
     pub const fn new() -> Self {
         Self {
             min_filter: SamplerMinMagFilter::Nearest,
             mag_filter: SamplerMinMagFilter::Nearest,
+            mip_filter: SamplerMipFilter::NotMipmapped,
             s_address_mode: SamplerAddressMode::ClampToEdge,
             t_address_mode: SamplerAddressMode::ClampToEdge,
+            r_address_mode: SamplerAddressMode::ClampToEdge,
             border_color: SamplerBorderColor::TransparentBlack,
             normalized_coordinates: true,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: f32::MAX,
+            lod_average: false,
+            max_anisotropy: 1,
+            compare_function: CompareFunction::Never,
+            reduction_mode: SamplerReductionMode::WeightedAverage,
             support_argument_buffers: false,
         }
     }
@@ -223,10 +256,18 @@ impl SamplerSpec {
     /// The words the case's input fingerprint covers: every field, so a sampler state that moves
     /// is a change to the case's inputs.
     ///
-    /// `supportArgumentBuffers` is a word only where it is set. The two forms still fingerprint
-    /// apart — one carries the word and the other does not — and a case that never puts a sampler
-    /// in an argument buffer fingerprints its state as it did before the field existed, so its
-    /// recording stays the answer to the inputs it was taken from.
+    /// **A field is a word only where it is not Metal's default.** `supportArgumentBuffers`
+    /// established the pattern and the eight fields added beside it keep it, for one reason: a
+    /// state at the default of every one of them fingerprints exactly as it did before those
+    /// fields existed, so every committed recording stays the answer to the inputs it was taken
+    /// from and not one of them decays. The two forms still fingerprint apart — one carries the
+    /// field's words and the other does not.
+    ///
+    /// Each added field carries a **tag** word of its own beside its value, and the tags are
+    /// outside the range any ordinal, flag or clamp of the six leading words can take
+    /// ([`SAMPLER_WORD_TAG`] and up). Without a tag a `mipFilter` of `Nearest` would push the bare
+    /// `1` that `supportArgumentBuffers` pushes, and two different states would fingerprint the
+    /// same; `tests::the_tagged_sampler_words_tell_every_field_apart` holds that apart.
     pub fn words(&self) -> Vec<u8> {
         let mut words = vec![
             self.min_filter.as_raw(),
@@ -239,9 +280,74 @@ impl SamplerSpec {
         if self.support_argument_buffers {
             words.push(1);
         }
+        let default = Self::new();
+        let mut tagged = |at: u32, value: u32| {
+            words.push(SAMPLER_WORD_TAG + at);
+            words.push(value);
+        };
+        if self.mip_filter != default.mip_filter {
+            tagged(0, self.mip_filter.as_raw());
+        }
+        if self.r_address_mode != default.r_address_mode {
+            tagged(1, self.r_address_mode.as_raw());
+        }
+        // The clamps fingerprint as their bits, so a NaN or a signed zero a case states is a
+        // distinct input rather than one a comparison of floats would fold into another.
+        if self.lod_min_clamp.to_bits() != default.lod_min_clamp.to_bits() {
+            tagged(2, self.lod_min_clamp.to_bits());
+        }
+        if self.lod_max_clamp.to_bits() != default.lod_max_clamp.to_bits() {
+            tagged(3, self.lod_max_clamp.to_bits());
+        }
+        if self.lod_average != default.lod_average {
+            tagged(4, u32::from(self.lod_average));
+        }
+        if self.max_anisotropy != default.max_anisotropy {
+            tagged(5, self.max_anisotropy);
+        }
+        if self.compare_function != default.compare_function {
+            tagged(6, self.compare_function.as_raw());
+        }
+        if self.reduction_mode != default.reduction_mode {
+            tagged(7, self.reduction_mode.as_raw());
+        }
         words.iter().flat_map(|word| word.to_le_bytes()).collect()
     }
+
+    /// The state with `mip_filter` as its mip filter.
+    #[must_use]
+    pub const fn mipped(mut self, mip_filter: SamplerMipFilter) -> Self {
+        self.mip_filter = mip_filter;
+        self
+    }
+
+    /// The state with `lod_min_clamp` as its lower LOD clamp.
+    #[must_use]
+    pub const fn clamped_from(mut self, lod_min_clamp: f32) -> Self {
+        self.lod_min_clamp = lod_min_clamp;
+        self
+    }
+
+    /// The state with `compare_function` as its comparison.
+    #[must_use]
+    pub const fn comparing(mut self, compare_function: CompareFunction) -> Self {
+        self.compare_function = compare_function;
+        self
+    }
+
+    /// The state with `border_color` as its border colour.
+    #[must_use]
+    pub const fn bordered(mut self, border_color: SamplerBorderColor) -> Self {
+        self.border_color = border_color;
+        self
+    }
 }
+
+/// The first tag [`SamplerSpec::words`] writes beside a non-default field's value.
+///
+/// Above every ordinal, flag and clamp the six leading words can hold, so a tag can never be
+/// mistaken for one of them however the SDK's enumerations grow.
+pub const SAMPLER_WORD_TAG: u32 = 0x8000_0000;
 
 impl Default for SamplerSpec {
     fn default() -> Self {

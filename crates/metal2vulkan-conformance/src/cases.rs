@@ -129,6 +129,7 @@ pub mod rotated_planes;
 pub mod rotated_targets;
 pub mod sample_fills;
 pub mod sample_positions;
+pub mod sampler_filtering;
 pub mod scheduled_handlers;
 pub mod shader_stencil;
 pub mod shared_events;
@@ -437,6 +438,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.extend(rotated_targets::all());
     cases.extend(rotated_planes::all());
+    for case in sampler_filtering::all() {
+        cases.push(Box::new(case));
+    }
     cases.extend(render_chains::boxed());
     cases.extend(compute_render_chains::boxed());
     cases.extend(draw_state_changes::boxed());

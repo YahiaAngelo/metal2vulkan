@@ -1,0 +1,806 @@
+{
+  "format": 1,
+  "case": "sampler-r-address-modes",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "msf_runtime_samplers.ll",
+      "entry": "msf_slot3d_linear_repeat",
+      "source_sha256": "fa455706aa522e16a8b72fb51387d32e70d5e0471b8db8e8465bc002a044ebbf"
+    },
+    {
+      "fixture": "msf_runtime_samplers.air.ll",
+      "entry": "msf_slot3d_linear_repeat",
+      "source_sha256": "3943694c31235c3e0841c22e15fb2ecb8fe55eae0f5edb81c04efa7ce27efb4a"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "fa455706aa522e16a8b72fb51387d32e70d5e0471b8db8e8465bc002a044ebbf"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3943694c31235c3e0841c22e15fb2ecb8fe55eae0f5edb81c04efa7ce27efb4a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "entry",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "cd7ac2460c9153892ee5c3c17257402b3856c8d361b80fb49cb839ebbad4030b"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:coords",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "406d4c889e8d83f68ed6a7525ccc35425c7bd44d0bcf3e70ec3daa2de74c7740"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:out",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "7efc0d08fdb1ce6d943883290db2368e5aaddd0a337fc43508658f8c274bb6c3"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:3d",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "04caa3941706988319409ae71d5f9dbc7d382a168fb8d035556f575573e9be6b"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler:clamp-to-edge",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "454b2562d547d5505ee1d8e642dc4e248f7866879fad4cf5c7386f5e22b4a9e6"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler:mirror-clamp-to-edge",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f78b65a5c800847d1a82f7132801ae9d9acb5056530033fce6a8e366a289dccf"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler:repeat",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "81c2c95dc29ce330ae137cb0483b01ab9a4b25f5e08f21b321ad7965f9261b05"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler:mirror-repeat",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "83131303e8e7e011a2eaa85a04e1520dc89c299014d7cdc3d133581a9c98cac7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler:clamp-to-zero",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "cc8d9b7117c9dc57c234739a3295866baec47ee56fed6f7b43a1bfad1de89fbf"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler:clamp-to-border-color",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "1bf8fbd16a31b69f7f5805a0bbb3a533240aa60fd644213deb9a55d9091c79d0"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/coords",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-edge/sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-edge/buffer/out",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-edge/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-edge/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-edge/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-edge",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "sampled",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADwQQAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAMBAAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AADwQQAAAAAAAAAAAACAPwAAWEIAAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwBAK0IAAAAAAAAAAAAAgD8AAMBAAAAAAAAAAAAAAIA/AEArQgAAAAAAAAAAAACAPwAAWEIAAAAAAAAAAAAAgD8AAGBBAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwAAOEIAAAAAAAAAAAAAgD8AAMBAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 384
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 32,
+                            "rows": 12,
+                            "image_pitch": 384,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "mirror-clamp-to-edge/sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mirror-clamp-to-edge/buffer/out",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mirror-clamp-to-edge/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mirror-clamp-to-edge/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mirror-clamp-to-edge/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mirror-clamp-to-edge",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "sampled",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADwQQAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAMBAAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AADwQQAAAAAAAAAAAACAPwAAWEIAAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwBAK0IAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AEArQgAAAAAAAAAAAACAPwAAWEIAAAAAAAAAAAAAgD8AAGBBAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwAAOEIAAAAAAAAAAAAAgD8AAMBAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 384
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 32,
+                            "rows": 12,
+                            "image_pitch": 384,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "repeat/sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "repeat/buffer/out",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "repeat/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "repeat/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "repeat/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "repeat",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "sampled",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADwQQAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAMBAAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AADwQQAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwBAK0IAAAAAAAAAAAAAgD8AABhCAAAAAAAAAAAAAIA/AEArQgAAAAAAAAAAAACAPwAAGEIAAAAAAAAAAAAAgD8AAGBBAAAAAAAAAAAAAIA/AACwQQAAAAAAAAAAAACAPwAAOEIAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 384
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 32,
+                            "rows": 12,
+                            "image_pitch": 384,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "mirror-repeat/sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mirror-repeat/buffer/out",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mirror-repeat/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mirror-repeat/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mirror-repeat/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "mirror-repeat",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "sampled",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADwQQAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAMBAAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AADwQQAAAAAAAAAAAACAPwAAWEIAAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwBAK0IAAAAAAAAAAAAAgD8AALBBAAAAAAAAAAAAAIA/AEArQgAAAAAAAAAAAACAPwAAsEEAAAAAAAAAAAAAgD8AAGBBAAAAAAAAAAAAAIA/AAAYQgAAAAAAAAAAAACAPwAAOEIAAAAAAAAAAAAAgD8AAMBAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 384
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 32,
+                            "rows": 12,
+                            "image_pitch": 384,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "clamp-to-zero/sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-zero/buffer/out",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-zero/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-zero/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-zero/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-zero",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "sampled",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADwQQAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAMBAAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AADwQQAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAACAPwBAK0IAAAAAAAAAAAAAgD8AAIA/AAAAAAAAAAAAAIA/AEArQgAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAGBBAAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAACAPwAAOEIAAAAAAAAAAAAAgD8AAIA/AAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 384
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 32,
+                            "rows": 12,
+                            "image_pitch": 384,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "clamp-to-border-color/sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-border-color/buffer/out",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-border-color/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-border-color/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-border-color/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "clamp-to-border-color",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "sampled",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADwQQAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAMBAAAAAAAAAAAAAAIA/AADAQAAAAAAAAAAAAACAPwAAwEAAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AABYQgAAAAAAAAAAAACAPwAA8EEAAAAAAAAAAAAAgD8AAFhCAAAAAAAAAAAAAIA/AADwQQAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAPBBAAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAACAPwBAK0IAAAAAAAAAAAAAgD8AAIA/AAAAAAAAAAAAAIA/AEArQgAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAGBBAAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAACAPwAAOEIAAAAAAAAAAAAAgD8AAIA/AAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 384
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 8,
+                            "row_pitch": 32,
+                            "rows": 12,
+                            "image_pitch": 384,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

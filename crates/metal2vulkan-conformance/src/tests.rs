@@ -5842,3 +5842,85 @@ fn a_creation_handler_that_never_ran_is_divergent_not_a_pass() {
         "no divergence names the two paths disagreeing: {paths:?}"
     );
 }
+
+/// Widening [`crate::case::SamplerSpec`] to all fourteen of `MTLSamplerDescriptor`'s fields did
+/// not move one committed recording's input fingerprint.
+///
+/// This is the test that had to exist before the eight fields were added. A case's recording is
+/// the answer to the inputs it was taken from, and the sampler state is one of those inputs, so a
+/// `words()` that wrote a field unconditionally would have decayed **every** recording in the
+/// suite at once — 111 cases make a sampler — and the suite would have needed re-recording whole.
+/// The words a default state and an argument-buffer state write are pinned here as bytes, so the
+/// only way to decay them is to edit this test and say so.
+#[test]
+fn the_default_sampler_words_are_the_words_they_always_were() {
+    use crate::case::SamplerSpec;
+    // Nearest, nearest, clamp to edge, clamp to edge, transparent black, normalized: the six
+    // words `words()` wrote before `mipFilter` and the seven fields beside it existed.
+    let six: Vec<u8> = [0u32, 0, 0, 0, 0, 1]
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .collect();
+    assert_eq!(SamplerSpec::new().words(), six);
+    let mut seven = six.clone();
+    seven.extend(1u32.to_le_bytes());
+    assert_eq!(SamplerSpec::new().for_argument_buffer().words(), seven);
+}
+
+/// Each of the eight fields added to [`crate::case::SamplerSpec`] fingerprints apart from every
+/// other and from `supportArgumentBuffers`.
+///
+/// `supportArgumentBuffers` writes a bare `1`, so an added field writing its raw ordinal would
+/// have made a `mipFilter` of `Nearest` fingerprint as an argument-buffer state: two different
+/// sampler states, one fingerprint, and a recording of one standing as the answer for the other.
+/// The tag word is what keeps them apart, and this is what holds it.
+#[test]
+fn the_tagged_sampler_words_tell_every_field_apart() {
+    use crate::case::SamplerSpec;
+    use metal2vulkan::metal::{
+        CompareFunction, SamplerAddressMode, SamplerMipFilter, SamplerReductionMode,
+    };
+    use std::collections::BTreeSet;
+
+    let mut specs = vec![SamplerSpec::new(), SamplerSpec::new().for_argument_buffer()];
+    let mut one = SamplerSpec::new();
+    one.mip_filter = SamplerMipFilter::Nearest;
+    specs.push(one);
+    let mut one = SamplerSpec::new();
+    one.r_address_mode = SamplerAddressMode::Repeat;
+    specs.push(one);
+    let mut one = SamplerSpec::new();
+    one.lod_min_clamp = 1.0;
+    specs.push(one);
+    let mut one = SamplerSpec::new();
+    one.lod_max_clamp = 1.0;
+    specs.push(one);
+    let mut one = SamplerSpec::new();
+    one.lod_average = true;
+    specs.push(one);
+    let mut one = SamplerSpec::new();
+    one.max_anisotropy = 2;
+    specs.push(one);
+    let mut one = SamplerSpec::new();
+    one.compare_function = CompareFunction::Less;
+    specs.push(one);
+    let mut one = SamplerSpec::new();
+    one.reduction_mode = SamplerReductionMode::Minimum;
+    specs.push(one);
+
+    let words: BTreeSet<Vec<u8>> = specs.iter().map(SamplerSpec::words).collect();
+    assert_eq!(
+        words.len(),
+        specs.len(),
+        "two of the ten states fingerprint alike"
+    );
+    // A clamp fingerprints as its bits, so a signed zero and a NaN are each their own input
+    // rather than values a float comparison would fold into the default or into each other.
+    let mut zero = SamplerSpec::new();
+    zero.lod_min_clamp = -0.0;
+    let mut nan = SamplerSpec::new();
+    nan.lod_min_clamp = f32::NAN;
+    assert_ne!(zero.words(), SamplerSpec::new().words());
+    assert_ne!(nan.words(), SamplerSpec::new().words());
+    assert_ne!(zero.words(), nan.words());
+}
