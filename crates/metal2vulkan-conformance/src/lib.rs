@@ -43,6 +43,7 @@
 //! runs on its own thread and is answered within the wait bound, so no wait in a case can hang.
 
 pub mod allowance;
+pub mod archives;
 pub mod argument_encoders;
 pub mod buffer_texture;
 pub mod case;

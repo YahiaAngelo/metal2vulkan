@@ -1,0 +1,328 @@
+{
+  "format": 1,
+  "case": "binary-archive-adders",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "px_samplers.ll",
+      "entry": "px_sample_argument",
+      "source_sha256": "8c4a0024c9ba10e25d2487017101ff9a6437a48c58602537d0a41ee693e32f20"
+    },
+    {
+      "fixture": "px_samplers.air.ll",
+      "entry": "px_sample_argument",
+      "source_sha256": "5cedd165bee51449aaab252183a73661902625d2ddf8aa9fa5582f605ea564b1"
+    },
+    {
+      "fixture": "reflection/texture_accesses.ll",
+      "entry": "texture_accesses_vertex",
+      "source_sha256": "081bf6dfe075bb2171d010f4720eb3bd1fce1d77b5cf5b7cf6cb07afaec9bfc8"
+    },
+    {
+      "fixture": "reflection/texture_accesses.air.ll",
+      "entry": "texture_accesses_vertex",
+      "source_sha256": "954c6d7119e9d0bc9526de28fbbea84424cb9619dc05a1e9ee7b8659f60e0dd3"
+    },
+    {
+      "fixture": "reflection/tile.ll",
+      "entry": "reflection_tile",
+      "source_sha256": "41ec095966ab1e27b4a3787d163827b9445d255934a5db8ba1a289bce2fa684c"
+    },
+    {
+      "fixture": "reflection/tile.air.ll",
+      "entry": "reflection_tile",
+      "source_sha256": "c3606b45567d30507a3792c0f699c5c75ba7e53ad375829616d5681c5db7744a"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air-0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ed977dd8744816beaf9313e5322c0a4ad95563d240f81abdcd73fb4d40457557"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed-0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "5cedd165bee51449aaab252183a73661902625d2ddf8aa9fa5582f605ea564b1"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d32f6a671adb0564f0c1268d0c51f915ad007596ef89b4a69f7ff801cda3d6c6"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed-1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "954c6d7119e9d0bc9526de28fbbea84424cb9619dc05a1e9ee7b8659f60e0dd3"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-2",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "93d2e3c16b2e46a7e85ed66309e26de45d317d49073886f114ba4b17146c2587"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed-2",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "c3606b45567d30507a3792c0f699c5c75ba7e53ad375829616d5681c5db7744a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "program",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4a0d369520a6813f20f19a84128aab98fe83c4c8a905922421f7238e5ed93faf"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "program",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "new-archive",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "add-compute",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "add-compute-again",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "add-render",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "add-render-again",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "add-tile",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "add-tile-again",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "serialize",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "file",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "exists",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "nonempty",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

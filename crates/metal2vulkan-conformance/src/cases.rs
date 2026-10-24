@@ -44,6 +44,7 @@
 
 pub mod argument_encoders;
 pub mod astc_textures;
+pub mod binary_archives;
 pub mod blend_sweeps;
 pub mod blit_encoder_commands;
 pub mod border_swizzles;
@@ -69,6 +70,7 @@ pub mod depth_texel_reads;
 pub mod device_queries;
 pub mod discard_hoist;
 pub mod draw_state_changes;
+pub mod dynamic_libraries;
 pub mod etc_textures;
 pub mod event_orders;
 pub mod extended_range_blends;
@@ -210,6 +212,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in pipeline_option_reflection::all() {
+        cases.push(Box::new(case));
+    }
+    for case in binary_archives::all() {
+        cases.push(Box::new(case));
+    }
+    for case in dynamic_libraries::all() {
         cases.push(Box::new(case));
     }
     for case in compute_pipeline_descriptors::all() {

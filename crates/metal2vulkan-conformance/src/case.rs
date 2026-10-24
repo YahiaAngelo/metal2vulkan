@@ -877,6 +877,27 @@ pub trait Side {
         Err(Failure::unavailable("compute_pipeline_bindings"))
     }
 
+    /// Run an archive-and-dynamic-library program ([`crate::archives::Program`]), answering one
+    /// observation a step in the step order.
+    ///
+    /// One call for a whole program rather than one per container call, because neither
+    /// `MTLBinaryArchive` nor `MTLDynamicLibrary` answers anything a single call can be compared
+    /// at: what either one is *for* is a sequence — make it, add to it, write it, load it back,
+    /// create from it — and the objects between the steps are the side's own, which no handle in
+    /// this vocabulary names. The side keeps them by index, as the program's steps name them.
+    ///
+    /// A side answers `Err` only where it could not run the program at all (no scratch directory,
+    /// no assembler). A call the program made that Metal or the runtime refused is an
+    /// **observation**, not an error of this call: that is what makes a refusal one leaf of a
+    /// swept table rather than the end of the case.
+    fn archives(
+        &mut self,
+        program: &crate::archives::Program<'_>,
+    ) -> Answer<Vec<crate::archives::Observation>> {
+        let _ = program;
+        Err(Failure::unavailable("archives"))
+    }
+
     /// `newComputePipelineStateWithFunction:options:reflection:error:` under the raw
     /// `MTLPipelineOption` value `options`, answering whether a reflection came back and what it
     /// held ([`OptionOutcome`](crate::pipeline_options::OptionOutcome)).

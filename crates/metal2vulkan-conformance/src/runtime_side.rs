@@ -6,6 +6,10 @@
 //!
 //! No wait here can hang: a command buffer is waited for with a bound, and a wait that runs out
 //! answers `NeverReturned` as a recorded fact rather than blocking the suite.
+use crate::archives::{
+    self, Added, Bytes, Created, DynamicSource, LibraryAt, Observation, Program, ProgramLibrary,
+    Scratch, Step,
+};
 use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
     Answer, ArgumentSlot, Bindings, CommandDraw, CoordinateProbe, Failure, Fill, FragmentFill,
@@ -84,18 +88,19 @@ use metal2vulkan::metal::{
     PixelFormat, PrimitiveType, RenderStages, ResourceUsage, TextureType, TextureUsage,
 };
 use metal2vulkan::pipeline::{
-    ColorAttachmentDescriptor, MeshPipelineDescriptor, RenderPipelineDescriptor,
-    StageInputAttributeDescriptor, StageInputDescriptor, StageInputLayoutDescriptor, StageSource,
-    TessellationDescriptor, TileRenderPipelineDescriptor, VertexAttributeDescriptor,
-    VertexBufferLayoutDescriptor, VertexDescriptor,
+    ColorAttachmentDescriptor, ComputePipelineDescriptor, MeshPipelineDescriptor,
+    RenderPipelineDescriptor, StageInputAttributeDescriptor, StageInputDescriptor,
+    StageInputLayoutDescriptor, StageSource, TessellationDescriptor, TileRenderPipelineDescriptor,
+    VertexAttributeDescriptor, VertexBufferLayoutDescriptor, VertexDescriptor,
 };
 use metal2vulkan_runtime::{
-    ArgumentEncoder, BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus,
-    CommandQueue, ComputePipelineState, Coordinate2D, DepthStencilState, Device, DrawPrimitiveType,
-    Fence, Heap, HeapDescriptor, HeapType, HostMemory, IndirectCommand, IndirectCommandBuffer,
-    IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
-    LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, Origin,
-    PipelineOption, PipelineOptions, PurgeableState, RasterizationRateMap, Region,
+    ArgumentEncoder, BinaryArchive, BinaryArchiveDescriptor, BlitOption, Buffer, ClearColor,
+    CommandBuffer, CommandBufferStatus, CommandQueue, ComputePipelineState, Coordinate2D,
+    DepthStencilState, Device, DrawPrimitiveType, DynamicLibrary, Fence, Heap, HeapDescriptor,
+    HeapType, HostMemory, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor,
+    IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction,
+    MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, Origin, PipelineOption,
+    PipelineOptions, PurgeableState, RasterizationRateMap, Region,
     RenderPassColorAttachmentDescriptor, RenderPassDepthAttachmentDescriptor, RenderPassDescriptor,
     RenderPassStencilAttachmentDescriptor, RenderPipelineFunctionsDescriptor, RenderPipelineState,
     ResourceOptions, ResourceRef, ResourceStateCommandEncoder, SamplePosition, SamplerState,
@@ -2320,6 +2325,41 @@ impl Side for RuntimeSide<'_> {
             refused: false,
             bindings: found,
         })
+    }
+
+    fn archives(&mut self, program: &Program<'_>) -> Answer<Vec<Observation>> {
+        // The scratch directory lives exactly as long as the program: its files are the program's
+        // own and nothing outside the call reads them, so they are gone when the call returns.
+        let scratch = Scratch::new().map_err(|why| Failure::named("NoScratchDirectory", why))?;
+        let mut built = Vec::with_capacity(program.libraries.len());
+        for entry in program.libraries {
+            built.push(
+                new_library_with_air(self.device, entry.source.bitcode)
+                    .map_err(Failure::from_error)?,
+            );
+        }
+        let registry = self.device.registry_id();
+        let mut archives: Vec<Option<BinaryArchive>> = Vec::new();
+        let mut from_data: Vec<Option<Library>> = Vec::new();
+        let mut dynamics: Vec<Option<DynamicLibrary>> = Vec::new();
+        let mut out = Vec::with_capacity(program.steps.len());
+        for (at, (_, step)) in program.steps.iter().enumerate() {
+            out.push(
+                runtime_step(
+                    self.device,
+                    &scratch,
+                    program,
+                    &built,
+                    registry,
+                    &mut archives,
+                    &mut from_data,
+                    &mut dynamics,
+                    step,
+                )
+                .map_err(|failure| failure.at_step(at))?,
+            );
+        }
+        Ok(out)
     }
 
     fn compute_pipeline_under_options(
@@ -7116,5 +7156,289 @@ fn our_tile_state_facts(state: &RenderPipelineState) -> TileFacts {
         max_total_threads_per_threadgroup: u64::from(state.max_total_threads_per_threadgroup()),
         threadgroup_size_matches_tile_size: state.threadgroup_size_matches_tile_size(),
         imageblock_sample_length: state.imageblock_sample_length().ok(),
+    }
+}
+
+/// The bytes a step names, built with the suite's own container writer.
+///
+/// Our whole of the two packagers Metal's side reaches through `xcrun`: the runtime takes a
+/// metallib's bytes and has no writer of its own, so [`crate::archives::container`] stands in for
+/// `xcrun metallib` and for `xcrun metal -dynamiclib`. The container is written around the bitcode
+/// `llvm-as` assembled, which is the dialect this side parses, exactly as every case already hands
+/// the two sides two dialects of one shader.
+fn runtime_bytes(program: &Program<'_>, bytes: Bytes) -> Answer<Vec<u8>> {
+    let held = |at: usize| -> Answer<&ProgramLibrary<'_>> {
+        program
+            .libraries
+            .get(at)
+            .ok_or_else(|| Failure::named("NoSuchProgramLibrary", at.to_string()))
+    };
+    match bytes {
+        Bytes::Metallib { library } => {
+            let held = held(library)?;
+            Ok(archives::container(held.source.bitcode, held.entries, None))
+        }
+        Bytes::DynamicLibraryFile {
+            library,
+            install_name,
+        } => {
+            let held = held(library)?;
+            Ok(archives::container(
+                held.source.bitcode,
+                held.entries,
+                Some(install_name),
+            ))
+        }
+        Bytes::Text(text) => Ok(text.as_bytes().to_vec()),
+        Bytes::Empty => Ok(Vec::new()),
+    }
+}
+
+/// A stage of one of a program's libraries, as a descriptor takes it.
+fn runtime_stage(built: &[Library], at: usize, name: &str) -> Answer<StageSource> {
+    let library = built
+        .get(at)
+        .ok_or_else(|| Failure::named("NoSuchProgramLibrary", at.to_string()))?;
+    Ok(StageSource::Function(
+        library
+            .new_function_with_name(name)
+            .map_err(Failure::from_error)?
+            .function_descriptor(),
+    ))
+}
+
+/// The render pipeline descriptor a step names, over `attachments` colour attachments of the
+/// program's format.
+fn runtime_render_descriptor(
+    program: &Program<'_>,
+    built: &[Library],
+    at: usize,
+    vertex: &str,
+    fragment: &str,
+    attachments: usize,
+) -> Answer<RenderPipelineDescriptor> {
+    let mut descriptor = RenderPipelineDescriptor::new(runtime_stage(built, at, vertex)?);
+    descriptor.fragment = Some(runtime_stage(built, at, fragment)?);
+    for index in 0..attachments {
+        let slot = descriptor
+            .color_attachments
+            .get_mut(index)
+            .ok_or_else(|| Failure::named("NoSuchColorAttachment", index.to_string()))?;
+        *slot = Some(ColorAttachmentDescriptor::new(program.attachment));
+    }
+    Ok(descriptor)
+}
+
+/// One step of a program on the runtime.
+#[allow(clippy::too_many_arguments)]
+fn runtime_step(
+    device: &Device,
+    scratch: &Scratch,
+    program: &Program<'_>,
+    built: &[Library],
+    registry: u64,
+    archives_made: &mut Vec<Option<BinaryArchive>>,
+    from_data: &mut Vec<Option<Library>>,
+    dynamics: &mut Vec<Option<DynamicLibrary>>,
+    step: &Step,
+) -> Answer<Observation> {
+    match *step {
+        Step::NewArchive { from } => {
+            let descriptor =
+                BinaryArchiveDescriptor::new(from.map(|source| scratch.source(source)));
+            let made = device.new_binary_archive(&descriptor).ok();
+            let refused = made.is_none();
+            archives_made.push(made);
+            Ok(Observation::Made { refused })
+        }
+        Step::ArchiveLabel { archive, set } => {
+            let Some(Some(archive)) = archives_made.get(archive) else {
+                return Ok(Observation::refused_for(step));
+            };
+            if let Some(label) = set {
+                archive.set_label(label);
+            }
+            Ok(Observation::Label(archive.label()))
+        }
+        Step::ArchiveDevice { archive } => {
+            let Some(Some(archive)) = archives_made.get(archive) else {
+                return Ok(Observation::refused_for(step));
+            };
+            Ok(Observation::Flag(
+                archive.device().registry_id() == registry,
+            ))
+        }
+        Step::Add { archive, what } => {
+            let Some(Some(archive)) = archives_made.get(archive).cloned() else {
+                return Ok(Observation::refused_for(step));
+            };
+            let refused = match what {
+                Added::Compute { library, kernel } => archive
+                    .add_compute_pipeline_functions(&ComputePipelineDescriptor::new(runtime_stage(
+                        built, library, kernel,
+                    )?))
+                    .is_err(),
+                Added::Render {
+                    library,
+                    vertex,
+                    fragment,
+                    attachments,
+                } => archive
+                    .add_render_pipeline_functions(&runtime_render_descriptor(
+                        program,
+                        built,
+                        library,
+                        vertex,
+                        fragment,
+                        attachments,
+                    )?)
+                    .is_err(),
+                Added::Tile { library, tile } => {
+                    let mut descriptor =
+                        TileRenderPipelineDescriptor::new(runtime_stage(built, library, tile)?);
+                    descriptor.color_attachment_formats[0] = Some(program.attachment);
+                    archive
+                        .add_tile_render_pipeline_functions(&descriptor)
+                        .is_err()
+                }
+                // `addMeshRenderPipelineFunctionsWithDescriptor:error:` has no counterpart on this
+                // side: `BinaryArchive` has three adders and Metal has four. Answered as the
+                // refusal it is, so the case reads `Refused` with the call named, rather than as a
+                // bool that differed.
+                Added::Mesh { .. } => {
+                    return Err(Failure::unavailable(
+                        "addMeshRenderPipelineFunctionsWithDescriptor",
+                    ))
+                }
+            };
+            Ok(Observation::Made { refused })
+        }
+        Step::Serialize { archive, to } => {
+            let Some(Some(archive)) = archives_made.get(archive) else {
+                return Ok(Observation::refused_for(step));
+            };
+            let refused = archive.serialize_to_url(&scratch.path(to)).is_err();
+            Ok(Observation::Made { refused })
+        }
+        Step::Create {
+            archives,
+            options,
+            what,
+        } => {
+            let mut listed = Vec::with_capacity(archives.len());
+            for index in archives {
+                match archives_made.get(*index).cloned().flatten() {
+                    Some(archive) => listed.push(archive),
+                    None => return Ok(Observation::refused_for(step)),
+                }
+            }
+            let mut options = PipelineOptions::new(PipelineOption::from_raw(options));
+            options.binary_archives = listed;
+            let refused = match what {
+                Created::Compute { library, kernel } => device
+                    .new_compute_pipeline_state(
+                        &ComputePipelineDescriptor::new(runtime_stage(built, library, kernel)?),
+                        &options,
+                    )
+                    .is_err(),
+                Created::Render {
+                    library,
+                    vertex,
+                    fragment,
+                    attachments,
+                } => device
+                    .new_render_pipeline_state(
+                        &runtime_render_descriptor(
+                            program,
+                            built,
+                            library,
+                            vertex,
+                            fragment,
+                            attachments,
+                        )?,
+                        &options,
+                    )
+                    .is_err(),
+            };
+            Ok(Observation::Made { refused })
+        }
+        Step::FileState { file } => Ok(scratch.state(file)),
+        Step::Write { file, bytes } => {
+            let written = runtime_bytes(program, bytes)?;
+            let refused = std::fs::write(scratch.path(file), &written).is_err();
+            Ok(Observation::Made { refused })
+        }
+        Step::NewLibraryWithData { bytes } => {
+            let data = runtime_bytes(program, bytes)?;
+            let made = device.new_library_with_data(&data).ok();
+            let facts = made.as_ref().map(|library| LibraryFacts {
+                function_names: library.function_names(),
+                library_type: library.library_type(),
+                install_name: library.install_name().map(str::to_owned),
+                device_is_the_cases: library.device().registry_id() == registry,
+            });
+            let refused = made.is_none();
+            from_data.push(made);
+            Ok(Observation::Library { refused, facts })
+        }
+        Step::NewDynamicLibrary { from } => {
+            let made = match from {
+                DynamicSource::Library(at) => {
+                    let library = match at {
+                        LibraryAt::Program(index) => {
+                            built.get(index).cloned().ok_or_else(|| {
+                                Failure::named("NoSuchProgramLibrary", index.to_string())
+                            })?
+                        }
+                        LibraryAt::FromData(index) => {
+                            match from_data.get(index).cloned().flatten() {
+                                Some(library) => library,
+                                None => {
+                                    dynamics.push(None);
+                                    return Ok(Observation::refused_for(step));
+                                }
+                            }
+                        }
+                    };
+                    device.new_dynamic_library(&library).ok()
+                }
+                DynamicSource::Url(source) => device
+                    .new_dynamic_library_with_url(&scratch.source(source))
+                    .ok(),
+            };
+            let install_name = made
+                .as_ref()
+                .map(|dynamic| dynamic.install_name().to_owned());
+            let refused = made.is_none();
+            dynamics.push(made);
+            Ok(Observation::Dynamic {
+                refused,
+                install_name,
+            })
+        }
+        Step::DynamicLabel { dynamic, set } => {
+            let Some(Some(dynamic)) = dynamics.get(dynamic) else {
+                return Ok(Observation::refused_for(step));
+            };
+            if let Some(label) = set {
+                dynamic.set_label(label);
+            }
+            Ok(Observation::Label(dynamic.label()))
+        }
+        Step::DynamicDevice { dynamic } => {
+            let Some(Some(dynamic)) = dynamics.get(dynamic) else {
+                return Ok(Observation::refused_for(step));
+            };
+            Ok(Observation::Flag(
+                dynamic.device().registry_id() == registry,
+            ))
+        }
+        Step::SerializeDynamic { dynamic, to } => {
+            let Some(Some(dynamic)) = dynamics.get(dynamic) else {
+                return Ok(Observation::refused_for(step));
+            };
+            let refused = dynamic.serialize_to_url(&scratch.path(to)).is_err();
+            Ok(Observation::Made { refused })
+        }
     }
 }

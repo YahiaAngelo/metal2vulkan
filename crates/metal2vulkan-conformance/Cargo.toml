@@ -32,6 +32,10 @@ sha2.workspace = true
 # `addCompletedHandler:` take Objective-C blocks, which is how a probe bounds a wait Metal has no
 # bounded form of. Already objc2-metal's own dependency; named here so the suite can build one.
 block2 = "0.6"
+# `newLibraryWithData:error:` takes a `dispatch_data_t`, which `objc2-metal` binds as
+# `dispatch2::DispatchData`. Already that crate's own dependency; named here so the suite can
+# build one ([`metal2vulkan_conformance::archives`]).
+dispatch2 = "0.3"
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-metal = "0.3"

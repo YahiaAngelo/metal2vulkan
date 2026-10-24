@@ -11,6 +11,9 @@
 //!
 //! Metal announces no degrade notice, so this side announces none: a notice in a transcript is
 //! ours, and a case that holds one must name what justifies it.
+use crate::archives::{
+    Added, Bytes, Created, DynamicSource, LibraryAt, Observation, Program, Scratch, Step,
+};
 use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
     Answer, ArgumentSlot, Bindings, CommandDraw, CoordinateProbe, Failure, FragmentFill,
@@ -94,19 +97,19 @@ use objc2_foundation::{
 };
 use objc2_metal::{
     MTLArgumentDescriptor, MTLArgumentEncoder, MTLArrayType, MTLAttribute, MTLAttributeFormat,
-    MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType, MTLBlendFactor,
-    MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLBufferBinding, MTLCPUCacheMode,
-    MTLClearColor, MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferHandler,
-    MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction,
-    MTLComputeCommandEncoder, MTLComputePipelineDescriptor, MTLComputePipelineReflection,
-    MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLCullMode, MTLDataType,
-    MTLDepthClipMode, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDispatchType,
-    MTLDynamicLibrary, MTLEvent, MTLFence, MTLFunction, MTLFunctionConstant,
-    MTLFunctionConstantValues, MTLFunctionDescriptor, MTLFunctionOptions, MTLHazardTrackingMode,
-    MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer,
-    MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectComputeCommand,
-    MTLIndirectRenderCommand, MTLLibrary, MTLLinkedFunctions, MTLLoadAction,
-    MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
+    MTLBarrierScope, MTLBinaryArchive, MTLBinaryArchiveDescriptor, MTLBinding, MTLBindingAccess,
+    MTLBindingType, MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer,
+    MTLBufferBinding, MTLCPUCacheMode, MTLClearColor, MTLColorWriteMask, MTLCommandBuffer,
+    MTLCommandBufferHandler, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
+    MTLCompareFunction, MTLComputeCommandEncoder, MTLComputePipelineDescriptor,
+    MTLComputePipelineReflection, MTLComputePipelineState, MTLCreateSystemDefaultDevice,
+    MTLCullMode, MTLDataType, MTLDepthClipMode, MTLDepthStencilDescriptor, MTLDepthStencilState,
+    MTLDevice, MTLDispatchType, MTLDynamicLibrary, MTLEvent, MTLFence, MTLFunction,
+    MTLFunctionConstant, MTLFunctionConstantValues, MTLFunctionDescriptor, MTLFunctionOptions,
+    MTLHazardTrackingMode, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType,
+    MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
+    MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary, MTLLinkedFunctions,
+    MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
     MTLMultisampleStencilResolveFilter, MTLMutability, MTLOrigin, MTLPipelineBufferDescriptor,
     MTLPipelineBufferDescriptorArray, MTLPipelineOption, MTLPixelFormat, MTLPointerType,
     MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLPurgeableState,
@@ -2045,30 +2048,6 @@ pub(crate) fn texture_descriptor(
     descriptor
 }
 
-/// A directory the metallibs are built in.
-struct Scratch(std::path::PathBuf);
-
-impl Scratch {
-    fn new() -> Result<Self, String> {
-        let path = std::env::temp_dir().join(format!(
-            "metal2vulkan-conformance-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|since| since.as_nanos())
-                .unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-        Ok(Self(path))
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 /// Run `xcrun tool args`, answering why it could not.
 fn xcrun(tool: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
     let output = std::process::Command::new("/usr/bin/xcrun")
@@ -3040,6 +3019,10 @@ impl Side for MetalSide {
             refused: false,
             bindings: found,
         })
+    }
+
+    fn archives(&mut self, program: &Program<'_>) -> Answer<Vec<Observation>> {
+        metal_program(&self.device, &self.scratch, program)
     }
 
     fn compute_pipeline_under_options(
@@ -9614,4 +9597,508 @@ fn handler_answer(answered: &std::sync::mpsc::Receiver<Delivered>) -> Handled {
         Ok(delivered) => Handled::answered(delivered),
         Err(_) => Handled::never_arrived(),
     }
+}
+
+/// One of a program's libraries as Metal's side built it: the `MTLLibrary`, and the AIR object
+/// `xcrun metal -dynamiclib` makes its dynamic form from.
+struct BuiltLibrary {
+    library: Retained<ProtocolObject<dyn MTLLibrary>>,
+    /// The `.air` object `xcrun metal-as` assembled.
+    air: std::path::PathBuf,
+    /// The executable metallib `xcrun metallib` packaged.
+    metallib: std::path::PathBuf,
+}
+
+/// The objects a program made, by the index its steps name them with. `None` where the creation
+/// was refused, which later steps that name it then observe as their own refusal.
+struct Held {
+    archives: Vec<Option<Retained<ProtocolObject<dyn MTLBinaryArchive>>>>,
+    from_data: Vec<Option<Retained<ProtocolObject<dyn MTLLibrary>>>>,
+    dynamics: Vec<Option<Retained<ProtocolObject<dyn MTLDynamicLibrary>>>>,
+}
+
+/// Run an archive program on Metal ([`Side::archives`]).
+///
+/// A free function rather than a method, because every step needs only the device and the scratch
+/// directory and the objects it makes are the program's own: nothing here joins one of the side's
+/// handle pools, since no handle in this vocabulary names an archive or a dynamic library.
+fn metal_program(
+    device: &Retained<ProtocolObject<dyn MTLDevice>>,
+    scratch: &Scratch,
+    program: &Program<'_>,
+) -> Answer<Vec<Observation>> {
+    let mut built = Vec::with_capacity(program.libraries.len());
+    for (at, entry) in program.libraries.iter().enumerate() {
+        built.push(metal_build_library(device, scratch, at, &entry.source)?);
+    }
+    let registry = device.registryID();
+    let mut held = Held {
+        archives: Vec::new(),
+        from_data: Vec::new(),
+        dynamics: Vec::new(),
+    };
+    // A serial for the dynamic-library files a `Bytes::DynamicLibraryFile` step writes, so two
+    // steps of one program never build over each other's output.
+    let mut serial = 0usize;
+    let mut out = Vec::with_capacity(program.steps.len());
+    for (_, step) in program.steps {
+        out.push(metal_step(
+            device,
+            scratch,
+            program,
+            &built,
+            registry,
+            &mut held,
+            &mut serial,
+            step,
+        )?);
+    }
+    Ok(out)
+}
+
+/// One of a program's libraries, assembled and packaged with Apple's own tools, as
+/// [`Side::library`] packages a case's shader.
+fn metal_build_library(
+    device: &Retained<ProtocolObject<dyn MTLDevice>>,
+    scratch: &Scratch,
+    at: usize,
+    source: &ShaderSource<'_>,
+) -> Answer<BuiltLibrary> {
+    let text = scratch.0.join(format!("program-{at}.air.ll"));
+    let air = scratch.0.join(format!("program-{at}.air"));
+    let metallib = scratch.0.join(format!("program-{at}.metallib"));
+    let build = || -> Result<(), String> {
+        std::fs::write(&text, source.air_text)
+            .map_err(|error| format!("{}: {error}", text.display()))?;
+        xcrun(
+            "metal-as",
+            &[text.as_os_str(), "-o".as_ref(), air.as_os_str()],
+        )?;
+        xcrun(
+            "metallib",
+            &[air.as_os_str(), "-o".as_ref(), metallib.as_os_str()],
+        )
+    };
+    build().map_err(|why| Failure::named("MetalToolFailed", why))?;
+    let url = file_url(&metallib)?;
+    let library = device
+        .newLibraryWithURL_error(&url)
+        .map_err(|error| Failure::named("NewLibraryWithURL", error.to_string()))?;
+    Ok(BuiltLibrary {
+        library,
+        air,
+        metallib,
+    })
+}
+
+/// The `NSURL` of a path.
+fn file_url(path: &std::path::Path) -> Answer<Retained<NSURL>> {
+    let text = path
+        .to_str()
+        .ok_or_else(|| Failure::named("NonUtf8Path", path.display().to_string()))?;
+    Ok(NSURL::fileURLWithPath(&NSString::from_str(text)))
+}
+
+/// The bytes a step names, built with Apple's own tools where it names a container.
+fn metal_bytes(
+    scratch: &Scratch,
+    built: &[BuiltLibrary],
+    serial: &mut usize,
+    bytes: Bytes,
+) -> Answer<Vec<u8>> {
+    let library = |at: usize| -> Answer<&BuiltLibrary> {
+        built
+            .get(at)
+            .ok_or_else(|| Failure::named("NoSuchProgramLibrary", at.to_string()))
+    };
+    match bytes {
+        Bytes::Metallib { library: at } => {
+            let path = &library(at)?.metallib;
+            std::fs::read(path).map_err(|error| {
+                Failure::named("MetallibNotRead", format!("{}: {error}", path.display()))
+            })
+        }
+        Bytes::DynamicLibraryFile {
+            library: at,
+            install_name,
+        } => {
+            let air = library(at)?.air.clone();
+            let out = scratch.0.join(format!("dynamic-{serial}.metallib"));
+            *serial += 1;
+            xcrun(
+                "metal",
+                &[
+                    "-dynamiclib".as_ref(),
+                    "-install_name".as_ref(),
+                    install_name.as_ref(),
+                    air.as_os_str(),
+                    "-o".as_ref(),
+                    out.as_os_str(),
+                ],
+            )
+            .map_err(|why| Failure::named("MetalToolFailed", why))?;
+            std::fs::read(&out).map_err(|error| {
+                Failure::named(
+                    "DynamicLibraryNotRead",
+                    format!("{}: {error}", out.display()),
+                )
+            })
+        }
+        Bytes::Text(text) => Ok(text.as_bytes().to_vec()),
+        Bytes::Empty => Ok(Vec::new()),
+    }
+}
+
+/// Metal's compute pipeline descriptor for what a step names, with `archives` listed.
+fn metal_compute_descriptor(
+    built: &[BuiltLibrary],
+    archives: &NSArray<ProtocolObject<dyn MTLBinaryArchive>>,
+    at: usize,
+    kernel: &str,
+) -> Answer<Retained<MTLComputePipelineDescriptor>> {
+    let descriptor = MTLComputePipelineDescriptor::new();
+    let function = metal_function(built, at, kernel)?;
+    descriptor.setComputeFunction(Some(&function));
+    descriptor.setBinaryArchives(Some(archives));
+    Ok(descriptor)
+}
+
+/// Metal's render pipeline descriptor for what a step names, with `archives` listed and
+/// `attachments` colour attachments of the program's format.
+fn metal_render_descriptor(
+    built: &[BuiltLibrary],
+    program: &Program<'_>,
+    archives: &NSArray<ProtocolObject<dyn MTLBinaryArchive>>,
+    at: usize,
+    vertex: &str,
+    fragment: &str,
+    attachments: usize,
+) -> Answer<Retained<MTLRenderPipelineDescriptor>> {
+    let descriptor = MTLRenderPipelineDescriptor::new();
+    let (vertex, fragment) = (
+        metal_function(built, at, vertex)?,
+        metal_function(built, at, fragment)?,
+    );
+    descriptor.setVertexFunction(Some(&vertex));
+    descriptor.setFragmentFunction(Some(&fragment));
+    let colors = descriptor.colorAttachments();
+    for index in 0..attachments {
+        // SAFETY: every index a case states is inside the fixed-size array each descriptor holds,
+        // which `tests::archive_programs_declare_attachments_metal_holds` keeps true.
+        let color = unsafe { colors.objectAtIndexedSubscript(index) };
+        color.setPixelFormat(MTLPixelFormat(program.attachment.as_raw() as usize));
+    }
+    descriptor.setBinaryArchives(Some(archives));
+    Ok(descriptor)
+}
+
+/// `newFunctionWithName:` of one of the program's libraries.
+fn metal_function(
+    built: &[BuiltLibrary],
+    at: usize,
+    name: &str,
+) -> Answer<Retained<ProtocolObject<dyn MTLFunction>>> {
+    built
+        .get(at)
+        .ok_or_else(|| Failure::named("NoSuchProgramLibrary", at.to_string()))?
+        .library
+        .newFunctionWithName(&NSString::from_str(name))
+        .ok_or_else(|| Failure::named("NoSuchFunction", name.to_owned()))
+}
+
+/// One step of a program on Metal.
+#[allow(clippy::too_many_arguments)]
+fn metal_step(
+    device: &Retained<ProtocolObject<dyn MTLDevice>>,
+    scratch: &Scratch,
+    program: &Program<'_>,
+    built: &[BuiltLibrary],
+    registry: u64,
+    held: &mut Held,
+    serial: &mut usize,
+    step: &Step,
+) -> Answer<Observation> {
+    let listed = |held: &Held,
+                  indices: &[usize]|
+     -> Option<Retained<NSArray<ProtocolObject<dyn MTLBinaryArchive>>>> {
+        let mut found = Vec::with_capacity(indices.len());
+        for index in indices {
+            found.push(held.archives.get(*index)?.clone()?);
+        }
+        Some(NSArray::from_retained_slice(&found))
+    };
+    match *step {
+        Step::NewArchive { from } => {
+            let descriptor = MTLBinaryArchiveDescriptor::new();
+            if let Some(source) = from {
+                let url = file_url(&scratch.source(source))?;
+                descriptor.setUrl(Some(&url));
+            }
+            let made = device
+                .newBinaryArchiveWithDescriptor_error(&descriptor)
+                .ok();
+            let refused = made.is_none();
+            held.archives.push(made);
+            Ok(Observation::Made { refused })
+        }
+        Step::ArchiveLabel { archive, set } => {
+            let Some(Some(archive)) = held.archives.get(archive) else {
+                return Ok(Observation::refused_for(step));
+            };
+            let archive: &Retained<ProtocolObject<dyn MTLBinaryArchive>> = archive;
+            if let Some(label) = set {
+                archive.setLabel(Some(&NSString::from_str(label)));
+            }
+            Ok(Observation::Label(
+                archive.label().map(|label| label.to_string()),
+            ))
+        }
+        Step::ArchiveDevice { archive } => {
+            let Some(Some(archive)) = held.archives.get(archive) else {
+                return Ok(Observation::refused_for(step));
+            };
+            let archive: &Retained<ProtocolObject<dyn MTLBinaryArchive>> = archive;
+            Ok(Observation::Flag(archive.device().registryID() == registry))
+        }
+        Step::Add { archive, what } => {
+            let Some(Some(archive)) = held.archives.get(archive).cloned() else {
+                return Ok(Observation::refused_for(step));
+            };
+            let none = NSArray::from_retained_slice(&[]);
+            let refused = match what {
+                Added::Compute { library, kernel } => {
+                    let descriptor = metal_compute_descriptor(built, &none, library, kernel)?;
+                    archive
+                        .addComputePipelineFunctionsWithDescriptor_error(&descriptor)
+                        .is_err()
+                }
+                Added::Render {
+                    library,
+                    vertex,
+                    fragment,
+                    attachments,
+                } => {
+                    let descriptor = metal_render_descriptor(
+                        built,
+                        program,
+                        &none,
+                        library,
+                        vertex,
+                        fragment,
+                        attachments,
+                    )?;
+                    archive
+                        .addRenderPipelineFunctionsWithDescriptor_error(&descriptor)
+                        .is_err()
+                }
+                Added::Tile { library, tile } => {
+                    let descriptor = MTLTileRenderPipelineDescriptor::new();
+                    let tile = metal_function(built, library, tile)?;
+                    // SAFETY: the function is of one of the program's own libraries, and the
+                    // descriptor is this step's own; nothing else holds it.
+                    unsafe { descriptor.setTileFunction(&tile) };
+                    let colors: Retained<MTLTileRenderPipelineColorAttachmentDescriptorArray> =
+                        descriptor.colorAttachments();
+                    // SAFETY: attachment 0 is inside the fixed-size array the descriptor holds.
+                    let color = unsafe { colors.objectAtIndexedSubscript(0) };
+                    color.setPixelFormat(MTLPixelFormat(program.attachment.as_raw() as usize));
+                    archive
+                        .addTileRenderPipelineFunctionsWithDescriptor_error(&descriptor)
+                        .is_err()
+                }
+                Added::Mesh {
+                    library,
+                    object,
+                    mesh,
+                    fragment,
+                } => {
+                    let descriptor = MTLMeshRenderPipelineDescriptor::new();
+                    let (object, mesh, fragment) = (
+                        metal_function(built, library, object)?,
+                        metal_function(built, library, mesh)?,
+                        metal_function(built, library, fragment)?,
+                    );
+                    // SAFETY: the three functions are of one of the program's own libraries, and
+                    // the descriptor is this step's own; nothing else holds it.
+                    unsafe {
+                        descriptor.setObjectFunction(Some(&object));
+                        descriptor.setMeshFunction(Some(&mesh));
+                        descriptor.setFragmentFunction(Some(&fragment));
+                    }
+                    let colors: Retained<MTLRenderPipelineColorAttachmentDescriptorArray> =
+                        descriptor.colorAttachments();
+                    // SAFETY: attachment 0 is inside the fixed-size array the descriptor holds.
+                    let color = unsafe { colors.objectAtIndexedSubscript(0) };
+                    color.setPixelFormat(MTLPixelFormat(program.attachment.as_raw() as usize));
+                    archive
+                        .addMeshRenderPipelineFunctionsWithDescriptor_error(&descriptor)
+                        .is_err()
+                }
+            };
+            Ok(Observation::Made { refused })
+        }
+        Step::Serialize { archive, to } => {
+            let Some(Some(archive)) = held.archives.get(archive) else {
+                return Ok(Observation::refused_for(step));
+            };
+            let archive: &Retained<ProtocolObject<dyn MTLBinaryArchive>> = archive;
+            let url = file_url(&scratch.path(to))?;
+            let refused = archive.serializeToURL_error(&url).is_err();
+            Ok(Observation::Made { refused })
+        }
+        Step::Create {
+            archives,
+            options,
+            what,
+        } => {
+            let Some(archives) = listed(held, archives) else {
+                return Ok(Observation::refused_for(step));
+            };
+            let option = MTLPipelineOption(options as NSUInteger);
+            let refused = match what {
+                Created::Compute { library, kernel } => {
+                    let descriptor = metal_compute_descriptor(built, &archives, library, kernel)?;
+                    device
+                        .newComputePipelineStateWithDescriptor_options_reflection_error(
+                            &descriptor,
+                            option,
+                            None,
+                        )
+                        .is_err()
+                }
+                Created::Render {
+                    library,
+                    vertex,
+                    fragment,
+                    attachments,
+                } => {
+                    let descriptor = metal_render_descriptor(
+                        built,
+                        program,
+                        &archives,
+                        library,
+                        vertex,
+                        fragment,
+                        attachments,
+                    )?;
+                    device
+                        .newRenderPipelineStateWithDescriptor_options_reflection_error(
+                            &descriptor,
+                            option,
+                            None,
+                        )
+                        .is_err()
+                }
+            };
+            Ok(Observation::Made { refused })
+        }
+        Step::FileState { file } => Ok(scratch.state(file)),
+        Step::Write { file, bytes } => {
+            let written = metal_bytes(scratch, built, serial, bytes)?;
+            let refused = std::fs::write(scratch.path(file), &written).is_err();
+            Ok(Observation::Made { refused })
+        }
+        Step::NewLibraryWithData { bytes } => {
+            let data = metal_bytes(scratch, built, serial, bytes)?;
+            let made = device
+                .newLibraryWithData_error(&dispatch2::DispatchData::from_bytes(&data))
+                .ok();
+            let facts = match &made {
+                Some(library) => Some(metal_library_facts(library, registry)?),
+                None => None,
+            };
+            let refused = made.is_none();
+            held.from_data.push(made);
+            Ok(Observation::Library { refused, facts })
+        }
+        Step::NewDynamicLibrary { from } => {
+            let made = match from {
+                DynamicSource::Library(at) => {
+                    let library = match at {
+                        LibraryAt::Program(index) => built
+                            .get(index)
+                            .map(|built| built.library.clone())
+                            .ok_or_else(|| {
+                                Failure::named("NoSuchProgramLibrary", index.to_string())
+                            })?,
+                        LibraryAt::FromData(index) => {
+                            match held.from_data.get(index).cloned().flatten() {
+                                Some(library) => library,
+                                None => {
+                                    held.dynamics.push(None);
+                                    return Ok(Observation::refused_for(step));
+                                }
+                            }
+                        }
+                    };
+                    device.newDynamicLibrary_error(&library).ok()
+                }
+                DynamicSource::Url(source) => {
+                    let url = file_url(&scratch.source(source))?;
+                    device.newDynamicLibraryWithURL_error(&url).ok()
+                }
+            };
+            let install_name = match &made {
+                Some(dynamic) => {
+                    let dynamic: &Retained<ProtocolObject<dyn MTLDynamicLibrary>> = dynamic;
+                    Some(dynamic.installName().to_string())
+                }
+                None => None,
+            };
+            let refused = made.is_none();
+            held.dynamics.push(made);
+            Ok(Observation::Dynamic {
+                refused,
+                install_name,
+            })
+        }
+        Step::DynamicLabel { dynamic, set } => {
+            let Some(Some(dynamic)) = held.dynamics.get(dynamic) else {
+                return Ok(Observation::refused_for(step));
+            };
+            let dynamic: &Retained<ProtocolObject<dyn MTLDynamicLibrary>> = dynamic;
+            if let Some(label) = set {
+                dynamic.setLabel(Some(&NSString::from_str(label)));
+            }
+            Ok(Observation::Label(
+                dynamic.label().map(|label| label.to_string()),
+            ))
+        }
+        Step::DynamicDevice { dynamic } => {
+            let Some(Some(dynamic)) = held.dynamics.get(dynamic) else {
+                return Ok(Observation::refused_for(step));
+            };
+            let dynamic: &Retained<ProtocolObject<dyn MTLDynamicLibrary>> = dynamic;
+            Ok(Observation::Flag(dynamic.device().registryID() == registry))
+        }
+        Step::SerializeDynamic { dynamic, to } => {
+            let Some(Some(dynamic)) = held.dynamics.get(dynamic) else {
+                return Ok(Observation::refused_for(step));
+            };
+            let dynamic: &Retained<ProtocolObject<dyn MTLDynamicLibrary>> = dynamic;
+            let url = file_url(&scratch.path(to))?;
+            let refused = dynamic.serializeToURL_error(&url).is_err();
+            Ok(Observation::Made { refused })
+        }
+    }
+}
+
+/// A library's own four portable facts, as [`crate::library_facts`] compares them.
+///
+/// `functionNames` and nothing of a function itself: `newFunctionWithName:` of a **dynamic**
+/// library's export stops at an assertion inside Metal (`TYPE` 3, measured on an M3 Max and an
+/// M4), and a library made from data here may be a dynamic one, so this reads the names and never
+/// asks for a function.
+fn metal_library_facts(
+    library: &Retained<ProtocolObject<dyn MTLLibrary>>,
+    registry: u64,
+) -> Answer<LibraryFacts> {
+    let names = library.functionNames();
+    let install = library.installName();
+    Ok(LibraryFacts {
+        function_names: names.iter().map(|name| name.to_string()).collect(),
+        library_type: our_library_type(library.r#type().0)?,
+        install_name: install.map(|name| name.to_string()),
+        device_is_the_cases: library.device().registryID() == registry,
+    })
 }

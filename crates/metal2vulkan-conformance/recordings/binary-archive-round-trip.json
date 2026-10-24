@@ -1,0 +1,463 @@
+{
+  "format": 1,
+  "case": "binary-archive-round-trip",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "px_samplers.ll",
+      "entry": "px_sample_argument",
+      "source_sha256": "8c4a0024c9ba10e25d2487017101ff9a6437a48c58602537d0a41ee693e32f20"
+    },
+    {
+      "fixture": "px_samplers.air.ll",
+      "entry": "px_sample_argument",
+      "source_sha256": "5cedd165bee51449aaab252183a73661902625d2ddf8aa9fa5582f605ea564b1"
+    },
+    {
+      "fixture": "reflection/texture_accesses.ll",
+      "entry": "texture_accesses_vertex",
+      "source_sha256": "081bf6dfe075bb2171d010f4720eb3bd1fce1d77b5cf5b7cf6cb07afaec9bfc8"
+    },
+    {
+      "fixture": "reflection/texture_accesses.air.ll",
+      "entry": "texture_accesses_vertex",
+      "source_sha256": "954c6d7119e9d0bc9526de28fbbea84424cb9619dc05a1e9ee7b8659f60e0dd3"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air-0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ed977dd8744816beaf9313e5322c0a4ad95563d240f81abdcd73fb4d40457557"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed-0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "5cedd165bee51449aaab252183a73661902625d2ddf8aa9fa5582f605ea564b1"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d32f6a671adb0564f0c1268d0c51f915ad007596ef89b4a69f7ff801cda3d6c6"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed-1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "954c6d7119e9d0bc9526de28fbbea84424cb9619dc05a1e9ee7b8659f60e0dd3"
+                        }
+                      }
+                    },
+                    {
+                      "name": "program",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b3672713797af6abdd121bf9dd7218efa57045031becf0041a5631f0e933824a"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "program",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "new-archive",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "label-before",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "label",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "None",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "label-after",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "label",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "Some",
+                                "payload": {
+                                  "lines": [
+                                    "the case's archive"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "device",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "device",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "add-compute",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "add-compute-again",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "add-render",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "serialize",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "file",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "exists",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "nonempty",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "serialize-over-itself",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "reload",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "reloaded-label",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "label",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "None",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "reloaded-device",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "device",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "reloaded-compute-hit",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "reloaded-compute-miss",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "reloaded-render-hit",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "serialize-the-reloaded-archive",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "refused",
+                          "observed": {
+                            "value": {
+                              "bool": false
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "again",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "exists",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "nonempty",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

@@ -382,6 +382,14 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.compute_pipeline_bindings(library, entry)
     }
 
+    fn archives(
+        &mut self,
+        program: &crate::archives::Program<'_>,
+    ) -> Answer<Vec<crate::archives::Observation>> {
+        let _span = self.watch("archives");
+        self.inner.archives(program)
+    }
+
     fn compute_pipeline_under_options(
         &mut self,
         library: Handle,
