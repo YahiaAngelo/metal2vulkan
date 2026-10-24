@@ -2805,16 +2805,39 @@ fn the_known_gaps_ledger_parses_and_names_real_cases() {
             known.waiting_on
         );
     }
-    // The divergence rows this round left open: the fragment quad's placement on llvmpipe, which
-    // MoltenVK answers exactly, so the rows are venue-scoped rather than global.
+    // The divergence rows this round left open: the fragment quad's placement on one lavapipe
+    // build, which MoltenVK answers exactly, so the rows are venue-scoped rather than global.
+    //
+    // The scope is the build and not the implementation. These rows were measured in the gate
+    // container's arm64 lavapipe, and the suite's other lavapipe -- x86-64, `LLVM 23.1.1`,
+    // 256-bit vectors -- does not hold them. A venue field of `llvmpipe` is a substring of both
+    // device names, so it held the rows on a venue the gap was never measured on, where the
+    // retire direction then read all three as fixed. The two legs are told apart by the only thing
+    // in a venue's description that differs, which is the device name `llvmpipe` writes itself,
+    // so that is what the field carries.
     let quads: Vec<&crate::known_gaps::KnownGap> = ledger
         .iter()
         .filter(|known| known.case == "discard-quad-sum-placement")
         .collect();
     assert_eq!(quads.len(), 3, "{ledger:?}");
+    let lavapipe = |device: &str| crate::case::Venue {
+        device: device.to_owned(),
+        driver: "vendor 0x10005 device 0x0000".to_owned(),
+        api: "1.2".to_owned(),
+        metal_level: "27.0.1".to_owned(),
+    };
+    let measured = lavapipe("llvmpipe (LLVM 21.1.8, 128 bits)");
+    let other = lavapipe("llvmpipe (LLVM 23.1.1, 256 bits)");
+    for known in &quads {
+        assert!(known.covers_venue(&measured), "{known:?}");
+        assert!(
+            !known.covers_venue(&other),
+            "the row holds on a lavapipe it was never measured on: {known:?}"
+        );
+    }
     for known in quads {
         assert_eq!(known.expects, crate::known_gaps::Expects::Divergent);
-        assert_eq!(known.venue, "llvmpipe");
+        assert_eq!(known.venue, "llvmpipe (LLVM 21.1.8, 128 bits)");
         // A divergence row says how much moved -- how many of the site's leaves differ and how
         // far -- and never where the walk first noticed, which is a property of the data and not
         // of the bug. All four texels of the kept quad differ, which the first-mismatch answer
@@ -3064,6 +3087,16 @@ fn the_ledger_fails_on_a_new_refusal_and_on_one_that_is_gone() {
     assert!(
         matches!(found.as_slice(), [Expectation::NotLedgerable { .. }]),
         "{found:?}"
+    );
+
+    // Nor does an unrecorded case read its own rows as fixed. It compared nothing, so the run
+    // holds no opinion about them: the only thing it says is that the case is not ledgerable.
+    // Reading them as fixed is what reported two live rows as retirable on a host whose `llvm-as`
+    // was not the recording Mac's.
+    let found = against(std::slice::from_ref(&stale), &listed);
+    assert!(
+        matches!(found.as_slice(), [Expectation::NotLedgerable { .. }]),
+        "an unrecorded case retires nothing: {found:?}"
     );
 }
 
@@ -5220,6 +5253,71 @@ fn every_cases_inputs_are_the_ones_its_recording_was_taken_from() {
         "{checked} recorded answers checked (cases with no recording at all, which this says \
          nothing about: {})",
         unrecorded.join(", ")
+    );
+}
+
+/// Every AIR input a case states is the digest of a **committed fixture text**, never of the
+/// bitcode `llvm-as` assembles from one.
+///
+/// `llvm-as`'s output is a function of the text *and the assembler's release*: the same
+/// `fixtures/public/fragment_constant_color.ll` assembles to `1a4cc972040870f8` under Homebrew
+/// LLVM 23.1.4 and to `38d752a345c98db2` under 23.1.1. So a fingerprint holding those bytes can
+/// only match on the host that assembled them, and nine cases of the archive and dynamic-library
+/// families read `unrecorded: the inputs this run fed are not the recording's: air differs` on
+/// every other host. The sharper cost is the one that made this a test: a case that never compared
+/// holds no verdict, so a `--check` run off the recording host reported two `known-gaps.tsv` rows
+/// as looking fixed and would have retired live ledger rows.
+///
+/// [`crate::recording::ShaderRef`] already states the rule for a recording's own shader digests --
+/// the text is what the tree commits and what every host reads alike. This holds the **input**
+/// fingerprint to the same rule, and it is the rule rather than a list of case names: an AIR input
+/// must be the digest of one of the texts the case's own [`crate::case::Case::shaders`] names.
+///
+/// It also means no case needs an assembler to state its fingerprint, which is why this test runs
+/// where `llvm-as` does not.
+#[test]
+fn every_air_input_is_a_committed_fixture_texts_digest() {
+    let mut checked = 0usize;
+    let mut wrong = Vec::new();
+    for case in crate::cases::all() {
+        let shaders = case
+            .shaders()
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        let committed: std::collections::BTreeMap<&str, &str> = shaders
+            .iter()
+            .map(|shader| (shader.source_sha256.as_str(), shader.fixture.as_str()))
+            .collect();
+        let inputs = case
+            .inputs()
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        for input in inputs {
+            // The AIR inputs, however a family names them: `air`, `air-typed`, `air-0`,
+            // `air:px_positions`.
+            if !input.name.starts_with("air") {
+                continue;
+            }
+            checked += 1;
+            if committed.contains_key(input.digest.hex.as_str()) {
+                continue;
+            }
+            wrong.push(format!(
+                "{}: {} is {}, which is none of the texts the case names ({})",
+                case.name(),
+                input.name,
+                input.digest.hex,
+                committed.values().copied().collect::<Vec<_>>().join(", "),
+            ));
+        }
+    }
+    assert!(
+        checked > 0,
+        "no case states an AIR input, so this says nothing"
+    );
+    assert!(
+        wrong.is_empty(),
+        "{checked} AIR inputs checked; these are digests of something the tree does not commit, \
+         so they can only match on the host that produced them:\n{}",
+        wrong.join("\n")
     );
 }
 
