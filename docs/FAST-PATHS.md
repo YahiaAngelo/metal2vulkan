@@ -282,41 +282,25 @@ recorded here.
 Open differences from Metal that no note announces yet, and runtime costs still above the
 driver's. Each is open work.
 
-- **A sparse tile mapped after a write covered it while unmapped**: Metal reads the texture's
-  unwritten pattern there, not zero. Measured on an Apple M3 Max under macOS 27.0.1 (26A434),
-  three runs each in its own process, over a 256 by 256 `R32Uint` sparse texture of 64-texel
-  (16 KiB) tiles on a sparse heap, eight of its sixteen tiles mapped in a checkerboard: a
-  `copyFromBuffer:toTexture:` over the whole level puts the copy's word in all 4,096 texels of each
-  mapped tile and leaves all 4,096 of each unmapped tile at **zero**, by `copyFromTexture:toBuffer:`
-  and by a kernel's `read()` alike; map one of those tiles afterwards (`usedSize` 131,072 to
-  147,456, one tile) and all 4,096 of its texels read `0xFFFFFFFF`, and an unmap-and-map round trip
-  of a tile that held the copy's words reads the same. The control says what that value is: a plain
-  `Private` `R32Uint` texture of the same extent, off any heap, reads `0xFFFFFFFF` at every one of
-  its 65,536 texels before anything writes it, so the newly mapped tile holds Metal's unwritten
-  pattern (`fresh_unwritten.rs`) rather than the dropped write or anything undefined. Our side
-  reads zero there: the runtime zeroes a sparse texture's unmapped texels and a newly bound block
-  whole, and `BlitEncoder::scrub` has already marked the blit's whole destination written, so
-  nothing holds the tile unwritten the way Metal does. Keeping the dropped part of a write
-  unwritten in `FreshUnwritten` would reach it. No conformance case compares it, and that is the
-  shape of the hole rather than a choice: the measurement above needs Metal, which is macOS and so
-  MoltenVK, and MoltenVK binds no sparse memory, so a sparse heap there is
-  `NotImplemented(SparseTileMaps)` and our side never reaches the site. Confirming it needs a venue
-  with `sparseBinding`, a queue family that binds sparse memory and `sparseResidencyImage2D` (the
-  three `SparseNeed` checks) -- of this round's venues the RTX 5080 Laptop is the candidate,
-  unverified for those three here -- and the Metal half of the comparison stays this probe's, since
-  Metal runs on neither.
+- **A sparse tile mapped after a write covered it while unmapped** reads zero for us and Metal's
+  unwritten pattern (`0xFFFFFFFF`) for Metal; an unmap-and-map round trip loses the texels the same
+  way. The runtime zeroes a sparse texture's unmapped texels and every newly bound block, and
+  `BlitEncoder::scrub` has already marked the whole destination of the blit written, so nothing
+  holds the tile unwritten; keeping the dropped part of a write unwritten in `FreshUnwritten` would
+  reach it. No case compares it, because Metal means macOS means MoltenVK, which binds no sparse
+  memory: confirming it needs a venue with `sparseBinding`, a sparse-binding queue family and
+  `sparseResidencyImage2D` (the three `SparseNeed` checks), and the Metal half stays
+  `probes/sparse_unmapped_blit.m`'s.
 
-- **A `half` or `FloatRG11B10` vertex or stage-in attribute read as `float`, fetched by Vulkan's
-  fixed-function vertex input**: Metal's fetch canonicalizes a NaN to `0x7FC00000`, payload and
-  sign dropped, and the device's widening carries the field's bits up into the payload instead
-  (RADV, the Radeon 780M and the RX 7900 XTX, Mesa 26.2.4: `0x7FC02000` for the `half` codes
-  `0x7E01` and `0xFE01`, `0x7FFE0000` for an all-ones `FloatRG11B10` field; MoltenVK's fetch is
-  Metal's own and is exact). The shader's pulled fetch answers Metal's NaN, which is what
-  `vertex-format-constant-step` and `attribute-format-fetches` compare; nothing in the vertex
-  function's compile key says a fixed-function attribute's Metal format is a narrow float, so no
-  canonicalizing select is emitted after its `Input` load. Carrying the encoding in
-  `VertexFetch::FixedFunction` would reach it. Every finite, zero, subnormal and infinite code is
-  exact, and a `half`-declared attribute keeps the fetched bits, as Metal's does.
+- **A `half` or `FloatRG11B10` attribute read as `float`: the canonical NaN on the Linux
+  venues.** Both fetch paths answer Metal's `0x7FC00000` and are exact on the CPU interpreter and
+  on MoltenVK; neither is rerun on RADV, llvmpipe or the RTX 5080 since the fix, and
+  `known-gaps.tsv` still carries their rows. The pulled path's rows on llvmpipe and the RTX 5080
+  (`vertex-format-constant-step`, `attribute-format-fetches`) answer the un-canonicalized bits
+  although the canonicalization was already in the tree, which leaves three causes unseparated:
+  a run of an older tip, a cache keyed on a `SEMANTICS_VERSION` the fix did not move, and a
+  driver folding the `float` `OpSelect` the fix used. The last two are addressed (the version
+  moved, and the answer is computed on the integer bits alone), and the reruns decide.
 
 - **An extended-range format's sample through a constexpr clamp-to-zero sampler at a subnormal
   coordinate**: Metal's texture unit reads a subnormal normalized coordinate as the zero of its
