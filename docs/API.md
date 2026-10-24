@@ -1410,6 +1410,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   attachment's format, samples and size. Cost: a scratch image, a color's kept by its command queue
   for its passes of that shape and a depth or stencil one's per pass: memory, and the bandwidth to
   write and read it, that Metal does not spend on a memoryless texture.
+- `metal2vulkan-degrade-memoryless-texture-buffer` (performance). `MemorylessTextureBuffer`: A
+  memoryless texture buffer (`newTextureWithDescriptor:` of a `TextureBuffer` descriptor of
+  `MTLStorageModeMemoryless`, which plain Metal makes), whose texels are a buffer's bytes: the
+  buffer is a `Private` one of the device's, since no Vulkan buffer takes memory lazily. The
+  texture answers the descriptor's memoryless mode, as Metal's does, and the runtime refuses every
+  use of it, as Metal's validation stops every use of a memoryless texture but as a render pass's
+  attachment, which no texture buffer is. Cost: a Private buffer of the texture's row of texels:
+  memory Metal spends none of on a memoryless texture. Nothing reaches those bytes.
 - `metal2vulkan-degrade-fetch-through-scratch` (performance). `FetchThroughScratch`: A color render
   target that a framebuffer fetch reads lacks the usage the fetch's form needs, so its pass renders
   into a scratch image that has it: `STORAGE` in the pixel interlock, or for its sample planes
@@ -2259,12 +2267,13 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   on a window the compositor does not show, a wait for the queue's idle at a resize) holds their
   submissions until it returns, where Metal's present holds no other queue.
 - `metal2vulkan-degrade-heap-texture-larger-than-metal` (precision). `HeapTextureLargerThanMetal`: A
-  heap texture sized or made (`heap_texture_size_and_align`, `Heap::new_texture`) whose image on the
-  device needs more bytes or a coarser alignment than Metal's answer, which the runtime models, and
-  which no shadow of the texture's bytes holds it to (`texture/heap.rs`: not a multisample texture,
-  whose image lies in memory of its own, nor one whose planes or Metal's tiles fit its bytes, and
-  not a texture held with a depth twin). The answer is then the larger of the two. Every other such
-  texture answers Metal's numbers and announces nothing here. Cost:
+  heap texture sized or made (`heap_texture_size_and_align`, `Heap::new_texture`) whose images on the
+  device need more bytes or a coarser alignment than Metal's answer, which the runtime models, and
+  which no shadow of the texture's bytes holds it to: not a multisample texture, whose image lies in
+  memory of its own, nor one whose planes or Metal's tiles fit its bytes, and not one held with a
+  depth twin. The answer is then the larger of the two, since no image binds at Metal's offsets.
+  Every other such texture answers Metal's numbers and announces nothing here. Not where
+  `optimized-depth-stencil-texture` says why. Cost:
   heap_texture_size_and_align answers more bytes or a coarser alignment than Metal's, so a heap
   sized by Metal's answers holds fewer such textures, and they lie at other offsets; each texture
   keeps its own bytes.
