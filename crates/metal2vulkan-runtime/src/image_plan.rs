@@ -103,6 +103,9 @@ pub(super) struct ImageFacts<'a> {
     /// image of a format whose linear tiling has `LINEAR_COLOR_ATTACHMENT_NV` renders, where
     /// every color attachment of the render pass instance is linear (`linear_attachment.rs`).
     pub(super) linear_attachments: bool,
+    /// `MultisampleDepthTwinPolicy::Exact`: a multisampled `Depth32Float` texture the program
+    /// only reads is held in a colour image ([`holds_multisample_depth_in_colour`]).
+    pub(super) multisample_depth_twin: bool,
 }
 
 /// What a device's driver is measured to keep in a `D32_SFLOAT` image, of the `float`s Metal's
@@ -526,9 +529,54 @@ pub(super) fn plan_images(
     facts: &ImageFacts<'_>,
 ) -> Result<(ImagePlan, Option<ImagePlan>), ImageRefusal> {
     let twin = plan_depth_twin(layout, usage, memoryless, facts);
-    let plan = plan_held(layout, usage, memoryless, facts, twin.is_some())
+    let colour =
+        twin.is_some() || holds_multisample_depth_in_colour(layout, usage, memoryless, facts);
+    let plan = plan_held(layout, usage, memoryless, facts, colour)
         .map_err(|r| r.naming(layout.pixel_format))?;
     Ok((plan, twin))
+}
+
+/// Whether a multisampled `Depth32Float` texture of `layout` with Metal `usage` (`memoryless` for
+/// `MTLStorageModeMemoryless`) holds its texels in an `R32_SFLOAT` image on a device with `facts`
+/// (`MultisampleDepthTwinPolicy::Exact`), as a single-sampled one of it does
+/// ([`plan_depth_twin`]): the program only reads or samples it (shader-read usage and no render
+/// target, so no pass writes it and no comparison reads it, Metal having none of a multisampled
+/// depth texture), the device's depth images may not keep its texels
+/// ([`ImageFacts::depth_loss`]), and the device holds a multisampled `R32_SFLOAT` image it
+/// samples and copies. `false` under the default, and for every other texture.
+///
+/// `plan_depth_twin` leaves a multisampled texture out on the reading that one without a render
+/// target usage has no writer; `BlitCommandEncoder::fill_texture` is one, and Metal's fill stores
+/// the pattern's bytes as given. The texture takes no depth twin beside the colour image: nothing
+/// compares it, and no copy writes a multisampled depth image from a colour one.
+fn holds_multisample_depth_in_colour(
+    layout: &TextureLayout,
+    usage: TextureUsage,
+    memoryless: bool,
+    facts: &ImageFacts<'_>,
+) -> bool {
+    let usage = effective_usage(usage);
+    facts.multisample_depth_twin
+        && layout.pixel_format == PixelFormat::Depth32Float
+        && layout.samples > 1
+        && !memoryless
+        && usage.contains(TextureUsage::SHADER_READ)
+        && !usage.contains(TextureUsage::RENDER_TARGET)
+        && facts.depth_loss().is_some()
+        && facts.optimal(Format::R32_SFLOAT).contains(
+            FormatFeatureFlags2::SAMPLED_IMAGE
+                | FormatFeatureFlags2::TRANSFER_SRC
+                | FormatFeatureFlags2::TRANSFER_DST,
+        )
+}
+
+/// Whether `plan`'s texels are in a colour image although its pixel format is a depth format: a
+/// `Depth32Float` texture held in `R32_SFLOAT`, which keeps every `float` a copy writes where the
+/// device's depth images may not ([`plan_depth_twin`] for a single-sampled one, with the
+/// `D32_SFLOAT` twin beside it; [`holds_multisample_depth_in_colour`] for a multisampled one, with
+/// no twin). `false` for every other plan, a depth plan among them.
+pub(super) fn holds_depth_in_colour(plan: &ImagePlan) -> bool {
+    plan.pixel_format == PixelFormat::Depth32Float && plan.format == Format::R32_SFLOAT
 }
 
 /// The flags a 3D image rendered into needs: 2D-array compatible, for the 2D view of its depth
@@ -970,8 +1018,9 @@ fn plan_held(
 /// ([`ImageFacts::depth_loss`]: without `VK_EXT_depth_range_unrestricted` enabled or a driver
 /// measured to keep a value outside `[0, 1]`, or without a driver measured to keep a denormal),
 /// whose `R32_SFLOAT` is sampled and copied and whose
-/// `D32_SFLOAT` is sampled and copied into, has one; `None` for every other. (A multisampled
-/// texture without a render target usage has no writer.)
+/// `D32_SFLOAT` is sampled and copied into, has one; `None` for every other. A multisampled
+/// texture takes no twin: nothing compares it, and no copy writes a multisampled depth image from
+/// a colour one ([`holds_multisample_depth_in_colour`] holds its texels in colour alone).
 fn plan_depth_twin(
     layout: &TextureLayout,
     usage: TextureUsage,
