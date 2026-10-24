@@ -119,6 +119,8 @@ pub mod mesh_pipeline_descriptors;
 pub mod mesh_pipeline_reflection;
 pub mod nearest_positions;
 pub mod norm_storage_writes;
+pub mod pass_attachment_pairs;
+pub mod pass_bound_pairs;
 pub mod pass_bytes;
 pub mod pipeline_descriptors;
 pub mod pipeline_facts;
@@ -157,6 +159,7 @@ pub mod sparse_mappings;
 pub mod sparse_tiles;
 pub mod srgb_fetch;
 pub mod stage_in_regions;
+pub mod stencil_resolve_pairs;
 pub mod surface_fills;
 pub mod swizzled_storage;
 pub mod tessellation_sweeps;
@@ -522,6 +525,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(render_depth_stencil_state::all());
     cases.extend(depth_stencil_space::all());
     cases.extend(depth_resolve_pairs::all());
+    cases.extend(stencil_resolve_pairs::all());
+    cases.extend(pass_attachment_pairs::all());
+    cases.extend(pass_bound_pairs::all());
     cases.extend(render_residency::all());
     cases.extend(frame_chains::boxed());
     cases
