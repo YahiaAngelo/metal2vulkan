@@ -1758,6 +1758,119 @@ fn a_set_diff_prints_what_is_missing_and_what_is_extra() {
     assert!(printed.contains("extra {\"d\"}"), "{printed}");
 }
 
+/// **A site name held twice under one parent is reported, on either side, rather than compared by
+/// luck.**
+///
+/// `no_recorded_site_shares_its_name_with_a_sibling` holds the committed recordings to this, which
+/// is Metal's half of it. Our side's transcript is built fresh at every replay and is written to no
+/// recording, so that test cannot see it at all: a case whose *own* answer repeats a name would
+/// have the repeat compared against nothing, with no error and no change of verdict, on every
+/// venue forever. So the comparison itself refuses, which covers both sides and every run.
+///
+/// The repeat Metal holds and the repeat we hold are separate assertions, because they fail for
+/// different reasons: the first is a recording nobody should have committed, the second is a case
+/// measuring less than it claims right now.
+#[test]
+fn a_site_name_held_twice_under_one_parent_is_reported_on_either_side() {
+    let twins = || {
+        Transcript::new(vec![Node::branch(
+            "pass",
+            vec![
+                Node::leaf("buffer", Observed::value(Value::Uint(1))),
+                Node::leaf("buffer", Observed::value(Value::Uint(2))),
+            ],
+        )])
+    };
+    let single = || {
+        Transcript::new(vec![Node::branch(
+            "pass",
+            vec![Node::leaf("buffer", Observed::value(Value::Uint(1)))],
+        )])
+    };
+
+    // Neither side repeats: the comparison is of one pair and says nothing about names.
+    let clean = compare(&single(), &single(), &[], Offered::notices(&[]));
+    assert!(
+        clean.divergences.is_empty(),
+        "a transcript with no repeat is reported: {:?}",
+        clean.divergences
+    );
+
+    for (who, metal, ours) in [
+        (crate::diff::Side::Ours, single(), twins()),
+        (crate::diff::Side::Metal, twins(), single()),
+    ] {
+        let found = compare(&metal, &ours, &[], Offered::notices(&[]));
+        let repeats: Vec<_> = found
+            .divergences
+            .iter()
+            .filter(|held| {
+                matches!(
+                    held.kind,
+                    DivergenceKind::DuplicateSite { held_by, held: 2 } if held_by == who
+                )
+            })
+            .collect();
+        assert_eq!(
+            repeats.len(),
+            1,
+            "{who} holding two `buffer` sites is reported {} time(s): {:?}",
+            repeats.len(),
+            found.divergences
+        );
+        assert_eq!(repeats[0].path, "case/pass/buffer");
+        let printed = repeats[0].to_string();
+        assert!(printed.contains("2 sites of this name"), "{printed}");
+        // The two sides do not fail the same way, and the difference is why the report has to be
+        // on both of them. The sites hold 1 and 2, and Metal's side is what the walk iterates:
+        //
+        // - the repeat is **ours**, so Metal's one site pairs with our first namesake, matches it,
+        //   and our second observation is compared with nothing. Without the report above these
+        //   transcripts compare clean while a value nobody read sits in the answer. The loss is
+        //   total and silent, and the repeat is the whole of what is reported.
+        // - the repeat is **Metal's**, so both its namesakes pair with our one site: one matches
+        //   and the other reports a difference against an answer that was never its own. Nothing
+        //   is lost, but what is reported is about a pair that does not exist.
+        let expected = match who {
+            crate::diff::Side::Ours => 1,
+            crate::diff::Side::Metal => 2,
+        };
+        assert_eq!(
+            found.divergences.len(),
+            expected,
+            "the repeat on {who} reported {} divergence(s), not {expected}: {:?}",
+            found.divergences.len(),
+            found.divergences
+        );
+    }
+
+    // And no allowance may excuse it: a tolerance names a site by its path, and a path that names
+    // two sites names nothing the allowance could be about.
+    let loosened = compare(
+        &single(),
+        &twins(),
+        &[Allowance::new(
+            "pass/buffer",
+            Loosening::Unchecked,
+            Justification::accepted(
+                accepted_differences()
+                    .first()
+                    .expect("docs/API.md section 10 holds entries")
+                    .clone(),
+            ),
+        )],
+        Offered::notices(&[]),
+    );
+    assert!(
+        loosened
+            .divergences
+            .iter()
+            .any(|held| matches!(held.kind, DivergenceKind::DuplicateSite { .. })),
+        "an allowance at the path excused the repeat: {:?}",
+        loosened.divergences
+    );
+}
+
 #[test]
 fn an_ordered_list_of_lines_names_the_line_that_moved() {
     let lines = |words: &[&str]| {
@@ -2585,12 +2698,10 @@ fn no_recorded_site_shares_its_name_with_a_sibling() {
             true => node.name.to_string(),
             false => format!("{path}/{}", node.name),
         };
-        let mut seen = std::collections::BTreeSet::new();
-        for child in &node.children {
-            let name = child.name.to_string();
-            if !seen.insert(name.clone()) {
-                found.push(format!("{here}: two children named {name}"));
-            }
+        // The same reading of the rule the comparison uses, so the two cannot drift: a recording
+        // this accepts is one `compare` will not report a duplicate at, and the other way about.
+        for (name, held) in node.repeated_children() {
+            found.push(format!("{here}: {held} children named {name}"));
         }
         for child in &node.children {
             duplicates(&here, child, found);

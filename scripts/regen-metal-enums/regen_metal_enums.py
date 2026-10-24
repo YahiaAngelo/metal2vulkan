@@ -20,6 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "crates" / "metal2vulkan" / "src" / "metal" / "generated.rs"
 AIR_OUTPUT = ROOT / "crates" / "metal2vulkan-air" / "src" / "metal" / "generated.rs"
+TABLE_OUTPUT = ROOT / "scripts" / "conformance-coverage" / "metal_enumerators.tsv"
 
 # NS_ENUM types, emitted as closed Rust enums (`metal_enum!`).
 ENUMS = [
@@ -268,6 +269,41 @@ AIR_ENUMS = [
     "MTLDataType",
 ]
 
+# Metal enums and option sets the tree models **by hand** rather than from these headers, because
+# the compile-and-plan layer never reads them: the runtime declares `LoadAction`, `StoreAction`,
+# `PipelineOption` and the rest in its own sources and says so there.
+#
+# No Rust is generated for them, and none should be: that decision belongs to whoever made it.
+# What is generated is `TABLE_OUTPUT`, a table of their SDK enumerators and ordinals, which is the
+# option-space axis's denominator for them (`scripts/conformance-coverage/option_space.py`).
+# Without it that axis measures a hand-written variant list against itself, which cannot report a
+# value the SDK has and the tree does not, and reports an option-set newtype -- which declares no
+# variants at all -- as a type with no values.
+#
+# `MTLResourceOptions` is **not** here: the SDK writes its values in terms of `MTLCPUCacheMode`'s
+# and `MTLStorageMode`'s enumerators shifted by `#define`d amounts, and `evaluate` takes integer
+# literals, shifts, ors and earlier enumerators of the same type and fails on anything else rather
+# than guessing it. So that one type keeps no denominator, with a reason, instead of one this
+# script would have to widen its contract to produce.
+TABLE_ONLY = [
+    "MTLBlitOption",
+    "MTLCPUCacheMode",
+    "MTLCommandBufferStatus",
+    "MTLHazardTrackingMode",
+    "MTLHeapType",
+    "MTLLoadAction",
+    "MTLMultisampleDepthResolveFilter",
+    "MTLMultisampleStencilResolveFilter",
+    "MTLPipelineOption",
+    "MTLPurgeableState",
+    "MTLSparsePageSize",
+    "MTLSparseTextureRegionAlignmentMode",
+    "MTLStorageMode",
+    "MTLStoreAction",
+    "MTLStoreActionOptions",
+    "MTLVisibilityResultMode",
+]
+
 # NS_OPTIONS types, emitted as bit-set newtypes (`metal_flags!`).
 OPTIONS = [
     "MTLBarrierScope",
@@ -422,6 +458,53 @@ def rows(name, entries, flags):
     return out, aliases
 
 
+def render_table(found, sdk_version, names):
+    """The SDK's enumerators for `names`, as a tab-separated table.
+
+    One row per name: the Metal type, `enum` or `flags`, whether the row is the `value` or an
+    `alias` spelling of one, the Rust name this generator derives, the SDK enumerator and the
+    ordinal. An alias shares its value row's ordinal and Rust name.
+
+    A table rather than Rust because nothing in the tree should declare these types twice: the
+    runtime already declares them by hand, and the only thing missing was a denominator to measure
+    that declaration against.
+    """
+    out = [
+        f"# Generated from the macOS {sdk_version} SDK Metal.framework headers (names and values).",
+        "# Regenerate with scripts/regen-metal-enums/regen_metal_enums.py; do not edit.",
+        "# The SDK's values for the Metal enums and option sets this tree models by hand, which is",
+        "# the conformance suite's option-space denominator for them.",
+        "type\tkind\trole\trust\tenumerator\tvalue",
+    ]
+    for name in names:
+        if name not in found:
+            raise ValueError(f"{name} not found in the SDK headers")
+        kind, body = found[name]
+        flags = kind == "OPTIONS"
+        parsed = parse_body(name, body)
+        known = {value for _, value in parsed}
+        for ident, value in PRIVATE.get(name, []):
+            if value in known:
+                raise ValueError(f"{ident} = {value} is declared by the headers now")
+            parsed.append((ident, value))
+        entries, aliases = rows(name, parsed, flags)
+        of_rust = {rust: value for rust, _, value in entries}
+        for rust, ident, value in entries:
+            out.append(f"{name}\t{'flags' if flags else 'enum'}\tvalue\t{rust}\t{ident}\t{value}")
+        # A deprecated spelling of a value already listed. It is a name, not a value, so it adds
+        # no row to any denominator -- but a recording or a case may name a value by it, and a
+        # numerator that reads names has to know it means the same value. `MTLPipelineOption`'s
+        # bit 1 is exactly this: the headers declare `MTLPipelineOptionArgumentInfo` first and
+        # `MTLPipelineOptionBindingInfo` after it, so the spelling the tree and Apple's
+        # documentation both use is the alias.
+        for ident, rust in aliases:
+            out.append(
+                f"{name}\t{'flags' if flags else 'enum'}\talias\t{rust}\t{ident}"
+                f"\t{of_rust[rust]}"
+            )
+    return "\n".join(out) + "\n"
+
+
 def render(found, sdk_version, enums, options):
     out = [
         f"// Generated from the macOS {sdk_version} SDK Metal.framework headers (names and values).",
@@ -481,6 +564,8 @@ def main():
     parser.add_argument("--sdk-version", help="SDK version recorded in the output header")
     parser.add_argument("--output", type=Path, default=OUTPUT)
     parser.add_argument("--air-output", type=Path, default=AIR_OUTPUT)
+    parser.add_argument("--table-output", type=Path, default=TABLE_OUTPUT,
+                        help="the SDK values of the types this tree models by hand")
     parser.add_argument("--check", action="store_true",
                         help="fail if the committed output differs from a fresh generation")
     args = parser.parse_args()
@@ -494,6 +579,7 @@ def main():
     outputs = [
         (args.output, render(found, version, ENUMS, OPTIONS)),
         (args.air_output, render(found, version, AIR_ENUMS, [])),
+        (args.table_output, render_table(found, version, TABLE_ONLY)),
     ]
     if args.check:
         stale = [path for path, text in outputs if path.read_text() != text]

@@ -77,6 +77,66 @@ def item_index(rows) -> dict[tuple[str, str], dict[str, str]]:
     return {(row["container"], row["name"]): row for row in rows}
 
 
+def self_named(rows) -> dict[str, tuple[str, str]]:
+    """Each container whose own implemented row the map holds, keyed by the container.
+
+    A container's own row — `MTLComputeCommandEncoder`'s `MTLComputeCommandEncoder`, and every
+    other `class`, `protocol` and `category` row — names the **type**, not a selector of it.
+    `objc2-metal` binds no selector by that name, and the resolution below only ever yields
+    selectors, so no call site can resolve to one: left to that resolution every such row reads as
+    never exercised however much of the type the suite drives.
+
+    So they are credited by what the row actually claims, which is that we implement the type: the
+    suite **messages** it. A call site whose receiver is the container or a subtype of it exercises
+    the container's own row, gated and attributed to a family exactly as the selector it sends is.
+    A class row and a protocol row are one rule here, because a message to the class
+    (`MTLTextureDescriptor::alloc()`) types its receiver to the class the same way an instance send
+    types its own.
+    """
+    return {
+        row["container"]: (row["container"], row["name"])
+        for row in rows
+        if row["status"] == "I" and row["container"] and row["name"] == row["container"]
+    }
+
+
+def free_functions(rows) -> dict[str, tuple[str, str]]:
+    """The header's free functions the map holds as implemented, keyed by the function's name.
+
+    These no container declares, so `objc2-metal` binds them as Rust functions rather than as
+    selectors and the receiver typing never sees one. The leg calls such a function by its own C
+    name, which the resolver records as a plain call — an edge of the reachability graph — so the
+    walk reads them there instead.
+    """
+    return {
+        row["name"]: (row["container"], row["name"])
+        for row in rows
+        if row["status"] == "I" and row["kind"] == "function" and not row["container"]
+    }
+
+
+def unbound(rows, index, api: metal_leg.Api) -> list[tuple[str, str]]:
+    """The implemented items no case could call, because `objc2-metal` binds no name for them.
+
+    The suite reaches Metal through `objc2-metal` alone. An item the crate binds no selector for
+    is not a gap in the **suite**: no case can call what has no binding, so counting it as not
+    exercised reads as work that no amount of authoring would close. Reported apart from the gap
+    for that reason, and derived rather than listed: every binding the crate declares is resolved
+    the same way a call site is, and what no binding lands on is what is left.
+
+    A container's own row and a free function are excluded: neither is reached through a selector,
+    and both have their own rule above.
+    """
+    bindable = set()
+    for (ty, rust), selector in api.selector.items():
+        found = sdk_item(index, api, ty, selector)
+        if found is not None:
+            bindable.add(found)
+    keys = {(row["container"], row["name"]) for row in rows if row["status"] == "I"}
+    other = set(self_named(rows).values()) | set(free_functions(rows).values())
+    return sorted(keys - bindable - other)
+
+
 def sdk_item(index, api: metal_leg.Api, ty: str, selector: str):
     """The coverage map's key for the item a call of `selector` on `ty` exercises, or `None`.
 
@@ -198,12 +258,33 @@ def sdk_keyed(leg: metal_leg.Leg, index, api: metal_leg.Api):
     return keyed, sorted(set(unlisted))
 
 
-def gated_items(leg: metal_leg.Leg, entry_points: set[str], keyed):
+def messaged_rows(leg: metal_leg.Leg, api: metal_leg.Api, selves) -> dict[int, set[tuple[str, str]]]:
+    """For each call site, the containers' own rows its receiver's type exercises.
+
+    A send to a receiver typed `MTLTexture` messages `MTLTexture`, and through it every container
+    `MTLTexture` inherits from, so the row of each of those containers is exercised by that one
+    call. Keyed by the call so the walk gates and attributes it with the selector it sends.
+    """
+    out: dict[int, set[tuple[str, str]]] = {}
+    for call in leg.calls:
+        if not call.receiver:
+            continue
+        keys = {selves[owner] for owner in api.chain(call.receiver) if owner in selves}
+        if keys:
+            out[id(call)] = keys
+    return out
+
+
+def gated_items(leg: metal_leg.Leg, entry_points: set[str], keyed, messaged, frees):
     """For each entry point, the items it reaches and the variants each reaching needs.
 
     One walk of the leg's own call graph. A call inside `Step::GetBytes =>` is reached only by a
     case that encodes that step, so the variants of the `match` arms around a call travel with it;
     a call under no arm is reached by every case that calls the entry point at all.
+
+    Three things a call reaches, and the same gate over all three: the SDK item its selector
+    resolves to (`keyed`), the containers' own rows its receiver messages (`messaged`), and, on an
+    edge of the graph rather than a call, a header free function the leg calls by name (`frees`).
     """
     reached: dict[str, dict[tuple[str, str], set[frozenset]]] = {}
 
@@ -214,9 +295,17 @@ def gated_items(leg: metal_leg.Leg, entry_points: set[str], keyed):
             return {}
         here: dict[tuple[str, str], set[frozenset]] = defaultdict(set)
         for call in leg.calls:
-            if call.function == fn and id(call) in keyed:
-                here[keyed[id(call)]].add(frozenset(call.arms))
+            if call.function != fn:
+                continue
+            arms = frozenset(call.arms)
+            if id(call) in keyed:
+                here[keyed[id(call)]].add(arms)
+            for item in messaged.get(id(call), ()):
+                here[item].add(arms)
         for callee in leg.calls_function.get(fn, ()):
+            if callee in frees:
+                for arms in leg.function_arms.get((fn, callee), {()}):
+                    here[frees[callee]].add(frozenset(arms))
             below = walk(callee, stack + (fn,))
             if not below:
                 continue
@@ -404,6 +493,9 @@ def inventory():
             + "\n".join(f"  {f}::{fn} sent {rust} to {ty}" for f, fn, rust, ty in sorted(set(leg.mistyped)))
         )
     keyed, unlisted = sdk_keyed(leg, index, api)
+    selves = self_named(rows)
+    frees = free_functions(rows)
+    messaged = messaged_rows(leg, api, selves)
     side = side_methods()
     constructors = variant_constructors(enums)
     families = case_families(side, enums, constructors)
@@ -411,7 +503,7 @@ def inventory():
 
     # The call graph, from each `Side` method the Metal leg implements.
     entries = {fn for fn in leg.calls_function} | {call.function for call in leg.calls}
-    gated = gated_items(leg, entries & set(side), keyed)
+    gated = gated_items(leg, entries & set(side), keyed, messaged, frees)
 
     # An item to the families that reach it, and how.
     by_item: dict[tuple[str, str], dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
@@ -428,7 +520,11 @@ def inventory():
 
     # Calls the leg makes that no family was found to reach: a call site this cannot attribute.
     reached = {item for method in gated.values() for item in method}
-    called = set(keyed.values())
+    called = (
+        set(keyed.values())
+        | {item for items in messaged.values() for item in items}
+        | {frees[callee] for callees in leg.calls_function.values() for callee in callees if callee in frees}
+    )
     return {
         "rows": rows,
         "index": index,
@@ -439,9 +535,14 @@ def inventory():
         "records": records,
         "gated": gated,
         "by_item": by_item,
+        "called": sorted(called),
         "unattributed": sorted(called - set(by_item)),
         "unreachable": sorted(called - reached),
         "keyed": keyed,
+        "selves": selves,
+        "frees": frees,
+        "messaged": messaged,
+        "unbound": unbound(rows, index, api),
         "unlisted": unlisted,
         "gaps": known_gaps(),
         # The second axis. A module with no case whose answer Metal ran puts no value to Metal,
@@ -491,17 +592,28 @@ def write_option_space(w, space) -> None:
     w(
         "The denominator is generated, never written here: "
         "`crates/metal2vulkan/src/metal/generated.rs` and the front end's hold every enumerator "
-        "name and ordinal `scripts/regen-metal-enums/` extracts from the SDK's Metal headers. A "
-        "Metal type this tree models by hand instead has **no denominator here** and is listed "
-        "apart, below."
+        "name and ordinal `scripts/regen-metal-enums/` extracts from the SDK's Metal headers, and "
+        "`scripts/conformance-coverage/metal_enumerators.tsv` holds the same for the Metal types "
+        "this tree declares by hand instead, which have no generated Rust. A Metal type neither "
+        "covers has **no denominator here** and is listed apart, below."
     )
     w("")
     w("A value is **compared** where either of two things holds, which are different claims:")
     w("")
     w(
-        "- **answered** — the enumerator's name is in a committed recording's transcript of an "
-        "answer Metal **ran**. Metal named the value back at a site the comparison reads, so the "
-        "value is in the compared text itself."
+        "- **answered** — the enumerator's name is in what a site of a committed recording "
+        "**observed**, in an answer Metal **ran**. Metal named the value back at a site the "
+        "comparison reads, so the value is in the compared text itself."
+    )
+    site = sum(len(row["at_a_site"]) for row in rows)
+    w(
+        f"- **at a site** — the enumerator's name is a committed recording's site **name**, and "
+        f"in nothing that site observed: {site} of them. The comparison pairs sites by name, so "
+        "the value is in the compared text and the case did put it to Metal — but the name is the "
+        "**case's** label for the site, so it is no evidence that Metal said the value. It is its "
+        "own column for that reason: read together with *answered* it reads as Metal having "
+        "named back values that a case spelled itself, which for `MTLPixelFormat` is most of "
+        "them."
     )
     w(
         "- **in effect** — a case module's own text names the value, and that module has at least "
@@ -518,6 +630,16 @@ def write_option_space(w, space) -> None:
         "in it says which enum the number belongs to, so only a site that records the enumerator's "
         "**name** is read. The *answered* column is a floor by every site that records an ordinal "
         "instead."
+    )
+    w(
+        "- **A spelling of a value this derivation does not read.** Both numerators read names, "
+        "and a name written in a shape the reading does not cover is counted nowhere and looks "
+        "exactly like a value no case reaches. Four shapes are read: a variant beside its type, "
+        "`objc2`'s own spelling, a renaming `use`, and a braced `use` whose variants the module "
+        "then writes bare. A fifth shape would be invisible the same way, so every count here is "
+        "a floor by that unknown — and the two shapes already found were each caught by someone "
+        "checking a count against the code, not by this derivation, so the unknown is not small "
+        "on the evidence."
     )
     w(
         "- **A value a case states as a raw ordinal.** A case may hand the Metal leg an enum's "
@@ -580,19 +702,54 @@ def write_option_space(w, space) -> None:
     )
     w("")
     w(
-        "Deepest gap first, which is the order the work list reads in. *answered* and *in effect* "
-        "overlap; *compared* is their union."
+        "Deepest gap first, which is the order the work list reads in. *answered*, *at a site* "
+        "and *in effect* overlap; *compared* is their union."
     )
     w("")
-    w("| Metal type | values | compared | answered | in effect | shared only | missing |")
-    w("|---|---|---|---|---|---|---|")
+    w(
+        "| Metal type | values | compared | answered | at a site | in effect | shared only | "
+        "missing |"
+    )
+    w("|---|---|---|---|---|---|---|---|")
     for row in sorted(rows, key=lambda r: (-len(r["missing"]), -len(r["shared"]), r["metal"])):
         w(
             f"| `{row['metal']}` | {len(row['values'])} | {len(row['compared'])} | "
-            f"{len(row['answered'])} | {len(row['in_effect'])} | {len(row['shared'])} | "
-            f"{len(row['missing'])} |"
+            f"{len(row['answered'])} | {len(row['at_a_site'])} | {len(row['in_effect'])} | "
+            f"{len(row['shared'])} | {len(row['missing'])} |"
         )
     w("")
+    unreadable = [row for row in rows if row["named_no_value"]]
+    if unreadable:
+        w("### Types a case is about, whose values this axis cannot read")
+        w("")
+        w(
+            "The raw-ordinal limit above as a work list rather than a sentence. Each row is a type "
+            "whose name a recorded case module uses and **none of whose values that module states "
+            "by name**: a sweep written `for bits in 0..8` reads exactly this way, and so does a "
+            "module that only mentions the type in passing. So a row is a question for the case, "
+            "never a verdict on it -- the module may put every value of the type to Metal, and "
+            "this axis would still count none of them."
+        )
+        w("")
+        w(
+            "It names the type and the module, and no value: which value a computed number is is "
+            "not a property of the text, and a rule that answered it would be inventing the "
+            "answer. Closing a row means the case stating its values by name, or a transcript site "
+            "recording the enumerator beside the ordinal it already stores."
+        )
+        w("")
+        w("| Metal type | values | compared | modules naming it that state no value |")
+        w("|---|---|---|---|")
+        for row in sorted(
+            unreadable, key=lambda r: (len(r["compared"]), -len(r["values"]), r["metal"])
+        ):
+            modules = ", ".join(f"`{m}`" for m in row["named_no_value"])
+            w(
+                f"| `{row['metal']}` | {len(row['values'])} | {len(row['compared'])} | "
+                f"{modules} |"
+            )
+        w("")
+
     w("### The values not compared")
     w("")
     w(
@@ -623,19 +780,26 @@ def write_option_space(w, space) -> None:
     w("")
     w(
         "These the tree models by hand: a Rust item whose own doc comment opens by naming a Metal "
-        "type, and whose shape is a closed enum or a newtype over one integer. "
-        "`regen-metal-enums` holds no value list for them, so **this axis has no denominator "
-        "here**, and *declared* is our own sources' variant count rather than the SDK's — a "
-        "newtype option set declares none. There is no *answered* column either: a recording names "
-        "a value by its Metal enumerator, and for these types this has no list of those names to "
-        "match against. Giving one a denominator means appending its Metal name to "
-        "`scripts/regen-metal-enums/`'s `ENUMS` or `OPTIONS` and regenerating."
+        "type, and whose shape is a closed enum or a newtype over one integer. The tree declares "
+        "them itself because the compile-and-plan layer never reads them, and that stays — but a "
+        "declaration measured against itself is no measurement, so "
+        "`scripts/regen-metal-enums/`'s `TABLE_ONLY` list generates "
+        "`scripts/conformance-coverage/metal_enumerators.tsv`, the SDK's own values for them, and "
+        "every type it covers is in the per-type table above with a real denominator. What is left "
+        "here is what the table does not cover."
     )
     w("")
     w(
-        f"These {len(space['by_hand'])} are what that shape finds, and the list is a floor: a type "
-        "the tree models without saying so on the item lands in neither table, and so is nowhere "
-        "in this axis at all."
+        "For a row here **this axis has no denominator**: *declared* is our own sources' variant "
+        "count rather than the SDK's — a newtype option set declares none — and there is no "
+        "*answered* column, because a recording names a value by its Metal enumerator and this has "
+        "no list of those names to match against."
+    )
+    w("")
+    w(
+        f"{len(space['by_hand'])} are left, and the list is a floor: a type the tree models "
+        "without saying so on the item lands in neither table, and so is nowhere in this axis at "
+        "all."
     )
     w("")
     w("| Metal type | the tree's type | declared | stated by a recorded case | shared only |")
@@ -652,8 +816,17 @@ def write(data) -> str:
     """The document's text."""
     rows, index, api, leg = data["rows"], data["index"], data["api"], data["leg"]
     families, records, by_item = data["families"], data["records"], data["by_item"]
-    implemented = [row for row in rows if row["status"] == "I"]
+    # One row per `(container, name)`, not one per row of the map: it holds
+    # `MTLRasterizationRateLayerDescriptor` twice, once as a class and once as a category on it,
+    # and every number here is over keys. Counting the rows instead states a denominator the
+    # numerator cannot reach, and `item_index` resolves a call to the later row anyway.
+    implemented = list(
+        {
+            (row["container"], row["name"]): row for row in rows if row["status"] == "I"
+        }.values()
+    )
     keys = {(row["container"], row["name"]) for row in implemented}
+    unreachable = set(data["unbound"])
     exercised = {key for key in by_item if key in keys}
     cases_of = defaultdict(list)
     for record in records:
@@ -733,6 +906,29 @@ def write(data) -> str:
         "generator fails rather than writing this document if any does, which is what keeps the "
         "typing from quietly counting the wrong item."
     )
+    selves, frees = data["selves"], data["frees"]
+    w(
+        f"- **{len(selves)} of the map's implemented rows are a container's own**: the `class`, "
+        "`protocol` and `category` rows, whose name is the container's and not a selector's. No "
+        "call site can resolve to one, because `objc2-metal` binds no selector by that name, so "
+        "these are credited by the suite **messaging** the type instead — a call whose receiver is "
+        "the container or a subtype of it — under the same gate and the same family attribution as "
+        "the selector it sends."
+    )
+    w(
+        f"- **{len(frees)} are the header's free functions**, which no container declares. "
+        "`objc2-metal` binds these as Rust functions, so the receiver typing never sees one; the "
+        "leg calls such a function by its own C name and the walk reads it as an edge of the call "
+        "graph."
+    )
+    unreach = data["unbound"]
+    w(
+        f"- **{len(unreach)} implemented items `objc2-metal` binds no name for at all**, so no "
+        "case can call them whatever it is authored to do. They are counted apart from the gap "
+        "below rather than folded into it, because a gap is work and these are not:"
+    )
+    for container, name in unreach:
+        w(f"  - {_container(container)}'s `{name}`")
     w(
         "- The unit a call is attributed to is the **case module**, not the case: a module's cases "
         "share one `run`, so which of them encodes which step is not a property of the text. "
@@ -751,10 +947,12 @@ def write(data) -> str:
     w("| | |")
     w("|---|---|")
     w(f"| implemented Metal items | {len(implemented)} |")
-    w(f"| of those, exercised by the suite's Metal leg | {len(exercised)} |")
-    w(f"| of those, not exercised | {len(implemented) - len(exercised)} |")
-    share = 100.0 * len(exercised) / len(implemented)
-    w(f"| share exercised | {share:.0f}% |")
+    w(f"| of those, unreachable: `objc2-metal` binds no name for them | {len(unreachable)} |")
+    w(f"| so reachable by some case | {len(keys) - len(unreachable)} |")
+    w(f"| of the reachable, exercised by the suite's Metal leg | {len(exercised)} |")
+    w(f"| of the reachable, not exercised | {len(keys) - len(unreachable) - len(exercised)} |")
+    share = 100.0 * len(exercised) / (len(keys) - len(unreachable))
+    w(f"| share of the reachable exercised | {share:.0f}% |")
     loose = {
         key
         for key in exercised
@@ -764,7 +962,13 @@ def write(data) -> str:
     w(f"| of those exercised, a case reaching it loosens some site | {len(loose)} |")
     w(f"| case modules | {len(families)} |")
     w(f"| committed recordings | {len(records)} |")
-    w(f"| distinct SDK items the Metal leg calls | {len(set(data['keyed'].values()))} |")
+    w(
+        f"| distinct SDK items the Metal leg reaches, of any status | {len(data['called'])} |"
+    )
+    w(
+        f"| of those, reached only where this cannot name the family | "
+        f"{len(data['unattributed'])} |"
+    )
     w(f"| ledger rows (a case whose gap is recorded) | {len(data['gaps'])} |")
     w("")
     w(
@@ -787,27 +991,33 @@ def write(data) -> str:
 
     w("## By container")
     w("")
-    w("Every container with an implemented item, by how much of it the suite reaches.")
+    w(
+        "Every container with an implemented item, by how much of it the suite reaches. *no "
+        "binding* is the container's share of the unreachable items above, held out of "
+        "*unexercised* so each ratio reads as what authoring could close."
+    )
     w("")
-    w("| container | implemented | exercised | unexercised | families |")
-    w("|---|---|---|---|---|")
+    w("| container | implemented | no binding | exercised | unexercised | families |")
+    w("|---|---|---|---|---|---|")
     by_container: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in implemented:
         by_container[row["container"]].append(row)
-    order = sorted(
-        by_container,
-        key=lambda c: (
-            -(len(by_container[c]) - len({k for k in exercised if k[0] == c})),
-            c,
-        ),
-    )
+    def container_left(container: str) -> int:
+        return sum(
+            1
+            for row in by_container[container]
+            if (row["container"], row["name"]) not in exercised
+            and (row["container"], row["name"]) not in unreachable
+        )
+    order = sorted(by_container, key=lambda c: (-container_left(c), c))
     for container in order:
         rows_here = by_container[container]
         hit = {key for key in exercised if key[0] == container}
+        blocked = sum(1 for key in unreachable if key[0] == container)
         modules = sorted({m for key in hit for m in by_item[key]})
         w(
-            f"| {_container(container)} | {len(rows_here)} | {len(hit)} | "
-            f"{len(rows_here) - len(hit)} | "
+            f"| {_container(container)} | {len(rows_here)} | {blocked} | {len(hit)} | "
+            f"{container_left(container)} | "
             + (", ".join(f"`{m}`" for m in modules[:4]) + ("…" if len(modules) > 4 else ""))
             + " |"
         )
@@ -827,7 +1037,12 @@ def write(data) -> str:
     for row in implemented:
         by_header[row["header"]].append(row)
     def left(header: str) -> int:
-        return sum(1 for row in by_header[header] if (row["container"], row["name"]) not in exercised)
+        return sum(
+            1
+            for row in by_header[header]
+            if (row["container"], row["name"]) not in exercised
+            and (row["container"], row["name"]) not in unreachable
+        )
     for header in sorted(by_header, key=lambda h: (-left(h), h)):
         hit = len(by_header[header]) - left(header)
         w(f"| `{header}` | {len(by_header[header])} | {hit} | {left(header)} |")
@@ -967,9 +1182,12 @@ def write(data) -> str:
     w("## Called, attributed to no family")
     w("")
     w(
-        "An item the Metal leg calls that no case module was found to reach: either a `Side` "
-        "method no case calls, or a step of the vocabulary no case encodes. Each is suite code "
-        "that no case runs."
+        "An item the Metal leg calls that no case module was found to reach: a `Side` method no "
+        "case calls, a step of the vocabulary no case encodes, or a call the leg makes outside "
+        "every `Side` method — the side's own constructor, which runs for every case and which "
+        "this walk has no family to attribute, because a family is read off which `Side` methods "
+        "a case's text calls. The first two are suite code that no case runs; the third is "
+        "measured and named here rather than counted as exercised."
     )
     w("")
     if data["unattributed"]:
@@ -977,7 +1195,10 @@ def write(data) -> str:
         w("|---|---|")
         for key in data["unattributed"]:
             row = index.get(key)
-            w(f"| `{key[0]}` `{key[1]}` | {STATUS[row['status']] if row else 'not in the map'} |")
+            w(
+                f"| {_container(key[0])} `{key[1]}` | "
+                f"{STATUS[row['status']] if row else 'not in the map'} |"
+            )
     else:
         w("None: every item the leg calls is reached by a case module.")
     w("")

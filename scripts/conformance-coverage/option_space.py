@@ -23,6 +23,27 @@ The numerator is two derived sets, which are different claims and are kept apart
 render vocabulary, say) is counted in neither: some case puts it to Metal, but which case is not a
 property of the text, so it is reported in its own column and is neither compared nor missing.
 
+# What the floor is made of
+
+Every column here is a floor, and the honest thing is to say what of rather than only that it is
+one. Two things, and as far as has been measured no third:
+
+1. **A value a case states as a raw ordinal**, which the next section is about. Measured where it
+   can be: the document lists each type a recorded module names and states no value of by name,
+   which is how a sweep over `0..n` reads, so the floor has a work list and not just a warning.
+2. **A spelling of a value that `_stated_in` does not read.** A name written in a shape the
+   reading does not cover is counted nowhere and looks exactly like a value no case reaches.
+   `_stated_in` lists every shape read and `_resolved` is the one rule they all go through, so a
+   shape not on that list is the floor. Two have been found, both by someone checking a printed
+   count against the code rather than by this file, which is the evidence for taking the unknown
+   seriously rather than calling it small.
+
+What is **not** part of the floor, because it is measured: the generated denominator (every type
+`regen-metal-enums` covers, by `ENUMS`, `OPTIONS` or `TABLE_ONLY`), the `#[cfg(test)]` exclusion,
+Metal's validation leg, and which case put a value in effect. A type the tree models by hand and
+says so nowhere on the item is outside both tables and so outside the axis, which the document
+states where it lists them.
+
 # Why a value stated as a raw ordinal is not resolved, and must not be
 
 Both numerators read **names**. A case may instead hand the Metal leg an enum's ordinal as a
@@ -42,6 +63,7 @@ name, or a transcript site recording the enumerator beside the ordinal it alread
 cleverer reading of the text here.
 """
 
+import csv
 import json
 import re
 from pathlib import Path
@@ -65,10 +87,21 @@ BY_HAND = (
 RAN = "metal_run"
 
 
+#: The generated table of SDK enumerators for the Metal types this tree models by hand.
+ENUMERATORS = "scripts/conformance-coverage/metal_enumerators.tsv"
+
+
 class Type:
     """One Metal enum or option set, with the SDK's values as the generated table holds them."""
 
-    def __init__(self, metal: str, rust: str, kind: str, values: list[tuple[str, str]]):
+    def __init__(
+        self,
+        metal: str,
+        rust: str,
+        kind: str,
+        values: list[tuple[str, str]],
+        aliases: dict[str, str] | None = None,
+    ):
         #: The Metal type name, `MTLBlendFactor`.
         self.metal = metal
         #: The Rust name the tree gives it, `BlendFactor`.
@@ -77,11 +110,21 @@ class Type:
         self.kind = kind
         #: Each value as `(Rust name, Metal enumerator name)`, in declaration order.
         self.values = values
+        #: A deprecated enumerator to the canonical enumerator of the same value. A name, not a
+        #: value, so it is in no denominator -- but a recording that names a value by it is naming
+        #: that value, and a numerator reading names has to know so.
+        self.aliases = aliases or {}
 
     @property
     def names(self) -> list[str]:
         """The Metal enumerator names, in declaration order."""
         return [metal for _, metal in self.values]
+
+    def value_named(self, name: str) -> str | None:
+        """The canonical enumerator `name` names, following an alias, or `None`."""
+        if name in self.aliases:
+            return self.aliases[name]
+        return name if name in self.names else None
 
 
 def read_types(root: Path) -> dict[str, Type]:
@@ -112,6 +155,51 @@ def read_types(root: Path) -> dict[str, Type]:
             # The parse silently matching nothing is the one way this axis can report a denominator
             # of zero and look like a closed option space, so it is a failure, not a count.
             raise SystemExit(f"{name}: no metal_enum!/metal_flags! block parsed")
+    return out
+
+
+def read_table(root: Path, rust_names: dict[str, str]) -> dict[str, Type]:
+    """The SDK's values for the Metal types this tree models by hand, from the generated table.
+
+    These have no generated Rust -- the runtime declares them itself, and `render_table`'s comment
+    says why that stays -- so without this table the axis had no SDK list for them and measured a
+    hand-written variant list against itself. It could not report a value the SDK declares and the
+    tree does not, and it reported an option-set newtype, which declares no variants at all, as a
+    type with no values: `MTLPipelineOption` read `0 of 0` while its four defined values were being
+    swept.
+
+    `rust_names` is the tree's own name for each, which `by_hand` reads off the declaring item, so
+    a case naming `StoreAction::Unknown` resolves the same way one naming a generated type's
+    variant does.
+    """
+    path = root / ENUMERATORS
+    values: dict[str, list[tuple[str, str]]] = {}
+    aliases: dict[str, dict[str, str]] = {}
+    kinds: dict[str, str] = {}
+    canonical: dict[tuple[str, str], str] = {}
+    with path.open() as handle:
+        rows = list(
+            csv.DictReader((line for line in handle if not line.startswith("#")), delimiter="\t")
+        )
+    if not rows:
+        # A table that parsed to nothing would hand every type in it a denominator of zero and
+        # read as a closed option space, which is the one way this axis fails silently.
+        raise SystemExit(f"{ENUMERATORS}: parsed to no rows")
+    for row in rows:
+        metal, role = row["type"], row["role"]
+        kinds[metal] = row["kind"]
+        if role == "value":
+            values.setdefault(metal, []).append((row["rust"], row["enumerator"]))
+            canonical[(metal, row["rust"])] = row["enumerator"]
+        elif role == "alias":
+            aliases.setdefault(metal, {})[row["enumerator"]] = canonical[(metal, row["rust"])]
+        else:
+            raise SystemExit(f"{ENUMERATORS}: {metal} has a row whose role is {role!r}")
+    out: dict[str, Type] = {}
+    for metal, held in sorted(values.items()):
+        out[metal] = Type(
+            metal, rust_names.get(metal, metal[3:]), kinds[metal], held, aliases.get(metal)
+        )
     return out
 
 
@@ -168,19 +256,60 @@ def without_tests(text: str) -> str:
     return "".join(out)
 
 
-def _stated_in(text: str, by_rust: dict[str, Type], by_metal: dict[str, Type]):
-    """The `(Metal type, value)` pairs `text` names, in either of the two spellings it uses.
+def _resolved(held: Type, tail: str, metal_spelling: bool) -> set[tuple[str, str]]:
+    """The values of `held` that the variant name `tail` names, by every spelling of one value.
 
-    The suite names a Metal value two ways, and both have to be read:
+    One reading of the rule, so every place that resolves a name uses the same one: a variant name
+    beside its type, a variant name brought in bare by a `use`, and the `objc2` spelling are the
+    same question asked of different text.
+
+    Three ways a name reaches a value, and no fourth:
+
+    - the Rust name the generated table gives it, which is what `BlendFactor::SourceAlpha` names;
+    - the type's name and the variant's spelled back together, where that concatenation is an
+      enumerator the table holds. `objc2` names a variant with its type's prefix dropped, so
+      `MTLStorageMode::Private` is `MTLStorageModePrivate` — and the same rule reads our own
+      spelling of a type we model unlike the SDK, `BlitOption::None` against `MTLBlitOptionNone`,
+      because we make a closed enum of what the SDK makes an `NS_OPTIONS`. Never by assuming the
+      rule held: the value credited is the one whose enumerator is exactly the concatenation, and
+      nothing is credited where the table holds no such name.
+    - a hand-modelled type with no table has no SDK enumerator list at all, so our own variant
+      name is the only name there is.
+    """
+    out: set[tuple[str, str]] = set()
+    for rust, value in held.values:
+        if rust == tail:
+            out.add((held.metal, value))
+    found = held.value_named(held.metal + tail)
+    if found is not None:
+        out.add((held.metal, found))
+    elif metal_spelling and held.kind == "by hand" and tail in held.names:
+        out.add((held.metal, tail))
+    return out
+
+
+def _stated_in(text: str, by_rust: dict[str, Type], by_metal: dict[str, Type]):
+    """The `(Metal type, value)` pairs `text` names, in every spelling the suite uses.
+
+    The suite names a Metal value three ways, and all three have to be read:
 
     - through the tree's own type, `BlendFactor::SourceAlpha` — and `rotated_targets.rs` writes
       `use BlendFactor as F;` and then every factor as `F::SourceAlpha`, so a derivation reading
       only `BlendFactor::` spellings reports a third of that module's blend factors as never
       exercised;
     - through `objc2-metal`'s own enum, `MTLStorageMode::Private`, which the Metal leg writes
-      directly. `objc2` names a variant with its type's prefix dropped, so the enumerator is the
-      two spelled back together, and it counts only where that concatenation is a name the
-      generated table holds — never by assuming the rule held.
+      directly;
+    - through a **braced `use`**, `use SamplerBorderColor::{OpaqueBlack, OpaqueWhite,
+      TransparentBlack};`, after which the module writes the variants bare and names
+      `SamplerBorderColor::` nowhere. `border_swizzles` sweeps all three border colours in nine
+      samplers written that way, and a reading of `Head::Tail` alone finds none of them.
+
+    A `use` is taken as the module naming the value, and the bare name is not looked for
+    afterwards. That is sound here and nowhere else: an import nothing uses is a warning, warnings
+    are errors in this tree, so a variant in a `use` is one the text goes on to use. Looking for
+    the bare name instead would be the unsound reading — `border_swizzles` imports
+    `TextureSwizzle::Alpha as A`, and crediting a type's value for every `A` in a module is how a
+    derivation invents coverage.
     """
     alias: dict[str, str] = {}
     for found in re.finditer(r"\b([A-Za-z_]\w*)\s+as\s+([A-Za-z_]\w*)\b", text):
@@ -191,19 +320,44 @@ def _stated_in(text: str, by_rust: dict[str, Type], by_metal: dict[str, Type]):
         head, tail = found.group(1), found.group(2)
         held = by_rust.get(alias.get(head, head))
         if held is not None:
-            for rust, value in held.values:
-                if rust == tail:
-                    out.add((held.metal, value))
+            out |= _resolved(held, tail, False)
         held = by_metal.get(head)
-        if held is None:
-            continue
-        if head + tail in held.names:
-            out.add((held.metal, head + tail))
-        elif held.kind == "by hand" and tail in held.names:
-            # A hand-modelled type has no SDK enumerator list, so our own variant name is the only
-            # name there is; `objc2` spells the same value the same way after the prefix.
-            out.add((held.metal, tail))
+        if held is not None:
+            out |= _resolved(held, tail, True)
+    # The braced form, which the loop above cannot see: after `::` comes `{` and not a name. The
+    # path may be qualified (`metal2vulkan::metal::TextureSwizzle::{..}`), so the type is its last
+    # segment, and each item may be renamed, in which case what names the value is the name
+    # imported and not the local one.
+    for found in re.finditer(r"\buse\s+([A-Za-z_][\w:]*?)\s*::\s*\{([^{}]*)\}", text):
+        head = found.group(1).split("::")[-1].strip()
+        for held, metal_spelling in (
+            (by_rust.get(alias.get(head, head)), False),
+            (by_metal.get(head), True),
+        ):
+            if held is None:
+                continue
+            for item in found.group(2).split(","):
+                imported = item.split(" as ")[0].strip()
+                if imported:
+                    out |= _resolved(held, imported, metal_spelling)
     return out
+
+
+def _types_named_in(text: str, held: dict[str, Type]) -> set[str]:
+    """The Metal types `text` names **as a type**, by either spelling, as whole identifiers.
+
+    A type's own name, never a value's: this says what a module is about, not what it put to
+    Metal. It is what turns the raw-ordinal limit from a sentence into a work list -- a module that
+    names `MTLPipelineOption` and states none of its values by name is a case this axis cannot read
+    the depth of, and saying which module that is costs no guess about which value it reached.
+    """
+    found: set[str] = set()
+    for one in held.values():
+        for spelling in (one.metal, one.rust):
+            if re.search(rf"\b{re.escape(spelling)}\b", text):
+                found.add(one.metal)
+                break
+    return found
 
 
 def stated(root: Path, types: dict[str, Type], ran: set[str]):
@@ -216,18 +370,26 @@ def stated(root: Path, types: dict[str, Type], ran: set[str]):
     by_metal = {held.metal: held for held in types.values()}
     src = root / "crates/metal2vulkan-conformance/src"
     in_effect: dict[tuple[str, str], set[str]] = {}
+    # Each module to the types its text is about, so a type a module names and states no value of
+    # can be reported as one whose depth is unreadable here rather than as one nothing reaches.
+    about: dict[str, set[str]] = {}
     for path in sorted((src / "cases").glob("*.rs")):
         if path.stem not in ran:
             continue
-        for pair in _stated_in(without_tests(path.read_text()), by_rust, by_metal):
+        text = without_tests(path.read_text())
+        stated_here = _stated_in(text, by_rust, by_metal)
+        for pair in stated_here:
             in_effect.setdefault(pair, set()).add(path.stem)
+        said = {metal for metal, _ in stated_here}
+        for metal in _types_named_in(text, types) - said:
+            about.setdefault(metal, set()).add(path.stem)
     shared: set[tuple[str, str]] = set()
     for path in sorted(src.rglob("*.rs")):
         held = path.relative_to(src)
         if held.parts[0] in ("cases", "tests", "bin") or held.name == "tests.rs":
             continue
         shared |= _stated_in(without_tests(path.read_text()), by_rust, by_metal)
-    return in_effect, shared
+    return in_effect, shared, about
 
 
 def _tokens(value, key: str | None, out: list[str]) -> None:
@@ -243,28 +405,79 @@ def _tokens(value, key: str | None, out: list[str]) -> None:
             _tokens(held, key, out)
 
 
-def answered(root: Path, types: dict[str, Type]) -> dict[tuple[str, str], set[str]]:
+def _site_and_observed(node, named: list[str], observed: list[str]) -> None:
+    """A transcript's tokens, split by where they came from: a site's **name**, or what it observed.
+
+    The split is the whole point. A node's name is the **case's** label for a site, chosen by
+    whoever wrote the case; what the node observed is Metal's answer. Read into one bag they credit
+    a value to Metal because a case spelled the enumerator in its own site name, which across the
+    committed recordings is most of `MTLPixelFormat`: the suite labels the site it asks about with
+    the format's name and the site answers a number.
+    """
+    if not isinstance(node, dict):
+        return
+    name = node.get("name")
+    if isinstance(name, str):
+        named.extend(re.findall(r"[A-Za-z0-9_]+", name))
+    _tokens(node.get("observed"), None, observed)
+    for child in node.get("children") or []:
+        _site_and_observed(child, named, observed)
+
+
+def answered(
+    root: Path, types: dict[str, Type]
+) -> tuple[dict[tuple[str, str], set[str]], dict[tuple[str, str], set[str]]]:
     """The values a committed recording's compared transcript holds, by the cases holding them.
+
+    Two dicts, because they are two claims of different strength and were one number:
+
+    - **answered**: the value is in what a site **observed**, which is Metal's own answer. This is
+      the strong claim the document makes for the column -- Metal named the value back at a site
+      the comparison reads.
+    - **at a site**: the value is in a site's **name**. The comparison does read those names, and
+      pairs sites by them, so the value is in the compared text and the case did put it to Metal.
+      But it is the case's label and not Metal's answer, so it is no evidence that Metal **said**
+      the value, and folding it into the first overstated what the recording holds.
+
+    Both are inside *compared*, so no total moves; what moves is which column carries them.
 
     Only `answers[].outcomes[].transcript` is read. An answer's `validated` leg is Metal's API
     validation, which the suite records and **never compares**, and its complaints name
     enumerators; reading it would count Apple's prose as a comparison. The cost and timing tables
     are not read either: a site name there is what was measured, not an answer that was compared.
     """
-    of_name = {metal: held.metal for held in types.values() for metal in held.names}
+    of_name = {metal: (held.metal, metal) for held in types.values() for metal in held.names}
+    # A deprecated spelling names the value it is an alias of, so a recording holding
+    # `MTLPipelineOptionBindingInfo` is Metal naming bit 1 back at us, whatever the headers call
+    # that bit first.
+    for held in types.values():
+        for name, canonical in held.aliases.items():
+            of_name.setdefault(name, (held.metal, canonical))
     out: dict[tuple[str, str], set[str]] = {}
+    at_a_site: dict[tuple[str, str], set[str]] = {}
     for path in sorted((root / "crates/metal2vulkan-conformance/recordings").glob("*.json")):
         data = json.loads(path.read_text())
-        found: list[str] = []
+        named: list[str] = []
+        observed: list[str] = []
         for answer in data.get("answers", []):
             if answer.get("provenance") != RAN:
                 continue
             for outcome in answer.get("outcomes", []):
-                _tokens(outcome.get("transcript"), None, found)
-        for token in set(found):
+                _site_and_observed(
+                    (outcome.get("transcript") or {}).get("root"), named, observed
+                )
+        for token in set(observed):
             if token in of_name:
-                out.setdefault((of_name[token], token), set()).add(data["case"])
-    return out
+                out.setdefault(of_name[token], set()).add(data["case"])
+        for token in set(named):
+            if token in of_name and of_name[token] not in out:
+                at_a_site.setdefault(of_name[token], set()).add(data["case"])
+    # A value Metal observed somewhere is answered, whatever else spells it, so the two columns
+    # never hold the same value twice.
+    for key in list(at_a_site):
+        if key in out:
+            del at_a_site[key]
+    return out, at_a_site
 
 
 #: A Rust item the tree declares to be one Metal enum or option set: a doc comment naming the
@@ -332,20 +545,28 @@ def by_hand(root: Path, types: dict[str, Type]) -> list[tuple[str, str, list[str
 def inventory(root: Path, ran: set[str]) -> dict:
     """The axis, derived: every type with its three sets of values."""
     types = read_types(root)
-    hand = by_hand(root, types)
-    # A hand-modelled type is carried through the same resolution, keyed by its own Rust variant
-    # names: this axis has no SDK enumerator list for it, so a variant is all there is to name.
+    # The tree's own name for each type it models by hand, read off the declaring item, so the
+    # generated table of their SDK values can be keyed the way a case spells them.
+    named = {metal: rust for metal, rust, _ in by_hand(root, types)}
+    # A hand-modelled type with a generated table of the SDK's values is no longer hand-modelled
+    # as far as this axis is concerned: it has a denominator, so it joins the per-type table and
+    # leaves the one below it.
+    types.update(read_table(root, named))
+    hand = [row for row in by_hand(root, types) if row[0] not in types]
+    # A hand-modelled type the table does not cover is carried through the same resolution, keyed
+    # by its own Rust variant names: this axis has no SDK enumerator list for it, so a variant is
+    # all there is to name.
     held = dict(types)
     for metal, rust, names in hand:
         held[metal] = Type(metal, rust, "by hand", [(name, name) for name in names])
-    effect, shared = stated(root, held, ran)
-    read_back = answered(root, types)
+    effect, shared, about = stated(root, held, ran)
+    read_back, at_a_site = answered(root, types)
     rows = []
     for metal, held in sorted(types.items()):
         compared, only_shared, missing = [], [], []
         for name in held.names:
             key = (metal, name)
-            if key in read_back or key in effect:
+            if key in read_back or key in at_a_site or key in effect:
                 compared.append(name)
             elif key in shared:
                 only_shared.append(name)
@@ -359,10 +580,18 @@ def inventory(root: Path, ran: set[str]) -> dict:
                 "values": held.names,
                 "compared": compared,
                 "answered": [n for n in held.names if (metal, n) in read_back],
+                # In a site's **name** rather than in what it observed: the case's label for the
+                # site, which the comparison does pair by, so the value is in the compared text --
+                # but it is not Metal saying the value, which is what *answered* claims.
+                "at_a_site": [n for n in held.names if (metal, n) in at_a_site],
                 "in_effect": [n for n in held.names if (metal, n) in effect],
                 "shared": only_shared,
                 "missing": missing,
                 "modules": sorted({m for n in held.names for m in effect.get((metal, n), ())}),
+                # Modules whose text is about this type and states no value of it by name. A
+                # sweep written over ordinals reads this way, and so does a module that only
+                # mentions the type, so the row is a question for the case and not a verdict.
+                "named_no_value": sorted(about.get(metal, ())),
             }
         )
     hand_rows = [
@@ -383,5 +612,6 @@ def inventory(root: Path, ran: set[str]) -> dict:
         "rows": rows,
         "by_hand": hand_rows,
         "answered": read_back,
+        "at_a_site": at_a_site,
         "in_effect": effect,
     }

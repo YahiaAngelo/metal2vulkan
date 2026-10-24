@@ -719,13 +719,19 @@ def read_leg(api: Api, src: Path, files: list[str], enums: set[str]) -> Leg:
             # the `init` an `alloc()` is handed. The receiver is the class the path names, so
             # nothing has to be typed; the path is resolved against what `objc2-metal` binds on
             # that class, the same way an instance send is.
+            #
+            # `\s*` after each `::` because a long constructor's name does not fit beside its
+            # class: `MTLRasterizationRateMapDescriptor::` ends one line and
+            # `rasterizationRateMapDescriptorWithScreenSize_layer(..)` begins the next, and with
+            # the whitespace unmatched that call site was in no table at all -- not a call, not
+            # unresolved, nowhere.
             for match in re.finditer(
-                r"\b((?:[A-Za-z_][A-Za-z0-9_]*::)+)(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+                r"\b((?:[A-Za-z_][A-Za-z0-9_]*::\s*)+)(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
                 text[fn.start : fn.end],
             ):
                 rust = match.group(2)
                 at = fn.start + match.start()
-                ty = [part for part in match.group(1).split("::") if part][-1]
+                ty = [part for part in match.group(1).split("::") if part.strip()][-1].strip()
                 if not api.declares(ty):
                     # Not an Objective-C type of `objc2-metal` at all, so this sends no message:
                     # a Rust type's associated function (`Vec::new`), an enum's variant, or a
@@ -748,6 +754,11 @@ def read_leg(api: Api, src: Path, files: list[str], enums: set[str]) -> Leg:
             # qualifier is kept where it is a module (`crate::metal_work::run`) or `Self`, and
             # dropped where it is a type, because `MTLTextureDescriptor::new` is the class message
             # the loop above resolves and not this source's own `new`.
+            #
+            # A method send is excluded by the `.` before its name, and by that alone: `rustfmt`
+            # breaks a chain **before** the dot, so a continuation line reads `.label(` and the
+            # dot is beside the name wherever the call sits. Measured over the whole leg: 0 call
+            # sites have whitespace between the dot and the name.
             for match in re.finditer(
                 r"\b((?:[A-Za-z_][A-Za-z0-9_]*::)*)([A-Za-z_][A-Za-z0-9_]*)\s*\(",
                 text[fn.start : fn.end],
@@ -758,8 +769,6 @@ def read_leg(api: Api, src: Path, files: list[str], enums: set[str]) -> Leg:
                     continue
                 qualifier = [part for part in match.group(1).split("::") if part]
                 if qualifier and qualifier[-1][:1].isupper() and qualifier[-1] != "Self":
-                    continue
-                if api.receivers(rust):
                     continue
                 here = tuple(v for lo, hi, v in arms if lo <= at < hi)
                 leg.calls_function.setdefault(fn.name, set()).add(rust)

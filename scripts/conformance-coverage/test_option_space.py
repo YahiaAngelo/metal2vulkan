@@ -65,15 +65,44 @@ metal_flags! {
 """
 
 
+#: A generated enumerator table, as `regen-metal-enums` writes `TABLE_OUTPUT`: the SDK's values
+#: for a type the tree models by hand, with one deprecated spelling. `MTLKept` is declared by no
+#: generated Rust here, exactly as `MTLStoreAction` and `MTLPipelineOption` are declared by none.
+TABLE = """\
+# Generated from the macOS 27.0 SDK Metal.framework headers (names and values).
+type\tkind\trole\trust\tenumerator\tvalue
+MTLKept\tenum\tvalue\tFirst\tMTLKeptFirst\t0
+MTLKept\tenum\tvalue\tSecond\tMTLKeptSecond\t1
+MTLKept\tenum\tvalue\tThird\tMTLKeptThird\t2
+MTLKept\tenum\talias\tSecond\tMTLKeptOldSecond\t1
+"""
+
+#: A hand-written declaration of `MTLKept`, whose variants are spelled unlike the table's derived
+#: names, which is `MTLBlitOption`'s shape: the tree models an option set as a closed enum.
+BY_HAND_KEPT = """\
+/// `MTLKept`, which this tree declares itself.
+pub enum Kept {
+    First,
+    Second,
+    Third,
+}
+"""
+
+
 def tree(
     cases: dict[str, str],
     shared: str = "",
     recordings: tuple[dict, ...] = (),
     generated: str = GENERATED,
+    table: str = TABLE,
+    by_hand: str = "",
 ) -> Path:
     """A repository-shaped tree of exactly these sources and recordings."""
     root = Path(tempfile.mkdtemp(prefix="option-space-selftest-"))
     MADE.append(root)
+    enumerators = root / option_space.ENUMERATORS
+    enumerators.parent.mkdir(parents=True, exist_ok=True)
+    enumerators.write_text(table)
     for name in option_space.GENERATED:
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,6 +111,8 @@ def tree(
         path.write_text(generated)
     for name in option_space.BY_HAND:
         (root / name).mkdir(parents=True, exist_ok=True)
+    if by_hand:
+        (root / option_space.BY_HAND[0] / "kept.rs").write_text(by_hand)
     suite = root / "crates/metal2vulkan-conformance"
     (suite / "src/cases").mkdir(parents=True, exist_ok=True)
     (suite / "recordings").mkdir(parents=True, exist_ok=True)
@@ -240,13 +271,18 @@ class Answered(unittest.TestCase):
         self.assertEqual(row["answered"], [])
 
     def test_a_compound_site_name_is_split_into_its_tokens(self):
+        # The tokenising is what this is about, and it still holds. The column is `at_a_site` and
+        # not `answered`: a site's name is the case's label, so a value found there is in the
+        # compared text without Metal having named it back. See `AtASite`.
         data = recording("one", "MTLThingGamma")
         data["answers"][0]["outcomes"][0]["transcript"]["root"] = {
             "name": "MTLThingZeta/TextureBuffer/64x1x1",
             "observed": {"value": "absent"},
         }
         row = axis(tree({}, recordings=(data,)), set())
-        self.assertEqual(row["answered"], ["MTLThingZeta"])
+        self.assertEqual(row["at_a_site"], ["MTLThingZeta"])
+        self.assertEqual(row["answered"], [])
+        self.assertIn("MTLThingZeta", row["compared"])
 
 
 class SharedOnly(unittest.TestCase):
@@ -360,6 +396,216 @@ impl Thingy {
         )
         found = option_space.inventory(root, set())
         self.assertEqual([row["metal"] for row in found["by_hand"]], [])
+
+
+def site_named(case: str, value: str) -> dict:
+    """A recording of `case` whose transcript holds `value` as a site's **name**, observing nothing.
+
+    The shape 105 values of `MTLPixelFormat` are in across the committed recordings: a case labels
+    the site it asks about with the enumerator, and the site's own answer is a number.
+    """
+    node = {
+        "name": "case",
+        "children": [{"name": value, "observed": {"value": {"uint": 7}}}],
+    }
+    return {
+        "format": 1,
+        "case": case,
+        "suite_version": 1,
+        "answers": [
+            {
+                "provenance": option_space.RAN,
+                "runs": 1,
+                "outcomes": [{"runs": 1, "transcript": {"root": node}}],
+            }
+        ],
+    }
+
+
+class AtASite(unittest.TestCase):
+    """A value in a site's **name** is not Metal naming it back, and was counted as if it were.
+
+    The comparison pairs sites by name, so such a value is in the compared text and the case did
+    put it to Metal. But the name is the case's own label, so it is no evidence Metal said the
+    value -- and folding it into *answered* made that column read 172 where Metal's own
+    observations held 67.
+    """
+
+    def test_a_value_only_in_a_site_name_is_at_a_site_and_not_answered(self):
+        root = tree({"blends": "fn go() {}\n"}, recordings=(site_named("b-one", "MTLThingBeta"),))
+        row = axis(root, {"blends"})
+        self.assertEqual(row["at_a_site"], ["MTLThingBeta"])
+        self.assertEqual(row["answered"], [])
+        # Still compared: the value is in the text the comparison reads.
+        self.assertEqual(row["compared"], ["MTLThingBeta"])
+        self.assertEqual(row["missing"], [n for n in row["values"] if n != "MTLThingBeta"])
+
+    def test_a_value_a_site_observed_is_answered(self):
+        root = tree({"blends": "fn go() {}\n"}, recordings=(recording("b-one", "MTLThingBeta"),))
+        row = axis(root, {"blends"})
+        self.assertEqual(row["answered"], ["MTLThingBeta"])
+        self.assertEqual(row["at_a_site"], [])
+
+    def test_a_value_both_observed_and_named_is_answered_only(self):
+        # The two columns never hold one value twice: what Metal observed is answered, whatever
+        # else spells it.
+        root = tree(
+            {"blends": "fn go() {}\n"},
+            recordings=(
+                recording("b-one", "MTLThingBeta"),
+                site_named("b-two", "MTLThingBeta"),
+            ),
+        )
+        row = axis(root, {"blends"})
+        self.assertEqual(row["answered"], ["MTLThingBeta"])
+        self.assertEqual(row["at_a_site"], [])
+
+    def test_a_carried_answers_site_name_is_not_read(self):
+        # The same gate the rest of `answered` applies: a carried answer ran no Metal.
+        held = site_named("b-one", "MTLThingBeta")
+        held["answers"][0]["provenance"] = "carried"
+        root = tree({"blends": "fn go() {}\n"}, recordings=(held,))
+        row = axis(root, {"blends"})
+        self.assertEqual(row["at_a_site"], [])
+        self.assertEqual(row["answered"], [])
+
+
+class BracedUse(unittest.TestCase):
+    """`use Type::{A, B};` names those values, which only `Head::Tail` reading missed entirely.
+
+    `border_swizzles` sweeps all three `MTLSamplerBorderColor` values in nine samplers through a
+    braced `use` and then writes the variants bare, naming `SamplerBorderColor::` nowhere. The
+    axis read 1 of 3 and the document said so while the sweep was complete.
+    """
+
+    def test_a_braced_use_names_every_variant_it_imports(self):
+        root = tree({"blends": "use Thing::{Alpha, Gamma};\nlet pair = [Alpha, Gamma];\n"})
+        self.assertEqual(axis(root, {"blends"})["in_effect"], ["MTLThingAlpha", "MTLThingGamma"])
+
+    def test_a_renamed_import_names_the_value_imported_not_the_local_name(self):
+        root = tree({"blends": "use Thing::{Beta as B};\nlet x = [B, B];\n"})
+        self.assertEqual(axis(root, {"blends"})["in_effect"], ["MTLThingBeta"])
+
+    def test_the_objc2_spelling_of_a_braced_use_is_read(self):
+        root = tree({"blends": "use MTLThing::{Delta, Epsilon};\nlet x = [Delta, Epsilon];\n"})
+        self.assertEqual(axis(root, {"blends"})["in_effect"], ["MTLThingDelta", "MTLThingEpsilon"])
+
+    def test_a_qualified_path_resolves_to_its_last_segment(self):
+        root = tree({"blends": "use metal2vulkan::metal::Thing::{Zeta};\nlet x = Zeta;\n"})
+        self.assertEqual(axis(root, {"blends"})["in_effect"], ["MTLThingZeta"])
+
+    def test_a_braced_use_of_something_else_names_no_value(self):
+        # The direction this could go wrong in: a brace list of names that are not the type's
+        # values, and a type name that is not a Metal type at all.
+        root = tree({"blends": "use Thing::{Omega};\nuse Other::{Alpha, Beta};\n"})
+        self.assertEqual(axis(root, {"blends"})["in_effect"], [])
+
+    def test_a_bare_name_with_no_use_names_nothing(self):
+        # The unsound reading this deliberately does not take: a module that writes `Alpha` and
+        # imports nothing has not said which type's value it means.
+        root = tree({"blends": "let x = [Alpha, Beta, Gamma];\n"})
+        self.assertEqual(axis(root, {"blends"})["in_effect"], [])
+
+    def test_a_braced_use_in_a_comment_names_nothing(self):
+        root = tree({"blends": "// use Thing::{Alpha, Beta};\nfn go() {}\n"})
+        self.assertEqual(axis(root, {"blends"})["in_effect"], [])
+
+
+class Table(unittest.TestCase):
+    """The generated enumerator table is the denominator for a type the tree declares by hand.
+
+    These types have no generated Rust, so before the table the axis measured a hand-written
+    variant list against itself: it could not report a value the SDK declares and the tree does
+    not, and it reported an option-set newtype -- which declares no variants at all -- as a type
+    with no values. Each test here asserts both that the table's values are counted and that
+    nothing is counted the table does not hold.
+    """
+
+    def row(self, root: Path, ran: set[str]):
+        """`MTLKept`'s row of the per-type table."""
+        held = option_space.inventory(root, ran)
+        return next(row for row in held["rows"] if row["metal"] == "MTLKept")
+
+    def test_the_table_is_the_denominator_and_leaves_the_hand_modelled_list(self):
+        root = tree({}, by_hand=BY_HAND_KEPT)
+        held = option_space.inventory(root, set())
+        row = next(one for one in held["rows"] if one["metal"] == "MTLKept")
+        self.assertEqual(row["values"], ["MTLKeptFirst", "MTLKeptSecond", "MTLKeptThird"])
+        self.assertEqual(row["compared"], [])
+        self.assertEqual(row["missing"], row["values"])
+        # And it is no longer in the table of types with no denominator, which is where it sat.
+        self.assertNotIn("MTLKept", [one["metal"] for one in held["by_hand"]])
+
+    def test_a_value_the_table_does_not_hold_is_not_counted(self):
+        # The one direction a table-backed denominator could go wrong in: a name shaped like an
+        # enumerator of the type, which the SDK does not declare.
+        root = tree({"kept": "let x = Kept::Fourth;\n"}, by_hand=BY_HAND_KEPT)
+        row = self.row(root, {"kept"})
+        self.assertEqual(row["compared"], [])
+        self.assertEqual(len(row["values"]), 3)
+
+    def test_the_trees_own_variant_name_states_the_sdk_value(self):
+        # `MTLBlitOption`'s shape: our variant is `Second`, the table's derived name is `Second`
+        # here but the join that matters is the enumerator, so a tree whose spelling differs from
+        # the table's still resolves. The objc2 spelling resolves the same way.
+        root = tree({"kept": "let x = Kept::Second;\n"}, by_hand=BY_HAND_KEPT)
+        self.assertEqual(self.row(root, {"kept"})["in_effect"], ["MTLKeptSecond"])
+        root = tree({"kept": "let x = MTLKept::Third;\n"}, by_hand=BY_HAND_KEPT)
+        self.assertEqual(self.row(root, {"kept"})["in_effect"], ["MTLKeptThird"])
+
+    def test_a_deprecated_spelling_names_the_value_it_is_an_alias_of(self):
+        # `MTLPipelineOption`'s shape: the headers declare `MTLPipelineOptionArgumentInfo` first,
+        # so the canonical enumerator of bit 1 is the one nothing in the tree writes, and the
+        # spelling the leg does write -- `MTLPipelineOption::BindingInfo` -- is the alias. Without
+        # the alias rows that value reads as named nowhere.
+        root = tree({"kept": "let x = MTLKept::OldSecond;\n"}, by_hand=BY_HAND_KEPT)
+        row = self.row(root, {"kept"})
+        self.assertEqual(row["in_effect"], ["MTLKeptSecond"])
+        self.assertNotIn("MTLKeptOldSecond", row["values"])
+        # And answered reads an alias in a recording's transcript as the value too.
+        root = tree(
+            {"kept": "fn run() {}\n"},
+            recordings=(recording("kept-one", "MTLKeptOldSecond"),),
+            by_hand=BY_HAND_KEPT,
+        )
+        self.assertEqual(self.row(root, {"kept"})["answered"], ["MTLKeptSecond"])
+
+    def test_a_table_that_parsed_to_nothing_is_a_failure(self):
+        # The one way a denominator can read as a closed option space: a table whose rows the
+        # reader no longer matches lowers every count at once and still looks like a measurement.
+        root = tree({}, table="# only a comment\ntype\tkind\trole\trust\tenumerator\tvalue\n")
+        with self.assertRaises(SystemExit):
+            option_space.inventory(root, set())
+
+
+class NamedWithNoValue(unittest.TestCase):
+    """A type a module is about and states no value of: the raw-ordinal limit as a work list."""
+
+    def test_a_module_naming_the_type_and_no_value_is_reported(self):
+        root = tree({"blends": "for bits in 0..6 { side.go(MTLThing(bits)); }\n"})
+        self.assertEqual(axis(root, {"blends"})["named_no_value"], ["blends"])
+
+    def test_a_module_that_states_a_value_is_not_reported(self):
+        # The same module with one value named: it is no longer a case whose depth is unreadable,
+        # whatever else it sweeps by ordinal.
+        root = tree({"blends": "let x = MTLThing::Alpha;\nfor bits in 0..6 { go(bits); }\n"})
+        row = axis(root, {"blends"})
+        self.assertEqual(row["named_no_value"], [])
+        self.assertEqual(row["in_effect"], ["MTLThingAlpha"])
+
+    def test_a_module_naming_neither_is_not_reported(self):
+        root = tree({"blends": "let x = 3;\n"})
+        self.assertEqual(axis(root, {"blends"})["named_no_value"], [])
+
+    def test_the_type_name_is_matched_as_a_whole_identifier(self):
+        # `ThingCase` is not `Thing`, and `MTLThingAlpha` is a value's name and not the type's.
+        root = tree({"blends": "struct ThingCase;\nfn go(x: MTLThingAlphaish) {}\n"})
+        self.assertEqual(axis(root, {"blends"})["named_no_value"], [])
+
+    def test_a_module_with_no_metal_run_is_not_reported(self):
+        # The same gate the rest of the axis applies: a module that ran no Metal put nothing to it.
+        root = tree({"blends": "for bits in 0..6 { side.go(MTLThing(bits)); }\n"})
+        self.assertEqual(axis(root, set())["named_no_value"], [])
 
 
 if __name__ == "__main__":

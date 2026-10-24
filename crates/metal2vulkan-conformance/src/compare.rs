@@ -424,6 +424,21 @@ impl Walk<'_> {
             // nowhere and its children everywhere.
             return;
         }
+        // Before pairing anything: a name held twice under one parent is a pair this walk cannot
+        // settle, and `Node::child` below would answer with the first namesake and compare the
+        // second against nothing. Reported on whichever side holds it, because a case builds both
+        // and either side's repeat loses the same comparison.
+        for (side, node) in [(Side::Metal, metal), (Side::Ours, ours)] {
+            for (name, held) in node.repeated_children() {
+                self.found.divergences.push(Divergence::new(
+                    format!("{path}/{name}"),
+                    DivergenceKind::DuplicateSite {
+                        held_by: side,
+                        held,
+                    },
+                ));
+            }
+        }
         for child in &metal.children {
             match ours.child(&child.name) {
                 Some(theirs) => self.node(&path, child, theirs),

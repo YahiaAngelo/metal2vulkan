@@ -62,6 +62,35 @@ impl Node {
     pub fn child(&self, name: &str) -> Option<&Node> {
         self.children.iter().find(|child| child.name == name)
     }
+
+    /// The names this node holds more than one child under, each with how many it holds.
+    ///
+    /// A site's path is how the comparison finds the answer to hold it against, and [`Self::child`]
+    /// answers with the **first** namesake, so two children under one name are a pair the walk
+    /// cannot settle: it compares a site against whichever namesake it reaches, and the other
+    /// site's observation is never compared with anything. Nothing refuses it -- [`Self::with`]
+    /// and [`Sites::push`] append whatever they are given -- so the loss is silent, with no error
+    /// and no change of verdict. A case of this round named the call that made its buffer and the
+    /// buffer's bytes after the pass both `buffer`, and its replay reported a difference at
+    /// `case/buffer` between Metal's bytes and our `Ok` of the make, having compared no byte of
+    /// either.
+    ///
+    /// So this is the one reading of the rule, and both the places that hold it call it: the
+    /// comparison, which reports a repeat rather than pairing by luck, and
+    /// `no_recorded_site_shares_its_name_with_a_sibling`, which holds every committed recording to
+    /// it. Children keep their order, so the names come back in the order the repeats appear.
+    pub fn repeated_children(&self) -> Vec<(&str, usize)> {
+        let mut held: Vec<(&str, usize)> = Vec::new();
+        for child in &self.children {
+            let name = child.name.as_str();
+            match held.iter_mut().find(|(seen, _)| *seen == name) {
+                Some((_, count)) => *count += 1,
+                None => held.push((name, 1)),
+            }
+        }
+        held.retain(|(_, count)| *count > 1);
+        held
+    }
 }
 
 /// What one site observed.

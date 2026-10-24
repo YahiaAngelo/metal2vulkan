@@ -156,6 +156,17 @@ pub enum DivergenceKind {
     Digest { metal: String, ours: String },
     /// A site one side holds and the other does not.
     Site { held_by: Side },
+    /// One side holds more than one site of this name under one parent, so the comparison cannot
+    /// say which answer belongs to which.
+    ///
+    /// A case authoring defect rather than a difference from Metal, and reported because the
+    /// alternative is silence: the walk finds a site by name
+    /// ([`crate::transcript::Node::child`]) and answers with the first namesake, so the second
+    /// site's observation is compared against nothing at all and the case passes having measured
+    /// less than it says. **Not** loosenable, for the same reason
+    /// [`DivergenceKind::UndeclaredNotice`] is not: an allowance names a site by its path, and
+    /// where a path names two sites there is nothing for it to name.
+    DuplicateSite { held_by: Side, held: usize },
     /// The case loosened this site, and the allowance does not hold: the difference it would have
     /// covered is one nobody is accounting for.
     Unjustified { why: String },
@@ -344,6 +355,11 @@ impl std::fmt::Display for DivergenceKind {
                 write!(out, "the digest is {metal} on Metal and {ours} here")
             }
             DivergenceKind::Site { held_by } => write!(out, "only {held_by} observed this site"),
+            DivergenceKind::DuplicateSite { held_by, held } => write!(
+                out,
+                "{held_by} holds {held} sites of this name under one parent, so the comparison \
+                 cannot say which answer is which"
+            ),
             DivergenceKind::Unjustified { why } => {
                 write!(out, "the case loosens this site, and {why}")
             }
