@@ -125,9 +125,13 @@ const RELEASED: &str = "what a release got round to destroying, which runs on wh
 /// Measured, in the one direction that matters. `depth16-texel-reads` run alone makes 2 pipeline
 /// layouts and shares none; inside the 350-case set it makes 1 and shares 1. Two and two.
 /// `xr-two-planes-rgb10a8-2p-xr10-srgb` run alone makes 8 pipeline variants and takes none back;
-/// inside the set it makes 4 and takes 4 back — and `variants_taken_back` is the one count of this
-/// family measured to go **up** with more cases around it, from 0 to 4, which is the direction an
-/// upper bound cannot survive.
+/// inside the set it makes 4 and takes 4 back — and `variants_taken_back` is the first count of
+/// this family measured to go **up** with more cases around it, from 0 to 4, which is the direction
+/// an upper bound cannot survive. `draw_shapes_reused` is the second, and the loudest:
+/// `integer-vertex-attributes` reads 0 alone and reached 19 in one replay of the whole set and 11
+/// in the next, because a draw takes none of a shape whose derivation announces a notice the device
+/// announces at every occurrence (`DeviceOptions::announce_each`, which this suite sets over every
+/// kind), so what it reuses depends on the notice state every case before it left behind.
 ///
 /// The `_made` partners stay gated, and a measurement over all 393 cases in both shapes says they
 /// can: `addressable_buffers_made`, `pooled_memory_blocks_made`, `arena_pools_made`,
@@ -292,7 +296,7 @@ const POOLED: &str = "an object made because no spare was free, where a spare co
 /// replays of a larger case set — which reads like a regression and is not one. See [`BORROWED`].
 /// `slot_returns` beside it stays gated: it counts work items, one a command buffer, and has held
 /// still alone and in both case sets.
-const RACY: [(&str, &str); 31] = [
+const RACY: [(&str, &str); 32] = [
     ("fences_made", POOLED),
     // What is alive, parked or waiting at the instant the counts were read.
     ("memory_blocks_live", INSTANTANEOUS),
@@ -308,13 +312,14 @@ const RACY: [(&str, &str); 31] = [
     ("host_imports_resident", INSTANTANEOUS),
     // A release the owning thread got round to, outside the `object_churn.` tree.
     ("sampler_sets_destroyed", RELEASED),
-    // Found already made rather than made. Named one by one rather than by the `_shared` suffix,
-    // which `set_zero_writes_if_shapes_shared` also carries and which is a per-draw count of the
-    // case's own work.
+    // Found already made rather than made. Named one by one rather than by a suffix: `_shared` is
+    // also carried by `set_zero_writes_if_shapes_shared`, which is a per-draw count of the case's
+    // own work, and `_reused` by counts of what a case's own encoder settled once.
     ("pipeline_layouts_shared", FOUND),
     ("shader_modules_shared", FOUND),
     ("sampler_sets_shared", FOUND),
     ("variants_taken_back", FOUND),
+    ("draw_shapes_reused", FOUND),
     ("completed_waits", BORROWED),
     ("pipeline_pool_busy", POOL_STATE),
     ("encoder_primaries_begun_ahead", AHEAD),

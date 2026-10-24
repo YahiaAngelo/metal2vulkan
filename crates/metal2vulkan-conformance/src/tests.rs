@@ -4257,6 +4257,12 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         "pipeline_layouts_shared",
         "shader_modules_shared",
         "completed_waits",
+        // A draw takes none of a shape whose derivation announces a notice the device announces at
+        // every occurrence, and this suite sets that over every kind, so what a case reuses
+        // depends on the notice state every case before it left behind:
+        // `integer-vertex-attributes` reads 0 alone and reached 19 and then 11 in two whole-set
+        // replays.
+        "draw_shapes_reused",
     ] {
         assert!(racy(count).is_some(), "{count}");
     }
@@ -4271,10 +4277,11 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         "commands_replayed.cmd_draw",
         "render_passes_made",
         "slot_returns",
-        // The `_made` partner of a `_shared` count stays gated: finding one already made only
-        // lowers it, and the gate is an upper bound.
+        // The `_made` partner of a `_shared` or `_reused` count stays gated: finding one already
+        // made, or reusing a shape already derived, only lowers it, and the gate is an upper bound.
         "pipeline_layouts_made",
         "shader_modules_made",
+        "draw_shapes_made",
     ] {
         assert!(racy(count).is_none(), "{count}");
     }
