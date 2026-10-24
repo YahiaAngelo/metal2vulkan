@@ -173,6 +173,16 @@ impl DeviceProfile {
         crate::memory::contain::device_drops_texel_writes(self, texel_buffer)
     }
 
+    /// Whether a `half` or `float` read of a 16-bit float texture answers the texel's own bits,
+    /// read through the texture's unsigned-integer alias at the slot's second binding
+    /// (`DevicePolicy::half_texel_bits`,
+    /// [`HalfTexelBitsPolicy::Exact`](crate::device::HalfTexelBitsPolicy::Exact)); `false` under
+    /// the default, where the read answers the device's decode of the texel. The runtime reads it
+    /// to list the alias among a sampled image's view formats.
+    pub fn reads_half_texel_bits(&self) -> bool {
+        self.fields.half_texel_bits == crate::device::policy::HalfTexelBitsPolicy::Exact
+    }
+
     /// The driver workarounds the profile takes: the leaf encodings it changes and the refusals of
     /// what the driver is measured to run wrong.
     pub fn workarounds(&self) -> &[DriverWorkaround] {
@@ -446,6 +456,10 @@ pub struct ProfileFields {
     /// Whether a `half4` output of a module without fast math blends into a 16-bit float
     /// attachment in the device's blend or in Metal's, computed by the function (the policy's).
     pub half_blend: crate::device::policy::HalfBlendPolicy,
+    /// Whether a `half` or `float` read of a 16-bit float texture answers the device's decode of
+    /// the texel or the texel's own bits, read through the texture's unsigned-integer alias (the
+    /// policy's).
+    pub half_texel_bits: crate::device::policy::HalfTexelBitsPolicy,
     /// Whose `half` rounding a module takes: Metal's (a measured form, or the integer rounding
     /// the policy's `HalfRoundingPolicy::Exact` asks for) or the device's own conversion or
     /// quantize (`lower::arith::narrow::quantize_form`). Derived, so a device measured to round
