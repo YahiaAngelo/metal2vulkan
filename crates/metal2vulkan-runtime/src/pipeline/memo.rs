@@ -22,7 +22,7 @@ use crate::device::lock;
 use crate::key_hash::KeyMap;
 use metal2vulkan::cache::PipelineKey;
 use metal2vulkan::library::{CompiledFunction, FunctionCompileKey};
-use metal2vulkan::pipeline::{ComputePipeline, RenderPipeline};
+use metal2vulkan::pipeline::{ComputePipeline, RenderPipeline, StageEntries};
 use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex, Weak};
@@ -204,7 +204,15 @@ enum MemoValue {
 }
 
 /// The device's memo of compiled pipelines.
-pub(crate) struct PipelineMemo(Mutex<Lru<MemoKey, MemoValue>>);
+pub(crate) struct PipelineMemo {
+    pipelines: Mutex<Lru<MemoKey, MemoValue>>,
+    /// The device's specialized stage entries, which every pipeline creation of the device shares
+    /// ([`PipelineMemo::stage_entries`]).
+    entries: StageEntries,
+    /// What [`PipelineMemo::note_stage_entries`] has counted of `entries`' own totals, so a
+    /// creation adds only what it moved.
+    noted: Mutex<(u64, u64)>,
+}
 
 /// What the memo knows of a compiled pipeline: the variant a live state made of it, or only the
 /// pipeline, whose objects are made again.
@@ -216,12 +224,35 @@ pub(crate) enum Remembered<P, V> {
 impl PipelineMemo {
     /// An empty memo of at most `capacity` bytes and [`MEMO_ENTRIES`] entries.
     pub(crate) fn new(capacity: u64) -> PipelineMemo {
-        PipelineMemo(Mutex::new(Lru::new(capacity, MEMO_ENTRIES)))
+        PipelineMemo {
+            pipelines: Mutex::new(Lru::new(capacity, MEMO_ENTRIES)),
+            entries: StageEntries::new(),
+            noted: Mutex::new((0, 0)),
+        }
+    }
+
+    /// The device's specialized stage entries: one object every pipeline creation of the device
+    /// gives to its checks, its keys and its compile, so a stage's function is decoded and
+    /// specialized once for the device and not once for each state made of it. An entry is a
+    /// property of the function, its constants, its linked functions and its dynamic libraries
+    /// alone, never of the state's own fields, so a sweep of states over one function pair shares
+    /// one entry a stage; the object is bounded, and the least recently used entries go.
+    pub(crate) fn stage_entries(&self) -> &StageEntries {
+        &self.entries
+    }
+
+    /// Count what the device's stage entries have specialized and spared since this last read it
+    /// (`WorkCounts::stage_entries_specialized`, `stage_entries_shared`).
+    pub(crate) fn note_stage_entries(&self, counts: &crate::work_counts::Counters) {
+        let (made, found) = self.entries.counts();
+        let mut noted = lock(&self.noted);
+        counts.stage_entries(made.saturating_sub(noted.0), found.saturating_sub(noted.1));
+        *noted = (made, found);
     }
 
     /// The function compiled under `key`.
     pub(crate) fn function(&self, key: &FunctionCompileKey) -> Option<CompiledFunction> {
-        match lock(&self.0).get(&MemoKey::Function(*key)) {
+        match lock(&self.pipelines).get(&MemoKey::Function(*key)) {
             Some(MemoValue::Function(function)) => Some(function.clone()),
             _ => None,
         }
@@ -229,7 +260,7 @@ impl PipelineMemo {
 
     /// Keep `function`, whose encoding is `bytes` long.
     pub(crate) fn keep_function(&self, function: &CompiledFunction, bytes: u64) {
-        lock(&self.0).insert(
+        lock(&self.pipelines).insert(
             MemoKey::Function(*function.key()),
             MemoValue::Function(function.clone()),
             bytes,
@@ -241,7 +272,7 @@ impl PipelineMemo {
         &self,
         key: &PipelineKey,
     ) -> Option<Remembered<ComputePipeline, Variant>> {
-        match lock(&self.0).get(&MemoKey::Compute(*key)) {
+        match lock(&self.pipelines).get(&MemoKey::Compute(*key)) {
             Some(MemoValue::Compute(pipeline, live)) => Some(remembered(pipeline, live)),
             _ => None,
         }
@@ -249,7 +280,7 @@ impl PipelineMemo {
 
     /// Keep `pipeline`, whose encoding is `bytes` long.
     pub(crate) fn keep_compute(&self, pipeline: &Arc<ComputePipeline>, bytes: u64) {
-        lock(&self.0).insert(
+        lock(&self.pipelines).insert(
             MemoKey::Compute(pipeline.key),
             MemoValue::Compute(Arc::clone(pipeline), Weak::new()),
             bytes,
@@ -259,7 +290,7 @@ impl PipelineMemo {
     /// Remember `variant` as the live variant of its pipeline, if the memo holds the pipeline.
     pub(crate) fn live_compute(&self, variant: &Arc<Variant>) {
         let key = MemoKey::Compute(variant.pipeline.key);
-        if let Some(MemoValue::Compute(_, live)) = lock(&self.0).get_mut(&key) {
+        if let Some(MemoValue::Compute(_, live)) = lock(&self.pipelines).get_mut(&key) {
             *live = Arc::downgrade(variant);
         }
     }
@@ -269,7 +300,7 @@ impl PipelineMemo {
         &self,
         key: &PipelineKey,
     ) -> Option<Remembered<RenderPipeline, RenderVariant>> {
-        match lock(&self.0).get(&MemoKey::Render(*key)) {
+        match lock(&self.pipelines).get(&MemoKey::Render(*key)) {
             Some(MemoValue::Render(pipeline, live)) => Some(remembered(pipeline, live)),
             _ => None,
         }
@@ -277,7 +308,7 @@ impl PipelineMemo {
 
     /// Keep `pipeline`, whose encoding is `bytes` long.
     pub(crate) fn keep_render(&self, pipeline: &Arc<RenderPipeline>, bytes: u64) {
-        lock(&self.0).insert(
+        lock(&self.pipelines).insert(
             MemoKey::Render(pipeline.key),
             MemoValue::Render(Arc::clone(pipeline), Weak::new()),
             bytes,
@@ -287,7 +318,7 @@ impl PipelineMemo {
     /// Remember `variant` as the live variant of its pipeline, if the memo holds the pipeline.
     pub(crate) fn live_render(&self, variant: &Arc<RenderVariant>) {
         let key = MemoKey::Render(variant.pipeline().key);
-        if let Some(MemoValue::Render(_, live)) = lock(&self.0).get_mut(&key) {
+        if let Some(MemoValue::Render(_, live)) = lock(&self.pipelines).get_mut(&key) {
             *live = Arc::downgrade(variant);
         }
     }
@@ -295,7 +326,7 @@ impl PipelineMemo {
     /// The bytes and entries the memo holds.
     #[cfg(test)]
     pub(crate) fn footprint(&self) -> (u64, usize) {
-        lock(&self.0).footprint()
+        lock(&self.pipelines).footprint()
     }
 }
 

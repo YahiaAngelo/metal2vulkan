@@ -239,10 +239,20 @@ fn a_vertex_function_returns_a_value_where_its_type_is_not_void() {
     ] {
         let mut descriptor = RenderPipelineDescriptor::new(source(&library, vertex_function));
         descriptor.rasterization_enabled = false;
+        // Twice through one object: the second ask reads the answer the first read, and the two
+        // agree, as a creation of the same function after another gets it.
+        let entries = StageEntries::new();
+        for _ in 0..2 {
+            assert_eq!(
+                descriptor.vertex_returns_value(&Budget::standard(), &entries),
+                Ok(returns),
+                "{vertex_function}"
+            );
+        }
         assert_eq!(
-            descriptor.vertex_returns_value(&Budget::standard()),
-            Ok(returns),
-            "{vertex_function}"
+            format!("{entries:?}"),
+            "StageEntries { made: 0 }",
+            "a plain answer keeps no specialized entry"
         );
     }
 }

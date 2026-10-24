@@ -764,34 +764,87 @@ pub(crate) fn stage_uses_direct_arguments(
     })
 }
 
-/// The specialized entries of the stages of one pipeline state's creation: each stage's function,
-/// with its calls nesting a given depth, is decoded and specialized at most once while the object
-/// lives, and every check, key and compile of the creation that is given the object reads that one
-/// entry. Specializing a large function takes far longer than decoding it (16 ms of an 18 ms decode
+/// The specialized entries of pipeline states' stages: each stage's function, with its calls
+/// nesting a given depth, is decoded and specialized at most once while the object holds its
+/// entry, and every check, key and compile that is given the object reads that one entry.
+/// Specializing a large function takes far longer than decoding it (16 ms of an 18 ms decode
 /// and specialization, measured), and a render state's creation asks for each stage's entry up to
 /// three times before its compile: its descriptor's linked-use checks
 /// (`RenderPipelineDescriptor::unwritten_fragment_inputs` and
 /// `fragment_writes_depth_unattached`) and its key (`Device::render_variant_key`).
 ///
-/// It holds each entry until it is dropped: a creation makes one, gives it to each of its steps,
-/// and drops it with the creation, so no entry outlives the state's making. Entries are told apart
-/// by their function descriptor (the function, its constants, its linked functions and dynamic
-/// libraries) and depth, so one object given to steps of different descriptors stays exact.
+/// **One object serves many creations.** Nothing in an entry depends on the pipeline state it was
+/// asked for: it is the function, its constants, its linked functions and its dynamic libraries
+/// alone (the device's profile does not reach it either, which is why a consumer may share one
+/// object across its devices). So a consumer that keeps one object and gives it to every creation
+/// specializes each stage once however many states it makes of it -- a sweep of pipeline states
+/// over one vertex-and-fragment pair decodes and specializes its two functions once rather than
+/// twice a state. Entries are told apart by their function descriptor and depth, so one object
+/// given to steps of different descriptors stays exact.
+///
+/// **The plain answers too.** A creation also reads answers of a stage's AIR that need no
+/// specialization and so are not worth keeping a specialized entry for: whether its entry returns
+/// a value, which Metal's creation refuses with rasterization disabled
+/// ([`RenderPipelineDescriptor::vertex_returns_value`]). Each is a function of the stage's
+/// descriptor alone, so the object keeps it beside the entries and a sweep of states decodes for
+/// it once.
+///
+/// **Bounded.** It keeps at most 32 specialized entries and at most 64 MiB of them (each entry
+/// charged what specializing it charged the ledger), and at most 32 plain answers; past any of
+/// those, the least recently used go, so an object that outlives one creation never grows without
+/// bound. A refusal is not kept: the next ask makes it again.
 #[derive(Default)]
 pub struct StageEntries {
-    made: std::sync::Mutex<Vec<StageEntry>>,
+    kept: std::sync::Mutex<Kept>,
+}
+
+/// The most entries one [`StageEntries`] keeps, whatever their sizes. One creation asks for at
+/// most three (its stages), so this is room for the stages of many states' worth of functions,
+/// while the search stays a scan of a handful.
+const KEPT_ENTRIES: usize = 32;
+
+/// The most bytes of specialized entries one [`StageEntries`] keeps: 64 MiB, each entry charged
+/// what specializing it charged the compile's ledger. One translation attempt may use 500 MiB, so
+/// an object shared between creations holds a fraction of one attempt's room.
+const KEPT_ENTRY_BYTES: u64 = 64 << 20;
+
+/// What a [`StageEntries`] holds: its specialized entries and its plain answers, each least
+/// recently used first, the bytes the entries were charged, and the totals its counts report.
+#[derive(Default)]
+struct Kept {
+    entries: Vec<StageEntry>,
+    /// The answers read of a stage's AIR without specializing it.
+    answers: Vec<StageAnswer>,
+    bytes: u64,
+    made: u64,
+    found: u64,
+}
+
+/// One plain answer of [`StageEntries`], read of a stage's AIR without specializing it, with what
+/// tells it apart: the stage's descriptor alone decides it.
+struct StageAnswer {
+    /// As a [`StageEntry`]'s: compared before the descriptor.
+    air_hash: Hash256,
+    function: FunctionDescriptor,
+    /// Whether the entry returns a value ([`stage_returns_value`]).
+    returns_value: bool,
 }
 
 /// One specialized entry of [`StageEntries`], with what tells it apart.
 struct StageEntry {
+    /// The function's AIR hash, which tells entries apart without comparing their descriptors:
+    /// the library's own table states it, so a scan reads it without decoding anything.
+    air_hash: Hash256,
     function: FunctionDescriptor,
     depth: u32,
+    /// What specializing it charged the ledger, which the byte bound counts.
+    bytes: u64,
     specialized: Arc<Specialized>,
 }
 
 impl std::fmt::Debug for StageEntries {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let made = self.made.lock().map_or(0, |made| made.len());
+        let made = self.kept.lock().map_or(0, |kept| kept.entries.len());
         f.debug_struct("StageEntries").field("made", &made).finish()
     }
 }
@@ -800,6 +853,46 @@ impl StageEntries {
     /// No entry made yet.
     pub fn new() -> StageEntries {
         StageEntries::default()
+    }
+
+    /// How many times it has decoded a stage's AIR -- to specialize an entry, or alone for a
+    /// plain answer -- and how many asks found what an earlier one read, over its whole life
+    /// (neither ever falls). A consumer that gives one object to every pipeline creation reads
+    /// the decodes it spared in the second.
+    pub fn counts(&self) -> (u64, u64) {
+        let kept = self.kept.lock();
+        kept.as_ref().map_or((0, 0), |k| (k.made, k.found))
+    }
+
+    /// Whether the entry of stage `fd` returns a value: the answer an earlier ask read, else read
+    /// now under `m` by `read`, which decodes the stage's AIR and specializes nothing
+    /// ([`stage_returns_value`]). The stage's descriptor alone decides it. A refusal is not kept.
+    fn returns_value(
+        &self,
+        fd: &FunctionDescriptor,
+        read: impl FnOnce() -> Result<bool, Error>,
+    ) -> Result<bool, Error> {
+        // The library's table states it without decoding (`Function::info`).
+        let air_hash = fd.function.info().air_hash;
+        let lock = || self.kept.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(returns) = lock().answer(&air_hash, fd) {
+            return Ok(returns);
+        }
+        let returns_value = read()?;
+        let mut kept = lock();
+        // As a specialized entry's: another caller may have read it meanwhile, and its answer is
+        // this one.
+        if let Some(theirs) = kept.answer(&air_hash, fd) {
+            return Ok(theirs);
+        }
+        kept.made += 1;
+        kept.answers.push(StageAnswer {
+            air_hash,
+            function: fd.clone(),
+            returns_value,
+        });
+        kept.evict();
+        Ok(returns_value)
     }
 
     /// The entry of stage `fd`, its calls nesting `depth` deep through visible functions (0 is
@@ -815,16 +908,17 @@ impl StageEntries {
         m: &mut Meter,
     ) -> Result<Arc<Specialized>, Error> {
         let depth = depth.max(1);
-        let lock = || self.made.lock().unwrap_or_else(|e| e.into_inner());
-        let found = lock()
-            .iter()
-            .find(|e| e.depth == depth && e.function == *fd)
-            .map(|e| Arc::clone(&e.specialized));
-        if let Some(specialized) = found {
+        // The library's table states it without decoding (`Function::info`).
+        let air_hash = fd.function.info().air_hash;
+        let lock = || self.kept.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(specialized) = lock().take(&air_hash, fd, depth) {
             return Ok(specialized);
         }
         let mut inputs = LowerInputs::new();
         inputs.max_call_stack_depth = call_stack_input(depth);
+        // What the specialization charged the ledger, which the byte bound counts: the entry is
+        // what the charge is still held for once this returns.
+        let before = m.ledger();
         let specialized = Arc::new(with_request(
             &fd.function,
             &fd.constants,
@@ -832,12 +926,75 @@ impl StageEntries {
             InputsFrom::Given(&inputs),
             |r| specialize_one(r, m),
         )?);
-        lock().push(StageEntry {
+        let bytes = m.ledger().saturating_sub(before);
+        let mut kept = lock();
+        // Another caller may have specialized the same stage meanwhile: its entry is this one, so
+        // the two share one.
+        if let Some(theirs) = kept.take(&air_hash, fd, depth) {
+            return Ok(theirs);
+        }
+        kept.made += 1;
+        kept.bytes = kept.bytes.saturating_add(bytes);
+        kept.entries.push(StageEntry {
+            air_hash,
             function: fd.clone(),
             depth,
+            bytes,
             specialized: Arc::clone(&specialized),
         });
+        kept.evict();
         Ok(specialized)
+    }
+}
+
+impl Kept {
+    /// The entry of `fd` at `depth` whose function's AIR hash is `air_hash`, made the most
+    /// recently used: `None` where none is held. The hash is compared first, so a scan reads a
+    /// function descriptor only where the hashes agree.
+    fn take(
+        &mut self,
+        air_hash: &Hash256,
+        fd: &FunctionDescriptor,
+        depth: u32,
+    ) -> Option<Arc<Specialized>> {
+        let at = self
+            .entries
+            .iter()
+            .position(|e| e.depth == depth && e.air_hash == *air_hash && e.function == *fd)?;
+        let entry = self.entries.remove(at);
+        let specialized = Arc::clone(&entry.specialized);
+        self.entries.push(entry);
+        self.found += 1;
+        Some(specialized)
+    }
+
+    /// The plain answer of `fd` whose function's AIR hash is `air_hash`, made the most recently
+    /// used: `None` where none is held. The hash is compared first, as [`Kept::take`] compares it.
+    fn answer(&mut self, air_hash: &Hash256, fd: &FunctionDescriptor) -> Option<bool> {
+        let at = self
+            .answers
+            .iter()
+            .position(|a| a.air_hash == *air_hash && a.function == *fd)?;
+        let answer = self.answers.remove(at);
+        let returns_value = answer.returns_value;
+        self.answers.push(answer);
+        self.found += 1;
+        Some(returns_value)
+    }
+
+    /// Drop the least recently used entries and answers until the bounds hold, never the last one
+    /// of either: a bound below one would make the object useless to the creation that is asking
+    /// now.
+    fn evict(&mut self) {
+        while self.entries.len() > 1
+            && (self.entries.len() > KEPT_ENTRIES || self.bytes > KEPT_ENTRY_BYTES)
+        {
+            let gone = self.entries.remove(0);
+            self.bytes = self.bytes.saturating_sub(gone.bytes);
+        }
+        while self.answers.len() > KEPT_ENTRIES.max(1) {
+            self.answers.remove(0);
+        }
     }
 }
 
@@ -858,8 +1015,18 @@ pub(crate) fn stage_entry<T>(
 }
 
 /// Whether the entry of stage `fd` returns a value: its function's return type is not `void`.
-/// It decodes the AIR, and specializes nothing.
-pub(crate) fn stage_returns_value(fd: &FunctionDescriptor, m: &mut Meter) -> Result<bool, Error> {
+/// It decodes the AIR, and specializes nothing; `entries` keeps the answer, which the stage's
+/// descriptor alone decides, so however many states are made of one function it decodes once.
+pub(crate) fn stage_returns_value(
+    fd: &FunctionDescriptor,
+    entries: &StageEntries,
+    m: &mut Meter,
+) -> Result<bool, Error> {
+    entries.returns_value(fd, || stage_returns_value_read(fd, m))
+}
+
+/// [`stage_returns_value`]'s own read of the AIR, which [`StageEntries`] keeps the answer of.
+fn stage_returns_value_read(fd: &FunctionDescriptor, m: &mut Meter) -> Result<bool, Error> {
     let inputs = LowerInputs::new();
     guarded(|| {
         with_request(

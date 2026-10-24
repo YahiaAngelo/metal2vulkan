@@ -49,6 +49,9 @@ pub(crate) struct Counters {
     pipelines_pooled: AtomicU64,
     residual_form_draws: AtomicU64,
     residual_form_makings: AtomicU64,
+    stage_entries_specialized: AtomicU64,
+    stage_entries_shared: AtomicU64,
+    linked_use_questions_asked: AtomicU64,
     shader_modules_made: AtomicU64,
     shader_modules_shared: AtomicU64,
     pipeline_layouts_made: AtomicU64,
@@ -721,6 +724,22 @@ impl Counters {
     /// meanwhile (`pipeline/render/residual.rs`).
     pub(crate) fn residual_form_making(&self) {
         self.residual_form_makings.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Stage entries the device's pipeline creations specialized, and asks of theirs that found
+    /// one specialized already (`pipeline/memo.rs`).
+    pub(crate) fn stage_entries(&self, specialized: u64, shared: u64) {
+        self.stage_entries_specialized
+            .fetch_add(specialized, Ordering::Relaxed);
+        self.stage_entries_shared
+            .fetch_add(shared, Ordering::Relaxed);
+    }
+
+    /// A render pipeline creation worked out one of its descriptor's linked-use answers rather
+    /// than reading it from the shader cache (`pipeline/render.rs`).
+    pub(crate) fn linked_use_question_asked(&self) {
+        self.linked_use_questions_asked
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// A pipeline state's variant made a `VkShaderModule` (`pipeline/objects.rs`).
@@ -2471,6 +2490,20 @@ pub struct WorkCounts {
     /// residual form began may outlast the draw's command buffer, which does not wait for it: a
     /// lane counting what later draws make waits until this is 0.
     pub pipeline_pool_busy: u64,
+    /// Stages the device's pipeline creations decoded and specialized before their compiles: a
+    /// stage's function, its constants, its linked functions and its dynamic libraries decide the
+    /// entry, so however many states are made of one function pair this counts its stages once.
+    /// Every check, key and compile of a creation reads the one entry.
+    pub stage_entries_specialized: u64,
+    /// Asks for a stage entry that found one specialized already, by this creation or by one
+    /// before it on the device: the decodes and specializations the device spared.
+    pub stage_entries_shared: u64,
+    /// Linked-use answers render pipeline creations worked out rather than reading from the
+    /// shader cache: whether the vertex function returns a value where the state does not
+    /// rasterize, the fragment function's unattached depth write, the stages using a direct
+    /// argument, and the fragment inputs no vertex output writes. Each decodes the stage it asks
+    /// about.
+    pub linked_use_questions_asked: u64,
     /// `VkShaderModule`s pipeline states' variants made: none for a state made again whose
     /// released variant's objects were kept (`pipeline/kept.rs`).
     pub shader_modules_made: u64,
@@ -3983,6 +4016,9 @@ impl Device {
             residual_form_draws: counters.residual_form_draws.load(Ordering::Relaxed),
             residual_form_makings: counters.residual_form_makings.load(Ordering::Relaxed),
             pipeline_pool_busy: self.shared().pipeline_pool.busy() as u64,
+            stage_entries_specialized: counters.stage_entries_specialized.load(Ordering::Relaxed),
+            stage_entries_shared: counters.stage_entries_shared.load(Ordering::Relaxed),
+            linked_use_questions_asked: counters.linked_use_questions_asked.load(Ordering::Relaxed),
             shader_modules_made: counters.shader_modules_made.load(Ordering::Relaxed),
             shader_modules_shared: counters.shader_modules_shared.load(Ordering::Relaxed),
             pipeline_layouts_made: counters.pipeline_layouts_made.load(Ordering::Relaxed),

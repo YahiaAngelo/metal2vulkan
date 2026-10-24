@@ -1145,7 +1145,7 @@ fn a_compile_from_a_creations_entries_is_the_plain_compile() {
     ));
     let budget = Budget::standard();
     let entries = StageEntries::new();
-    let made = || entries.made.lock().map_or(0, |made| made.len());
+    let made = || entries.counts().0;
     let keys = dev
         .render_variant_key(&d, &crate::cache::VariantKey::new(), &budget, &entries)
         .expect("keys");
@@ -1178,7 +1178,71 @@ fn a_compile_from_a_creations_entries_is_the_plain_compile() {
             dev.compile_function(&vertex, inputs, &budget)
         );
     }
-    assert_eq!(fresh.made.lock().map_or(0, |made| made.len()), 1);
+    assert_eq!(fresh.counts().0, 1);
+}
+
+/// One entry set given to the keys of pipeline states that differ only in their own fields
+/// specializes each stage once, not once a state: an entry is the function, its constants, its
+/// linked functions and its dynamic libraries alone, so a consumer that keeps one object and
+/// gives it to every creation decodes and specializes a sweep's functions once.
+#[test]
+fn one_entry_set_specializes_a_sweeps_stages_once() {
+    use crate::pipeline::compile::StageEntries;
+    let Some(bc) = fixture("stage_io") else {
+        return;
+    };
+    let lib = Library::from_air(&bc).expect("library");
+    let vertex = FunctionDescriptor::new(lib.function("stage_io_vertex_position").expect("vertex"));
+    let fragment = FunctionDescriptor::new(
+        lib.function("stage_io_fragment_primitive")
+            .expect("fragment"),
+    );
+    let dev = device("moltenvk-m3");
+    let budget = Budget::standard();
+    let entries = StageEntries::new();
+    // Eight states of the one function pair, each writing its colors through a different write
+    // mask, which is a field of the state and of no stage's entry.
+    let masks = [
+        metal::ColorWriteMask::ALL,
+        metal::ColorWriteMask::RED,
+        metal::ColorWriteMask::GREEN,
+        metal::ColorWriteMask::BLUE,
+        metal::ColorWriteMask::ALPHA,
+        metal::ColorWriteMask::RED | metal::ColorWriteMask::GREEN,
+        metal::ColorWriteMask::BLUE | metal::ColorWriteMask::ALPHA,
+        metal::ColorWriteMask::RED | metal::ColorWriteMask::ALPHA,
+    ];
+    for mask in masks {
+        let mut d = RenderPipelineDescriptor::new(StageSource::Function(vertex.clone()));
+        d.fragment = Some(StageSource::Function(fragment.clone()));
+        let mut color = ColorAttachmentDescriptor::new(metal::PixelFormat::RGBA8Unorm);
+        color.write_mask = mask;
+        d.color_attachments[0] = Some(color);
+        dev.render_variant_key(&d, &crate::cache::VariantKey::new(), &budget, &entries)
+            .expect("keys");
+    }
+    let (specialized, shared) = entries.counts();
+    assert_eq!(
+        specialized, 2,
+        "the vertex and the fragment stage, once each over the eight states"
+    );
+    assert!(shared >= 14, "every later ask read an entry: {shared}");
+    // A set of its own for every state specializes both stages for every state, which is the
+    // work the shared set spares.
+    let apart = (0..8)
+        .map(|_| {
+            let own = StageEntries::new();
+            let mut d = RenderPipelineDescriptor::new(StageSource::Function(vertex.clone()));
+            d.fragment = Some(StageSource::Function(fragment.clone()));
+            d.color_attachments[0] = Some(ColorAttachmentDescriptor::new(
+                metal::PixelFormat::RGBA8Unorm,
+            ));
+            dev.render_variant_key(&d, &crate::cache::VariantKey::new(), &budget, &own)
+                .expect("keys");
+            own.counts().0
+        })
+        .sum::<u64>();
+    assert_eq!(apart, 16, "two stages specialized for each of the eight");
 }
 
 /// A render descriptor's key is the same for an equal descriptor and on another device of the

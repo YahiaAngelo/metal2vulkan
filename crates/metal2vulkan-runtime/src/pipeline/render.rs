@@ -1224,6 +1224,18 @@ impl RenderPipelineState {
     }
 }
 
+/// Counts what a creation specialized of the device's stage entries and what it found specialized
+/// already, however the creation ends (`WorkCounts::stage_entries_specialized`,
+/// `stage_entries_shared`): a refusal did its decodes too.
+struct NoteEntries<'a>(&'a Device);
+
+impl Drop for NoteEntries<'_> {
+    fn drop(&mut self) {
+        let shared = self.0.shared();
+        shared.shader_cache.memo.note_stage_entries(&shared.counts);
+    }
+}
+
 impl GraphicsState {
     /// `new_render_pipeline_state` of `descriptor` under `options` on `device`, noting what it
     /// uses in `used` (a binary archive's add). Each stage's dynamic libraries are loaded first
@@ -1271,6 +1283,7 @@ impl GraphicsState {
         (used, added_unsupported): (Option<&Used>, [usize; 2]),
         reflect: bool,
     ) -> Result<(GraphicsState, Option<Reflected>), Error> {
+        let _noted = NoteEntries(device);
         let mut loaded = descriptor.clone();
         loaded.vertex = crate::dynamic_library::stage_with_dependencies(&loaded.vertex);
         loaded.fragment = loaded
@@ -1314,12 +1327,17 @@ impl GraphicsState {
             .unwrap_or_default();
         let mut answers = LinkedUseAnswers::default();
         let mut learned = false;
+        // Every check, and the key below, read the device's stage entries: a state of functions an
+        // earlier creation read reads its entries and its plain answers rather than decoding and
+        // specializing them again (`pipeline/memo.rs`).
+        let entries = cache.memo.stage_entries();
         if !descriptor.rasterization_enabled {
             let returns = match known.vertex_returns_value {
                 Some(returns) => Ok(returns),
                 None => {
                     learned = true;
-                    descriptor.vertex_returns_value(&options.budget())
+                    device.shared().counts.linked_use_question_asked();
+                    descriptor.vertex_returns_value(&options.budget(), entries)
                 }
             };
             answers.vertex_returns_value = returns.as_ref().ok().copied();
@@ -1331,13 +1349,12 @@ impl GraphicsState {
         // buffers (`indirect_arguments.rs`), and stage inputs the linking keeps that no vertex
         // output writes (`linked_fragment.rs`), before it compiles anything. The compile then
         // drops a fragment function nothing rasterizes.
-        // The checks, then the key below, read each stage's one specialized entry.
-        let entries = StageEntries::new();
         let writes = match known.fragment_writes_depth_unattached {
             Some(writes) => Ok(writes),
             None => {
                 learned = true;
-                descriptor.fragment_writes_depth_unattached(&options.budget(), &entries)
+                device.shared().counts.linked_use_question_asked();
+                descriptor.fragment_writes_depth_unattached(&options.budget(), entries)
             }
         };
         answers.fragment_writes_depth_unattached = writes.as_ref().ok().copied();
@@ -1347,7 +1364,8 @@ impl GraphicsState {
                 Some(uses) => Ok(uses),
                 None => {
                     learned = true;
-                    descriptor.stages_using_direct_arguments(&options.budget(), &entries)
+                    device.shared().counts.linked_use_question_asked();
+                    descriptor.stages_using_direct_arguments(&options.budget(), entries)
                 }
             };
             answers.stages_using_direct_arguments = uses.as_ref().ok().cloned();
@@ -1358,7 +1376,8 @@ impl GraphicsState {
             Some(unwritten) => Ok(unwritten),
             None => {
                 learned = true;
-                descriptor.unwritten_fragment_inputs(&options.budget(), &entries)
+                device.shared().counts.linked_use_question_asked();
+                descriptor.unwritten_fragment_inputs(&options.budget(), entries)
             }
         };
         answers.unwritten_fragment_inputs = unwritten.as_ref().ok().cloned();
@@ -1417,9 +1436,9 @@ impl GraphicsState {
     }
 
     /// The state of `descriptor`, the rasterized descriptor of a render creation whose checks
-    /// passed, with `entries`, the specialized entries its checks made: compiled under stand-ins
-    /// where it needs them, its variant's objects made, and the pipelines Metal compiles at its
-    /// creation made (`create_reflecting`).
+    /// passed, with `entries`, the device's specialized stage entries, which its checks read and
+    /// filled: compiled under stand-ins where it needs them, its variant's objects made, and the
+    /// pipelines Metal compiles at its creation made (`create_reflecting`).
     fn create_checked(
         device: &Device,
         (descriptor, options, used, added_unsupported): (
@@ -1428,7 +1447,7 @@ impl GraphicsState {
             Option<&Used>,
             [usize; 2],
         ),
-        entries: StageEntries,
+        entries: &StageEntries,
     ) -> Result<GraphicsState, Error> {
         let placement = if descriptor.support_indirect_command_buffers {
             pipeline_placement("new_render_pipeline_state", options.placement)?
@@ -1445,7 +1464,7 @@ impl GraphicsState {
         let sources = Sources::creation(device, options, used);
         let profile = device.compile_device().profile();
         let (found, key) = stand_in::compile_with_stand_ins(profile, |key| {
-            RenderVariant::compiled(&sources, descriptor, key, &entries)
+            RenderVariant::compiled(&sources, descriptor, key, entries)
         })
         .map_err(|error| compile_error(device, error))?;
         let sized_class = matches!(
@@ -1481,13 +1500,11 @@ impl GraphicsState {
                 )
             });
         }
-        let large = large_form(device, descriptor, (&base, &entries), stand_in);
+        let large = large_form(device, descriptor, (&base, entries), stand_in);
         // Each color group's variant, where Metal compiles: a refusal of any group's refuses the
         // creation, as Metal's creation fails (`GraphicsState::color_group`). The first group's
         // is the base.
-        let group_bases = group_bases(&sources, descriptor, &entries, (&base, stand_in))?;
-        // No later step reads an entry: the creation lets them go before it makes its state.
-        drop(entries);
+        let group_bases = group_bases(&sources, descriptor, entries, (&base, stand_in))?;
         let grouped = base.pipeline.graphics.color_group.clone().map(|group| {
             let mut twin = descriptor.clone();
             // A twin is no state an indirect command names: it takes no ID.
@@ -1570,6 +1587,7 @@ impl GraphicsState {
         options: &PipelineOptions,
     ) -> Result<GraphicsState, Error> {
         const CALL: &str = "new_mesh_render_pipeline_state";
+        let _noted = NoteEntries(device);
         // Metal's descriptor validation stops an attachment in a format the device's Metal
         // describes none of, first (`attachment_formats.rs`).
         super::attachment_formats::check(
@@ -1609,23 +1627,27 @@ impl GraphicsState {
         // depth without a depth attachment, the indirect command buffers' refusal, then the
         // fragment function's stage inputs the linking keeps that the mesh function does not
         // write (`linked_fragment.rs`), before the compile.
-        let entries = StageEntries::new();
+        // The device's specialized stage entries, as a drawing state's creation reads them.
+        let entries = device.shared().shader_cache.memo.stage_entries();
+        let counts = &device.shared().counts;
+        counts.linked_use_question_asked();
         super::linked_fragment::check_depth(
             CALL,
-            descriptor.fragment_writes_depth_unattached(&budget, &entries),
+            descriptor.fragment_writes_depth_unattached(&budget, entries),
         )?;
         if descriptor.support_indirect_command_buffers {
+            counts.linked_use_question_asked();
             super::indirect_arguments::check_render(
                 CALL,
-                descriptor.stages_using_direct_arguments(&budget, &entries),
+                descriptor.stages_using_direct_arguments(&budget, entries),
             )?;
         }
+        counts.linked_use_question_asked();
         super::linked_fragment::check_inputs(
             CALL,
             "mesh",
-            descriptor.unwritten_fragment_inputs(&budget, &entries),
+            descriptor.unwritten_fragment_inputs(&budget, entries),
         )?;
-        drop(entries);
         let compile = device.compile_device();
         let (pipeline, key) = stand_in::compile_with_stand_ins(compile.profile(), |key| {
             compile.compile_mesh_variant(descriptor, key, &budget)
@@ -2216,8 +2238,8 @@ impl GraphicsState {
                     };
                     let translated = {
                         let sources = Sources::later(&device);
-                        let entries = StageEntries::new();
-                        RenderVariant::compiled(&sources, &descriptor, &key, &entries)
+                        let entries = device.shared().shader_cache.memo.stage_entries();
+                        RenderVariant::compiled(&sources, &descriptor, &key, entries)
                             .ok()
                             .map(|found| match found {
                                 Remembered::Live(variant) => Arc::clone(&variant.pipeline),
@@ -2254,9 +2276,12 @@ impl GraphicsState {
         }
         let sources = Sources::later(&self.0.device);
         let found = match &self.0.descriptor {
-            StateDescriptor::Vertex(descriptor) => {
-                RenderVariant::compiled(&sources, descriptor, key, &StageEntries::new())
-            }
+            StateDescriptor::Vertex(descriptor) => RenderVariant::compiled(
+                &sources,
+                descriptor,
+                key,
+                self.0.device.shared().shader_cache.memo.stage_entries(),
+            ),
             // A mesh render pipeline is compiled as it is asked for, past the memo, the archives
             // and the disk cache, which hold the other render pipelines.
             StateDescriptor::Mesh(descriptor) => self

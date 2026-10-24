@@ -613,14 +613,21 @@ impl RenderPipelineDescriptor {
     /// Whether the vertex function returns a value (its return type is not `void`), which
     /// `newRenderPipelineStateWithDescriptor:` refuses with rasterization disabled, with or
     /// without `supportIndirectCommandBuffers` (on an M4 under macOS 27.0.1). It decodes the vertex
-    /// function's AIR under `budget`.
+    /// function's AIR under `budget`, unless `entries` holds the answer an earlier ask read: the
+    /// vertex stage's descriptor alone decides it, so a consumer that gives one object to every
+    /// creation decodes for this once however many states it makes of the function
+    /// ([`StageEntries`]).
     ///
     /// Refused where the vertex function is one the compile layer already compiled
     /// (`StageSource::Compiled`, which kept no AIR: `Unsupported` with `Feature::Reflection`), and
     /// as its decode refuses.
-    pub fn vertex_returns_value(&self, budget: &crate::Budget) -> Result<bool, Error> {
+    pub fn vertex_returns_value(
+        &self,
+        budget: &crate::Budget,
+        entries: &StageEntries,
+    ) -> Result<bool, Error> {
         let mut m = Meter::new(budget);
-        compile::stage_returns_value(function(&self.vertex)?, &mut m)
+        compile::stage_returns_value(function(&self.vertex)?, entries, &mut m)
     }
 }
 
