@@ -212,6 +212,16 @@ pub(crate) struct Program {
     /// Its functions' texture slots and their accesses (`texture_access.rs`), read when first
     /// asked.
     texture_accesses: TextureAccessMemo,
+    /// The key of the descriptor it draws as ([`GraphicsState::descriptor_key`]), built when
+    /// something first looks an answer up by it.
+    ///
+    /// Building it digests every field of the descriptor, each in its derived `Debug` form, so it
+    /// allocates a dozen strings a build; `descriptor()` is fixed for the state's life, so the
+    /// key is, and `compiled_reflection` built it again on every read to find a reflection the
+    /// shader cache had already kept. Held in a `OnceLock` behind
+    /// [`GraphicsState::descriptor_key`], which is the only way to it: a second build of one
+    /// state's key cannot be written through this path, so nothing has to check that it is not.
+    descriptor_key: OnceLock<PipelineKey>,
     /// Its part of the pipeline creation log, while the log is on (`creation_log.rs`).
     log: Option<StateLog>,
     /// Its variants' capture forms (`VariantKey::captured_positions`), as capture replay asked for
@@ -641,7 +651,10 @@ impl Device {
     /// `None` when it does not, as Metal leaves `reflection` nil. The reflection is
     /// `MeshPipelineDescriptor::reflection`'s (its object, mesh and fragment bindings) of the
     /// descriptor the state was made from, with the dynamic libraries its creation loaded, under
-    /// the creation's budget; what it refuses refuses the call (`Unsupported`, `Compile`).
+    /// the creation's budget; what it refuses refuses the call (`Unsupported`, `Compile`). It
+    /// comes from the shader cache under the descriptor's key
+    /// (`Device::mesh_descriptor_key`), so every state of one descriptor shares one answer rather
+    /// than decoding the three stages' AIR again.
     pub fn new_mesh_render_pipeline_state_with_reflection(
         &self,
         descriptor: &MeshPipelineDescriptor,
@@ -649,8 +662,18 @@ impl Device {
     ) -> Result<(RenderPipelineState, Option<RenderPipelineReflection>), Error> {
         let state = GraphicsState::create_mesh(self, descriptor, options)?;
         let reflection = match (options.options.reflects(), state.descriptor()) {
+            // Through the shader cache under the descriptor's key, as a drawing pipeline's
+            // reflection goes: it decodes the object, mesh and fragment functions' AIR, and
+            // Metal answers every state of one descriptor from the library it compiled once.
             (true, StateDescriptor::Mesh(loaded)) => {
-                Some(loaded.reflection(&options.budget()).map_err(device_error)?)
+                let compile = self.compile_device();
+                let cache = &self.shared().shader_cache;
+                let key = compile.mesh_descriptor_key(loaded);
+                Some(
+                    cache
+                        .render_reflection(compile, &key, || loaded.reflection(&options.budget()))
+                        .map_err(device_error)?,
+                )
             }
             (true, StateDescriptor::Vertex(_)) => {
                 return Err(internal("a mesh state made of a render descriptor"))
@@ -1700,6 +1723,7 @@ impl GraphicsState {
                 log,
                 label,
                 texture_accesses: TextureAccessMemo::new(),
+                descriptor_key: OnceLock::new(),
                 captures: Mutex::new(Lru::counted(CAPTURES)),
                 settled: Mutex::new(VecDeque::with_capacity(SETTLED)),
                 last_pipelines: Mutex::new(VecDeque::with_capacity(LAST_PIPELINES)),
@@ -1740,26 +1764,35 @@ impl GraphicsState {
 
     /// The pipeline's reflection ([`RenderPipelineState::compiled_reflection`]) of the descriptor
     /// it draws as (with the dynamic libraries its creation loaded), as its creation's
-    /// out-parameter answers it: a drawing pipeline's the shader cache's for the descriptor's key,
-    /// worked out under `budget` and kept where it holds none; a mesh pipeline's worked out under
-    /// `budget`.
+    /// out-parameter answers it: the shader cache's for the descriptor's key, worked out under
+    /// `budget` and kept where it holds none, for a mesh pipeline as for a drawing one -- so every
+    /// state of one descriptor, and every read of one state's, share the one answer, where Metal
+    /// answers each from the library it compiled once.
     pub(crate) fn reflection(
         &self,
         budget: &metal2vulkan::Budget,
     ) -> Result<RenderPipelineReflection, Error> {
-        match self.descriptor() {
-            StateDescriptor::Vertex(descriptor) => {
-                let device = &self.0.device;
-                let compile = device.compile_device();
-                let key = compile.render_descriptor_key(descriptor);
-                let cache = &device.shared().shader_cache;
-                (cache.render_reflection(compile, &key, || descriptor.reflection(budget)))
-                    .map_err(device_error)
+        let device = &self.0.device;
+        let compile = device.compile_device();
+        let key = self.descriptor_key();
+        let cache = &device.shared().shader_cache;
+        let work = || match self.descriptor() {
+            StateDescriptor::Vertex(descriptor) => descriptor.reflection(budget),
+            StateDescriptor::Mesh(descriptor) => descriptor.reflection(budget),
+        };
+        (cache.render_reflection(compile, key, work)).map_err(device_error)
+    }
+
+    /// The key of the descriptor the state draws as, built once and held
+    /// ([`Program::descriptor_key`]).
+    pub(crate) fn descriptor_key(&self) -> &PipelineKey {
+        self.0.descriptor_key.get_or_init(|| {
+            let compile = self.0.device.compile_device();
+            match self.descriptor() {
+                StateDescriptor::Vertex(descriptor) => compile.render_descriptor_key(descriptor),
+                StateDescriptor::Mesh(descriptor) => compile.mesh_descriptor_key(descriptor),
             }
-            StateDescriptor::Mesh(descriptor) => {
-                descriptor.reflection(budget).map_err(device_error)
-            }
-        }
+        })
     }
 
     /// The state a patch draw an indirect command scales runs on (`None` for a state that does

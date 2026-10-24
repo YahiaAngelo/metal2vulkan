@@ -53,12 +53,16 @@ mod degradation;
 mod depth_copy;
 mod depth_ranges;
 mod depth_stencil_resolve;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod derived_once;
 mod descriptor_arena;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod detach_lost;
 mod device;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod device_registry;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod direct_arguments_from_compiled;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod dispatch_pending;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
@@ -86,8 +90,6 @@ mod freed_memory;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod fresh_pages;
 mod fresh_unwritten;
-#[cfg(any(m2v_gpu, m2v_cpu_icd))]
-mod function_properties;
 mod function_table;
 mod gate;
 mod gpu_pools;
@@ -132,6 +134,8 @@ mod managed;
 mod memo;
 mod memory;
 mod memory_reads;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod mesh_reflection_derived;
 mod metal_level;
 mod mipmap;
 mod mipmap_plan;
