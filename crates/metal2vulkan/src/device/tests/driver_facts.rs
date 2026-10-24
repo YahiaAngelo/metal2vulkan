@@ -567,6 +567,8 @@ const ONE_OF_METALS: DriverFact = DriverFact::DontCareStoreIsOneOfMetals;
 const COPY_BACK: DriverFact = DriverFact::ShadowCopyBackDispatchFaster;
 const COPY_IN: DriverFact = DriverFact::ShadowCopyInDispatchFaster;
 const ROWS: DriverFact = DriverFact::RowCopiesDispatchFaster;
+const MERGES: DriverFact = DriverFact::SubmissionsWithoutSignalsMerge;
+const MESSENGER: DriverFact = DriverFact::QueueFailuresReportedByMessenger;
 const LINEAR_UNINITIALIZED: DriverFact = DriverFact::LinearTilingFeaturesUninitialized;
 const STALL: DriverFact = DriverFact::SemaphoreOperationsStallSubmits;
 const SAMPLED_HIZ: DriverFact = DriverFact::SampledDepthKeepsHiZ;
@@ -635,6 +637,7 @@ fn the_committed_profiles_drivers_have_their_facts() {
                 BC6H,
                 BC7,
                 ONE_OF_METALS,
+                MERGES,
                 FOLLOWS,
             ],
         ),
@@ -648,6 +651,7 @@ fn the_committed_profiles_drivers_have_their_facts() {
                 BC6H,
                 BC7,
                 ONE_OF_METALS,
+                MERGES,
                 FOLLOWS,
             ],
         ),
@@ -674,6 +678,7 @@ fn the_committed_profiles_drivers_have_their_facts() {
                 ONE_OF_METALS,
                 COPY_BACK,
                 ROWS,
+                MERGES,
                 SAMPLED_HIZ,
                 MSAA_DEPTH,
                 FOLLOWS,
@@ -693,6 +698,7 @@ fn the_committed_profiles_drivers_have_their_facts() {
                 COPY_BACK,
                 COPY_IN,
                 ROWS,
+                MERGES,
             ],
         ),
         (
@@ -716,6 +722,7 @@ fn the_committed_profiles_drivers_have_their_facts() {
                 BC6H,
                 BC7,
                 SCARCE_POOLS,
+                MESSENGER,
                 LINEAR_UNINITIALIZED,
                 TILE_STORE,
             ],
@@ -741,6 +748,7 @@ fn the_committed_profiles_drivers_have_their_facts() {
                 BC6H,
                 BC7,
                 SCARCE_POOLS,
+                MESSENGER,
                 LINEAR_UNINITIALIZED,
                 TILE_STORE,
             ],
@@ -763,8 +771,8 @@ fn the_committed_profiles_drivers_have_their_facts() {
 /// A release or GPU not measured is an unmeasured identity: it takes none of its driver's answer
 /// facts, and its driver's defects stand at every release and on every GPU of the driver. The M4
 /// at MoltenVK 1.4.2, or at 1.4.0, or another Apple GPU at 1.4.1, takes MoltenVK's defects alone
-/// (its depth images apart and GPU-optimized, its scarce timestamp pools, its uninitialized
-/// linear-tiling features); the RPL-S at ANV 26.2.5, or another Intel GPU at 26.2.4, takes
+/// (its depth images apart and GPU-optimized, its scarce timestamp pools, its queue failures
+/// reported by the messenger, its uninitialized linear-tiling features); the RPL-S at ANV 26.2.5, or another Intel GPU at 26.2.4, takes
 /// ANV's hidden aliased writes alone; the RTX 5080 Laptop GPU at another release takes NVIDIA's
 /// custom-position depth alone. No driver takes another driver's defects.
 #[test]
@@ -783,7 +791,14 @@ fn an_unmeasured_identity_takes_its_drivers_defects_alone() {
         assert!(!desc.measured_identity());
         assert_eq!(
             desc.driver_facts(),
-            [APART, OPTIMIZED, SCARCE_POOLS, LINEAR_UNINITIALIZED].into()
+            [
+                APART,
+                OPTIMIZED,
+                SCARCE_POOLS,
+                MESSENGER,
+                LINEAR_UNINITIALIZED
+            ]
+            .into()
         );
     }
     let mut desc = read("moltenvk-m4");
@@ -791,7 +806,14 @@ fn an_unmeasured_identity_takes_its_drivers_defects_alone() {
     assert!(!desc.measured_identity());
     assert_eq!(
         desc.driver_facts(),
-        [APART, OPTIMIZED, SCARCE_POOLS, LINEAR_UNINITIALIZED].into()
+        [
+            APART,
+            OPTIMIZED,
+            SCARCE_POOLS,
+            MESSENGER,
+            LINEAR_UNINITIALIZED
+        ]
+        .into()
     );
 
     let mut desc = read("intel-uhd770-rpls-anv");
@@ -1026,7 +1048,7 @@ fn the_rx_7900_xtx_at_mesa_26_2_4_takes_the_facts_measured_on_it() {
     navi31.device_id = AMD_RX_7900_XTX;
     assert!(navi31.measured_identity());
     let measured =
-        std::collections::BTreeSet::from([FOLLOWS, DriverFact::RobustIndexFetchReadsZero]);
+        std::collections::BTreeSet::from([FOLLOWS, MERGES, DriverFact::RobustIndexFetchReadsZero]);
     assert_eq!(navi31.driver_facts(), measured);
     assert!(navi31.driver_facts_withheld().is_empty());
     for release in [mesa(26, 2, 3), mesa(26, 0, 8)] {
