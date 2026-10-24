@@ -711,6 +711,37 @@ driver's. Each is open work.
   neither pixel is required; both choices conform and there is no Vulkan control over the tie, so
   this is the driver's and not ours. RADV and ANV unrun.
 
+- **A heap multisample texture's sample moves on a GPU of 20 GiB or less**: a command queue keeps
+  the images such moves go through up to a sixty-fourth of the device's largest device-local heap
+  (`gpu_pools::device_share`, `texture/copy_images.rs`). A 4096 x 2160 `Depth32Float_Stencil8`
+  texture of 4 samples -- the consumer's surface -- needs 295 MiB of them per blit, over the
+  255 MiB a 16 GiB GPU keeps, so every copy makes all 16 again (measured on an RTX 5080 Laptop
+  GPU, 615.71.09; `heap_sample_moves` prints each copy's images made and lent, and its 256 x 256
+  shape, 2 MiB of images, makes none after the first). The images are correct and bounded; the
+  cost is the making. Raising the share, or holding the bound to at least one copy's images,
+  would reach it.
+
+- **A folded object grid's cost per Metal threadgroup**: a device that runs object functions
+  through `VK_EXT_mesh_shader` takes one task workgroup per Metal object threadgroup
+  (`bind/mesh_arguments.rs`, the folded object form), and an RTX 5080 Laptop GPU (615.71.09) takes
+  2.4 to 2.7 microseconds over each: 4,587,520 of `mesh_object_grid`'s threadgroups in 12.0 s and
+  4,194,307 in 11.1 s. Metal's own GPU ran the 33.5 million-threadgroup grids of the same fixture
+  inside its 5 s watchdog, about sixteen times faster per threadgroup, so those grids are past any
+  bounded wait here and `mesh_draws::object_grids_run_as_metal_runs_them` now measures the device's
+  cost and skips them, printing both. Nothing is wrong with the words the smaller grids leave; the
+  cost is the dispatch.
+
+- **A dma-buf import on NVIDIA**: the driver enables `VK_EXT_external_memory_dma_buf` and refuses
+  to import a udmabuf of host pages, `vkAllocateMemory` answering `ERROR_OUT_OF_DEVICE_MEMORY` for
+  8 KiB with 15,291 MiB of the card free (615.71.09). It also **closes the descriptor it was
+  handed**, which the Vulkan specification gives it only on a successful import: `F_GETFD` on the
+  descriptor reads `EBADF` the instant the call returns. Closing it again aborted the process on
+  Rust's I/O safety check, so an import now hands the driver a clone and never closes a clone it
+  has handed over (`memory.rs`), which lets go of one descriptor per failed import. Giving a
+  well-behaved driver its descriptor back would need a measured driver fact; the pages' other route
+  (importing the pointer) is the one NVIDIA takes for writable pages and is unaffected. A device
+  that imports dma-bufs (RADV) is **unaudited** for the clone.
+
 - **Reflection after a compute descriptor reset on RADV**: `max_total_threads_per_threadgroup`
   answers 0 where Metal answers 96, `required_threads_per_threadgroup` `0x0x0` where Metal answers
   `8x6x2`, and `threadgroup_size_is_multiple_of_execution_width` false where Metal answers true
