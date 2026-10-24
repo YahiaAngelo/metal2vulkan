@@ -5,10 +5,9 @@
 //! acyclic and child ids precede parents. Globals and functions appear as operands only through
 //! [`Const::GlobalAddr`] / [`Const::FuncAddr`], so every non-local operand is one `ConstId`.
 
-use std::collections::HashMap;
-
 use super::id::{Arena, ConstId, FuncId, GlobalId, TypeId};
 use super::inst::{BinOp, CastOp, IntFlags};
+use super::intern::FxHashMap;
 use crate::budget::Meter;
 use crate::error::Error;
 use crate::error::{InputError, InputErrorKind, Location, VerifyError};
@@ -115,7 +114,7 @@ pub(crate) fn malformed_constant() -> Error {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ConstTable {
     consts: Arena<ConstId, Constant>,
-    index: HashMap<Constant, ConstId>,
+    index: FxHashMap<Constant, ConstId>,
 }
 
 impl ConstTable {

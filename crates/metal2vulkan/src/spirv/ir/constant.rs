@@ -3,11 +3,10 @@
 //! Plain constants are hash-consed. Specialization constants are keyed by their [`SpecKey`] (link
 //! assigns the `SpecId`) and never merged with plain constants of equal value.
 
-use std::collections::HashMap;
-
 use crate::pipeline::sym::SpecKey;
 use crate::spirv::error::{BResult, BuildError, ConstRule, Dangling, TypeRule};
 use crate::spirv::ids::{ConstId, TypeId};
+use crate::spirv::ir::intern::FxHashMap;
 use crate::spirv::ir::types::{Type, Types};
 
 /// Raw bits of a scalar in its type's width: `0`/`1` for `bool`, two's complement for integers,
@@ -140,9 +139,9 @@ pub struct ConstDef {
 #[derive(Clone, Debug, Default)]
 pub struct Consts {
     list: Vec<ConstDef>,
-    index: HashMap<Constant, ConstId>,
-    spec: HashMap<SpecKey, ConstId>,
-    spec_ops: HashMap<(SpecOp, TypeId, Box<[ConstId]>), ConstId>,
+    index: FxHashMap<Constant, ConstId>,
+    spec: FxHashMap<SpecKey, ConstId>,
+    spec_ops: FxHashMap<(SpecOp, TypeId, Box<[ConstId]>), ConstId>,
     /// The heap bytes of the operand lists inside `list` and the index keys, counted as they are
     /// interned.
     boxed: usize,

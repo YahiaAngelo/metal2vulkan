@@ -12,6 +12,7 @@ pub mod cfg;
 pub mod constant;
 pub mod id;
 pub mod inst;
+pub(crate) mod intern;
 pub mod layout;
 pub mod metadata;
 pub mod module;

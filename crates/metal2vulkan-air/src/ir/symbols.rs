@@ -1,8 +1,7 @@
 //! The module's interned byte strings: symbol names and metadata strings.
 
-use std::collections::HashMap;
-
 use super::id::{Arena, Sym};
+use super::intern::FxHashMap;
 use crate::budget::Meter;
 use crate::error::Error;
 
@@ -10,7 +9,7 @@ use crate::error::Error;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Symbols {
     strings: Arena<Sym, Box<[u8]>>,
-    index: HashMap<Box<[u8]>, Sym>,
+    index: FxHashMap<Box<[u8]>, Sym>,
 }
 
 impl Symbols {

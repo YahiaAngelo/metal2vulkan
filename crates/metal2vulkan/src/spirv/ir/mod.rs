@@ -3,6 +3,7 @@
 pub mod constant;
 pub mod edit;
 pub mod inst;
+pub(crate) mod intern;
 pub mod module;
 pub mod types;
 

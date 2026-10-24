@@ -10,11 +10,10 @@
 //! than their parents'. The per-type [`TypeFacts`] are therefore computed once at interning from
 //! the children's facts, with no recursion.
 
-use std::collections::HashMap;
-
 use crate::spirv::error::{BResult, BuildError, Dangling, LayoutViolation, TypeRule};
 use crate::spirv::ids::{ConstId, TypeId};
 use crate::spirv::ir::constant::Consts;
+use crate::spirv::ir::intern::FxHashMap;
 
 /// The storage classes the new core emits.
 #[non_exhaustive]
@@ -294,7 +293,7 @@ impl TypeFacts {
 #[derive(Clone, Debug, Default)]
 pub struct Types {
     list: Vec<(Type, TypeFacts)>,
-    index: HashMap<Type, TypeId>,
+    index: FxHashMap<Type, TypeId>,
     /// The heap bytes of the member and parameter lists inside `list` and the index keys,
     /// counted as they are interned.
     boxed: usize,

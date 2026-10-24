@@ -7,10 +7,10 @@
 //! its parent's, and whole-table passes (layout, printing) run in one forward sweep with no
 //! recursion.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use super::id::{Arena, Sym, TypeId};
+use super::intern::FxHashMap;
 use crate::budget::Meter;
 use crate::error::{Error, Feature, Limit, Unsupported};
 use crate::error::{InputError, InputErrorKind, Location, VerifyError};
@@ -208,7 +208,7 @@ impl fmt::Display for AddrSpace {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TypeTable {
     types: Arena<TypeId, Type>,
-    index: HashMap<Type, TypeId>,
+    index: FxHashMap<Type, TypeId>,
     /// Whether each type is a pointer or an aggregate holding one ([`TypeTable::holds_pointer`]),
     /// by id: read from its children's at interning, which precede it.
     pointers: Arena<TypeId, bool>,
