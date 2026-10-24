@@ -62,12 +62,29 @@
 //!
 //! Three of the seventeen blends move at all, and the other fourteen -- including every one whose
 //! factor is `One`, `Zero`, a source factor, `Min` or `Max` -- are code-identical in every format.
-//! `sc-dc` is one code at its worst. The two large distances are both alpha-channel blends whose
-//! result sits near zero, where a raw-code distance is many steps of a small value: `da-1mda` on
-//! `rgba16f` moves exactly one channel of every one of the 256 pixels.
+//! `sc-dc` is one code at its worst. The two large distances are colour channels whose result sits
+//! near zero, where a raw-code distance is many steps of a small value; the alpha channel of
+//! `da-1mda` does not move at all, in either format.
+//!
+//! **What the difference is**, read off those eight sites rather than off the notice: Metal rounds
+//! the **source** product to the attachment's precision and carries the **destination** product
+//! into the sum unrounded -- `round(round(Sf * S) + Df * D)`, one fused multiply-add on the
+//! destination term -- and our side is the mirror image, `round(Sf * S + round(Df * D))`. Each rule
+//! holds at all 5,376 compared words of the eight sites, and this module's own
+//! `metals_recorded_codes_hold_the_rounding_the_divergent_sites_measure` keeps Metal's
+//! half of that against the committed recordings. So the gap is not half-precision rounding but
+//! which of the two products the arithmetic keeps unrounded, which is why the two 32-bit float
+//! formats differ too and why `sc-dc`, whose source product `S * S` is exact in the attachment,
+//! still moves by a single code. Metal's rule is its compiler's fast-math fold of the blend into
+//! the fragment function; ours is the device's fixed-function blend, which the pipeline leaves the
+//! blend to. `half-output-blends-r32f` is where the two rules agree at every word, which is why it
+//! is the one of the six that is exact. The alpha channel of `da-1mda`, whose source factor and
+//! destination value are both the destination alpha, follows neither rule on either side and is
+//! identical on both, so nothing here asserts a rule for it.
 //!
 //! That stays `divergent` rather than being loosened: `half-output-fast-math-blend`'s own
-//! definition says validation derives no tolerance from it.
+//! definition says validation derives no tolerance from it. `known-gaps.tsv` carries the eight
+//! rows.
 //!
 //! Nothing here can fault a GPU: single-sampled 16 by 16 targets, one full-screen triangle a pass,
 //! no loop, and every fetch inside its buffer.
@@ -697,5 +714,218 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The grid the exact arithmetic below counts in: every operand of a blend here is a multiple
+    /// of `2^-20` (a source is a multiple of `2^-4`, a destination of `2^-10` or `2^-20`, and a
+    /// factor of either or of one minus either), so every product is a multiple of `2^-40` and the
+    /// whole rule is exact in it. A rounded value is a multiple of `2^-24` (`half`, down to its
+    /// subnormals) or of an `f32` unit in the last place at these magnitudes, both of which the
+    /// grid holds, so no step of the rule leaves it.
+    const GRID: u32 = 40;
+
+    /// `value` on the [`GRID`], which every operand of this family sits on exactly.
+    fn exact(value: f32) -> i128 {
+        let scaled = f64::from(value) * 2f64.powi(GRID as i32);
+        assert_eq!(scaled.fract(), 0.0, "{value} is not a multiple of 2^-40");
+        scaled as i128
+    }
+
+    /// The product of two [`GRID`] values, on the grid: exact, because both are multiples of
+    /// `2^-20`.
+    fn product(left: i128, right: i128) -> i128 {
+        let full = left * right;
+        assert_eq!(full % (1 << GRID), 0, "a product left the grid");
+        full / (1 << GRID)
+    }
+
+    /// `value`, a [`GRID`] value, rounded to nearest even onto a binary float format of `mantissa`
+    /// fraction bits whose smallest normal exponent is `least`, as a grid value.
+    ///
+    /// Written out rather than taken from a cast so the rule the test holds is the rule in the
+    /// test: a cast to `half` would have to go through a code, and a cast to `f32` of a value this
+    /// one computes in `f64` would round twice.
+    fn rounded(value: i128, mantissa: u32, least: i32) -> i128 {
+        if value == 0 {
+            return 0;
+        }
+        let size = value.unsigned_abs();
+        // The exponent `e` with `2^e <= |value| < 2^(e+1)`, from the top set bit.
+        let top = 127 - size.leading_zeros() as i32;
+        let exponent = (top - GRID as i32).max(least);
+        // The format's unit in the last place there, counted in grid steps. One finer than a grid
+        // step means the grid already holds every value of the format, so nothing rounds.
+        let steps = exponent - mantissa as i32 + GRID as i32;
+        if steps <= 0 {
+            return value;
+        }
+        let unit = 1i128 << steps;
+        let (whole, part) = ((size / unit as u128) as i128, (size % unit as u128) as i128);
+        // Away from zero on a part past the half, and to the even neighbour on a tie. A carry into
+        // the next binade needs no arm: the value is then a power of two, which that binade holds.
+        let up = part * 2 > unit || (part * 2 == unit && whole % 2 == 1);
+        let size = (whole + i128::from(up)) * unit;
+        if value < 0 {
+            -size
+        } else {
+            size
+        }
+    }
+
+    /// A [`GRID`] value as an `f64`, which is exact for every value the rule produces.
+    fn value_of(grid: i128) -> f64 {
+        grid as f64 / 2f64.powi(GRID as i32)
+    }
+
+    /// The eight sites this family's rounding was measured over: every site of it that is
+    /// `divergent` on this round's MoltenVK, which is where Metal's rounding and ours part.
+    ///
+    /// `sas-1msa` appears only for `RG16Float`, which holds no alpha channel, so
+    /// `SourceAlphaSaturated` is the smaller of the source alpha and one less the destination's
+    /// at every channel here and the alpha channel's own value of one never arises.
+    const MEASURED: [(&str, &str); 8] = [
+        ("half-output-blends-r16f", "sc-dc"),
+        ("half-output-blends-rg16f", "sc-dc"),
+        ("half-output-blends-rg16f", "sas-1msa"),
+        ("half-output-blends-rgba16f", "sc-dc"),
+        ("half-output-blends-rgba16f", "da-1mda"),
+        ("half-output-blends-rg32f", "sc-dc"),
+        ("half-output-blends-rgba32f", "sc-dc"),
+        ("half-output-blends-rgba32f", "da-1mda"),
+    ];
+
+    /// Metal's own rounding in a blend of a `half` colour output, held against its recorded codes
+    /// at every word of every site of this family that differs from ours.
+    ///
+    /// **The rule, measured over this family's own recordings:** Metal rounds the **source**
+    /// product to the attachment's precision and carries the **destination** product into the sum
+    /// unrounded -- `round(round(Sf * S) + Df * D)`, one fused multiply-add on the destination
+    /// term. It holds at all 5,376 compared words of the eight sites of [`MEASURED`], in 16- and
+    /// 32-bit float formats alike.
+    ///
+    /// That is what makes this family's divergences more than a half-precision story: the two
+    /// 32-bit float formats diverge as well, and `sc-dc`, whose source product `S * S` is exact in
+    /// the attachment, still moves by a single code. The runtime's own answer is the mirror image
+    /// of the rule -- `round(Sf * S + round(Df * D))`, the destination product rounded and the
+    /// source product fused -- which is the gap `known-gaps.tsv` carries for these eight sites.
+    ///
+    /// **Only these eight sites are held, because only they were measured.** Metal's rounding at
+    /// the family's other sites is ours, which is why they are exact, and at two of them
+    /// (`sas-1msa` into the two formats that hold an alpha channel) it is neither of the two rules
+    /// written here: both sides agree there, so no gap turns on it and no rule is asserted for it.
+    /// `one-zero`, `min` and `max` are the test above.
+    #[test]
+    fn metals_recorded_codes_hold_the_rounding_the_divergent_sites_measure() {
+        use metal2vulkan_runtime::MetalLevel;
+        let mut checked = 0usize;
+        for case in all() {
+            let sites: Vec<&str> = MEASURED
+                .iter()
+                .filter(|(named, _)| *named == case.name())
+                .map(|(_, site)| *site)
+                .collect();
+            if sites.is_empty() {
+                continue;
+            }
+            let Ok(recording) = crate::recording::read(case.name()) else {
+                continue;
+            };
+            let answer = recording
+                .answer(MetalLevel::NEWEST)
+                .unwrap_or_else(|why| panic!("{}: {why}", case.name));
+            let taken = answer
+                .deterministic()
+                .unwrap_or_else(|| panic!("{}: one outcome", case.name));
+            let blended = taken
+                .root
+                .child("blended")
+                .unwrap_or_else(|| panic!("{}: no blended site", case.name));
+            let layout = case.layout();
+            let destination = case.destination_bytes();
+            // The attachment's own precision, which every rounding of the rule is onto.
+            let (mantissa, least) = match case.wide {
+                true => (23, -126),
+                false => (10, -14),
+            };
+            let round = |grid: i128| rounded(grid, mantissa, least);
+            let stored = |bytes: &[u8], pixel: usize, channel: u32| -> f64 {
+                let at = layout.at(0, pixel as u32, channel);
+                match case.wide {
+                    true => f64::from(f32::from_bits(u32::from_le_bytes(
+                        bytes[at..at + 4].try_into().unwrap(),
+                    ))),
+                    false => f64::from(half_value(u16::from_le_bytes(
+                        bytes[at..at + 2].try_into().unwrap(),
+                    ))),
+                }
+            };
+            let source_of =
+                |pixel: usize, channel: u32| source((pixel + STRIDE * channel as usize) % SOURCES);
+            // A destination channel the attachment does not hold reads one, as Metal's and
+            // Vulkan's blends both take a missing alpha.
+            let destination_of = |pixel: usize, channel: u32| -> f32 {
+                if channel >= case.channels {
+                    return 1.0;
+                }
+                let at = layout.at(0, pixel as u32, channel);
+                match case.wide {
+                    true => f32::from_bits(u32::from_le_bytes(
+                        destination[at..at + 4].try_into().unwrap(),
+                    )),
+                    false => half_value(u16::from_le_bytes(
+                        destination[at..at + 2].try_into().unwrap(),
+                    )),
+                }
+            };
+            for site in sites {
+                let Some(node) = blended.child(site) else {
+                    panic!("{}: no {site} site", case.name);
+                };
+                let Value::Bytes(bytes) = &node.observed.value else {
+                    panic!("{}: {site} holds {}", case.name, node.observed.value.kind());
+                };
+                assert_eq!(bytes.len(), case.level_bytes(), "{} {site}", case.name);
+                for pixel in 0..PIXELS {
+                    let source_alpha = exact(source_of(pixel, 3));
+                    let destination_alpha = exact(destination_of(pixel, 3));
+                    let one = exact(1.0);
+                    for channel in 0..case.channels {
+                        // The alpha channel of `da-1mda`, whose source factor and destination value
+                        // are both the destination alpha: neither rule fits Metal there or here,
+                        // the two sides agree at every one of those words, and a rule nobody has
+                        // measured is not asserted.
+                        if site == "da-1mda" && case.channels == 4 && channel == 3 {
+                            continue;
+                        }
+                        let value = exact(source_of(pixel, channel));
+                        let held = exact(destination_of(pixel, channel));
+                        let (source_factor, destination_factor) = match site {
+                            "sc-dc" => (value, held),
+                            "da-1mda" => (destination_alpha, one - destination_alpha),
+                            "sas-1msa" => (
+                                source_alpha.min(one - destination_alpha),
+                                one - source_alpha,
+                            ),
+                            other => panic!("{other}"),
+                        };
+                        let want = value_of(round(
+                            round(product(source_factor, value))
+                                + product(destination_factor, held),
+                        ));
+                        let got = stored(bytes, pixel, channel);
+                        assert_eq!(
+                            got, want,
+                            "{} {site} pixel {pixel} channel {channel}: Metal stored {got}, the \
+                             rounding its divergent sites measure gives {want}",
+                            case.name
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        // The eight sites' compared words, less the held-out alpha channel of the two `da-1mda`
+        // sites: the count the rule was measured over, so a site losing its recording is loud.
+        assert_eq!(checked, 5376, "every compared word of the eight sites");
     }
 }

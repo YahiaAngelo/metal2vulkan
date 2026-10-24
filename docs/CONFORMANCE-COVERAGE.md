@@ -41,7 +41,7 @@ Its limits, measured rather than asserted:
 | committed recordings | 1010 |
 | distinct SDK items the Metal leg reaches, of any status | 793 |
 | of those, reached only where this cannot name the family | 7 |
-| ledger rows (a case whose gap is recorded) | 77 |
+| ledger rows (a case whose gap is recorded) | 94 |
 
 A tolerance names a **site of a transcript**, not an item, so the last two rows are read as written: a case that loosens one site of its own transcript may compare every other field of it exactly, and this derivation cannot tell which of a case's fields came from which Metal call. Where the distinction matters, read the case.
 
@@ -2130,4 +2130,21 @@ A case whose difference from Metal is recorded rather than compared away. The le
 | `attribute-format-fetches` | Metal's half-to-float widening in a stage-in fetch canonicalizes a NaN -- the half codes 0x7E01 and 0xFE01 both reach a `float4` attribute as the positive quiet… |
 | `attribute-format-fetches` | Metal's half-to-float widening in a stage-in fetch canonicalizes a NaN -- the half codes 0x7E01 and 0xFE01 both reach a `float4` attribute as the positive quiet… |
 | `attribute-format-fetches` | Metal's `MTLAttributeFormatFloatRG11B10` stage-in fetch answers the positive quiet NaN 0x7FC00000 for a field whose 5-bit exponent is all ones, and ours answers… |
+| `half-texel-nans-r16f` | Metal's `half` result of a 16-bit float texel hands back the texel's own NaN code, with its sign, its payload and its signalling bit kept, and ours answers the … |
+| `half-texel-nans-r16f` | Metal's `half` result of a 16-bit float texel hands back the texel's own NaN code, with its sign, its payload and its signalling bit kept, and ours answers the … |
+| `half-texel-nans-r16f` | Metal's `half` result of a 16-bit float texel hands back the texel's own NaN code, with its sign, its payload and its signalling bit kept, and ours answers the … |
+| `half-texel-nans-rg16f` | Metal's `half` result of a 16-bit float texel hands back the texel's own NaN code, with its sign, its payload and its signalling bit kept, and ours answers the … |
+| `half-texel-nans-rg16f` | Metal's `half` result of a 16-bit float texel hands back the texel's own NaN code, with its sign, its payload and its signalling bit kept, and ours answers the … |
+| `half-texel-nans-rg16f` | Metal's `half` result of a 16-bit float texel hands back the texel's own NaN code, with its sign, its payload and its signalling bit kept, and ours answers the … |
+| `half-texel-nans-rgba16f` | Metal's `half` result of a 16-bit float texel hands back the texel's own NaN code, with its sign, its payload and its signalling bit kept, and ours answers the … |
+| `half-texel-nans-rgba16f` | Metal's `half` result of a 16-bit float texel hands back the texel's own NaN code, with its sign, its payload and its signalling bit kept, and ours answers the … |
+| `half-texel-nans-rgba16f` | Metal's `half` result of a 16-bit float texel hands back the texel's own NaN code, with its sign, its payload and its signalling bit kept, and ours answers the … |
+| `half-output-blends-r16f` | Metal's stored blend result rounds the SOURCE product to the attachment's precision and carries the DESTINATION product into the sum unrounded -- `round(round(S… |
+| `half-output-blends-rg16f` | Metal's stored blend result rounds the SOURCE product to the attachment's precision and carries the DESTINATION product into the sum unrounded -- `round(round(S… |
+| `half-output-blends-rg16f` | Metal's stored blend result rounds the SOURCE product to the attachment's precision and carries the DESTINATION product into the sum unrounded -- `round(round(S… |
+| `half-output-blends-rgba16f` | Metal's stored blend result rounds the SOURCE product to the attachment's precision and carries the DESTINATION product into the sum unrounded -- `round(round(S… |
+| `half-output-blends-rgba16f` | Metal's stored blend result rounds the SOURCE product to the attachment's precision and carries the DESTINATION product into the sum unrounded -- `round(round(S… |
+| `half-output-blends-rg32f` | Metal's stored blend result rounds the SOURCE product to the attachment's precision and carries the DESTINATION product into the sum unrounded -- `round(round(S… |
+| `half-output-blends-rgba32f` | Metal's stored blend result rounds the SOURCE product to the attachment's precision and carries the DESTINATION product into the sum unrounded -- `round(round(S… |
+| `half-output-blends-rgba32f` | Metal's stored blend result rounds the SOURCE product to the attachment's precision and carries the DESTINATION product into the sum unrounded -- `round(round(S… |
 

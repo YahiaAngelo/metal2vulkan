@@ -51,9 +51,24 @@
 //! whose code is not already `0x7e00` -- for `R16Float`, the twelve such values of the half table at their
 //! 515 texels -- and no finite, zero, denormal or infinite texel differs anywhere.
 //!
+//! **Where the payload goes.** Our `half` access reads the image as a `vec4` of `f32` and converts
+//! it (`lower::texture::half`, through `narrow::round_texel`), and this chip's decode of a 16-bit
+//! float texel into `f32` canonicalizes the NaN, so the sign and the payload are gone before the
+//! conversion sees them -- which is why all twelve codes, of both signs, collapse onto one value,
+//! and why the `widened` column, where Metal canonicalizes too, is exact. Metal's `texture2d<half>`
+//! read never widens, so the texel's bits survive by construction.
+//!
+//! This is **not** the gap that `vertex-format-constant-step` and `attribute-format-fetches` carry
+//! for their half rows, and one fix cannot close both: those run the other way round -- Metal
+//! canonicalizes the widen and we carry the payload and the sign -- so their exact form, a
+//! canonicalizing select after the widen, leaves this family exactly as it stands, because here we
+//! already answer the canonical NaN. What the two share is one device fact, that this chip's
+//! half-to-float widening canonicalizes a NaN: there it is what Metal shows and we do not
+//! reproduce, here it is what destroys the payload inside our own path.
+//!
 //! That stays `divergent` rather than being loosened: `device-nan-encoding`'s own definition says
 //! validation derives no tolerance from it, so a tolerance here would be the suite overruling the
-//! contract under test.
+//! contract under test. `known-gaps.tsv` carries the nine rows.
 //!
 //! The lane's four filtered accesses — a linear sample at the centre, a linear sample a quarter
 //! texel right of it, a gather, and the same through the runtime sampler at slot 0 — ran on the
