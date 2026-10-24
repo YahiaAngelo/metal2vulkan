@@ -23,11 +23,16 @@
 //!   refusal-surface question — what Metal does with an attribute the function declares and the
 //!   descriptor leaves `Invalid` — and not a value row, so no row here sets it.
 //! - **`MTLVertexFormatInt`, `Int2`, `Int3`, `Int4`, `UInt`, `UInt2`, `UInt3`, `UInt4`**: a 32-bit
-//!   integer format reaches the shader as an integer, so it needs an `int`- or `uint`-declared
-//!   attribute and a float4 one cannot read it. Those eight are the integer half of the field and
-//!   wait on a fixture with an `int4` and a `uint4` `[[stage_in]]` attribute;
-//!   `tests::the_formats_left_out_are_the_integer_ones_and_invalid` holds that this list and the
-//!   swept one together are the whole SDK table, so the gap cannot widen quietly.
+//!   integer format reaches the shader as an integer, so it needs an `int4`- or `uint4`-declared
+//!   attribute and a `float4` or `half4` one cannot read it. Those eight are the integer half of the
+//!   field and are swept by `cases::wide_int_attributes` (`vertex-format-int4`,
+//!   `vertex-format-uint4`) through `dsx_wide_int_attributes`, which declares both. They are left
+//!   out **here** and compared there, over the same twelve codes of
+//!   [`crate::attribute_coding`]: `tests::the_formats_left_out_are_the_integer_ones_and_invalid`
+//!   holds that this list and the swept one together are the whole SDK table, so this family's
+//!   half cannot widen quietly, and
+//!   `wide_int_attributes::tests::the_two_sweeps_are_every_wide_integer_format_of_the_sdk_table`
+//!   holds that the other family is exactly the eight.
 //!
 //! The 8- and 16-bit **unnormalized** integer formats are swept, because Metal converts those to
 //! float in a float attribute: `integer-vertex-attributes` already records Metal doing it for
@@ -605,6 +610,10 @@ mod tests {
 
     /// The formats a float-declared attribute cannot read, which this family leaves out: every
     /// 32-bit integer format, and `MTLVertexFormatInvalid`, which is not a format at all.
+    ///
+    /// The eight integer ones are left out of **this** family and swept by
+    /// `cases::wide_int_attributes`, which declares the `int4` and `uint4` attributes they need, so
+    /// a name here is this family's omission rather than the suite's.
     ///
     /// Stated here so that [`the_formats_left_out_are_the_integer_ones_and_invalid`] can hold the
     /// swept list and this one to being the whole SDK table between them. It is a statement of

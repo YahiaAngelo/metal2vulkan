@@ -1,0 +1,368 @@
+{
+  "format": 1,
+  "case": "vertex-format-uint4",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "dsx_wide_int_attributes.ll",
+      "entry": "wide_uint_attribute_to_uint4",
+      "source_sha256": "954536ebb54165d9c6fce0cd3e25a5b2e22bfe18b1c26aa768f0373c8cbcb555"
+    },
+    {
+      "fixture": "dsx_wide_int_attributes.air.ll",
+      "entry": "wide_uint_attribute_to_uint4",
+      "source_sha256": "acaa9df8aefa5dad33274114f25b5710ae52eade667fe5dd80870ba301f5feb4"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "954536ebb54165d9c6fce0cd3e25a5b2e22bfe18b1c26aa768f0373c8cbcb555"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "acaa9df8aefa5dad33274114f25b5710ae52eade667fe5dd80870ba301f5feb4"
+                        }
+                      }
+                    },
+                    {
+                      "name": "records",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "38a915f88eb291746dd3cd2c53d0ca2f4037d328fa13a79668f66c1e3e9f3982"
+                        }
+                      }
+                    },
+                    {
+                      "name": "answers",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ac4c71356fea45ea2692ac5681f23ebf835f0ea3dea3e67fd58c2d3f8c7bbd8d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "pipelines",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e25f5862e4aacd2ae4909decf3b4ab7dfc6cf09a99d3d4c1fd1b5dcad15ca4e4"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/records",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/answers",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUInt/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUInt2/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUInt3/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUInt4/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUInt",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAEAAAACAAAAAAAAAAAAAAABAAAA////fwAAAAAAAAAAAQAAAAAAAIAAAAAAAAAAAAEAAAABAACAAAAAAAAAAAABAAAA/f///wAAAAAAAAAAAQAAAP7///8AAAAAAAAAAAEAAAD/////AAAAAAAAAAABAAAAVVVVVQAAAAAAAAAAAQAAAKqqqqoAAAAAAAAAAAEAAADoAwAAAAAAAAAAAAABAAAA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUInt2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAP///38AAAAAAQAAAAEAAAAAAACAAAAAAAEAAAACAAAAAQAAgAAAAAABAAAA////f/3///8AAAAAAQAAAAAAAID+////AAAAAAEAAAABAACA/////wAAAAABAAAA/f///1VVVVUAAAAAAQAAAP7///+qqqqqAAAAAAEAAAD/////6AMAAAAAAAABAAAAVVVVVQAAAAAAAAAAAQAAAKqqqqoBAAAAAAAAAAEAAADoAwAAAgAAAAAAAAABAAAA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUInt3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAP///3/9////AQAAAAEAAAAAAACA/v///wEAAAACAAAAAQAAgP////8BAAAA////f/3///9VVVVVAQAAAAAAAID+////qqqqqgEAAAABAACA/////+gDAAABAAAA/f///1VVVVUAAAAAAQAAAP7///+qqqqqAQAAAAEAAAD/////6AMAAAIAAAABAAAAVVVVVQAAAAD///9/AQAAAKqqqqoBAAAAAAAAgAEAAADoAwAAAgAAAAEAAIABAAAA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUInt4",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAP///3/9////VVVVVQEAAAAAAACA/v///6qqqqoCAAAAAQAAgP/////oAwAA////f/3///9VVVVVAAAAAAAAAID+////qqqqqgEAAAABAACA/////+gDAAACAAAA/f///1VVVVUAAAAA////f/7///+qqqqqAQAAAAAAAID/////6AMAAAIAAAABAACAVVVVVQAAAAD///9//f///6qqqqoBAAAAAAAAgP7////oAwAAAgAAAAEAAID/////"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

@@ -35,14 +35,14 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "a35489fc715bfaa1a147090519dc6c8fdfe678375e6c386381b0d208d4fe7ee6"
+                          "hex": "8ba55609292fd312b9b9709abc0eb335df50c21024249daf07a1e7bb5d1f41a4"
                         }
                       }
                     }
                   ]
                 },
                 {
-                  "name": "depth-0-stencil-0",
+                  "name": "MTLMultisampleDepthResolveFilterMin/MTLMultisampleStencilResolveFilterSample0",
                   "observed": {
                     "value": "absent"
                   },
@@ -382,7 +382,7 @@
                   ]
                 },
                 {
-                  "name": "depth-0-stencil-1",
+                  "name": "MTLMultisampleDepthResolveFilterMin/MTLMultisampleStencilResolveFilterDepthResolvedSample",
                   "observed": {
                     "value": "absent"
                   },
@@ -722,7 +722,7 @@
                   ]
                 },
                 {
-                  "name": "depth-1-stencil-0",
+                  "name": "MTLMultisampleDepthResolveFilterMax/MTLMultisampleStencilResolveFilterSample0",
                   "observed": {
                     "value": "absent"
                   },
@@ -1062,7 +1062,7 @@
                   ]
                 },
                 {
-                  "name": "depth-1-stencil-1",
+                  "name": "MTLMultisampleDepthResolveFilterMax/MTLMultisampleStencilResolveFilterDepthResolvedSample",
                   "observed": {
                     "value": "absent"
                   },
@@ -1402,7 +1402,7 @@
                   ]
                 },
                 {
-                  "name": "depth-2-stencil-0",
+                  "name": "MTLMultisampleDepthResolveFilterSample0/MTLMultisampleStencilResolveFilterSample0",
                   "observed": {
                     "value": "absent"
                   },
@@ -1742,7 +1742,7 @@
                   ]
                 },
                 {
-                  "name": "depth-2-stencil-1",
+                  "name": "MTLMultisampleDepthResolveFilterSample0/MTLMultisampleStencilResolveFilterDepthResolvedSample",
                   "observed": {
                     "value": "absent"
                   },

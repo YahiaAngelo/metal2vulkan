@@ -119,9 +119,112 @@ use crate::pass_descriptors::{
     INDEX_VALUES, NUMBER_SWEEPS, POSITION_ROWS, STATED_NUMBERS, STATED_POSITIONS,
 };
 use crate::transcript::{Node, Observed, Sites};
+use metal2vulkan_runtime::{
+    LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, StoreAction,
+};
 
 /// The site a whole-descriptor shape's answers sit at.
 const FACTS: &str = "facts";
+
+// ---- The swept values' own names ---------------------------------------------------------------
+//
+// The action and filter sweeps state their values as Metal's **raw ordinals**, for the reason
+// `crate::pass_descriptors::Actions` gives: the whole of what an action means is its ordinal, and a
+// third vocabulary beside the two the sides already have would be a third thing to keep in step.
+// That is right for the value a row feeds, and it leaves the row's **site name** saying
+// `load-0-store-4`, which names no Metal value a reader or a census could recognise. These four
+// functions close that: each is a match over the runtime's own enum — one of the two vocabularies,
+// not a third — from the ordinal the row holds to the SDK enumerator the ordinal **is**, and the
+// site is named after it. So a diff names the value Metal was asked for rather than a number, and
+// the enumerator is in the compared text, which is the only place the option-space census can read
+// it from. A value whose ordinal no sweep reaches has no name here to go unused: the sweeps are
+// exhaustive over all four types, which `tests::every_swept_action_and_filter_is_named` holds.
+
+/// The SDK enumerator of `MTLLoadAction`'s raw value `raw`.
+fn load_action_name(raw: u64) -> Result<&'static str, String> {
+    Ok(
+        match LoadAction::from_raw(raw).map_err(|e| e.to_string())? {
+            LoadAction::DontCare => "MTLLoadActionDontCare",
+            LoadAction::Load => "MTLLoadActionLoad",
+            LoadAction::Clear => "MTLLoadActionClear",
+            held => return Err(format!("MTLLoadAction {raw} ({held:?}) has no name here")),
+        },
+    )
+}
+
+/// The SDK enumerator of `MTLStoreAction`'s raw value `raw`.
+fn store_action_name(raw: u64) -> Result<&'static str, String> {
+    Ok(
+        match StoreAction::from_raw(raw).map_err(|e| e.to_string())? {
+            StoreAction::DontCare => "MTLStoreActionDontCare",
+            StoreAction::Store => "MTLStoreActionStore",
+            StoreAction::MultisampleResolve => "MTLStoreActionMultisampleResolve",
+            StoreAction::StoreAndMultisampleResolve => "MTLStoreActionStoreAndMultisampleResolve",
+            StoreAction::Unknown => "MTLStoreActionUnknown",
+            StoreAction::CustomSampleDepthStore => "MTLStoreActionCustomSampleDepthStore",
+            held => return Err(format!("MTLStoreAction {raw} ({held:?}) has no name here")),
+        },
+    )
+}
+
+/// The SDK enumerator of `MTLMultisampleDepthResolveFilter`'s raw value `raw`.
+fn depth_filter_name(raw: u64) -> Result<&'static str, String> {
+    Ok(
+        match MultisampleDepthResolveFilter::from_raw(raw).map_err(|e| e.to_string())? {
+            MultisampleDepthResolveFilter::Sample0 => "MTLMultisampleDepthResolveFilterSample0",
+            MultisampleDepthResolveFilter::Min => "MTLMultisampleDepthResolveFilterMin",
+            MultisampleDepthResolveFilter::Max => "MTLMultisampleDepthResolveFilterMax",
+            held => {
+                return Err(format!(
+                    "MTLMultisampleDepthResolveFilter {raw} ({held:?}) has no name here"
+                ))
+            }
+        },
+    )
+}
+
+/// The SDK enumerator of `MTLMultisampleStencilResolveFilter`'s raw value `raw`.
+fn stencil_filter_name(raw: u64) -> Result<&'static str, String> {
+    Ok(
+        match MultisampleStencilResolveFilter::from_raw(raw).map_err(|e| e.to_string())? {
+            MultisampleStencilResolveFilter::Sample0 => "MTLMultisampleStencilResolveFilterSample0",
+            MultisampleStencilResolveFilter::DepthResolvedSample => {
+                "MTLMultisampleStencilResolveFilterDepthResolvedSample"
+            }
+            held => {
+                return Err(format!(
+                    "MTLMultisampleStencilResolveFilter {raw} ({held:?}) has no name here"
+                ))
+            }
+        },
+    )
+}
+
+/// The site a row of the action sweep is emitted at: the two SDK enumerators **colour
+/// attachment 0** carries, which is the row's own unrotated triple (`Row::rotated`: the swept
+/// colour takes the row, the depth attachment `rotated(1)` and the stencil attachment
+/// `rotated(2)`). Naming the attachment the row is *about* is what keeps the site the selector it
+/// reads; the other two attachments' values are in the same row's compared facts.
+fn action_site(load: u64, store: u64) -> String {
+    match (load_action_name(load), store_action_name(store)) {
+        (Ok(load), Ok(store)) => format!("{load}/{store}"),
+        _ => format!("load-{load}-store-{store}"),
+    }
+}
+
+/// The site a row of the filter sweep is emitted at: the SDK enumerator the **depth** attachment
+/// carries and the one the **stencil** attachment carries.
+///
+/// A resolve filter is only ever on those two attachments, and they read `rotated(1)` and
+/// `rotated(2)` of the row rather than the row itself, so the caller passes the rotated values. The
+/// row's own unrotated depth filter is on no attachment at all, and a site named after it would
+/// name a value nothing in the row reads.
+fn filter_site(depth: u64, stencil: u64) -> String {
+    match (depth_filter_name(depth), stencil_filter_name(stencil)) {
+        (Ok(depth), Ok(stencil)) => format!("{depth}/{stencil}"),
+        _ => format!("depth-{depth}-stencil-{stencil}"),
+    }
+}
 
 /// What one case sweeps, and so which rows its `run` states.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,7 +330,7 @@ impl Sweep {
                 .into_iter()
                 .map(|row| {
                     (
-                        format!("load-{}-store-{}", row.actions.load, row.actions.store),
+                        action_site(row.actions.load, row.actions.store),
                         PassSpec::new(Shape::Defaults, Reads::Attachments).at(row),
                     )
                 })
@@ -236,10 +339,7 @@ impl Sweep {
                 .into_iter()
                 .map(|row| {
                     (
-                        format!(
-                            "depth-{}-stencil-{}",
-                            row.filters.depth, row.filters.stencil
-                        ),
+                        filter_site(row.rotated(1).filters.depth, row.rotated(2).filters.stencil),
                         PassSpec::new(Shape::Defaults, Reads::Attachments).at(row),
                     )
                 })
@@ -481,6 +581,80 @@ mod tests {
             filter_rows().len(),
             (DEPTH_FILTERS * STENCIL_FILTERS) as usize
         );
+    }
+
+    /// Every value the action and filter sweeps put to Metal has an SDK enumerator name here, and
+    /// every name here is a value one of them reaches.
+    ///
+    /// The depth claim of these two sweeps, held by execution. They state their rows as raw
+    /// ordinals on purpose, so the enumerator reaches the compared text only through the site name:
+    /// a value whose ordinal a row feeds but whose name no function above returns would be swept
+    /// and invisible, and a name no row reaches would be a value this module claims and never asks
+    /// for. Both directions fail here.
+    #[test]
+    fn every_swept_action_and_filter_is_named() {
+        let mut loads: BTreeSet<&str> = BTreeSet::new();
+        let mut stores: BTreeSet<&str> = BTreeSet::new();
+        for row in action_rows() {
+            for shift in [0, 1, 2] {
+                let actions = row.rotated(shift).actions;
+                loads.insert(load_action_name(actions.load).expect("a swept load action is named"));
+                stores.insert(
+                    store_action_name(actions.store).expect("a swept store action is named"),
+                );
+            }
+        }
+        assert_eq!(loads.len(), LOAD_ACTIONS as usize, "{loads:?}");
+        assert_eq!(stores.len(), STORE_ACTIONS as usize, "{stores:?}");
+        // The two the suite reached nowhere else, said by name so this test is what keeps them.
+        assert!(stores.contains("MTLStoreActionUnknown"));
+        assert!(stores.contains("MTLStoreActionCustomSampleDepthStore"));
+
+        let mut depths: BTreeSet<&str> = BTreeSet::new();
+        let mut stencils: BTreeSet<&str> = BTreeSet::new();
+        for row in filter_rows() {
+            depths.insert(
+                depth_filter_name(row.rotated(1).filters.depth).expect("a swept filter is named"),
+            );
+            stencils.insert(
+                stencil_filter_name(row.rotated(2).filters.stencil)
+                    .expect("a swept filter is named"),
+            );
+        }
+        assert_eq!(depths.len(), DEPTH_FILTERS as usize, "{depths:?}");
+        assert_eq!(stencils.len(), STENCIL_FILTERS as usize, "{stencils:?}");
+        assert!(depths.contains("MTLMultisampleDepthResolveFilterMin"));
+        assert!(depths.contains("MTLMultisampleDepthResolveFilterMax"));
+        assert!(stencils.contains("MTLMultisampleStencilResolveFilterDepthResolvedSample"));
+
+        // No name is unreachable: a raw value past each type's count has no name, so the functions
+        // are exactly the swept spaces and not a wider list written once and left.
+        assert!(load_action_name(LOAD_ACTIONS).is_err());
+        assert!(store_action_name(STORE_ACTIONS).is_err());
+        assert!(depth_filter_name(DEPTH_FILTERS).is_err());
+        assert!(stencil_filter_name(STENCIL_FILTERS).is_err());
+    }
+
+    /// No two rows of either sweep name one site.
+    ///
+    /// A transcript holding two sites of one name silently loses one, so a site name that stopped
+    /// being unique would quietly halve a sweep.
+    #[test]
+    fn no_two_rows_of_the_action_or_filter_sweeps_name_one_site() {
+        let actions: BTreeSet<String> = action_rows()
+            .into_iter()
+            .map(|row| action_site(row.actions.load, row.actions.store))
+            .collect();
+        assert_eq!(actions.len(), action_rows().len(), "{actions:?}");
+        let filters: BTreeSet<String> = filter_rows()
+            .into_iter()
+            .map(|row| filter_site(row.rotated(1).filters.depth, row.rotated(2).filters.stencil))
+            .collect();
+        assert_eq!(filters.len(), filter_rows().len(), "{filters:?}");
+        // Every site carries both enumerators rather than falling back to the ordinals.
+        for site in actions.iter().chain(&filters) {
+            assert!(site.starts_with("MTL"), "{site} is not an enumerator pair");
+        }
     }
 
     /// The stencil clear sweep is exhaustive over the byte, which is the claim its prose makes.

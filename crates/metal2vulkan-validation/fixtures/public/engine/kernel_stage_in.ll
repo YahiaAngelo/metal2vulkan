@@ -15,11 +15,11 @@ define void @stage_in_fetch(<4 x float> %0, <4 x i32> %1, i32 %2, <2 x half> %3,
   %14 = zext i32 %13 to i64
   %15 = getelementptr inbounds <4 x i32>, ptr addrspace(1) %4, i64 %14
   %16 = bitcast ptr addrspace(1) %15 to ptr addrspace(1)
-  store <4 x float> %0, ptr addrspace(1) %16, align 16, !tbaa !38, !alias.scope !41
+  store <4 x float> %0, ptr addrspace(1) %16, align 16, !tbaa !44, !alias.scope !47
   %17 = add i32 %13, 1
   %18 = zext i32 %17 to i64
   %19 = getelementptr inbounds <4 x i32>, ptr addrspace(1) %4, i64 %18
-  store <4 x i32> %1, ptr addrspace(1) %19, align 16, !tbaa !38, !alias.scope !41
+  store <4 x i32> %1, ptr addrspace(1) %19, align 16, !tbaa !44, !alias.scope !47
   %20 = insertelement <4 x i32> undef, i32 %2, i64 0
   %21 = bitcast <2 x half> %3 to <2 x i16>
   %22 = extractelement <2 x i16> %21, i64 0
@@ -32,7 +32,43 @@ define void @stage_in_fetch(<4 x float> %0, <4 x i32> %1, i32 %2, <2 x half> %3,
   %29 = add i32 %13, 2
   %30 = zext i32 %29 to i64
   %31 = getelementptr inbounds <4 x i32>, ptr addrspace(1) %4, i64 %30
-  store <4 x i32> %28, ptr addrspace(1) %31, align 16, !tbaa !38, !alias.scope !41
+  store <4 x i32> %28, ptr addrspace(1) %31, align 16, !tbaa !44, !alias.scope !47
+  ret void
+}
+
+; Function Attrs: mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: write)
+define void @stage_in_fetch_wide(<4 x float> %0, <4 x i32> %1, i32 %2, <2 x half> %3, <4 x i32> %4, ptr addrspace(1) noundef writeonly captures(none) "air-buffer-no-alias" %5, <2 x i32> noundef %6, <2 x i32> noundef %7) local_unnamed_addr #0 {
+  %9 = extractelement <2 x i32> %6, i64 1
+  %10 = extractelement <2 x i32> %7, i64 0
+  %11 = mul i32 %10, %9
+  %12 = extractelement <2 x i32> %6, i64 0
+  %13 = add i32 %11, %12
+  %14 = shl i32 %13, 2
+  %15 = zext i32 %14 to i64
+  %16 = getelementptr inbounds <4 x i32>, ptr addrspace(1) %5, i64 %15
+  %17 = bitcast ptr addrspace(1) %16 to ptr addrspace(1)
+  store <4 x float> %0, ptr addrspace(1) %17, align 16, !tbaa !44, !alias.scope !50
+  %18 = or i32 %14, 1
+  %19 = zext i32 %18 to i64
+  %20 = getelementptr inbounds <4 x i32>, ptr addrspace(1) %5, i64 %19
+  store <4 x i32> %1, ptr addrspace(1) %20, align 16, !tbaa !44, !alias.scope !50
+  %21 = insertelement <4 x i32> undef, i32 %2, i64 0
+  %22 = bitcast <2 x half> %3 to <2 x i16>
+  %23 = extractelement <2 x i16> %22, i64 0
+  %24 = zext i16 %23 to i32
+  %25 = insertelement <4 x i32> %21, i32 %24, i64 1
+  %26 = extractelement <2 x i16> %22, i64 1
+  %27 = zext i16 %26 to i32
+  %28 = insertelement <4 x i32> %25, i32 %27, i64 2
+  %29 = insertelement <4 x i32> %28, i32 %13, i64 3
+  %30 = or i32 %14, 2
+  %31 = zext i32 %30 to i64
+  %32 = getelementptr inbounds <4 x i32>, ptr addrspace(1) %5, i64 %31
+  store <4 x i32> %29, ptr addrspace(1) %32, align 16, !tbaa !44, !alias.scope !50
+  %33 = or i32 %14, 3
+  %34 = zext i32 %33 to i64
+  %35 = getelementptr inbounds <4 x i32>, ptr addrspace(1) %5, i64 %34
+  store <4 x i32> %4, ptr addrspace(1) %35, align 16, !tbaa !44, !alias.scope !50
   ret void
 }
 
@@ -45,13 +81,13 @@ define void @stage_in_region(float %0, ptr addrspace(1) noundef writeonly captur
   %10 = shl i32 %2, 1
   %11 = zext i32 %10 to i64
   %12 = getelementptr inbounds <4 x i32>, ptr addrspace(1) %1, i64 %11
-  store <4 x i32> %9, ptr addrspace(1) %12, align 16, !tbaa !38, !alias.scope !44
+  store <4 x i32> %9, ptr addrspace(1) %12, align 16, !tbaa !44, !alias.scope !53
   %13 = shufflevector <3 x i32> %4, <3 x i32> poison, <4 x i32> <i32 0, i32 1, i32 2, i32 poison>
   %14 = insertelement <4 x i32> %13, i32 %2, i64 3
   %15 = or i32 %10, 1
   %16 = zext i32 %15 to i64
   %17 = getelementptr inbounds <4 x i32>, ptr addrspace(1) %1, i64 %16
-  store <4 x i32> %14, ptr addrspace(1) %17, align 16, !tbaa !38, !alias.scope !44
+  store <4 x i32> %14, ptr addrspace(1) %17, align 16, !tbaa !44, !alias.scope !53
   ret void
 }
 
@@ -60,7 +96,7 @@ define void @stage_in_region_short(ptr addrspace(1) noundef writeonly captures(n
   %5 = shufflevector <2 x i16> %2, <2 x i16> %3, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   %6 = zext i32 %1 to i64
   %7 = getelementptr inbounds <4 x i16>, ptr addrspace(1) %0, i64 %6
-  store <4 x i16> %5, ptr addrspace(1) %7, align 8, !tbaa !38, !alias.scope !47
+  store <4 x i16> %5, ptr addrspace(1) %7, align 8, !tbaa !44, !alias.scope !56
   ret void
 }
 
@@ -69,13 +105,13 @@ attributes #1 = { mustprogress nofree norecurse nosync nounwind willreturn memor
 attributes #2 = { mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: write) "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="32" "no-builtins" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" }
 
 !llvm.module.flags = !{!0, !1, !2, !3, !4, !5, !6, !7, !8}
-!air.kernel = !{!9, !19, !26}
-!air.compile_options = !{!32, !33, !34}
-!llvm.ident = !{!35}
-!air.version = !{!36}
-!air.language_version = !{!37}
+!air.kernel = !{!9, !19, !25, !32}
+!air.compile_options = !{!38, !39, !40}
+!llvm.ident = !{!41}
+!air.version = !{!42}
+!air.language_version = !{!43}
 
-!0 = !{i32 2, !"SDK Version", [2 x i32] [i32 26, i32 5]}
+!0 = !{i32 2, !"SDK Version", [2 x i32] [i32 27, i32 0]}
 !1 = !{i32 1, !"wchar_size", i32 4}
 !2 = !{i32 7, !"frame-pointer", i32 2}
 !3 = !{i32 7, !"air.max_device_buffers", i32 31}
@@ -94,34 +130,43 @@ attributes #2 = { mustprogress nofree norecurse nosync nounwind willreturn memor
 !16 = !{i32 4, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 16, !"air.arg_type_align_size", i32 16, !"air.arg_type_name", !"uint4", !"air.arg_name", !"out"}
 !17 = !{i32 5, !"air.thread_position_in_grid", !"air.arg_type_name", !"uint2", !"air.arg_name", !"gid"}
 !18 = !{i32 6, !"air.threads_per_grid", !"air.arg_type_name", !"uint2", !"air.arg_name", !"grid"}
-!19 = !{ptr @stage_in_region, !10, !20}
-!20 = !{!21, !22, !23, !24, !25}
-!21 = !{i32 0, !"air.stage_in", !"air.location_index", i32 0, i32 1, !"air.arg_type_name", !"float", !"air.arg_name", !"v"}
-!22 = !{i32 1, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 16, !"air.arg_type_align_size", i32 16, !"air.arg_type_name", !"uint4", !"air.arg_name", !"out"}
-!23 = !{i32 2, !"air.thread_position_in_grid", !"air.arg_type_name", !"uint", !"air.arg_name", !"t"}
-!24 = !{i32 3, !"air.stage_in_grid_origin", !"air.arg_type_name", !"uint3", !"air.arg_name", !"origin"}
-!25 = !{i32 4, !"air.stage_in_grid_size", !"air.arg_type_name", !"uint3", !"air.arg_name", !"size"}
-!26 = !{ptr @stage_in_region_short, !10, !27}
-!27 = !{!28, !29, !30, !31}
-!28 = !{i32 0, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 8, !"air.arg_type_align_size", i32 8, !"air.arg_type_name", !"ushort4", !"air.arg_name", !"out"}
-!29 = !{i32 1, !"air.thread_position_in_grid", !"air.arg_type_name", !"uint", !"air.arg_name", !"t"}
-!30 = !{i32 2, !"air.stage_in_grid_origin", !"air.arg_type_name", !"ushort2", !"air.arg_name", !"origin"}
-!31 = !{i32 3, !"air.stage_in_grid_size", !"air.arg_type_name", !"ushort2", !"air.arg_name", !"size"}
-!32 = !{!"air.compile.denorms_disable"}
-!33 = !{!"air.compile.fast_math_enable"}
-!34 = !{!"air.compile.framebuffer_fetch_enable"}
-!35 = !{!"Apple metal version 32023.883 (metalfe-32023.883)"}
-!36 = !{i32 2, i32 8, i32 0}
-!37 = !{!"Metal", i32 4, i32 0, i32 0}
-!38 = !{!39, !39, i64 0}
-!39 = !{!"omnipotent char", !40, i64 0}
-!40 = !{!"Simple C++ TBAA"}
-!41 = !{!42}
-!42 = distinct !{!42, !43, !"air-alias-scope-arg(4)"}
-!43 = distinct !{!43, !"air-alias-scopes(stage_in_fetch)"}
-!44 = !{!45}
-!45 = distinct !{!45, !46, !"air-alias-scope-arg(1)"}
-!46 = distinct !{!46, !"air-alias-scopes(stage_in_region)"}
+!19 = !{ptr @stage_in_fetch_wide, !10, !20}
+!20 = !{!12, !13, !14, !15, !21, !22, !23, !24}
+!21 = !{i32 4, !"air.stage_in", !"air.location_index", i32 4, i32 1, !"air.arg_type_name", !"int4", !"air.arg_name", !"v"}
+!22 = !{i32 5, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 16, !"air.arg_type_align_size", i32 16, !"air.arg_type_name", !"uint4", !"air.arg_name", !"out"}
+!23 = !{i32 6, !"air.thread_position_in_grid", !"air.arg_type_name", !"uint2", !"air.arg_name", !"gid"}
+!24 = !{i32 7, !"air.threads_per_grid", !"air.arg_type_name", !"uint2", !"air.arg_name", !"grid"}
+!25 = !{ptr @stage_in_region, !10, !26}
+!26 = !{!27, !28, !29, !30, !31}
+!27 = !{i32 0, !"air.stage_in", !"air.location_index", i32 0, i32 1, !"air.arg_type_name", !"float", !"air.arg_name", !"v"}
+!28 = !{i32 1, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 16, !"air.arg_type_align_size", i32 16, !"air.arg_type_name", !"uint4", !"air.arg_name", !"out"}
+!29 = !{i32 2, !"air.thread_position_in_grid", !"air.arg_type_name", !"uint", !"air.arg_name", !"t"}
+!30 = !{i32 3, !"air.stage_in_grid_origin", !"air.arg_type_name", !"uint3", !"air.arg_name", !"origin"}
+!31 = !{i32 4, !"air.stage_in_grid_size", !"air.arg_type_name", !"uint3", !"air.arg_name", !"size"}
+!32 = !{ptr @stage_in_region_short, !10, !33}
+!33 = !{!34, !35, !36, !37}
+!34 = !{i32 0, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 8, !"air.arg_type_align_size", i32 8, !"air.arg_type_name", !"ushort4", !"air.arg_name", !"out"}
+!35 = !{i32 1, !"air.thread_position_in_grid", !"air.arg_type_name", !"uint", !"air.arg_name", !"t"}
+!36 = !{i32 2, !"air.stage_in_grid_origin", !"air.arg_type_name", !"ushort2", !"air.arg_name", !"origin"}
+!37 = !{i32 3, !"air.stage_in_grid_size", !"air.arg_type_name", !"ushort2", !"air.arg_name", !"size"}
+!38 = !{!"air.compile.denorms_disable"}
+!39 = !{!"air.compile.fast_math_enable"}
+!40 = !{!"air.compile.framebuffer_fetch_enable"}
+!41 = !{!"Apple metal version 32023.921 (metalfe-32023.921.6)"}
+!42 = !{i32 2, i32 8, i32 0}
+!43 = !{!"Metal", i32 4, i32 0, i32 0}
+!44 = !{!45, !45, i64 0}
+!45 = !{!"omnipotent char", !46, i64 0}
+!46 = !{!"Simple C++ TBAA"}
 !47 = !{!48}
-!48 = distinct !{!48, !49, !"air-alias-scope-arg(0)"}
-!49 = distinct !{!49, !"air-alias-scopes(stage_in_region_short)"}
+!48 = distinct !{!48, !49, !"air-alias-scope-arg(4)"}
+!49 = distinct !{!49, !"air-alias-scopes(stage_in_fetch)"}
+!50 = !{!51}
+!51 = distinct !{!51, !52, !"air-alias-scope-arg(5)"}
+!52 = distinct !{!52, !"air-alias-scopes(stage_in_fetch_wide)"}
+!53 = !{!54}
+!54 = distinct !{!54, !55, !"air-alias-scope-arg(1)"}
+!55 = distinct !{!55, !"air-alias-scopes(stage_in_region)"}
+!56 = !{!57}
+!57 = distinct !{!57, !58, !"air-alias-scope-arg(0)"}
+!58 = distinct !{!58, !"air-alias-scopes(stage_in_region_short)"}

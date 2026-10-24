@@ -168,6 +168,7 @@ pub mod two_plane_samples;
 pub mod vertex_formats;
 pub mod visibility;
 pub mod visible_tables;
+pub mod wide_int_attributes;
 pub mod wide_points;
 pub mod ycbcr_minify;
 pub mod ycbcr_textures;
@@ -289,6 +290,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in int_attributes::all() {
+        cases.push(Box::new(case));
+    }
+    for case in wide_int_attributes::all() {
         cases.push(Box::new(case));
     }
     for case in vertex_formats::all() {

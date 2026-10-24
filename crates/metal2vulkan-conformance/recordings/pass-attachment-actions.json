@@ -35,14 +35,14 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "9f0f7c36050731f41ec2b7a11d2af6a6eb5474b5b4a958d96ae65a4c3b41931d"
+                          "hex": "737b78f7c484721273d2e5bd79985403afb320a471225392e0252211af1534f6"
                         }
                       }
                     }
                   ]
                 },
                 {
-                  "name": "load-0-store-0",
+                  "name": "MTLLoadActionDontCare/MTLStoreActionDontCare",
                   "observed": {
                     "value": "absent"
                   },
@@ -382,7 +382,7 @@
                   ]
                 },
                 {
-                  "name": "load-0-store-1",
+                  "name": "MTLLoadActionDontCare/MTLStoreActionStore",
                   "observed": {
                     "value": "absent"
                   },
@@ -722,7 +722,7 @@
                   ]
                 },
                 {
-                  "name": "load-0-store-2",
+                  "name": "MTLLoadActionDontCare/MTLStoreActionMultisampleResolve",
                   "observed": {
                     "value": "absent"
                   },
@@ -1062,7 +1062,7 @@
                   ]
                 },
                 {
-                  "name": "load-0-store-3",
+                  "name": "MTLLoadActionDontCare/MTLStoreActionStoreAndMultisampleResolve",
                   "observed": {
                     "value": "absent"
                   },
@@ -1402,7 +1402,7 @@
                   ]
                 },
                 {
-                  "name": "load-0-store-4",
+                  "name": "MTLLoadActionDontCare/MTLStoreActionUnknown",
                   "observed": {
                     "value": "absent"
                   },
@@ -1742,7 +1742,7 @@
                   ]
                 },
                 {
-                  "name": "load-0-store-5",
+                  "name": "MTLLoadActionDontCare/MTLStoreActionCustomSampleDepthStore",
                   "observed": {
                     "value": "absent"
                   },
@@ -2082,7 +2082,7 @@
                   ]
                 },
                 {
-                  "name": "load-1-store-0",
+                  "name": "MTLLoadActionLoad/MTLStoreActionDontCare",
                   "observed": {
                     "value": "absent"
                   },
@@ -2422,7 +2422,7 @@
                   ]
                 },
                 {
-                  "name": "load-1-store-1",
+                  "name": "MTLLoadActionLoad/MTLStoreActionStore",
                   "observed": {
                     "value": "absent"
                   },
@@ -2762,7 +2762,7 @@
                   ]
                 },
                 {
-                  "name": "load-1-store-2",
+                  "name": "MTLLoadActionLoad/MTLStoreActionMultisampleResolve",
                   "observed": {
                     "value": "absent"
                   },
@@ -3102,7 +3102,7 @@
                   ]
                 },
                 {
-                  "name": "load-1-store-3",
+                  "name": "MTLLoadActionLoad/MTLStoreActionStoreAndMultisampleResolve",
                   "observed": {
                     "value": "absent"
                   },
@@ -3442,7 +3442,7 @@
                   ]
                 },
                 {
-                  "name": "load-1-store-4",
+                  "name": "MTLLoadActionLoad/MTLStoreActionUnknown",
                   "observed": {
                     "value": "absent"
                   },
@@ -3782,7 +3782,7 @@
                   ]
                 },
                 {
-                  "name": "load-1-store-5",
+                  "name": "MTLLoadActionLoad/MTLStoreActionCustomSampleDepthStore",
                   "observed": {
                     "value": "absent"
                   },
@@ -4122,7 +4122,7 @@
                   ]
                 },
                 {
-                  "name": "load-2-store-0",
+                  "name": "MTLLoadActionClear/MTLStoreActionDontCare",
                   "observed": {
                     "value": "absent"
                   },
@@ -4462,7 +4462,7 @@
                   ]
                 },
                 {
-                  "name": "load-2-store-1",
+                  "name": "MTLLoadActionClear/MTLStoreActionStore",
                   "observed": {
                     "value": "absent"
                   },
@@ -4802,7 +4802,7 @@
                   ]
                 },
                 {
-                  "name": "load-2-store-2",
+                  "name": "MTLLoadActionClear/MTLStoreActionMultisampleResolve",
                   "observed": {
                     "value": "absent"
                   },
@@ -5142,7 +5142,7 @@
                   ]
                 },
                 {
-                  "name": "load-2-store-3",
+                  "name": "MTLLoadActionClear/MTLStoreActionStoreAndMultisampleResolve",
                   "observed": {
                     "value": "absent"
                   },
@@ -5482,7 +5482,7 @@
                   ]
                 },
                 {
-                  "name": "load-2-store-4",
+                  "name": "MTLLoadActionClear/MTLStoreActionUnknown",
                   "observed": {
                     "value": "absent"
                   },
@@ -5822,7 +5822,7 @@
                   ]
                 },
                 {
-                  "name": "load-2-store-5",
+                  "name": "MTLLoadActionClear/MTLStoreActionCustomSampleDepthStore",
                   "observed": {
                     "value": "absent"
                   },

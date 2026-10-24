@@ -1,7 +1,8 @@
 //! Every `MTLAttributeFormat` a kernel's `[[stage_in]]` can read, decoded by
 //! `MTLStageInputOutputDescriptor`.
 //!
-//! `MTLAttributeFormat` has 54 enumerators and the suite reached **one** of them: `stage_in_regions`
+//! `MTLAttributeFormat` has 54 enumerators; the suite reached **one** of them before this family:
+//! `stage_in_regions`
 //! and `indirect_commands` both fetch a `UInt` and ask other questions of it. So the stage-in
 //! path's decoding was untested, although it is the same field as the vertex descriptor's and the
 //! translator decodes both through one module
@@ -21,13 +22,14 @@
 //! nothing else. Widening it to 53 formats would multiply those 28 rows by a field they have
 //! nothing to do with, and would still need another fixture, because `stage_in_regions.metal`
 //! declares no float, half or integer-vector attribute to decode into. The fixture that does is
-//! `kernel_stage_in`, whose `stage_in_fetch` declares one attribute of each class and reports
+//! `kernel_stage_in`, whose `stage_in_fetch_wide` declares one attribute of each class and reports
 //! every one as raw bits, which is exactly this family's question and none of that one's.
 //!
-//! # The four declared attributes, and what each can read
+//! # The five declared attributes, and what each can read
 //!
-//! `stage_in_fetch`'s `[[stage_in]]` holds `float4 f`, `uint4 u`, `int i` and `half2 h`, so the
-//! descriptor — not the source — chooses each one's format. A format reaches the shader only
+//! `stage_in_fetch_wide`'s `[[stage_in]]` holds `float4 f`, `uint4 u`, `int i`, `half2 h` and
+//! `int4 v`,
+//! so the descriptor — not the source — chooses each one's format. A format reaches the shader only
 //! through an attribute whose declared type admits it, which splits the field by **numeric class**:
 //!
 //! | attribute | declared | formats of its own class |
@@ -36,6 +38,14 @@
 //! | 1 | `uint4` | `UInt`, `UInt2`, `UInt3`, `UInt4` |
 //! | 2 | `int` | `Int` |
 //! | 3 | `half2` | `Half`, `Half2` |
+//! | 4 | `int4` | `Int`, `Int2`, `Int3`, `Int4` |
+//!
+//! Attribute 4 is why the signed 32-bit **vectors** are compared at all. `int i` takes one
+//! component, so `MTLAttributeFormatInt2`, `Int3` and `Int4` reached no declaration the fixture
+//! held, and no float declaration takes a 32-bit integer format in any width. `Int` is on both
+//! attribute 2 and attribute 4 by the same rule — a signed 4-byte coding — which is not a value
+//! compared twice but two questions of one value: what one component of it reads as, and what the
+//! three components the format does not hold read as beside it.
 //!
 //! The class is read from the shape the SDK name states, never from a list of names, and it is
 //! Metal's own line: it is also where the family's two cases divide.
@@ -71,11 +81,13 @@
 //!
 //! # What is not reached here, and why
 //!
-//! - **`MTLAttributeFormatInvalid`** is the absence of an attribute, not a format.
-//! - **`MTLAttributeFormatInt2`, `Int3`, `Int4`** are signed 32-bit vectors, which need an `int2`,
-//!   `int3` or `int4` declared attribute. No committed fixture declares one, and whether Metal
-//!   admits a signed vector format on the `uint4` attribute is a refusal-surface question rather
-//!   than a value row, so no row here asks it of a pipeline.
+//! - **`MTLAttributeFormatInvalid`** is the absence of an attribute, not a format. It is the
+//!   descriptor's value for *no attribute here*, so what it would compare is a fetch that does not
+//!   happen: the kernel's `[[stage_in]]` requires a declaration at each attribute index it names,
+//!   and setting one of those indices to `Invalid` leaves the stage input short of it, which is a
+//!   pipeline Metal refuses rather than a decoding it performs. There is no value row to write for
+//!   it, and the refusal belongs to the descriptor families rather than to a format sweep. It is
+//!   the one name on `LEFT_OUT`, and the only `MTLAttributeFormat` this family does not compare.
 //!
 //! `tests::the_formats_left_out_are_named` holds the two cases' lists and that list to being the
 //! whole SDK table between them, with nothing in two of them, so the gap cannot widen quietly.
@@ -106,7 +118,13 @@ use metal2vulkan::metal::{AttributeFormat, StepFunction};
 const FIXTURE: &str = "kernel_stage_in";
 
 /// The entry point: one attribute of each class, each reported as raw bits.
-const ENTRY: &str = "stage_in_fetch";
+///
+/// `stage_in_fetch_wide` and not `stage_in_fetch`, which is the same four attributes without the
+/// `int4`. The two exist apart because `stage_in_fetch`'s four are the contract a dozen of the
+/// translator's own stage-input tests state their descriptors against, and a fifth attribute the
+/// kernel declares and those descriptors do not describe is an invalid descriptor to every one of
+/// them. So the wide declaration is its own entry point in the same fixture.
+const ENTRY: &str = "stage_in_fetch_wide";
 
 /// The Metal buffer index every attribute's layout reads.
 const SOURCE: u32 = 1;
@@ -127,19 +145,20 @@ const REGION: StageInRegion = StageInRegion::Direct {
     size: [ROWS as u32, 1, 1],
 };
 
-/// Words one thread writes: three `uint4`s.
-const ROW_WORDS: u32 = 12;
+/// Words one thread writes: four `uint4`s.
+const ROW_WORDS: u32 = 16;
 
 /// Bytes one thread writes.
 const ROW_BYTES: u32 = 4 * ROW_WORDS;
 
 /// The output buffer's length: longer than the grid writes, so every row also records that the
 /// dispatch wrote nothing past its grid.
-const OUTPUT_BYTES: usize = 640;
+const OUTPUT_BYTES: usize = 832;
 
 // ---- The four declared attributes --------------------------------------------------------------
 
-/// One of the four `[[stage_in]]` attributes `stage_in_fetch` declares, by what it is declared as.
+/// One of the five `[[stage_in]]` attributes `stage_in_fetch_wide` declares, by what it is
+/// declared as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Declared {
     /// `float4 f [[attribute(0)]]`.
@@ -150,15 +169,19 @@ enum Declared {
     Int,
     /// `half2 h [[attribute(3)]]`.
     Half2,
+    /// `int4 v [[attribute(4)]]`, which is the only declaration a signed 32-bit **vector** format
+    /// reaches: `int i` takes one component and no float declaration takes a 32-bit integer at all.
+    Int4,
 }
 
 impl Declared {
-    /// The four, in attribute-index order.
-    const ALL: [Declared; 4] = [
+    /// The five, in attribute-index order.
+    const ALL: [Declared; 5] = [
         Declared::Float4,
         Declared::UInt4,
         Declared::Int,
         Declared::Half2,
+        Declared::Int4,
     ];
 
     /// The Metal attribute index the kernel declares it at.
@@ -168,6 +191,7 @@ impl Declared {
             Declared::UInt4 => 1,
             Declared::Int => 2,
             Declared::Half2 => 3,
+            Declared::Int4 => 4,
         }
     }
 
@@ -201,6 +225,13 @@ impl Declared {
                         }
             }
             Declared::Half2 => held.coding == coding::Coding::Half && held.components <= 2,
+            Declared::Int4 => {
+                held.coding
+                    == coding::Coding::Integer {
+                        bytes: 4,
+                        signed: true,
+                    }
+            }
         }
     }
 
@@ -278,12 +309,12 @@ fn records() -> Vec<u8> {
     coding::records(&names())
 }
 
-/// Where one declared attribute's words sit in a thread's forty-eight bytes, and how many words
+/// Where one declared attribute's words sit in a thread's sixty-four bytes, and how many words
 /// they are.
 ///
-/// Thread `t` writes `out[3t] = bits(f)`, `out[3t + 1] = u` and
-/// `out[3t + 2] = (bits(i), bits(h.x), bits(h.y), t)`, so each attribute's answer is a known slice
-/// of the twelve words and the last word is the thread's own index.
+/// Thread `t` writes `out[4t] = bits(f)`, `out[4t + 1] = u`,
+/// `out[4t + 2] = (bits(i), bits(h.x), bits(h.y), t)` and `out[4t + 3] = bits(v)`, so each
+/// attribute's answer is a known slice of the sixteen words and word 11 is the thread's own index.
 impl Declared {
     /// The byte offset of the attribute's words inside a thread's row, and the words it holds.
     fn slice(self) -> (u32, u32) {
@@ -292,6 +323,7 @@ impl Declared {
             Declared::UInt4 => (16, 4),
             Declared::Int => (32, 1),
             Declared::Half2 => (36, 2),
+            Declared::Int4 => (48, 4),
         }
     }
 
@@ -311,9 +343,9 @@ fn index_layout() -> ByteLayout {
 
 /// A layout over `words` words at byte `offset` of each of the grid's threads.
 ///
-/// `Gaps::Ignored`, because the four attributes' slices, the thread index and
+/// `Gaps::Ignored`, because the five attributes' slices, the thread index and
 /// [`tail_layout`] cover every byte of the buffer exactly once between them: a layout that also
-/// compared its gaps would compare most of the buffer five times and name the wrong leaf for a
+/// compared its gaps would compare most of the buffer six times and name the wrong leaf for a
 /// difference.
 fn grid_layout(offset: u32, words: u32) -> ByteLayout {
     ByteLayout {
@@ -366,16 +398,16 @@ fn grid_tail(offset: u32, words: u32) -> ByteLayout {
 
 // ---- The cases ---------------------------------------------------------------------------------
 
-/// One row: the format each of the four declared attributes carries.
+/// One row: the format each of the five declared attributes carries.
 ///
-/// A row sets **all four**, because the kernel declares all four, and it varies all four, because
-/// a row that held three still would be the same experiment as the row beside it: each attribute's
+/// A row sets **all five**, because the kernel declares all five, and it varies all five, because
+/// a row that held four still would be the same experiment as the row beside it: each attribute's
 /// own format list is cycled, so attribute 0's format — the longest list, and so unique to the row
-/// — names the row while the other three step through their own values beside it.
+/// — names the row while the other four step through their own values beside it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Row {
     /// The format on each attribute, in [`Declared::ALL`] order.
-    formats: [AttributeFormat; 4],
+    formats: [AttributeFormat; 5],
 }
 
 impl Row {
@@ -453,7 +485,7 @@ fn rows() -> Vec<Row> {
         .into_iter()
         .map(|declared| declared.formats().len())
         .max()
-        .expect("four attributes");
+        .expect("five attributes");
     (0..longest).map(Row::new).collect()
 }
 
@@ -580,7 +612,7 @@ impl Case for AttributeFormats {
             )?;
             // One leaf an attribute, each named after the format that attribute carried, so the
             // enumerator Metal was asked for is in the compared text and a diff names the format
-            // rather than a byte offset. The four slices and the tail cover every byte of the
+            // rather than a byte offset. The five slices and the tail cover every byte of the
             // buffer exactly once, and the tail is where "the dispatch wrote nothing past its
             // grid" is checked.
             let mut node = Node::branch(row.name(), Vec::new());
@@ -740,12 +772,7 @@ mod tests {
     /// Stated here so that [`the_formats_left_out_are_named`] can hold the swept list and this one
     /// to being the whole SDK table between them. It is a statement of what is missing, not a value
     /// list a sweep reads: every row is derived from `AttributeFormat::ALL` and never from this.
-    const LEFT_OUT: [&str; 4] = [
-        "MTLAttributeFormatInvalid",
-        "MTLAttributeFormatInt2",
-        "MTLAttributeFormatInt3",
-        "MTLAttributeFormatInt4",
-    ];
+    const LEFT_OUT: [&str; 1] = ["MTLAttributeFormatInvalid"];
 
     /// Every format the family reaches, over both its cases: the value rows of
     /// `attribute-format-fetches` and the pipeline rows of `attribute-format-class-crossings`.
@@ -799,7 +826,7 @@ mod tests {
         );
         assert_eq!(
             (valued.len(), crossed.len()),
-            (34, 16),
+            (37, 16),
             "the two halves of the field moved: {} valued, {} crossed",
             valued.len(),
             crossed.len()
@@ -882,7 +909,7 @@ mod tests {
             .map(|row| crate::sha256_hex(&row.parameters()))
             .collect();
         assert_eq!(digests.len(), rows.len(), "two rows feed one digest");
-        let descriptors: BTreeSet<[u32; 4]> = rows
+        let descriptors: BTreeSet<[u32; 5]> = rows
             .iter()
             .map(|row| row.formats.map(AttributeFormat::as_raw))
             .collect();

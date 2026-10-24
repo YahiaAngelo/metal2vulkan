@@ -5,13 +5,13 @@
   "shaders": [
     {
       "fixture": "kernel_stage_in.ll",
-      "entry": "stage_in_fetch",
-      "source_sha256": "40a60e7b6568ca2c8d8fa341aff853b491de26682f558beb33282c39b87157c4"
+      "entry": "stage_in_fetch_wide",
+      "source_sha256": "7e7482a0b2a896a40b42502585a32b25a7621ea24a8fe2f4a931f534df7900d2"
     },
     {
       "fixture": "kernel_stage_in.air.ll",
-      "entry": "stage_in_fetch",
-      "source_sha256": "61c7fab2ecb72e7a51f3c3e41df639b59c0bc98f43f3175112eb34d1beef7864"
+      "entry": "stage_in_fetch_wide",
+      "source_sha256": "68a480d877a187bd21e45a352579dd7f7e4e6183e0467a8aea4ad6475811966f"
     }
   ],
   "answers": [
@@ -47,7 +47,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "40a60e7b6568ca2c8d8fa341aff853b491de26682f558beb33282c39b87157c4"
+                          "hex": "7e7482a0b2a896a40b42502585a32b25a7621ea24a8fe2f4a931f534df7900d2"
                         }
                       }
                     },
@@ -57,7 +57,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "61c7fab2ecb72e7a51f3c3e41df639b59c0bc98f43f3175112eb34d1beef7864"
+                          "hex": "68a480d877a187bd21e45a352579dd7f7e4e6183e0467a8aea4ad6475811966f"
                         }
                       }
                     },
@@ -67,7 +67,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "1f9e77240d07ed6738c31961d21163f4cc175b1fc844a96921908179eb0fe184"
+                          "hex": "893b1064ee172cd3096c4c0cbf5e516c42402f348f79a50469c5770ba4354dcf"
                         }
                       }
                     },
@@ -77,7 +77,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "82ba7ab84c14a26d313f900a6c7247f3954e9ee9a50a8152c696231ff567c7cc"
+                          "hex": "d3f9a08bf75a46bb2ddde2e329061c16f9f4041313e0beef3e3631c73cd065ac"
                         }
                       }
                     },
@@ -87,7 +87,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "4a349046671144dce9a4c5e96008256094f743298b7281ceeb08339d435a0f71"
+                          "hex": "cff86e93a2146036b59226bef0e093f383e429cbea539d23069ac18883460be9"
                         }
                       }
                     },
@@ -97,7 +97,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "55c67b1e5ba68a4cc8b4f1f87760fe8e4051dd47c3b0af206a9af4b1f32a8b41"
+                          "hex": "27c158e388dccc3f3358b6e9470807cfc246f697bf3dfb186110d6311d0fd897"
                         }
                       }
                     },
@@ -107,7 +107,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "835a7acfdd22828b65f71c2305aa6f0f4ff7f94c2cc0c55625c03f094bcfe226"
+                          "hex": "b2ac95668a0be7ea794a39c9a9f57cdc67f6db9744596231894906ea26566a76"
                         }
                       }
                     },
@@ -117,7 +117,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "28bc3cfaf9085a1086e907d1da7d71dce4ea7dbac6878476ce3c68581886bc6d"
+                          "hex": "b1be83557e36b1c81349dd1eb925a3c888e1e2e94fa404690789cc3dd5aea61e"
                         }
                       }
                     },
@@ -127,7 +127,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "fd5c0ec9279ba0799e1022410079b473096272978938bb17b01b341fc83a9aa2"
+                          "hex": "95ecf8078af5204c7f9e8965000a77282ece2937def5b3eaa5f27f016b680ece"
                         }
                       }
                     },
@@ -137,7 +137,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "9bc4be7b9295d49ea6ada6ba24dfef1882592ab4ed197b1d954e54d7e2ca6443"
+                          "hex": "6efaa54a2d5620f47c059eb94563e914936db9f99f5c9e160b7ca574ac595787"
                         }
                       }
                     },
@@ -147,7 +147,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "753a3ea48567591b630582a02dd299f6bdd29e561949c33426d2a994a4dc7672"
+                          "hex": "11fc6e0482a7063e9658d31b78b94bb832d11c908a38bfe499465b8f381bcd91"
                         }
                       }
                     },
@@ -157,7 +157,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "f7d7279bdacede3dd737f0cbe8b177aa4cb5c9cf733da9e2eb4b9414e0a60e72"
+                          "hex": "d654b158ea99d5543a79a74d8bbb31dfebabefcf8fa5aade923867adac74149e"
                         }
                       }
                     },
@@ -167,7 +167,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "0ef100dc2918ce0f5bfbe9171d90ee98934154f5ffdff5dcbe5a20bbe8230028"
+                          "hex": "47fc0742e950a7474b5f5a049f182b69bdc1bd048483a7dca2e4825455d16398"
                         }
                       }
                     },
@@ -177,7 +177,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "ae7f5feec80926da1727bbed41584ba25e4546bf652006084be77c047e3054cd"
+                          "hex": "b74ccc8501214c59bc4d09230d09504e142695ec9d794dbf9d70372e64b08147"
                         }
                       }
                     },
@@ -187,7 +187,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "6ea1d28cdd5dc3fac83df2c19974b5e64deafac5313f76a2e66c971f31e8a012"
+                          "hex": "6ae60572cb6f0828099b8544c69ffbe1f05db33be38055f354f52ea715e8a80c"
                         }
                       }
                     },
@@ -197,7 +197,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "dba89c20dbb8f84c1bdcf2bd6558557e6b5ef28fd54d84eb9e065f492e73a853"
+                          "hex": "c8e39d234b769943852f4ad28f33aeb8d28697cd2ad73afbec1b7bb70061f085"
                         }
                       }
                     },
@@ -207,7 +207,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "a344534732ea97d7b8dfaa229a6f5564ca18efcfc5785a8acfd566698ac6b519"
+                          "hex": "9098cecc885a21aecda9fad406583c9697c67004537c2fb64025bbfb5660fbba"
                         }
                       }
                     },
@@ -217,7 +217,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "8fa13fd89c7dc547eb32bef43a1aef174ca467527bd1e13d95e75dd963646332"
+                          "hex": "fe1cf89b62f70e548c5f1d409ffe725f937e2a6f2eab8de84c3a2c3aad136068"
                         }
                       }
                     }
