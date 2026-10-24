@@ -339,11 +339,13 @@ mod tests {
     /// the `1 x 1 x 1` the model answered.
     #[test]
     fn the_model_answers_a_real_tile_for_every_query_of_the_family() {
-        let notices = Notices::default();
+        let mut notices = Notices::default();
         let cache = ScratchCache::new().unwrap();
         let runtime = device::open(VENUE, &notices, &cache).unwrap();
-        let taker = notices.clone();
-        let mut side = RuntimeSide::new(&runtime, move || taker.take());
+        let mut side = RuntimeSide::new(
+            &runtime,
+            notices.open("the_model_answers_a_real_tile_for_every_query_of_the_family"),
+        );
         let mut unknown = Vec::new();
         for case in all() {
             for query in &case.queries {

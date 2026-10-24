@@ -690,8 +690,6 @@ pub struct RuntimeSide<'a> {
     /// else does. There is no surface on this side at all — the stand-in buffer is the whole point
     /// of the family, and is why these cases run where there is no IOSurface.
     planes: Vec<(Handle, Buffer)>,
-    /// The degrade-notice codes the device has delivered so far, which `announced` takes away.
-    notices: Box<dyn FnMut() -> Vec<String> + 'a>,
     /// The host pages this side mapped for a no-copy buffer ([`Side::host_buffer`]), one per such
     /// buffer, in the order they were made.
     ///
@@ -700,12 +698,25 @@ pub struct RuntimeSide<'a> {
     /// `buffers` above is dropped before this is. Not a pool a handle names — the buffer itself
     /// lives in `buffers`, and what this adds is the mapping under it.
     host_pages: Vec<crate::host_pages::HostPages>,
+    /// This case's open notice scope, which `announced` reads: every degrade notice the device
+    /// delivers while this side lives is this case's and no other's.
+    ///
+    /// **Declared last on purpose**, after every resource pool, for the same drop-order reason:
+    /// letting go of a resource may itself announce a notice, and the scope has to still be open
+    /// to hear it. Once the scope closes such a notice is unattributed
+    /// ([`crate::device::Notices::unattributed`]) rather than the next case's, which is the whole
+    /// point of the type.
+    notices: crate::device::CaseNotices<'a>,
 }
 
 impl<'a> RuntimeSide<'a> {
-    /// The side on `device`, taking the notices it announced from `notices` (the lane's message
-    /// sink, which hands them over and clears itself).
-    pub fn new(device: &'a Device, notices: impl FnMut() -> Vec<String> + 'a) -> Self {
+    /// The side on `device`, reading the notices its case announced from `notices`, the scope
+    /// [`crate::device::Notices::open`] handed over.
+    ///
+    /// The scope is a value and not a closure over a shared list on purpose: a side cannot be
+    /// made without one, and the one it holds belongs to one case, so there is no way to build a
+    /// side that reads another case's notices.
+    pub fn new(device: &'a Device, notices: crate::device::CaseNotices<'a>) -> Self {
         Self {
             device,
             queue: None,
@@ -723,8 +734,8 @@ impl<'a> RuntimeSide<'a> {
             heaps: Vec::new(),
             argument_encoders: Vec::new(),
             planes: Vec::new(),
-            notices: Box::new(notices),
             host_pages: Vec::new(),
+            notices,
         }
     }
 
@@ -2971,7 +2982,7 @@ impl Side for RuntimeSide<'_> {
     }
 
     fn announced(&mut self) -> Vec<String> {
-        (self.notices)()
+        self.notices.take()
     }
 
     fn indirect_draw_read_back(

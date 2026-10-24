@@ -39,6 +39,15 @@ pub struct Report {
     /// no case. They are reported, never compared: a case's notices are the ones its own work
     /// announced.
     venue_notices: Vec<(String, Vec<String>)>,
+    /// Every degrade notice that arrived with no case's notice scope open
+    /// ([`crate::device::Notices::unattributed`]).
+    ///
+    /// **The harness's own gap, never a case's difference.** A notice the runtime delivers off the
+    /// calling thread, or as a case's last resource is let go, can arrive after the case that
+    /// provoked it has been compared. Handing it to whichever case asked next is what made a
+    /// verdict depend on the selection, so it is reported here instead: the owner's rule is that
+    /// an accuracy note is logged and announced, never dropped, and no case is charged for it.
+    unattributed: Vec<crate::device::Unattributed>,
     /// What the cost half says of each case ([`crate::cost`]). Its own list and its own verdicts:
     /// a count has no Metal counterpart, so it never touches a correctness row.
     costs: Vec<CostRow>,
@@ -53,6 +62,16 @@ impl Report {
     /// Record what `venue` announced as its device was made.
     pub fn venue_announced(&mut self, venue: &str, codes: Vec<String>) {
         self.venue_notices.push((venue.to_owned(), codes));
+    }
+
+    /// Record the notices the run could not attribute to a case.
+    pub fn unattributed_notices(&mut self, notices: Vec<crate::device::Unattributed>) {
+        self.unattributed = notices;
+    }
+
+    /// The notices the run could not attribute to a case.
+    pub fn unattributed(&self) -> &[crate::device::Unattributed] {
+        &self.unattributed
     }
 
     /// Add what replaying one case on one venue came to.
@@ -338,6 +357,12 @@ impl Report {
         for (venue, codes) in &self.venue_notices {
             if !codes.is_empty() {
                 out.push_str(&format!("\n{venue} announced as it was made: {codes:?}\n"));
+            }
+        }
+        if !self.unattributed.is_empty() {
+            out.push_str("\nnotices no case's scope was open for, which no case is charged for\n");
+            for notice in &self.unattributed {
+                out.push_str(&format!("  {notice}\n"));
             }
         }
         out.push_str(&self.allowances_section());

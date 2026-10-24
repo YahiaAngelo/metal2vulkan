@@ -66,6 +66,12 @@ impl StubSide {
         self
     }
 
+    /// The same side announcing `codes`, as a case's own notice scope handed them over.
+    fn announcing_codes(mut self, codes: Vec<String>) -> Self {
+        self.notices = codes;
+        self
+    }
+
     fn refusing(mut self, call: &'static str, failure: Failure) -> Self {
         self.refuse.push((call, failure));
         self
@@ -6034,4 +6040,91 @@ fn the_tagged_sampler_words_tell_every_field_apart() {
     assert_ne!(zero.words(), SamplerSpec::new().words());
     assert_ne!(nan.words(), SamplerSpec::new().words());
     assert_ne!(zero.words(), nan.words());
+}
+
+// ---------------------------------------------------------------------------------------------
+// A case's verdict is a function of that case alone.
+// ---------------------------------------------------------------------------------------------
+
+/// The suite's integrity property, composed from the two halves that decide it: **a case's verdict
+/// is the case's.** One device serves a whole selection, so the two halves are the notice
+/// attribution ([`crate::device::Notices`]) and what the comparison is allowed to read
+/// ([`replay_against`]).
+///
+/// **Measured, at `cbbdca70a3`.** The comparison took the codes the device had announced *earlier
+/// in the run* as justifications a case's own tolerances could cite. The case below — a value
+/// tolerance justified by a notice, a run that announced nothing itself, and a word that genuinely
+/// differs — read `Divergent` alone and `Announced` inside a selection where **any** earlier case
+/// had provoked that code. A real difference was excused by a neighbour's notice, which is the one
+/// failure mode that lets a broken implementation pass a whole-set run while every added case
+/// still looks green.
+///
+/// What the test drives is the second case of a two-case selection, with the selection's own
+/// notice sink: the first case provokes the code, the second announces nothing of its own, and its
+/// verdict must be the one it reads alone.
+#[test]
+fn a_notice_one_case_provoked_does_not_excuse_the_nexts_difference() {
+    let kind = Degradation::DeviceArithmetic;
+    let case = WordsCase {
+        allowances: vec![Allowance::new(
+            "case/output",
+            Loosening::Unchecked,
+            Justification::notice(kind),
+        )],
+        ..WordsCase::new("words", 2)
+    };
+    let recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
+
+    /// What the case reads with `announced` as its own run's notices: one word differs, and
+    /// whether that difference is accounted for turns on whether this run announced the code.
+    fn verdict_with(case: &WordsCase, recording: &Recording, announced: Vec<String>) -> Verdict {
+        let mut side = StubSide::new(words(&[1, 9])).announcing_codes(announced);
+        replay_against(case, &mut side, recording).unwrap().verdict
+    }
+
+    // Alone. Nothing this run announced justifies the word, so nobody is accounting for it.
+    let alone = verdict_with(&case, &recording, Vec::new());
+    assert!(
+        matches!(alone, Verdict::Divergent { .. }),
+        "a word differs with nothing announced to justify it: {alone}"
+    );
+
+    // The same case as the **second** of a selection, over the selection's own sink, after a
+    // neighbour provoked exactly the code its tolerance cites.
+    let mut notices = crate::device::Notices::default();
+    let announce = notices.announcer_for_tests();
+    let first = notices.open("the-neighbour");
+    announce(kind.code());
+    assert_eq!(
+        first.take(),
+        vec![kind.code()],
+        "the neighbour provoked the notice, so the test is not vacuous"
+    );
+    drop(first);
+    let second = notices.open("words");
+    let in_set = verdict_with(&case, &recording, second.take());
+    drop(second);
+
+    assert_eq!(
+        alone, in_set,
+        "the same case over the same run read two verdicts, one of them inside a selection"
+    );
+
+    // The other leak, which is the same property from the other side: a neighbour whose notice
+    // arrives **after** it was compared — off a runtime thread, or as it lets its last resource go
+    // — leaves nothing for this case to pick up either.
+    let mut notices = crate::device::Notices::default();
+    let announce = notices.announcer_for_tests();
+    let neighbour = notices.open("the-neighbour");
+    drop(neighbour);
+    announce(kind.code());
+    let second = notices.open("words");
+    let after_a_late_notice = verdict_with(&case, &recording, second.take());
+    drop(second);
+    assert_eq!(
+        alone, after_a_late_notice,
+        "a notice that arrived between the two cases was charged to the second"
+    );
+    // Never lost: the run reports it against no case.
+    assert_eq!(notices.unattributed().len(), 1);
 }

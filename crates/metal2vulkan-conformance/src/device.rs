@@ -4,6 +4,21 @@
 //! directory this run owns and removes, and a message sink that keeps the degrade-notice codes the
 //! device delivered. A warm cache never stands in for a translation the suite compares, and a
 //! notice is never lost: it is the thing that justifies a loosened field.
+//!
+//! # A notice belongs to the case whose work announced it
+//!
+//! One device serves a whole selection, and its sink hears every notice every case provokes. The
+//! sink therefore has to **attribute** each one, and that attribution is what [`Notices`] is: a
+//! notice is put in the scope of the case that is running ([`Notices::open`]), or, with no case's
+//! scope open, in the venue's own list or the run's late list. There is no fourth place for one to
+//! go, so no case can be handed a notice its own work did not announce.
+//!
+//! What this replaces was a shared list the sink appended to and each case drained. Attribution was
+//! then "whatever was in the list when the case asked", which is not the same thing: a notice the
+//! runtime delivers off the calling thread (a scheduler thread, a command buffer's host step) can
+//! land after the case that provoked it has drained, and the next case to drain takes it. One
+//! notice misattributed that way is a divergence reported against a case that did nothing, and a
+//! real degradation missing from the case that did.
 
 use metal2vulkan_runtime::{
     DebugMessage, Degradation, Device, DeviceKind, DeviceOptions, MessageSink, ShaderCacheOptions,
@@ -11,29 +26,168 @@ use metal2vulkan_runtime::{
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-/// The degrade-notice codes a device announced, which [`Notices::take`] hands over and clears.
-#[derive(Clone, Default)]
-pub struct Notices(Arc<Mutex<Vec<String>>>);
+/// A degrade notice no case's scope was open for: the harness could not attribute it, so it is
+/// reported rather than given to a case that did not provoke it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unattributed {
+    /// The notice's code.
+    pub code: String,
+    /// The case whose scope closed last before it arrived, which is the likeliest provoker and is
+    /// never charged for it.
+    pub after: Option<String>,
+}
+
+impl std::fmt::Display for Unattributed {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.after {
+            Some(case) => write!(out, "{} (after {case} finished)", self.code),
+            None => write!(out, "{} (before any case ran)", self.code),
+        }
+    }
+}
+
+/// Where the notices a device delivers are put.
+#[derive(Default)]
+struct Heard {
+    /// The case whose scope is open, with the codes heard since it opened.
+    open: Option<(String, Vec<String>)>,
+    /// The case whose scope closed last, so a notice arriving late can say what it came after.
+    closed: Option<String>,
+    /// The codes heard before any case's scope opened: the device's own, as it was made.
+    venue: Vec<String>,
+    /// The codes heard with no case's scope open, once one had been.
+    late: Vec<Unattributed>,
+}
+
+/// The degrade-notice codes a device announces, each attributed to the case whose scope was open
+/// when it arrived.
+///
+/// Not `Clone`: the sink is the one shared handle, so nothing can hold a second way to read or
+/// drain a case's notices. [`Notices::open`] takes `&mut self`, which is what makes "one case's
+/// scope at a time" a fact the borrow checker holds rather than a convention — two open scopes
+/// would be the misattribution this type exists to prevent, and the code that would do it does
+/// not compile.
+#[derive(Default)]
+pub struct Notices(Arc<Mutex<Heard>>);
 
 impl Notices {
-    /// A sink for a device's options: it keeps each notice's code and drops the rest.
+    /// A sink for a device's options: it attributes each notice's code and drops the rest.
     pub fn sink(&self) -> MessageSink {
-        let kept = Arc::clone(&self.0);
+        let heard = Arc::clone(&self.0);
         MessageSink::new(move |message: &DebugMessage| {
             if let Some(notice) = message.degradation.as_ref() {
-                if let Ok(mut codes) = kept.lock() {
-                    codes.push(notice.degradation.code().to_owned());
-                }
+                put(&heard, notice.degradation.code());
             }
         })
     }
 
-    /// The codes announced so far, taken away.
-    pub fn take(&self) -> Vec<String> {
+    /// Announce codes the way [`Notices::sink`] does, for a test of the attribution itself.
+    ///
+    /// The runtime's own `DegradeNotice` cannot be built outside its crate, so a test of this
+    /// module reaches the sink's own step — the code, put where the scopes say — rather than
+    /// fabricating a device message. It closes over the same handle the sink does, so it is
+    /// callable while a case's scope is open, as the device is.
+    #[cfg(test)]
+    pub(crate) fn announcer_for_tests(&self) -> impl Fn(&str) + use<> {
+        let heard = Arc::clone(&self.0);
+        move |code: &str| put(&heard, code)
+    }
+
+    /// Open `case`'s scope: every notice the device announces until the scope closes is this
+    /// case's.
+    ///
+    /// `&mut self` is the guarantee. A second scope cannot be open while this one is, so there is
+    /// no moment at which the sink has two cases to choose between.
+    pub fn open(&mut self, case: &str) -> CaseNotices<'_> {
+        if let Ok(mut heard) = self.0.lock() {
+            // A scope left open by a `CaseNotices` that was leaked rather than dropped would
+            // otherwise keep taking the next case's notices. Closing it here keeps the invariant
+            // whatever a caller did with the guard.
+            if let Some((held, _)) = heard.open.take() {
+                heard.closed = Some(held);
+            }
+            heard.open = Some((case.to_owned(), Vec::new()));
+        }
+        CaseNotices(self)
+    }
+
+    /// The codes the device announced as it was made, before any case's scope opened: the venue's
+    /// own, which say what this host's driver and release cost and are no case's.
+    pub fn venue(&self) -> Vec<String> {
         self.0
             .lock()
-            .map(|mut codes| std::mem::take(&mut *codes))
+            .map(|mut heard| std::mem::take(&mut heard.venue))
             .unwrap_or_default()
+    }
+
+    /// Every notice that arrived with no case's scope open after the first one had opened.
+    ///
+    /// These are the harness's own failures of attribution, not any case's difference: the run
+    /// reports them so a notice is never lost, and no case is charged for one.
+    pub fn unattributed(&self) -> Vec<Unattributed> {
+        self.0
+            .lock()
+            .map(|heard| heard.late.clone())
+            .unwrap_or_default()
+    }
+}
+
+/// Put `code` where the current scope says it belongs.
+fn put(heard: &Arc<Mutex<Heard>>, code: &str) {
+    let Ok(mut heard) = heard.lock() else {
+        return;
+    };
+    if let Some((_, codes)) = heard.open.as_mut() {
+        codes.push(code.to_owned());
+        return;
+    }
+    match heard.closed.clone() {
+        None => heard.venue.push(code.to_owned()),
+        after => heard.late.push(Unattributed {
+            code: code.to_owned(),
+            after,
+        }),
+    }
+}
+
+/// One case's open notice scope: the only way to read the notices a case's own work announced.
+///
+/// It has no constructor of its own — [`Notices::open`] is the only source — and it is not
+/// `Clone`, so a case's notices cannot be read from anywhere but the case's own run. Dropping it
+/// closes the scope, after which a notice the runtime delivers late is unattributed rather than
+/// the next case's.
+pub struct CaseNotices<'a>(&'a Notices);
+
+impl CaseNotices<'_> {
+    /// The codes this case's own work has announced, taken away.
+    pub fn take(&self) -> Vec<String> {
+        self.0
+             .0
+            .lock()
+            .map(|mut heard| match heard.open.as_mut() {
+                Some((_, codes)) => std::mem::take(codes),
+                None => Vec::new(),
+            })
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for CaseNotices<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut heard) = self.0 .0.lock() {
+            if let Some((case, codes)) = heard.open.take() {
+                // A notice the case announced and never took is still the case's, and losing it
+                // silently is the one thing this module must not do: it reads as unattributed,
+                // which the run reports.
+                for code in codes {
+                    heard.late.push(Unattributed {
+                        code,
+                        after: Some(case.clone()),
+                    });
+                }
+                heard.closed = Some(case);
+            }
+        }
     }
 }
 
@@ -213,7 +367,7 @@ pub fn sites_the_runtime_calls_invalid(
         }
     }
 
-    let notices = Notices::default();
+    let mut notices = Notices::default();
     let cache = ScratchCache::new().map_err(|why| format!("no scratch cache: {why}"))?;
     let venue = if cfg!(m2v_gpu) {
         Venues::Gpu
@@ -223,8 +377,7 @@ pub fn sites_the_runtime_calls_invalid(
     let runtime = open(venue, &notices, &cache)?;
     let mut found = Vec::new();
     for case in cases {
-        let taker = notices.clone();
-        let mut side = crate::runtime_side::RuntimeSide::new(&runtime, move || taker.take());
+        let mut side = crate::runtime_side::RuntimeSide::new(&runtime, notices.open(case.name()));
         let mut sites = crate::transcript::Sites::new();
         // An abort is the case's own refusal of a call it cannot carry on without, which is a
         // recorded verdict and not a validation stop; what it leaves emitted is still scanned.
@@ -242,4 +395,102 @@ pub fn sites_the_runtime_calls_invalid(
         }
     }
     Ok(found)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Notices, Unattributed};
+
+    /// The property the suite rests on, at the one place a case's notices are decided: **a notice
+    /// belongs to the case whose work announced it.**
+    ///
+    /// A shared list the sink appended to and each case drained could not say this. Attribution
+    /// was "whatever was in the list when the case asked", so a notice the runtime delivers off
+    /// the calling thread — a scheduler thread, a command buffer's host step, a resource being let
+    /// go — landed on whichever case drained next.
+    #[test]
+    fn a_notice_belongs_to_the_case_whose_scope_was_open() {
+        let mut notices = Notices::default();
+        let announce = notices.announcer_for_tests();
+
+        let first = notices.open("first");
+        announce("a-notice-the-first-case-provoked");
+        assert_eq!(first.take(), vec!["a-notice-the-first-case-provoked"]);
+        drop(first);
+
+        let second = notices.open("second");
+        announce("a-notice-the-second-case-provoked");
+        assert_eq!(second.take(), vec!["a-notice-the-second-case-provoked"]);
+        drop(second);
+
+        assert_eq!(notices.unattributed(), Vec::new());
+    }
+
+    /// The direction that cost a verdict: a notice the first case provoked, delivered **after** it
+    /// was compared, is not the next case's. The next case sees nothing, which is exactly what it
+    /// would see running alone.
+    #[test]
+    fn a_notice_that_arrives_between_cases_reaches_neither() {
+        let mut notices = Notices::default();
+        let announce = notices.announcer_for_tests();
+
+        let first = notices.open("first");
+        assert_eq!(first.take(), Vec::<String>::new());
+        drop(first);
+
+        // The notice the first case's work provoked, arriving late.
+        announce("late");
+
+        let second = notices.open("second");
+        assert_eq!(
+            second.take(),
+            Vec::<String>::new(),
+            "the second case was handed a notice its own work did not announce"
+        );
+        drop(second);
+
+        // Never lost, either: the run reports it against no case at all.
+        assert_eq!(
+            notices.unattributed(),
+            vec![Unattributed {
+                code: "late".to_owned(),
+                after: Some("first".to_owned()),
+            }]
+        );
+    }
+
+    /// What the device announced as it was made is the venue's, and reaches no case however many
+    /// cases run after it.
+    #[test]
+    fn the_venues_own_notices_reach_no_case() {
+        let mut notices = Notices::default();
+        let announce = notices.announcer_for_tests();
+        announce("what-the-device-cost-to-make");
+
+        let case = notices.open("a-case");
+        assert_eq!(case.take(), Vec::<String>::new());
+        drop(case);
+
+        assert_eq!(notices.venue(), vec!["what-the-device-cost-to-make"]);
+        assert_eq!(notices.unattributed(), Vec::new());
+    }
+
+    /// A notice a case announced and never read is reported, not dropped: the owner's rule is that
+    /// an accuracy note is logged and announced. It is still charged to no case, because the
+    /// case's comparison is already over.
+    #[test]
+    fn a_notice_a_case_never_took_is_reported_rather_than_lost() {
+        let mut notices = Notices::default();
+        let announce = notices.announcer_for_tests();
+        let case = notices.open("a-case");
+        announce("announced-as-the-case-let-its-last-resource-go");
+        drop(case);
+        assert_eq!(
+            notices.unattributed(),
+            vec![Unattributed {
+                code: "announced-as-the-case-let-its-last-resource-go".to_owned(),
+                after: Some("a-case".to_owned()),
+            }]
+        );
+    }
 }

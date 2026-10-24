@@ -895,11 +895,13 @@ mod device_tests {
 
     #[test]
     fn no_shape_of_the_making_table_is_one_metal_stops() {
-        let notices = Notices::default();
+        let mut notices = Notices::default();
         let cache = ScratchCache::new().unwrap();
         let runtime = device::open(VENUE, &notices, &cache).unwrap();
-        let taker = notices.clone();
-        let mut side = RuntimeSide::new(&runtime, move || taker.take());
+        let mut side = RuntimeSide::new(
+            &runtime,
+            notices.open("no_shape_of_the_making_table_is_one_metal_stops"),
+        );
         let mut stopped = Vec::new();
         for request in requests() {
             if let Err(failure) = side.buffer_texture(&request) {

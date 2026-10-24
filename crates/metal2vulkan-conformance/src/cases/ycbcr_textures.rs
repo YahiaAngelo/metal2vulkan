@@ -639,11 +639,13 @@ mod device_tests {
 
     #[test]
     fn no_descriptor_of_the_family_is_one_metals_validation_stops() {
-        let notices = Notices::default();
+        let mut notices = Notices::default();
         let cache = ScratchCache::new().unwrap();
         let runtime = device::open(VENUE, &notices, &cache).unwrap();
-        let taker = notices.clone();
-        let mut side = RuntimeSide::new(&runtime, move || taker.take());
+        let mut side = RuntimeSide::new(
+            &runtime,
+            notices.open("no_descriptor_of_the_family_is_one_metals_validation_stops"),
+        );
         let mut stopped = Vec::new();
         for (query, asks_texture) in FormatDescriptors.queries() {
             if let Err(failure) = side.heap_texture_size_and_align(&query) {

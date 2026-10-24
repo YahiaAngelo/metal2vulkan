@@ -87,47 +87,37 @@ impl std::fmt::Display for ReplayError {
 
 /// Run `case` on `side` and compare it with its recording.
 pub fn replay(case: &dyn Case, side: &mut dyn Side) -> Result<Replayed, ReplayError> {
-    replay_known(case, side, &[])
-}
-
-/// [`replay`] where `device_notices` are the codes this device has already announced earlier in
-/// the run.
-pub fn replay_known(
-    case: &dyn Case,
-    side: &mut dyn Side,
-    device_notices: &[String],
-) -> Result<Replayed, ReplayError> {
     let name = case.name();
     let recording = recording::read(name).map_err(|why| ReplayError::NoRecording {
         case: name.to_owned(),
         why,
     })?;
-    replay_against_known(case, side, &recording, device_notices)
+    replay_against(case, side, &recording)
 }
 
 /// [`replay`] against a recording already in hand.
+///
+/// # A case's verdict is a function of that case alone
+///
+/// **Everything this reads is the case's own**: its recording, its allowances, and the transcript
+/// `side` just emitted. There is no parameter through which a selection, an order or a neighbour's
+/// run can reach the comparison, and that is the point — a suite whose verdict moves with what
+/// else ran can report a clean run on a broken implementation, which no amount of added depth
+/// catches.
+///
+/// It did carry one such parameter, and it cost a verdict. The codes the device had announced
+/// *earlier in the run* were added to what this case's tolerances could cite, on the reasoning
+/// that a notice is a fact about the device for the whole run. Measured: a case with a value
+/// tolerance justified by a notice, over a run that announced nothing itself and a word that
+/// genuinely differed, read `Divergent` alone and `Announced` inside a selection where any earlier
+/// case had provoked that code
+/// (`tests::a_case_verdict_does_not_move_with_what_a_neighbour_announced`). A real difference was
+/// excused by a neighbour. A notice now justifies a difference only in the case whose own work
+/// announced it, which is what the declaration claims in the first place.
 pub fn replay_against(
     case: &dyn Case,
     side: &mut dyn Side,
     recording: &Recording,
-) -> Result<Replayed, ReplayError> {
-    replay_against_known(case, side, recording, &[])
-}
-
-/// [`replay_against`] where `device_notices` are the codes this device has already announced
-/// earlier in the run.
-///
-/// A degrade notice is announced **once per device per kind**, so a case that runs after the one
-/// that first provoked a notice sees none of it. Its own notices site still holds only what its
-/// own work announced — that is what makes the site readable — but the device's notice is a fact
-/// about the device for the whole run, so it justifies a loosened field in any case of that run.
-/// Without this a case could only name a notice it happened to provoke first, which the order of
-/// the case set decides.
-pub fn replay_against_known(
-    case: &dyn Case,
-    side: &mut dyn Side,
-    recording: &Recording,
-    device_notices: &[String],
 ) -> Result<Replayed, ReplayError> {
     let name = case.name();
     let venue = side.venue();
@@ -164,7 +154,6 @@ pub fn replay_against_known(
     sites.notices(NOTICES_SITE, &announced);
     let ours = sites.finish();
     announced.extend(ours.announced_notices().into_keys());
-    announced.extend(device_notices.iter().cloned());
 
     let answer = match recording.answer(level) {
         Ok(answer) => answer,
