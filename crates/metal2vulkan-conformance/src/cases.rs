@@ -44,6 +44,7 @@
 
 pub mod argument_encoders;
 pub mod astc_textures;
+pub mod attribute_formats;
 pub mod attribute_strides;
 pub mod binary_archives;
 pub mod blend_sweeps;
@@ -160,6 +161,7 @@ pub mod tile_threadgroups;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
 pub mod two_plane_samples;
+pub mod vertex_formats;
 pub mod visibility;
 pub mod wide_points;
 pub mod ycbcr_minify;
@@ -272,6 +274,13 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in int_attributes::all() {
         cases.push(Box::new(case));
     }
+    for case in vertex_formats::all() {
+        cases.push(Box::new(case));
+    }
+    for case in attribute_formats::all() {
+        cases.push(Box::new(case));
+    }
+    cases.push(Box::new(attribute_formats::ClassCrossings));
     for case in extended_range_planes::all() {
         cases.push(Box::new(case));
     }

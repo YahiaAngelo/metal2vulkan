@@ -1,0 +1,445 @@
+{
+  "format": 1,
+  "case": "attribute-format-class-crossings",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "kernel_stage_in.ll",
+      "entry": "stage_in_fetch",
+      "source_sha256": "40a60e7b6568ca2c8d8fa341aff853b491de26682f558beb33282c39b87157c4"
+    },
+    {
+      "fixture": "kernel_stage_in.air.ll",
+      "entry": "stage_in_fetch",
+      "source_sha256": "61c7fab2ecb72e7a51f3c3e41df639b59c0bc98f43f3175112eb34d1beef7864"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "40a60e7b6568ca2c8d8fa341aff853b491de26682f558beb33282c39b87157c4"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "61c7fab2ecb72e7a51f3c3e41df639b59c0bc98f43f3175112eb34d1beef7864"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatUChar2",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "1f9e77240d07ed6738c31961d21163f4cc175b1fc844a96921908179eb0fe184"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatUChar3",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "82ba7ab84c14a26d313f900a6c7247f3954e9ee9a50a8152c696231ff567c7cc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatUChar4",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4a349046671144dce9a4c5e96008256094f743298b7281ceeb08339d435a0f71"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatChar2",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "55c67b1e5ba68a4cc8b4f1f87760fe8e4051dd47c3b0af206a9af4b1f32a8b41"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatChar3",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "835a7acfdd22828b65f71c2305aa6f0f4ff7f94c2cc0c55625c03f094bcfe226"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatChar4",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "28bc3cfaf9085a1086e907d1da7d71dce4ea7dbac6878476ce3c68581886bc6d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatUShort2",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "fd5c0ec9279ba0799e1022410079b473096272978938bb17b01b341fc83a9aa2"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatUShort3",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9bc4be7b9295d49ea6ada6ba24dfef1882592ab4ed197b1d954e54d7e2ca6443"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatUShort4",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "753a3ea48567591b630582a02dd299f6bdd29e561949c33426d2a994a4dc7672"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatShort2",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f7d7279bdacede3dd737f0cbe8b177aa4cb5c9cf733da9e2eb4b9414e0a60e72"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatShort3",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "0ef100dc2918ce0f5bfbe9171d90ee98934154f5ffdff5dcbe5a20bbe8230028"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatShort4",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ae7f5feec80926da1727bbed41584ba25e4546bf652006084be77c047e3054cd"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatUChar",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6ea1d28cdd5dc3fac83df2c19974b5e64deafac5313f76a2e66c971f31e8a012"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatChar",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "dba89c20dbb8f84c1bdcf2bd6558557e6b5ef28fd54d84eb9e065f492e73a853"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatUShort",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a344534732ea97d7b8dfaa229a6f5564ca18efcfc5785a8acfd566698ac6b519"
+                        }
+                      }
+                    },
+                    {
+                      "name": "row:MTLAttributeFormatShort",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8fa13fd89c7dc547eb32bef43a1aef174ca467527bd1e13d95e75dd963646332"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatUChar2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatUChar3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatUChar4",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatChar2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatChar3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatChar4",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatUShort2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatUShort3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatUShort4",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatShort2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatShort3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatShort4",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatUChar",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatChar",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatUShort",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLAttributeFormatShort",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

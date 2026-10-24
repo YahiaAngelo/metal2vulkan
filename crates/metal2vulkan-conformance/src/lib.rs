@@ -45,6 +45,7 @@
 pub mod allowance;
 pub mod archives;
 pub mod argument_encoders;
+pub mod attribute_coding;
 pub mod buffer_texture;
 pub mod case;
 pub mod cases;

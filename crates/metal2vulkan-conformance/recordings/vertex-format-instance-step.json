@@ -1,0 +1,2213 @@
+{
+  "format": 1,
+  "case": "vertex-format-instance-step",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "dsx_int_attributes.ll",
+      "entry": "int_attribute_to_float4",
+      "source_sha256": "0c9ccc924f3218455abf738c01f52dae3ba38c3add963b0b170f8e35a986d88c"
+    },
+    {
+      "fixture": "dsx_int_attributes.air.ll",
+      "entry": "int_attribute_to_float4",
+      "source_sha256": "2e7e1ea56f5f17c062894a4b802e975802e86dcc4c565fdc1eaa504d6a535ce5"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "0c9ccc924f3218455abf738c01f52dae3ba38c3add963b0b170f8e35a986d88c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "2e7e1ea56f5f17c062894a4b802e975802e86dcc4c565fdc1eaa504d6a535ce5"
+                        }
+                      }
+                    },
+                    {
+                      "name": "records",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9fa8371c1c3babd30f8968cbb41a229ecf7dea7760bea67f71a9b4e5f33fc63f"
+                        }
+                      }
+                    },
+                    {
+                      "name": "answers",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "634fe2ef218426c88e9486131f36b3ed7e03aa529584672943f74758180cdff3"
+                        }
+                      }
+                    },
+                    {
+                      "name": "pipelines",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "68bafc2c4de10015c11bcb6bc05186a3461688d81d837f652c2bbdcba3fbb358"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/records",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/answers",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUChar2/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUChar3/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUChar4/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatChar2/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatChar3/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatChar4/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUChar2Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUChar3Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUChar4Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatChar2Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatChar3Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatChar4Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUShort2/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUShort3/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUShort4/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatShort2/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatShort3/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatShort4/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUShort2Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUShort3Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUShort4Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatShort2Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatShort3Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatShort4Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatHalf2/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatHalf3/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatHalf4/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatFloat/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatFloat2/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatFloat3/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatFloat4/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatInt1010102Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUInt1010102Normalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUChar4Normalized_BGRA/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUChar/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatChar/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUCharNormalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatCharNormalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUShort/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatShort/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUShortNormalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatShortNormalized/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatHalf/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatFloatRG11B10/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatFloatRGB9E5/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLVertexFormatUChar2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAAAAAACAPwAAAAAAAP5CAAAAAAAAgD8AAAAAAAD+QgAAAAAAAIA/AAAAAAAA/kIAAAAAAACAPwAAAAAAAP5CAAAAAAAAgD8AAAAAAAD+QgAAAAAAAIA/AAAAAAAA/kIAAAAAAACAPwAAAAAAAP5CAAAAAAAAgD8AAAAAAAD+QgAAAAAAAIA/AAAAAAAA/kIAAAAAAACAPwAAAAAAAP5CAAAAAAAAgD8AAAAAAAD+QgAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUChar3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAEhDAACAPwAAAAAAAP5CAABIQwAAgD8AAAAAAAD+QgAASEMAAIA/AAAAAAAA/kIAAEhDAACAPwAAAAAAAP5CAABIQwAAgD8AAAAAAAD+QgAASEMAAIA/AAAAAAAA/kIAAEhDAACAPwAAAAAAAP5CAABIQwAAgD8AAAAAAAD+QgAASEMAAIA/AAAAAAAA/kIAAEhDAACAPwAAAAAAAP5CAABIQwAAgD8AAAAAAAD+QgAASEMAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUChar4",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAEhDAAB/QwAAAAAAAP5CAABIQwAAf0MAAAAAAAD+QgAASEMAAH9DAAAAAAAA/kIAAEhDAAB/QwAAAAAAAP5CAABIQwAAf0MAAAAAAAD+QgAASEMAAH9DAAAAAAAA/kIAAEhDAAB/QwAAAAAAAP5CAABIQwAAf0MAAAAAAAD+QgAASEMAAH9DAAAAAAAA/kIAAEhDAAB/QwAAAAAAAP5CAABIQwAAf0MAAAAAAAD+QgAASEMAAH9D"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatChar2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/sIAAAAAAACAPwAAAAAAAP7CAAAAAAAAgD8AAAAAAAD+wgAAAAAAAIA/AAAAAAAA/sIAAAAAAACAPwAAAAAAAP7CAAAAAAAAgD8AAAAAAAD+wgAAAAAAAIA/AAAAAAAA/sIAAAAAAACAPwAAAAAAAP7CAAAAAAAAgD8AAAAAAAD+wgAAAAAAAIA/AAAAAAAA/sIAAAAAAACAPwAAAAAAAP7CAAAAAAAAgD8AAAAAAAD+wgAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatChar3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/sIAAABAAACAPwAAAAAAAP7CAAAAQAAAgD8AAAAAAAD+wgAAAEAAAIA/AAAAAAAA/sIAAABAAACAPwAAAAAAAP7CAAAAQAAAgD8AAAAAAAD+wgAAAEAAAIA/AAAAAAAA/sIAAABAAACAPwAAAAAAAP7CAAAAQAAAgD8AAAAAAAD+wgAAAEAAAIA/AAAAAAAA/sIAAABAAACAPwAAAAAAAP7CAAAAQAAAgD8AAAAAAAD+wgAAAEAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatChar4",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/sIAAABAAADIwgAAAAAAAP7CAAAAQAAAyMIAAAAAAAD+wgAAAEAAAMjCAAAAAAAA/sIAAABAAADIwgAAAAAAAP7CAAAAQAAAyMIAAAAAAAD+wgAAAEAAAMjCAAAAAAAA/sIAAABAAADIwgAAAAAAAP7CAAAAQAAAyMIAAAAAAAD+wgAAAEAAAMjCAAAAAAAA/sIAAABAAADIwgAAAAAAAP7CAAAAQAAAyMIAAAAAAAD+wgAAAEAAAMjC"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUChar2Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAP/+/j4AAAAAAACAPwAAAAD//v4+AAAAAAAAgD8AAAAA//7+PgAAAAAAAIA/AAAAAP/+/j4AAAAAAACAPwAAAAD//v4+AAAAAAAAgD8AAAAA//7+PgAAAAAAAIA/AAAAAP/+/j4AAAAAAACAPwAAAAD//v4+AAAAAAAAgD8AAAAA//7+PgAAAAAAAIA/AAAAAP/+/j4AAAAAAACAPwAAAAD//v4+AAAAAAAAgD8AAAAA//7+PgAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUChar3Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAP/+/j7JyEg/AACAPwAAAAD//v4+ychIPwAAgD8AAAAA//7+PsnISD8AAIA/AAAAAP/+/j7JyEg/AACAPwAAAAD//v4+ychIPwAAgD8AAAAA//7+PsnISD8AAIA/AAAAAP/+/j7JyEg/AACAPwAAAAD//v4+ychIPwAAgD8AAAAA//7+PsnISD8AAIA/AAAAAP/+/j7JyEg/AACAPwAAAAD//v4+ychIPwAAgD8AAAAA//7+PsnISD8AAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUChar4Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAP/+/j7JyEg/AACAPwAAAAD//v4+ychIPwAAgD8AAAAA//7+PsnISD8AAIA/AAAAAP/+/j7JyEg/AACAPwAAAAD//v4+ychIPwAAgD8AAAAA//7+PsnISD8AAIA/AAAAAP/+/j7JyEg/AACAPwAAAAD//v4+ychIPwAAgD8AAAAA//7+PsnISD8AAIA/AAAAAP/+/j7JyEg/AACAPwAAAAD//v4+ychIPwAAgD8AAAAA//7+PsnISD8AAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatChar2Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAgL8AAAAAAACAPwAAAAAAAIC/AAAAAAAAgD8AAAAAAACAvwAAAAAAAIA/AAAAAAAAgL8AAAAAAACAPwAAAAAAAIC/AAAAAAAAgD8AAAAAAACAvwAAAAAAAIA/AAAAAAAAgL8AAAAAAACAPwAAAAAAAIC/AAAAAAAAgD8AAAAAAACAvwAAAAAAAIA/AAAAAAAAgL8AAAAAAACAPwAAAAAAAIC/AAAAAAAAgD8AAAAAAACAvwAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatChar3Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAgL8EAoE8AACAPwAAAAAAAIC/BAKBPAAAgD8AAAAAAACAvwQCgTwAAIA/AAAAAAAAgL8EAoE8AACAPwAAAAAAAIC/BAKBPAAAgD8AAAAAAACAvwQCgTwAAIA/AAAAAAAAgL8EAoE8AACAPwAAAAAAAIC/BAKBPAAAgD8AAAAAAACAvwQCgTwAAIA/AAAAAAAAgL8EAoE8AACAPwAAAAAAAIC/BAKBPAAAgD8AAAAAAACAvwQCgTwAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatChar4Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAgL8EAoE8JpNJvwAAAAAAAIC/BAKBPCaTSb8AAAAAAACAvwQCgTwmk0m/AAAAAAAAgL8EAoE8JpNJvwAAAAAAAIC/BAKBPCaTSb8AAAAAAACAvwQCgTwmk0m/AAAAAAAAgL8EAoE8JpNJvwAAAAAAAIC/BAKBPCaTSb8AAAAAAACAvwQCgTwmk0m/AAAAAAAAgL8EAoE8JpNJvwAAAAAAAIC/BAKBPCaTSb8AAAAAAACAvwQCgTwmk0m/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUShort2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAD+/0YAAAAAAACAPwAAAAAA/v9GAAAAAAAAgD8AAAAAAP7/RgAAAAAAAIA/AAAAAAD+/0YAAAAAAACAPwAAAAAA/v9GAAAAAAAAgD8AAAAAAP7/RgAAAAAAAIA/AAAAAAD+/0YAAAAAAACAPwAAAAAA/v9GAAAAAAAAgD8AAAAAAP7/RgAAAAAAAIA/AAAAAAD+/0YAAAAAAACAPwAAAAAA/v9GAAAAAAAAgD8AAAAAAP7/RgAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUShort3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAD+/0YA/X9HAACAPwAAAAAA/v9GAP1/RwAAgD8AAAAAAP7/RgD9f0cAAIA/AAAAAAD+/0YA/X9HAACAPwAAAAAA/v9GAP1/RwAAgD8AAAAAAP7/RgD9f0cAAIA/AAAAAAD+/0YA/X9HAACAPwAAAAAA/v9GAP1/RwAAgD8AAAAAAP7/RgD9f0cAAIA/AAAAAAD+/0YA/X9HAACAPwAAAAAA/v9GAP1/RwAAgD8AAAAAAP7/RgD9f0cAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUShort4",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAD+/0YA/X9HAKqqRgAAAAAA/v9GAP1/RwCqqkYAAAAAAP7/RgD9f0cAqqpGAAAAAAD+/0YA/X9HAKqqRgAAAAAA/v9GAP1/RwCqqkYAAAAAAP7/RgD9f0cAqqpGAAAAAAD+/0YA/X9HAKqqRgAAAAAA/v9GAP1/RwCqqkYAAAAAAP7/RgD9f0cAqqpGAAAAAAD+/0YA/X9HAKqqRgAAAAAA/v9GAP1/RwCqqkYAAAAAAP7/RgD9f0cAqqpG"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatShort2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAD+/8YAAAAAAACAPwAAAAAA/v/GAAAAAAAAgD8AAAAAAP7/xgAAAAAAAIA/AAAAAAD+/8YAAAAAAACAPwAAAAAA/v/GAAAAAAAAgD8AAAAAAP7/xgAAAAAAAIA/AAAAAAD+/8YAAAAAAACAPwAAAAAA/v/GAAAAAAAAgD8AAAAAAP7/xgAAAAAAAIA/AAAAAAD+/8YAAAAAAACAPwAAAAAA/v/GAAAAAAAAgD8AAAAAAP7/xgAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatShort3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAD+/8YAAABAAACAPwAAAAAA/v/GAAAAQAAAgD8AAAAAAP7/xgAAAEAAAIA/AAAAAAD+/8YAAABAAACAPwAAAAAA/v/GAAAAQAAAgD8AAAAAAP7/xgAAAEAAAIA/AAAAAAD+/8YAAABAAACAPwAAAAAA/v/GAAAAQAAAgD8AAAAAAP7/xgAAAEAAAIA/AAAAAAD+/8YAAABAAACAPwAAAAAA/v/GAAAAQAAAgD8AAAAAAP7/xgAAAEAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatShort4",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAD+/8YAAABAAAB6xAAAAAAA/v/GAAAAQAAAesQAAAAAAP7/xgAAAEAAAHrEAAAAAAD+/8YAAABAAAB6xAAAAAAA/v/GAAAAQAAAesQAAAAAAP7/xgAAAEAAAHrEAAAAAAD+/8YAAABAAAB6xAAAAAAA/v/GAAAAQAAAesQAAAAAAP7/xgAAAEAAAHrEAAAAAAD+/8YAAABAAAB6xAAAAAAA/v/GAAAAQAAAesQAAAAAAP7/xgAAAEAAAHrE"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUShort2Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAD//z4AAAAAAACAPwAAAAAA//8+AAAAAAAAgD8AAAAAAP//PgAAAAAAAIA/AAAAAAD//z4AAAAAAACAPwAAAAAA//8+AAAAAAAAgD8AAAAAAP//PgAAAAAAAIA/AAAAAAD//z4AAAAAAACAPwAAAAAA//8+AAAAAAAAgD8AAAAAAP//PgAAAAAAAIA/AAAAAAD//z4AAAAAAACAPwAAAAAA//8+AAAAAAAAgD8AAAAAAP//PgAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUShort3Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAD//z4A/n8/AACAPwAAAAAA//8+AP5/PwAAgD8AAAAAAP//PgD+fz8AAIA/AAAAAAD//z4A/n8/AACAPwAAAAAA//8+AP5/PwAAgD8AAAAAAP//PgD+fz8AAIA/AAAAAAD//z4A/n8/AACAPwAAAAAA//8+AP5/PwAAgD8AAAAAAP//PgD+fz8AAIA/AAAAAAD//z4A/n8/AACAPwAAAAAA//8+AP5/PwAAgD8AAAAAAP//PgD+fz8AAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUShort4Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAD//z4A/n8/q6qqPgAAAAAA//8+AP5/P6uqqj4AAAAAAP//PgD+fz+rqqo+AAAAAAD//z4A/n8/q6qqPgAAAAAA//8+AP5/P6uqqj4AAAAAAP//PgD+fz+rqqo+AAAAAAD//z4A/n8/q6qqPgAAAAAA//8+AP5/P6uqqj4AAAAAAP//PgD+fz+rqqo+AAAAAAD//z4A/n8/q6qqPgAAAAAA//8+AP5/P6uqqj4AAAAAAP//PgD+fz+rqqo+"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatShort2Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAgL8AAAAAAACAPwAAAAAAAIC/AAAAAAAAgD8AAAAAAACAvwAAAAAAAIA/AAAAAAAAgL8AAAAAAACAPwAAAAAAAIC/AAAAAAAAgD8AAAAAAACAvwAAAAAAAIA/AAAAAAAAgL8AAAAAAACAPwAAAAAAAIC/AAAAAAAAgD8AAAAAAACAvwAAAAAAAIA/AAAAAAAAgL8AAAAAAACAPwAAAAAAAIC/AAAAAAAAgD8AAAAAAACAvwAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatShort3Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAgL8AAYA4AACAPwAAAAAAAIC/AAGAOAAAgD8AAAAAAACAvwABgDgAAIA/AAAAAAAAgL8AAYA4AACAPwAAAAAAAIC/AAGAOAAAgD8AAAAAAACAvwABgDgAAIA/AAAAAAAAgL8AAYA4AACAPwAAAAAAAIC/AAGAOAAAgD8AAAAAAACAvwABgDgAAIA/AAAAAAAAgL8AAYA4AACAPwAAAAAAAIC/AAGAOAAAgD8AAAAAAACAvwABgDgAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatShort4Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAgL8AAYA49AH6vAAAAAAAAIC/AAGAOPQB+rwAAAAAAACAvwABgDj0Afq8AAAAAAAAgL8AAYA49AH6vAAAAAAAAIC/AAGAOPQB+rwAAAAAAACAvwABgDj0Afq8AAAAAAAAgL8AAYA49AH6vAAAAAAAAIC/AAGAOPQB+rwAAAAAAACAvwABgDj0Afq8AAAAAAAAgL8AAYA49AH6vAAAAAAAAIC/AAGAOPQB+rwAAAAAAACAvwABgDj0Afq8"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatHalf2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAADAfzgAAAAAAACAPwAAAAAAwH84AAAAAAAAgD8AAAAAAMB/OAAAAAAAAIA/AAAAAADAfzgAAAAAAACAPwAAAAAAwH84AAAAAAAAgD8AAAAAAMB/OAAAAAAAAIA/AAAAAADAfzgAAAAAAACAPwAAAAAAwH84AAAAAAAAgD8AAAAAAMB/OAAAAAAAAIA/AAAAAADAfzgAAAAAAACAPwAAAAAAwH84AAAAAAAAgD8AAAAAAMB/OAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatHalf3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAADAfzgA4H9HAACAPwAAAAAAwH84AOB/RwAAgD8AAAAAAMB/OADgf0cAAIA/AAAAAADAfzgA4H9HAACAPwAAAAAAwH84AOB/RwAAgD8AAAAAAMB/OADgf0cAAIA/AAAAAADAfzgA4H9HAACAPwAAAAAAwH84AOB/RwAAgD8AAAAAAMB/OADgf0cAAIA/AAAAAADAfzgA4H9HAACAPwAAAAAAwH84AOB/RwAAgD8AAAAAAMB/OADgf0cAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatHalf4",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAADAfzgA4H9HAADAfwAAAAAAwH84AOB/RwAAwH8AAAAAAMB/OADgf0cAAMB/AAAAAADAfzgA4H9HAADAfwAAAAAAwH84AOB/RwAAwH8AAAAAAMB/OADgf0cAAMB/AAAAAADAfzgA4H9HAADAfwAAAAAAwH84AOB/RwAAwH8AAAAAAMB/OADgf0cAAMB/AAAAAADAfzgA4H9HAADAfwAAAAAAwH84AOB/RwAAwH8AAAAAAMB/OADgf0cAAMB/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatFloat",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatFloat2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAP//fwAAAAAAAACAPwAAAAD//38AAAAAAAAAgD8AAAAA//9/AAAAAAAAAIA/AAAAAP//fwAAAAAAAACAPwAAAAD//38AAAAAAAAAgD8AAAAA//9/AAAAAAAAAIA/AAAAAP//fwAAAAAAAACAPwAAAAD//38AAAAAAAAAgD8AAAAA//9/AAAAAAAAAIA/AAAAAP//fwAAAAAAAACAPwAAAAD//38AAAAAAAAAgD8AAAAA//9/AAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatFloat3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAP//fwD//39/AACAPwAAAAD//38A//9/fwAAgD8AAAAA//9/AP//f38AAIA/AAAAAP//fwD//39/AACAPwAAAAD//38A//9/fwAAgD8AAAAA//9/AP//f38AAIA/AAAAAP//fwD//39/AACAPwAAAAD//38A//9/fwAAgD8AAAAA//9/AP//f38AAIA/AAAAAP//fwD//39/AACAPwAAAAD//38A//9/fwAAgD8AAAAA//9/AP//f38AAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatFloat4",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAP//fwD//39/AQDAfwAAAAD//38A//9/fwEAwH8AAAAA//9/AP//f38BAMB/AAAAAP//fwD//39/AQDAfwAAAAD//38A//9/fwEAwH8AAAAA//9/AP//f38BAMB/AAAAAP//fwD//39/AQDAfwAAAAD//38A//9/fwEAwH8AAAAA//9/AP//f38BAMB/AAAAAP//fwD//39/AQDAfwAAAAD//38A//9/fwEAwH8AAAAA//9/AP//f38BAMB/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatInt1010102Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUInt1010102Normalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUChar4Normalized_BGRA",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "ychIP//+/j4AAAAAAACAP8nISD///v4+AAAAAAAAgD/JyEg///7+PgAAAAAAAIA/ychIP//+/j4AAAAAAACAP8nISD///v4+AAAAAAAAgD/JyEg///7+PgAAAAAAAIA/ychIP//+/j4AAAAAAACAP8nISD///v4+AAAAAAAAgD/JyEg///7+PgAAAAAAAIA/ychIP//+/j4AAAAAAACAP8nISD///v4+AAAAAAAAgD/JyEg///7+PgAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUChar",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatChar",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUCharNormalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatCharNormalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUShort",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatShort",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatUShortNormalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatShortNormalized",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatHalf",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatFloatRG11B10",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLVertexFormatFloatRGB9E5",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 192
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 12,
+                            "image_pitch": 192,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}
