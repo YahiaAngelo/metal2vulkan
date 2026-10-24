@@ -75,6 +75,9 @@ fn one_replay_pass(
     let venue_label = device.name().to_owned();
     for case in cases {
         let before = read_counts(device);
+        // The Metal pipeline states the case creates: the denominator of the ratio bound
+        // (`cost::PipelinesPerState`), read around the case exactly as the runtime's counts are.
+        let states_before = crate::states::made();
         let started = std::time::Instant::now();
         // The case's own notice scope, open for exactly as long as its side lives. Nothing it
         // announces can reach another case, and nothing another case announced can reach it.
@@ -96,8 +99,11 @@ fn one_replay_pass(
             case.as_ref(),
             &venue_label,
             whole_set,
-            moved,
-            nanos,
+            Measured {
+                counts: moved,
+                states: crate::states::made().saturating_sub(states_before),
+                nanos,
+            },
             &degraded,
             &replayed,
         ));
@@ -118,16 +124,31 @@ fn read_counts(device: &metal2vulkan_runtime::Device) -> Result<Counts, String> 
     Counts::of(&device.work_counts())
 }
 
+/// What one pass measured of one case, before any bound is read: the three readings taken around
+/// the case, kept together so they are passed as one thing and cannot be reordered at a call site.
+struct Measured {
+    /// The counts the runtime moved, or why they could not be read.
+    counts: Result<Counts, String>,
+    /// The Metal pipeline states the case created ([`crate::states`]).
+    states: u64,
+    /// How long the case took. Advisory, never gated ([`cost::CaseCost::nanos`]).
+    nanos: u64,
+}
+
 /// How one case's counts stand against its recording's bounds.
 fn cost_row(
     case: &dyn Case,
     venue: &str,
     whole_set: bool,
-    moved: Result<Counts, String>,
-    nanos: u64,
+    measured: Measured,
     degraded: &[String],
     replayed: &Result<crate::replay::Replayed, crate::replay::ReplayError>,
 ) -> CostRow {
+    let Measured {
+        counts: moved,
+        states,
+        nanos,
+    } = measured;
     let counts = match moved {
         Ok(counts) => counts,
         Err(why) => {
@@ -161,6 +182,7 @@ fn cost_row(
         venue,
         whole_set,
         &counts,
+        states,
         stopped.as_deref(),
         degraded,
     );
@@ -224,6 +246,7 @@ pub fn cost_on_under(
         venue = device.name().to_owned();
         for (index, case) in cases.iter().enumerate() {
             let before = read_counts(&device)?;
+            let states_before = crate::states::made();
             let started = std::time::Instant::now();
             let mut side = RuntimeSide::new(&device, notices.open(case.name()));
             let mut sites = crate::transcript::Sites::new();
@@ -236,6 +259,7 @@ pub fn cost_on_under(
             drop(side);
             let nanos = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
             let moved = read_counts(&device)?.since(&before);
+            let states = crate::states::made().saturating_sub(states_before);
             let stopped = abort.map(|abort| {
                 let what = abort
                     .failure
@@ -252,6 +276,7 @@ pub fn cost_on_under(
                     case: case.name().to_owned(),
                     counts: moved.clone(),
                     least: moved,
+                    states,
                     runs: 1,
                     stopped,
                     degraded: announced,
@@ -261,6 +286,9 @@ pub fn cost_on_under(
                 let held = &mut held[index];
                 held.counts = held.counts.largest(&moved);
                 held.least = held.least.smallest(&moved);
+                // The most any run created, to match `counts`: both halves of the ratio come from
+                // the run that did the most, so the quotient is of one shape and not of two.
+                held.states = held.states.max(states);
                 held.runs += 1;
                 held.nanos = held.nanos.max(nanos);
                 // A run that stopped where an earlier one did not is itself a fact about the
@@ -383,6 +411,9 @@ fn record_one_refusal(
         moving: std::collections::BTreeMap::new(),
         composed: std::collections::BTreeMap::new(),
         ceilings: std::collections::BTreeMap::new(),
+        // A refusal holds no ratio either: the states the part-run created are a part of the
+        // case's, so a ratio taken from them would gate the case at a denominator it never had.
+        per_state: None,
         unmeasurable: Some(why.to_owned()),
     });
     recording

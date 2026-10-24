@@ -4068,6 +4068,43 @@ WorkCounts {
     assert_eq!(read.len(), 3, "{:?}", read);
 }
 
+/// **No `MONOTONE` bound is a count of bytes**, which is the general form of the one exception that
+/// table already records by name.
+///
+/// `device_memory_allocated` passed `MONOTONE`'s direction test — 385 cases, none where the lone
+/// run read lower — and is kept out because it counts *bytes*: the two shapes differ by 268,435,456
+/// where the largest of the object counts differs by 8, so a bound taken at the larger shape is a
+/// number no regression can reach while looking exactly like a bound that bites. That reasoning is
+/// about the unit and not about the name, and the next byte count to arrive will resemble the
+/// object counts far more than it resembles `device_memory_allocated` — `owned_kernel_spirv_bytes`
+/// is one, with an alone-against-company gap of about 10 KiB where its own object count's gap is 2.
+/// So the rule is held here rather than left in the prose for somebody to re-derive.
+#[test]
+fn no_monotone_bound_is_a_count_of_bytes() {
+    let counts = crate::cost::Counts::of(&metal2vulkan_runtime::WorkCounts::default())
+        .expect("the runtime's counts read as counts");
+    let mut byte_counts = 0;
+    for (name, _) in counts.iter() {
+        let leaf = name.rsplit('.').next().unwrap_or(name);
+        if !(leaf.ends_with("_bytes") || leaf == "device_memory_allocated") {
+            continue;
+        }
+        byte_counts += 1;
+        assert!(
+            crate::cost::monotone(name).is_none(),
+            "{name} counts bytes and holds a MONOTONE row, so its bound is the larger shape's \
+             reading of an allocation rather than of an object: the two shapes differ by \
+             268,435,456 for device_memory_allocated where the largest object count differs by 8, \
+             and such a bound cannot fail. Let the contrast report it instead."
+        );
+    }
+    // A floor, because a guard that found nothing to check passes for ever.
+    assert!(
+        byte_counts > 0,
+        "the runtime keeps no count of bytes, so this guard is reading the wrong thing"
+    );
+}
+
 /// The three regions are the ones the cost regime names, and the device API is the residual.
 #[test]
 fn the_work_is_attributed_to_the_three_regions() {
@@ -4077,6 +4114,13 @@ fn the_work_is_attributed_to_the_three_regions() {
         "shader_modules_made",
         "pipeline_layouts_shared",
         "graphics_pipelines_looked_up",
+        // The stage decode and specialization a pipeline creation does, which is translation work
+        // by definition: an entry's specialization depends on the functions and the constants and
+        // never on the pipeline state. Held here before the counters land, so the classification
+        // cannot arrive in the wrong region with the counters.
+        "stage_entries_specialized",
+        "stage_entries_shared",
+        "linked_use_questions_asked",
     ] {
         assert_eq!(region_of(name), Region::Translation, "{name}");
     }
@@ -4120,6 +4164,7 @@ fn a_count_the_measurement_never_saw_is_bounded_at_zero() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     };
     let judge = |text: &str| {
@@ -4128,6 +4173,7 @@ fn a_count_the_measurement_never_saw_is_bounded_at_zero() {
             "a venue",
             true,
             &crate::cost::Counts::read(text).expect("the shape reads"),
+            0,
             None,
             &[],
         )
@@ -4173,6 +4219,7 @@ fn a_count_whose_readings_moved_is_reported_and_not_gated() {
             .unwrap_or_default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     };
     let found = crate::cost::Counts::read("WorkCounts {\n    render_passes_made: 9,\n}").unwrap();
@@ -4184,6 +4231,7 @@ fn a_count_whose_readings_moved_is_reported_and_not_gated() {
             "a venue",
             true,
             &found,
+            0,
             None,
             &[]
         )
@@ -4199,6 +4247,7 @@ fn a_count_whose_readings_moved_is_reported_and_not_gated() {
             "a venue",
             true,
             &found,
+            0,
             None,
             &[]
         )
@@ -4227,6 +4276,7 @@ fn a_run_with_no_bound_that_stands_is_unmeasured_and_says_why() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     };
     let found = crate::cost::Counts::read("WorkCounts {\n    queue_submissions: 1,\n}").unwrap();
@@ -4238,7 +4288,16 @@ fn a_run_with_no_bound_that_stands_is_unmeasured_and_says_why() {
     };
     // The measurement's own shape: within.
     assert_eq!(
-        crate::cost::judge(records, "the measured venue", true, &found, None, &degraded).word(),
+        crate::cost::judge(
+            records,
+            "the measured venue",
+            true,
+            &found,
+            0,
+            None,
+            &degraded
+        )
+        .word(),
         "within"
     );
     // Another venue.
@@ -4247,6 +4306,7 @@ fn a_run_with_no_bound_that_stands_is_unmeasured_and_says_why() {
         "another venue",
         true,
         &found,
+        0,
         None,
         &degraded,
     ));
@@ -4258,6 +4318,7 @@ fn a_run_with_no_bound_that_stands_is_unmeasured_and_says_why() {
         "the measured venue",
         false,
         &found,
+        0,
         None,
         &degraded,
     ));
@@ -4268,6 +4329,7 @@ fn a_run_with_no_bound_that_stands_is_unmeasured_and_says_why() {
         "the measured venue",
         true,
         &found,
+        0,
         Some("the venue lacks 2x multisampling"),
         &degraded,
     ));
@@ -4278,6 +4340,7 @@ fn a_run_with_no_bound_that_stands_is_unmeasured_and_says_why() {
         "the measured venue",
         true,
         &found,
+        0,
         None,
         &[],
     ));
@@ -4312,6 +4375,7 @@ fn the_cost_record_rides_in_the_recording() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     }];
     let recording = Recording::new("a case", Vec::new(), vec![answer]).with_costs(costs.clone());
@@ -4335,6 +4399,7 @@ fn the_cost_record_rides_in_the_recording() {
 #[test]
 fn a_measurement_becomes_bounds_that_name_it() {
     let cost = crate::cost::CaseCost {
+        states: 0,
         case: "a case".to_owned(),
         counts: crate::cost::Counts::read(
             "WorkCounts {\n    queue_submissions: 2,\n    render_passes_made: 5,\n}",
@@ -4383,6 +4448,7 @@ fn re_recording_a_metal_answer_keeps_the_cost_record() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     }];
     let held = held.with_costs(costs.clone());
@@ -4570,6 +4636,7 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     };
     assert_eq!(record.gated(), 1, "only the total is gated");
@@ -4579,6 +4646,7 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
             "a venue",
             true,
             &crate::cost::Counts::read(text).expect("the shape reads"),
+            0,
             None,
             &[],
         )
@@ -4694,6 +4762,7 @@ fn a_count_the_selection_decides_is_reported_and_not_gated() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     };
     // What the case does alone: two submissions where company needed one, and three command
@@ -4701,6 +4770,7 @@ fn a_count_the_selection_decides_is_reported_and_not_gated() {
     // move in opposite directions, and the 393-case measurement found both of them doing that
     // across the set, so no MONOTONE row covers either and neither shape bounds them.
     let apart = crate::cost::CaseCost {
+        states: 0,
         case: "a case".to_owned(),
         counts: crate::cost::Counts::read(
             "WorkCounts {\n    command_buffers_submitted: 2,\n    command_buffers_begun: 3,\n    \
@@ -4758,6 +4828,7 @@ fn a_count_the_selection_decides_is_reported_and_not_gated() {
              queue_submissions: 2,\n}",
         )
         .unwrap(),
+        0,
         None,
         &[],
     );
@@ -4768,6 +4839,7 @@ fn a_count_the_selection_decides_is_reported_and_not_gated() {
         "a venue",
         true,
         &crate::cost::Counts::read("WorkCounts {\n    queue_submissions: 3,\n}").unwrap(),
+        0,
         None,
         &[],
     );
@@ -4793,9 +4865,11 @@ fn a_count_only_one_shape_moved_is_reported_as_well() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     };
     let apart = crate::cost::CaseCost {
+        states: 0,
         case: "a case".to_owned(),
         // Alone the case moved a count the whole-set run never did, and did not move the one it
         // did: both directions of "only one shape saw it".
@@ -5610,9 +5684,11 @@ fn a_count_whose_ceiling_is_the_lone_run_is_gated_there() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     };
     let alone = |text: &str| crate::cost::CaseCost {
+        states: 0,
         case: "a case".to_owned(),
         counts: crate::cost::Counts::read(text).expect("the shape reads"),
         least: crate::cost::Counts::read(text).expect("the shape reads"),
@@ -5639,6 +5715,7 @@ fn a_count_whose_ceiling_is_the_lone_run_is_gated_there() {
             "a venue",
             true,
             &crate::cost::Counts::read(text).expect("the shape reads"),
+            0,
             None,
             &[],
         )
@@ -5742,11 +5819,13 @@ fn a_second_measurement_of_the_same_shape_changes_nothing() {
         ceilings: [("pipeline_layouts_made".to_owned(), 2)]
             .into_iter()
             .collect(),
+        per_state: None,
         unmeasurable: None,
     };
     // The whole set measured again, reading exactly what it read before. For the ceiling count
     // that is the *lower* number, which is the whole point: 1 in company against 2 alone.
     let again = crate::cost::CaseCost {
+        states: 0,
         case: "a case".to_owned(),
         counts: crate::cost::Counts::read(
             "WorkCounts {\n    pipeline_layouts_made: 1,\n    command_buffers_begun: 4,\n    \
@@ -5816,11 +5895,13 @@ fn a_ceiling_is_recorded_as_the_evidence_for_its_bound() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     };
     // A monotone count the lone run moved and the whole-set run never did at all: the case that
     // produced 389 vanishing bounds, because nothing wrote down where the bound came from.
     let apart = crate::cost::CaseCost {
+        states: 0,
         case: "a case".to_owned(),
         counts: crate::cost::Counts::read(
             "WorkCounts {\n    addressable_buffers_made: 2,\n    queue_submissions: 1,\n}",
@@ -5846,6 +5927,7 @@ fn a_ceiling_is_recorded_as_the_evidence_for_its_bound() {
     // A count the table does not name gets no ceiling, whichever way it differs, so the map is
     // exactly the exception and never a second place the rule is decided.
     let apart = crate::cost::CaseCost {
+        states: 0,
         counts: crate::cost::Counts::read("WorkCounts {\n    inline_passes: 2,\n}").unwrap(),
         least: crate::cost::Counts::read("WorkCounts {\n    inline_passes: 2,\n}").unwrap(),
         ..apart
@@ -5932,6 +6014,7 @@ fn the_diff_tool_reads_the_gate_and_not_the_noise() {
                 .iter()
                 .map(|(n, v)| ((*n).to_owned(), *v))
                 .collect(),
+            per_state: None,
             unmeasurable: None,
         }
     };
@@ -6063,6 +6146,8 @@ fn the_diff_tool_reads_the_gate_and_not_the_noise() {
 fn the_counts_a_re_measure_moved_are_summed_over_cases_once_each() {
     use crate::cost::{counts_that_moved, Drift, Drifted, Moved, Region};
     let one = |count: &str, what: Drifted| Drift {
+        was_ratio: None,
+        now_ratio: None,
         count: count.to_owned(),
         region: Region::Submission,
         what,
@@ -6593,6 +6678,244 @@ fn the_cost_coverage_set_is_held_in_both_directions() {
     assert!(cost_coverage_diff(&set(&[]), &set(&[])).is_none());
 }
 
+/// **The ratio gate.** A change that makes one more `VkPipeline` per Metal pipeline state fails,
+/// while a case that simply grows a state passes — and neither absolute bound can tell those apart.
+///
+/// This is the hole the gate was built for, and the test drives it as the hole. The record holds
+/// the figures a real case was blessed at: `integer-vertex-attributes`, 64 states, 64 pipelines
+/// made at creation and 128 variants, which is the doubled predicted pipeline blessed as a ceiling
+/// for three passes. Every reading below is **at or under both absolute bounds**, so
+/// `creation_pipelines_made` and `variant_pipelines_made` read `within` for all of them; only the
+/// ratio separates the case growing from the tree making more per state.
+#[test]
+fn the_ratio_holds_pipelines_per_state_where_no_count_bound_can() {
+    let record = crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 8,
+        measured: "8 runs of the whole selection on a venue".to_owned(),
+        contrasted: None,
+        degraded: Vec::new(),
+        // Deliberately roomy: a growing case is why a real bound has room, and the point is that
+        // the ratio bites while these do not.
+        bounds: [
+            ("creation_pipelines_made".to_owned(), 200),
+            ("variant_pipelines_made".to_owned(), 400),
+        ]
+        .into_iter()
+        .collect(),
+        moving: Default::default(),
+        composed: Default::default(),
+        ceilings: Default::default(),
+        per_state: Some(crate::cost::PipelinesPerState {
+            pipelines: 192,
+            states: 64,
+        }),
+        unmeasurable: None,
+    };
+    let judge = |creation: u64, variants: u64, states: u64| {
+        let counts = crate::cost::Counts::read(&format!(
+            "WorkCounts {{\n    creation_pipelines_made: {creation},\n    \
+             variant_pipelines_made: {variants},\n}}"
+        ))
+        .expect("the shape reads");
+        crate::cost::judge(
+            std::slice::from_ref(&record),
+            "a venue",
+            true,
+            &counts,
+            states,
+            None,
+            &[],
+        )
+    };
+    // The measured reading: 3 pipelines a state.
+    assert_eq!(judge(64, 128, 64).word(), "within", "the measured reading");
+    // **A case that grew a state.** One more state, three more pipelines, the same ratio. Both
+    // absolute counts rose and both bounds still have room, and so does the ratio: no re-bless.
+    assert_eq!(
+        judge(65, 130, 65).word(),
+        "within",
+        "a case that grew a state failed, so the gate costs a re-bless for honest growth"
+    );
+    // Twice as many states, twice the pipelines: still 3 each.
+    assert_eq!(judge(128, 256, 128).word(), "within", "a doubled case");
+    // **The regression.** One more pipeline per state, on a case that also grew a state — the
+    // exact shape both absolute bounds pass, because each count rose for two reasons at once.
+    let worse = judge(65, 195, 65);
+    assert_eq!(
+        worse.word(),
+        "over",
+        "one more pipeline per state passed the gate: {worse}"
+    );
+    let crate::cost::CostVerdict::Over { over } = &worse else {
+        panic!("a raised ratio is `over`")
+    };
+    assert_eq!(over.len(), 1, "{over:?}");
+    assert_eq!(over[0].count, crate::cost::PER_STATE);
+    // The allowance printed is the allowance judged: 192 over 64 states is 3 each, so 65 states
+    // allow 195 and this run made 260.
+    assert_eq!((over[0].bound, over[0].found), (195, 260));
+    assert_eq!(over[0].region, crate::cost::Region::Translation);
+    // And a single extra pipeline over the whole case is caught, which is the resolution the
+    // absolute bounds cannot reach while they have room: 196 over 65 states is 3.015 each.
+    assert_eq!(
+        judge(65, 131, 65).word(),
+        "over",
+        "one extra pipeline over the whole case passed"
+    );
+    // Fewer pipelines per state is a win and never a breach.
+    assert_eq!(judge(64, 64, 64).word(), "within", "the fix must pass");
+    // A run that creates no state at all makes the ratio unjudgeable rather than infinite: with no
+    // denominator there is nothing to divide, and such a run moved no pipeline either.
+    assert_eq!(judge(0, 0, 0).word(), "within");
+    // But pipelines with no state is a ratio of infinity, and it fails.
+    assert_eq!(
+        judge(1, 0, 0).word(),
+        "over",
+        "a pipeline made for no state at all passed"
+    );
+}
+
+/// A case that creates no Metal pipeline state carries **no** ratio bound.
+///
+/// Gating such a case at a ratio of zero states would fail it the moment anything made it one
+/// pipeline, for a quantity the measurement never had a denominator for.
+#[test]
+fn a_case_that_creates_no_state_carries_no_ratio() {
+    let counts = crate::cost::Counts::read(
+        "WorkCounts {\n    creation_pipelines_made: 2,\n    variant_pipelines_made: 3,\n}",
+    )
+    .expect("the shape reads");
+    let cost = |states: u64| crate::cost::CaseCost {
+        case: "a case".to_owned(),
+        counts: counts.clone(),
+        least: counts.clone(),
+        states,
+        runs: 8,
+        stopped: None,
+        degraded: Vec::new(),
+        nanos: 0,
+    };
+    assert_eq!(
+        cost(0).per_state(),
+        None,
+        "a case with no state got a ratio"
+    );
+    assert_eq!(
+        cost(5).per_state(),
+        Some(crate::cost::PipelinesPerState {
+            pipelines: 5,
+            states: 5
+        }),
+        "the numerator is the two made counts added"
+    );
+    // And the record it writes carries it, so the gate reads it back.
+    let record = cost(5).record("a venue", "8 runs".to_owned());
+    assert_eq!(record.per_state.and_then(|held| held.ratio()), Some(1.0));
+    assert_eq!(
+        cost(0).record("a venue", "8 runs".to_owned()).per_state,
+        None
+    );
+}
+
+/// The ratio is the **whole set's** shape, and a measurement of the cases alone does not raise it.
+///
+/// A case alone makes more pipelines per state than the same case in company, because it finds
+/// nothing already made. `judge` refuses any selection but the whole set, so the whole set is the
+/// only shape the ratio is ever judged in — and folding the lone run's looser ratio in would give
+/// the gate away for nothing.
+#[test]
+fn the_lone_run_does_not_raise_the_ratio() {
+    let counts = |pipelines: u64| {
+        crate::cost::Counts::read(&format!(
+            "WorkCounts {{\n    variant_pipelines_made: {pipelines},\n}}"
+        ))
+        .expect("the shape reads")
+    };
+    let in_set = crate::cost::CaseCost {
+        case: "a case".to_owned(),
+        counts: counts(4),
+        least: counts(4),
+        states: 4,
+        runs: 8,
+        stopped: None,
+        degraded: Vec::new(),
+        nanos: 0,
+    };
+    let held = in_set.record("a venue", "8 runs of the whole selection".to_owned());
+    assert_eq!(held.per_state.and_then(|one| one.ratio()), Some(1.0));
+    let alone = crate::cost::CaseCost {
+        counts: counts(8),
+        least: counts(8),
+        ..in_set.clone()
+    };
+    let folded = alone.fold_alone_into(&held, "8 runs of each case alone".to_owned());
+    assert_eq!(
+        folded.per_state, held.per_state,
+        "the lone run's looser ratio was blessed into the gate"
+    );
+    // And a fresh whole-set measurement carrying the contrast keeps its own ratio, because that is
+    // the shape the ratio is taken in.
+    let fresh = in_set.record("a venue", "8 more runs".to_owned());
+    assert_eq!(
+        fresh.carrying_the_contrast_of(&folded).per_state,
+        held.per_state
+    );
+}
+
+/// A moved ratio is a **load-bearing** drift: the gate's own number changed.
+///
+/// The counts under it move whenever a case grows, which is why `--check` reports them and does not
+/// fail on them. The ratio moves only when the tree makes more pipelines for the same work, so it
+/// belongs with the gated bounds and the ceilings rather than with the noise.
+#[test]
+fn a_moved_ratio_is_a_load_bearing_drift() {
+    let record = |pipelines: u64| crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 8,
+        measured: "8 runs".to_owned(),
+        contrasted: None,
+        degraded: Vec::new(),
+        bounds: Default::default(),
+        moving: Default::default(),
+        composed: Default::default(),
+        ceilings: Default::default(),
+        per_state: Some(crate::cost::PipelinesPerState {
+            pipelines,
+            states: 64,
+        }),
+        unmeasurable: None,
+    };
+    assert!(
+        crate::cost::drift(&record(128), &record(128)).is_empty(),
+        "an unchanged ratio drifted"
+    );
+    let moved = crate::cost::drift(&record(128), &record(192));
+    let [one] = moved.as_slice() else {
+        panic!("one drift: {moved:?}")
+    };
+    assert_eq!(one.what, crate::cost::Drifted::PerState);
+    assert!(one.what.is_load_bearing(), "a moved ratio is not fatal");
+    let said = one.to_string();
+    assert!(
+        said.contains("128 pipeline(s) over 64 state(s), 2.000 each"),
+        "{said}"
+    );
+    assert!(
+        said.contains("192 pipeline(s) over 64 state(s), 3.000 each"),
+        "{said}"
+    );
+    // A ratio that went missing is the same defect as a ceiling that went missing: a bound that
+    // still looks like a bound and holds nothing.
+    let without = crate::cost::CostRecord {
+        per_state: None,
+        ..record(128)
+    };
+    let gone = crate::cost::drift(&record(128), &without);
+    assert_eq!(gone.len(), 1);
+    assert!(gone[0].what.is_load_bearing());
+}
+
 /// A recorded refusal reads as `Unmeasured` and gates no count.
 ///
 /// The venue writes down that it cannot measure a case ([`crate::run`]'s refusal writer), and that
@@ -6668,6 +6991,7 @@ fn a_count_of_work_avoided_is_gated_from_below_as_well() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: None,
     };
     let judge = |made: u64, drawn: u64, variants: u64| {
@@ -6681,6 +7005,7 @@ fn a_count_of_work_avoided_is_gated_from_below_as_well() {
             "a venue",
             true,
             &counts,
+            0,
             None,
             &[],
         )
@@ -6754,6 +7079,7 @@ fn a_recorded_refusal_is_unmeasured_and_gates_no_count() {
         moving: Default::default(),
         composed: Default::default(),
         ceilings: Default::default(),
+        per_state: None,
         unmeasurable: Some("the venue lacks the feature the case needs".to_owned()),
     };
     let counts = crate::cost::Counts::read("WorkCounts {\n    queue_submissions: 7,\n}")
@@ -6764,6 +7090,7 @@ fn a_recorded_refusal_is_unmeasured_and_gates_no_count() {
             "a venue",
             true,
             &counts,
+            0,
             None,
             &[],
         )
@@ -6777,6 +7104,7 @@ fn a_recorded_refusal_is_unmeasured_and_gates_no_count() {
     assert!(why.contains("lacks the feature the case needs"), "{why}");
     // Without the refusal the identical record bounds all seven submissions at zero.
     let bare = crate::cost::CostRecord {
+        per_state: None,
         unmeasurable: None,
         ..refused.clone()
     };

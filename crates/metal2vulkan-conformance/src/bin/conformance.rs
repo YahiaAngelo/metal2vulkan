@@ -367,6 +367,12 @@ fn cost(
             stopped += 1;
             println!("    the run stopped: {why}");
         }
+        // The ratio, printed for every case that creates a state, because it is the one bound in
+        // the record a reader has to look at rather than diff: a count rises when a case grows and
+        // this rises only when the tree makes more pipelines for the same work.
+        if let Some(per_state) = one.per_state() {
+            println!("    pipelines per Metal pipeline state: {per_state}");
+        }
         // With the cases measured alone, the contrast against the record the gate's own shape
         // wrote is what decides which counts it holds, so it is printed where it is read.
         if alone {

@@ -701,7 +701,7 @@ impl VertexAttribute {
 /// it in the field would mean widening `stride` to `u64` — and the field is in every render case's
 /// input fingerprint, so eight bytes where there were four moves the fingerprint of every one of
 /// them and reads every committed recording as stale. The sentinel is a different *request* rather
-/// than a larger number, so it gets its own variant, and [`VertexStride::words`] keeps the plain
+/// than a larger number, so it gets its own variant, and this type's own `words` keeps the plain
 /// one's four bytes exactly as they were.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VertexStride {

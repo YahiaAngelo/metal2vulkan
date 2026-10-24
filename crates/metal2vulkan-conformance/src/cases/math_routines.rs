@@ -17,7 +17,7 @@
 //! `frexp-mantissa` or `ilogb` of one input rather than a row of eight numbers. Every column
 //! compares exactly; there is nothing here a device may round differently, and no value is
 //! loosened. The only allowance is the declaration of the notice a device without unified memory
-//! announces for the pass's `Shared` buffers ([`PASS_NOTICES`]).
+//! announces for the pass's `Shared` buffers (`SharedInSystemMemory`).
 //!
 //! Nothing here can fault a GPU: one compute pass a case, two buffers, no texture, no loop, and
 //! each thread reads its own word.

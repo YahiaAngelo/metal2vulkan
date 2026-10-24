@@ -95,6 +95,7 @@ pub mod slow_calls;
 pub mod sparse_mapping;
 pub mod sparse_query;
 pub mod stability;
+pub mod states;
 pub mod surface;
 pub mod texture;
 pub mod texture_query;

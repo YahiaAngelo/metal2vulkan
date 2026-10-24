@@ -473,8 +473,16 @@ pub struct Measurement {
     pub cpu_clock: bool,
     /// Per case, in the selection's order.
     pub cases: Vec<CaseTimes>,
-    /// Per call, pooled over the whole selection: the table a reader acts on.
+    /// Per call, pooled over the cases this leg did **exactly**: the table a reader acts on where
+    /// there is no Metal leg to pair against.
     pub calls: Vec<CallTimes>,
+    /// Per call, pooled over the cases this leg ran to the end while announcing a **notice**.
+    ///
+    /// The same figures the paired table withholds a verdict on ([`paired_noticed`]), for the one
+    /// venue that has no paired table at all. `calls` filtered these cases out and nothing printed
+    /// them, so on a host with no Metal a notice erased a case from the only table there was. A
+    /// case whose run **stopped** is in neither pool: its calls are a part of the case.
+    pub noticed_calls: Vec<CallTimes>,
 }
 
 impl Measurement {
@@ -522,57 +530,171 @@ impl TimeVerdict {
     }
 }
 
+/// Which of the three classes a case's two legs fall into, which is **not** the same question as
+/// what verdict they earn.
+///
+/// [`judge`] collapses the last two classes into [`TimeVerdict::Unmeasured`]. That is right for a
+/// verdict and was wrong for everything else: every function that ranked, pooled or printed a
+/// figure asked `judge` whether a case was `Unmeasured` and skipped it, so a case that announced
+/// any notice vanished from the per-call table, from the triage and from every ranking — figures
+/// and all.
+///
+/// **What that hid, measured offline over this tree's stored recordings.** The paired cases carry
+/// 2,811 ms of excess over Metal, 18.6% of it pipeline creation. The cases with no notice carry
+/// 658 ms of it, 74.5% pipeline creation. The cases a notice erased carry **2,154 ms — 3.3 times
+/// the whole of what the suite was reporting — and only 1.5% of that is pipeline creation.** So
+/// the erasure was not trimming noise off the edge of the measurement; it was removing the larger
+/// half of the finding, and skewing what was left towards the one cause that survived the filter.
+///
+/// **And the notice does not have to explain the cost it hides.** The largest single cluster in
+/// the set, `extended-swizzles-*` at 1,884 ms, sits behind a notice that demonstrably is not its
+/// cause: all 15 siblings do the thing the notice names and four of them are 3x *faster* than
+/// Metal. `depth16-texel-reads` hides 173 ms of purely **blocked** cost behind `fast-math-rewrites`,
+/// a notice about arithmetic, which cannot make a caller wait at all.
+///
+/// So a notice withholds the **verdict** — the rule itself is right, a leg that did less of the
+/// case is not a leg to judge — and no longer hides the **figures**.
+///
+/// **What must never be promoted with them** is the third class. A leg that stopped part way did a
+/// part of the case, and a case Metal spent nothing measurable on has no denominator: 72
+/// `texture-fills-*` and `sample-fills-*` cases have no Metal leg at all, because Metal fills a
+/// texture through private API alone, and in a ranking they would read as the largest non-pipeline
+/// item in the set while meaning nothing. [`Comparison::Apart`] is that class, and nothing reports
+/// a figure from it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Comparison {
+    /// Both legs did the case exactly, so the margin decides. This is the only class a verdict or
+    /// a gated figure ([`crate::slow_calls`]) ever comes from.
+    Judged { verdict: TimeVerdict },
+    /// Both legs ran the case to the end and one of them announced a notice, so they did different
+    /// amounts of the case. The figures are real and both legs have them; the verdict is withheld.
+    Noticed {
+        /// Which leg announced.
+        leg: Leg,
+        /// The codes it announced, sorted.
+        codes: Vec<String>,
+        /// Both legs' spend, so a report can print the figure it is withholding a verdict on.
+        ours: u64,
+        metal: u64,
+    },
+    /// There is no comparison to make, and why: a leg stopped before the case finished, or Metal's
+    /// spend reads zero. No figure from this class enters a table, a ranking or a total.
+    Apart { why: String },
+}
+
+impl Comparison {
+    /// How many times our leg's spend is Metal's, where the two are figures at all.
+    ///
+    /// A noticed case answers one, which is the whole point: the number exists, it is just not a
+    /// verdict.
+    pub fn ratio(&self) -> Option<f64> {
+        match self {
+            Comparison::Judged { verdict } => verdict.ratio(),
+            Comparison::Noticed { ours, metal, .. } => {
+                (*metal > 0).then(|| *ours as f64 / *metal as f64)
+            }
+            Comparison::Apart { .. } => None,
+        }
+    }
+
+    /// Whether this case's figures may be reported: both legs ran it to the end.
+    pub fn has_figures(&self) -> bool {
+        !matches!(self, Comparison::Apart { .. })
+    }
+}
+
+/// Which class one case's two legs fall into ([`Comparison`]).
+///
+/// The order the reasons are checked in is the order they are load-bearing in. A leg that stopped
+/// is checked first, because its calls are a part of the case and nothing else about it means
+/// anything. Metal's spend reading zero comes next, before the notices, because a case with no
+/// denominator cannot carry a ratio however much it did: putting it after the notices would let
+/// such a case into the noticed table with a ratio of nothing.
+pub fn classify(metal: &CaseTimes, ours: &CaseTimes) -> Comparison {
+    if let Some(why) = &metal.stopped {
+        return Comparison::Apart {
+            why: format!("the Metal leg stopped before the case finished: {why}"),
+        };
+    }
+    if let Some(why) = &ours.stopped {
+        return Comparison::Apart {
+            why: format!("our leg stopped before the case finished: {why}"),
+        };
+    }
+    if metal.spend == 0 {
+        return Comparison::Apart {
+            why: "the Metal leg's spend reads zero, which is a measurement that did not happen \
+                  rather than a case Metal answers for nothing"
+                .to_owned(),
+        };
+    }
+    if !ours.degraded.is_empty() {
+        return Comparison::Noticed {
+            leg: Leg::Ours,
+            codes: ours.degraded.clone(),
+            ours: ours.spend,
+            metal: metal.spend,
+        };
+    }
+    if !metal.degraded.is_empty() {
+        return Comparison::Noticed {
+            leg: Leg::Metal,
+            codes: metal.degraded.clone(),
+            ours: ours.spend,
+            metal: metal.spend,
+        };
+    }
+    let (ours, metal) = (ours.spend, metal.spend);
+    Comparison::Judged {
+        verdict: if ours > metal.saturating_mul(MARGIN) {
+            TimeVerdict::Over { ours, metal }
+        } else {
+            TimeVerdict::Within { ours, metal }
+        },
+    }
+}
+
 /// Judge one case's two legs against each other.
 ///
 /// Every reason a row cannot be compared is checked before the margin, and each is its own
 /// sentence in the report:
 ///
 /// - either leg's run **stopped** before the case finished, so its calls are a part of the case;
+/// - Metal's spend reads **zero**, which is a measurement that did not happen rather than a free
+///   case;
 /// - our leg **announced a degrade notice**, so it did a different amount of work from Metal's and
 ///   a lower cost is the device's gap rather than our saving ([module docs](self));
-/// - the Metal leg announced one, which cannot happen today and would mean the same thing;
-/// - Metal's spend reads **zero**, which is a measurement that did not happen rather than a free
-///   case.
+/// - the Metal leg announced one, which cannot happen today and would mean the same thing.
+///
+/// The classification itself lives in [`classify`] and this reads it, rather than applying the
+/// same rule a second time. Two paths over one rule drift, and only one of them is ever checked —
+/// the counters half has a defect on record from exactly that shape, where a printed form and a
+/// stored form of one rule diverged with every test still passing.
 pub fn judge(metal: &CaseTimes, ours: &CaseTimes) -> TimeVerdict {
-    if let Some(why) = &metal.stopped {
-        return TimeVerdict::Unmeasured {
-            why: format!("the Metal leg stopped before the case finished: {why}"),
-        };
-    }
-    if let Some(why) = &ours.stopped {
-        return TimeVerdict::Unmeasured {
-            why: format!("our leg stopped before the case finished: {why}"),
-        };
-    }
-    if !ours.degraded.is_empty() {
-        return TimeVerdict::Unmeasured {
+    match classify(metal, ours) {
+        Comparison::Judged { verdict } => verdict,
+        Comparison::Noticed {
+            leg: Leg::Ours,
+            codes,
+            ..
+        } => TimeVerdict::Unmeasured {
             why: format!(
                 "our leg announced {}, so it did a different amount of work from Metal's and its \
                  cost is not Metal's to compare with",
-                ours.degraded.join(", ")
+                codes.join(", ")
             ),
-        };
-    }
-    if !metal.degraded.is_empty() {
-        return TimeVerdict::Unmeasured {
+        },
+        Comparison::Noticed {
+            leg: Leg::Metal,
+            codes,
+            ..
+        } => TimeVerdict::Unmeasured {
             why: format!(
                 "the Metal leg announced {}, so the two legs did different work",
-                metal.degraded.join(", ")
+                codes.join(", ")
             ),
-        };
-    }
-    if metal.spend == 0 {
-        return TimeVerdict::Unmeasured {
-            why: "the Metal leg's spend reads zero, which is a measurement that did not happen \
-                  rather than a case Metal answers for nothing"
-                .to_owned(),
-        };
-    }
-    let (ours, metal) = (ours.spend, metal.spend);
-    if ours > metal.saturating_mul(MARGIN) {
-        TimeVerdict::Over { ours, metal }
-    } else {
-        TimeVerdict::Within { ours, metal }
+        },
+        Comparison::Apart { why } => TimeVerdict::Unmeasured { why },
     }
 }
 
@@ -637,17 +759,25 @@ pub fn fold(
         let of_case: Vec<&CaseRound> = taken.iter().filter_map(|round| round.get(index)).collect();
         folded.push(CaseTimes::of(case.name(), &of_case));
     }
-    let pooled: Vec<CaseRound> = taken
-        .iter()
-        .map(|round| CaseRound {
-            observed: round
-                .iter()
-                .filter(|one| one.stopped.is_none() && one.degraded.is_empty())
-                .flat_map(|one| one.observed.iter().copied())
-                .collect(),
-            ..Default::default()
-        })
-        .collect();
+    // Two pools, not one filtered pool. A case that stopped part way is in neither, because its
+    // calls are a part of the case; a case that ran to the end while announcing a notice is in the
+    // second, because its figures are real and withholding a verdict is not a reason to delete
+    // them.
+    let pool = |keep: fn(&CaseRound) -> bool| -> Vec<CaseRound> {
+        taken
+            .iter()
+            .map(|round| CaseRound {
+                observed: round
+                    .iter()
+                    .filter(|one| one.stopped.is_none() && keep(one))
+                    .flat_map(|one| one.observed.iter().copied())
+                    .collect(),
+                ..Default::default()
+            })
+            .collect()
+    };
+    let exactly = pool(|one| one.degraded.is_empty());
+    let noticed = pool(|one| !one.degraded.is_empty());
     Measurement {
         leg,
         venue,
@@ -656,7 +786,8 @@ pub fn fold(
         calibration,
         cpu_clock: crate::clocks::thread_cpu_nanos().is_some(),
         cases: folded,
-        calls: per_call(&pooled.iter().collect::<Vec<_>>()),
+        calls: per_call(&exactly.iter().collect::<Vec<_>>()),
+        noticed_calls: per_call(&noticed.iter().collect::<Vec<_>>()),
     }
 }
 
@@ -692,12 +823,23 @@ impl Paired {
 /// How many cases both legs did exactly, so the paired table's denominator is printed rather
 /// than implied.
 pub fn comparable(metal: &Measurement, ours: &Measurement) -> usize {
+    counted(metal, ours, |one| matches!(one, Comparison::Judged { .. }))
+}
+
+/// How many cases both legs ran to the end with a notice announced: the rows the verdict is
+/// withheld on and the figures are printed for ([`Comparison`]).
+pub fn noticed(metal: &Measurement, ours: &Measurement) -> usize {
+    counted(metal, ours, |one| matches!(one, Comparison::Noticed { .. }))
+}
+
+/// How many of our cases the Metal leg also holds and `keep` accepts.
+fn counted(metal: &Measurement, ours: &Measurement, keep: impl Fn(&Comparison) -> bool) -> usize {
     ours.cases
         .iter()
         .filter(|one| {
             metal
                 .case(&one.case)
-                .is_some_and(|theirs| !matches!(judge(theirs, one), TimeVerdict::Unmeasured { .. }))
+                .is_some_and(|theirs| keep(&classify(theirs, one)))
         })
         .count()
 }
@@ -711,20 +853,49 @@ pub fn comparable(metal: &Measurement, ours: &Measurement) -> usize {
 /// with the authority of a measurement. Measured on this Mac, not supposed: that is what the first
 /// whole-set run produced, and it is why this function exists.
 ///
-/// So a call's row is summed over the cases where [`judge`] returns a verdict at all. Both legs
-/// then cover one case set, and the row's two call counts are printed anyway, because a case whose
-/// two legs make a call a different number of times is still comparing different work and only the
-/// counts can say so.
+/// So a call's row is summed over the cases [`classify`] returns [`Comparison::Judged`] for. Both
+/// legs then cover one case set, and the row's two call counts are printed anyway, because a case
+/// whose two legs make a call a different number of times is still comparing different work and
+/// only the counts can say so.
+///
+/// This is the table [`crate::slow_calls`] gates on, and it holds exactly what it always held: the
+/// cases a notice withholds a verdict on have their own table ([`paired_noticed`]) and never enter
+/// this one.
 ///
 /// The ratio is on the **totals**, so a call is weighted by how often it runs: a 30x on a call
 /// made once is not the same finding as a 30x on a call made a thousand times.
 pub fn paired(metal: &Measurement, ours: &Measurement) -> Vec<Paired> {
+    paired_where(metal, ours, |one| matches!(one, Comparison::Judged { .. }))
+}
+
+/// The same table over the cases a **notice** withholds the verdict on: reported, gated by
+/// nothing.
+///
+/// It exists because erasing those cases hid 3.3 times the excess the suite was reporting, and
+/// because a notice need not be the cause of the cost it was hiding — [`Comparison`] carries the
+/// measurements. It is a separate function and a separate table rather than a flag on [`paired`],
+/// so nothing that gates can reach it by accident: a row here is a figure to localise, never a
+/// verdict.
+pub fn paired_noticed(metal: &Measurement, ours: &Measurement) -> Vec<Paired> {
+    paired_where(metal, ours, |one| matches!(one, Comparison::Noticed { .. }))
+}
+
+/// The paired per-call table over the cases `keep` accepts.
+///
+/// A case the Metal leg does not hold at all, and every case of [`Comparison::Apart`], is out of
+/// reach of both callers: `keep` is only ever asked about a case both legs hold, and neither
+/// caller accepts that class.
+fn paired_where(
+    metal: &Measurement,
+    ours: &Measurement,
+    keep: impl Fn(&Comparison) -> bool,
+) -> Vec<Paired> {
     let mut by_call: BTreeMap<String, (Vec<&CallTimes>, Vec<&CallTimes>)> = BTreeMap::new();
     for one in &ours.cases {
         let Some(theirs) = metal.case(&one.case) else {
             continue;
         };
-        if matches!(judge(theirs, one), TimeVerdict::Unmeasured { .. }) {
+        if !keep(&classify(theirs, one)) {
             continue;
         }
         for call in &one.per_call {
@@ -788,14 +959,42 @@ fn ms(nanos: u64) -> String {
 /// is not evidence about another. Without this a reader has only the bisection by hand that the
 /// plan's UX bar exists to abolish.
 ///
-/// Only the cases both legs did exactly are listed, for the same reason the paired table lists
-/// only those.
+/// It prints **two** blocks, and the split is the point. The first is the cases both legs did
+/// exactly, which is what the gate judges. The second is the cases a notice withholds a verdict on
+/// ([`Comparison::Noticed`]), which this triage used to drop silently along with everything else
+/// `judge` called unmeasured — and which hold the larger share of the excess. Cases of
+/// [`Comparison::Apart`] appear in neither: a leg that did a part of the case has no figure to
+/// rank.
 pub fn render_one_call(metal: &Measurement, ours: &Measurement, call: &str) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "\nWHERE `{call}` COSTS, case by case over the cases both legs did exactly, worst ratio \
          of totals first (us)\n"
     ));
+    out.push_str(&one_call_table(metal, ours, call, |one| {
+        matches!(one, Comparison::Judged { .. })
+    }));
+    out.push_str(
+        "\nAND WHERE IT COSTS IN THE CASES A NOTICE WITHHOLDS A VERDICT ON: real figures, judged \
+         by nothing (us)\n  a notice says the two legs did different amounts of the case, which is \
+         why no verdict is taken from these rows; it does not say\n  the notice is what the cost \
+         is, and measured over this tree's recordings these rows carry 3.3x the excess of the \
+         block above\n",
+    );
+    out.push_str(&one_call_table(metal, ours, call, |one| {
+        matches!(one, Comparison::Noticed { .. })
+    }));
+    out
+}
+
+/// One block of [`render_one_call`]: the cases `keep` accepts, worst ratio of totals first.
+fn one_call_table(
+    metal: &Measurement,
+    ours: &Measurement,
+    call: &str,
+    keep: impl Fn(&Comparison) -> bool,
+) -> String {
+    let mut out = String::new();
     out.push_str(&format!(
         "{:<44} {:>7} {:>11} {:>11} {:>8}   {:>11} {:>11}\n",
         "case", "calls", "metal tot", "ours tot", "ratio", "ours cpu", "ours blkd"
@@ -805,7 +1004,7 @@ pub fn render_one_call(metal: &Measurement, ours: &Measurement, call: &str) -> S
         let Some(theirs) = metal.case(&one.case) else {
             continue;
         };
-        if matches!(judge(theirs, one), TimeVerdict::Unmeasured { .. }) {
+        if !keep(&classify(theirs, one)) {
             continue;
         }
         let Some(mine) = one.per_call.iter().find(|held| held.call == call) else {
@@ -843,7 +1042,7 @@ pub fn render_one_call(metal: &Measurement, ours: &Measurement, call: &str) -> S
         ));
     }
     if rows.is_empty() {
-        out.push_str("  no case both legs did exactly makes that call\n");
+        out.push_str("  no case of this class makes that call\n");
     }
     out
 }
@@ -881,20 +1080,33 @@ pub fn render(metal: Option<&Measurement>, ours: &Measurement, show: bool) -> St
 
     let Some(metal) = metal else {
         out.push_str("\nno Metal leg on this host, so every row below is ours alone\n\n");
-        out.push_str(&format!(
-            "{:<38} {:>7} {:>11} {:>11} {:>11}\n",
-            "call", "calls", "wall us", "on cpu us", "blocked us"
-        ));
-        for one in &ours.calls {
+        let table = |heading: &str, calls: &[CallTimes]| {
+            let mut out = String::from(heading);
             out.push_str(&format!(
                 "{:<38} {:>7} {:>11} {:>11} {:>11}\n",
-                one.call,
-                one.most_calls,
-                us(one.wall),
-                us(one.on_cpu),
-                us(one.blocked)
+                "call", "calls", "wall us", "on cpu us", "blocked us"
             ));
-        }
+            for one in calls {
+                out.push_str(&format!(
+                    "{:<38} {:>7} {:>11} {:>11} {:>11}\n",
+                    one.call,
+                    one.most_calls,
+                    us(one.wall),
+                    us(one.on_cpu),
+                    us(one.blocked)
+                ));
+            }
+            if calls.is_empty() {
+                out.push_str("  no case of this class made a call\n");
+            }
+            out
+        };
+        out.push_str(&table("over the cases this leg did exactly\n", &ours.calls));
+        out.push_str(&table(
+            "\nover the cases this leg ran to the end while announcing a notice: the same \
+             figures, withheld from every verdict and no longer deleted\n",
+            &ours.noticed_calls,
+        ));
         return out;
     };
 
@@ -983,12 +1195,81 @@ pub fn render(metal: Option<&Measurement>, ours: &Measurement, show: bool) -> St
         ));
     }
 
+    // The half the report used to drop. A notice withholds the verdict and no longer hides the
+    // figures: measured offline over this tree's stored recordings, the cases a notice erased
+    // carry 2,154 ms of excess against the 658 ms of the block above, and only 1.5% of theirs is
+    // pipeline creation against 74.5% of the comparable set's. A reader shown only the first table
+    // was shown the smaller share of the cost and the wrong attribution for it.
+    let withheld = {
+        let mut rows = paired_noticed(metal, ours);
+        rows.sort_by(|one, two| {
+            let ratio = |row: &Paired| row.ratio().unwrap_or(f64::INFINITY);
+            ratio(two)
+                .partial_cmp(&ratio(one))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        rows
+    };
+    out.push_str(&format!(
+        "\nPER CALL, over the {} case(s) A NOTICE WITHHOLDS A VERDICT ON: reported, gated by \
+         nothing\n",
+        noticed(metal, ours)
+    ));
+    out.push_str(
+        "  A notice means the two legs did different amounts of the case, so no verdict and no \
+         gate may read these rows. It does\n  NOT mean the notice is what the cost is, and this \
+         table used to be deleted rather than withheld: over this tree's\n  recordings these \
+         cases carry 3.3x the excess of the table above, the largest cluster in the set sits \
+         behind a notice its\n  15 siblings all do while four of them run 3x faster than Metal, \
+         and one case hides 173 ms of pure WAITING behind a\n  notice about arithmetic. Localise \
+         a row here with `--call <name>` before believing or dismissing it.\n",
+    );
+    out.push_str(&format!(
+        "{:<34} {:>7} {:>10} {:>10} {:>7} {:>10} {:>10} {:>7}   {:>9} {:>9}\n",
+        "call",
+        "metal n",
+        "metal tot",
+        "metal one",
+        "ours n",
+        "ours tot",
+        "ours one",
+        "ratio",
+        "ours cpu",
+        "ours blkd"
+    ));
+    for row in &withheld {
+        let ratio = row
+            .ratio()
+            .map(|ratio| format!("{ratio:.1}x"))
+            .unwrap_or_else(|| "-".to_owned());
+        out.push_str(&format!(
+            "{:<34} {:>7} {:>10} {:>10} {:>7} {:>10} {:>10} {:>7}   {:>9} {:>9}\n",
+            row.call,
+            row.metal.calls,
+            us(row.metal.wall),
+            us(row.metal.typical),
+            row.ours.calls,
+            us(row.ours.wall),
+            us(row.ours.typical),
+            ratio,
+            us(row.ours.on_cpu),
+            us(row.ours.blocked)
+        ));
+    }
+    if withheld.is_empty() {
+        out.push_str("  no case of this selection announced a notice on either leg\n");
+    }
+
     // Per case, the three attributions kept apart. A case is judged on `spend`, which is
     // everything the machine spent on its calls however attributed, so nothing here can be
     // improved by moving work from one column to another.
     out.push_str(
         "\nPER CASE, the three attributions apart, in ms; `spend` is wall-in-calls + elsewhere \
-         and is what the margin judges\n",
+         and is what the margin judges\n  a ratio with a trailing `?` is WITHHELD, not judged: a \
+         notice says the legs did different amounts of the case. The figure is still real\n  and \
+         it is printed because deleting it hid 3.3x the excess the suite was reporting. A row with \
+         no ratio at all has no\n  comparison to withhold -- a leg stopped part way, or Metal \
+         spent nothing measurable.\n",
     );
     out.push_str(&format!(
         "{:<42} {:>8} {:>8} {:>8} {:>8}   {:>8} {:>8} {:>8} {:>8} {:>7}\n",
@@ -1008,6 +1289,10 @@ pub fn render(metal: Option<&Measurement>, ours: &Measurement, show: bool) -> St
     let mut unmeasured = 0;
     let mut notes: Vec<String> = Vec::new();
     for one in &ours.cases {
+        // The class first and the verdict from it, rather than the verdict alone: a case a notice
+        // withholds the verdict on still has both legs' figures and a real ratio, and printing the
+        // word "unmeasured" in the ratio column was the per-case half of the same erasure.
+        let class = metal.case(&one.case).map(|theirs| classify(theirs, one));
         let verdict = match metal.case(&one.case) {
             Some(theirs) => judge(theirs, one),
             None => TimeVerdict::Unmeasured {
@@ -1028,10 +1313,19 @@ pub fn render(metal: Option<&Measurement>, ours: &Measurement, show: bool) -> St
         }
         let theirs = metal.case(&one.case);
         let column = |of: Option<u64>| of.map(ms).unwrap_or_else(|| "-".to_owned());
-        let ratio = verdict
-            .ratio()
-            .map(|ratio| format!("{ratio:.1}x"))
-            .unwrap_or_else(|| verdict.word().to_owned());
+        // A withheld ratio is printed with a trailing `?`, so it can never be read as a verdict
+        // and can never be grepped out of the judged rows by accident.
+        let ratio = match &class {
+            Some(Comparison::Noticed { .. }) => class
+                .as_ref()
+                .and_then(Comparison::ratio)
+                .map(|ratio| format!("{ratio:.1}x?"))
+                .unwrap_or_else(|| "notice".to_owned()),
+            _ => verdict
+                .ratio()
+                .map(|ratio| format!("{ratio:.1}x"))
+                .unwrap_or_else(|| verdict.word().to_owned()),
+        };
         out.push_str(&format!(
             "{:<42} {:>8} {:>8} {:>8} {:>8}   {:>8} {:>8} {:>8} {:>8} {:>7}\n",
             one.case,
@@ -1322,6 +1616,7 @@ mod tests {
             cpu_clock: true,
             cases,
             calls: Vec::new(),
+            noticed_calls: Vec::new(),
         }
     }
 
@@ -1399,6 +1694,176 @@ mod tests {
         assert_eq!((hot.metal.wall, hot.ours.wall), (10_000, 100_000));
         assert_eq!(hot.metal.typical, 10, "the typical call lost its median");
         assert_eq!(hot.ratio(), Some(10.0));
+    }
+
+    /// **A notice withholds the verdict and no longer deletes the figures.**
+    ///
+    /// This is the guard for the erasure itself. Every function that ranked or pooled a figure
+    /// asked `judge` whether a case was unmeasured and skipped it, so a case with any notice left
+    /// the per-call table, the triage and every total — and measured over this tree's recordings
+    /// those cases carry 2,154 ms of excess against the 658 ms of the comparable set. The test
+    /// drives the real aggregation: a degraded case's 1,000 calls must reach the withheld table
+    /// with their figures intact, must not reach the judged one, and must earn no verdict.
+    #[test]
+    fn a_noticed_cases_calls_reach_the_report_while_its_verdict_is_withheld() {
+        let clean_metal = calling("clean", "render_pipeline", 1, 100);
+        let clean_ours = calling("clean", "render_pipeline", 1, 200);
+        let noisy_metal = calling("noisy", "render_pipeline", 1_000, 100);
+        let mut noisy_ours = calling("noisy", "render_pipeline", 1_000, 300);
+        noisy_ours.degraded = vec!["a-notice".to_owned()];
+        let metal = measurement(Leg::Metal, vec![clean_metal, noisy_metal]);
+        let ours = measurement(Leg::Ours, vec![clean_ours, noisy_ours]);
+
+        // The judged table is unchanged: one case, and the gate reads this and nothing else.
+        assert_eq!(comparable(&metal, &ours), 1);
+        let judged = paired(&metal, &ours);
+        let [row] = judged.as_slice() else {
+            panic!("one judged call: {judged:?}");
+        };
+        assert_eq!((row.metal.calls, row.ours.calls), (1, 1));
+
+        // And the withheld table carries the case the judged one drops, with its figures.
+        assert_eq!(noticed(&metal, &ours), 1);
+        let withheld = paired_noticed(&metal, &ours);
+        let [row] = withheld.as_slice() else {
+            panic!("one withheld call: {withheld:?}");
+        };
+        assert_eq!(row.call, "render_pipeline");
+        assert_eq!(
+            (row.metal.calls, row.ours.calls),
+            (1_000, 1_000),
+            "the noticed case's calls did not reach the withheld table"
+        );
+        assert_eq!((row.metal.wall, row.ours.wall), (100_000, 300_000));
+        assert_eq!(
+            row.ratio(),
+            Some(3.0),
+            "the withheld ratio was not computed"
+        );
+
+        // The verdict is still withheld, and the ratio the verdict carries is still None: the
+        // figure lives on the comparison, never on the verdict.
+        let (theirs, mine) = (metal.case("noisy").unwrap(), ours.case("noisy").unwrap());
+        let verdict = judge(theirs, mine);
+        assert!(
+            matches!(&verdict, TimeVerdict::Unmeasured { why } if why.contains("a-notice")),
+            "{verdict:?}"
+        );
+        assert_eq!(verdict.ratio(), None);
+        assert_eq!(classify(theirs, mine).ratio(), Some(3.0));
+
+        // Both tables reach the printed report, and the withheld rows are marked.
+        let printed = render(Some(&metal), &ours, true);
+        assert!(
+            printed.contains("A NOTICE WITHHOLDS A VERDICT ON"),
+            "the report has no withheld table:\n{printed}"
+        );
+        assert!(
+            printed.contains("3.0x?"),
+            "the withheld per-case ratio is not printed, or is not marked:\n{printed}"
+        );
+        let localised = render_one_call(&metal, &ours, "render_pipeline");
+        assert!(
+            localised.contains("noisy"),
+            "the triage dropped the noticed case:\n{localised}"
+        );
+    }
+
+    /// A leg that **stopped** is the class that must never be promoted with the noticed ones.
+    ///
+    /// 72 `texture-fills-*` and `sample-fills-*` cases have no Metal leg at all, because Metal
+    /// fills a texture through private API alone. Ranked beside the rest they would read as the
+    /// largest non-pipeline item in the set and mean nothing, so neither table may hold them.
+    #[test]
+    fn a_stopped_leg_reaches_neither_table() {
+        let clean_metal = calling("clean", "render_pipeline", 1, 100);
+        let clean_ours = calling("clean", "render_pipeline", 1, 200);
+        let mut gone_metal = calling("gone", "render_pipeline", 1_000, 100);
+        gone_metal.stopped = Some("Metal fills a texture through private API alone".to_owned());
+        let mut gone_ours = calling("gone", "render_pipeline", 1_000, 5_000);
+        gone_ours.degraded = vec!["a-notice".to_owned()];
+        let metal = measurement(Leg::Metal, vec![clean_metal, gone_metal]);
+        let ours = measurement(Leg::Ours, vec![clean_ours, gone_ours]);
+        assert_eq!(comparable(&metal, &ours), 1);
+        assert_eq!(
+            noticed(&metal, &ours),
+            0,
+            "a stopped leg was promoted into the withheld class by its notice"
+        );
+        for row in paired(&metal, &ours)
+            .iter()
+            .chain(&paired_noticed(&metal, &ours))
+        {
+            assert_eq!(
+                (row.metal.calls, row.ours.calls),
+                (1, 1),
+                "a stopped leg's 1,000 calls reached a table: {row:?}"
+            );
+        }
+        let (theirs, mine) = (metal.case("gone").unwrap(), ours.case("gone").unwrap());
+        assert!(
+            matches!(classify(theirs, mine), Comparison::Apart { .. }),
+            "{:?}",
+            classify(theirs, mine)
+        );
+        assert_eq!(classify(theirs, mine).ratio(), None);
+    }
+
+    /// A case Metal spent nothing measurable on has **no denominator**, whatever it announced, so
+    /// it is `Apart` and not withheld: a withheld row with no ratio is a row nobody can localise.
+    #[test]
+    fn a_metal_leg_of_zero_is_apart_even_with_a_notice() {
+        let mut ours = case_of("o", 500, 0, 0);
+        ours.degraded = vec!["a-notice".to_owned()];
+        let class = classify(&case_of("m", 0, 0, 0), &ours);
+        assert!(
+            matches!(&class, Comparison::Apart { why } if why.contains("reads zero")),
+            "{class:?}"
+        );
+    }
+
+    /// The single-leg pools are two pools and not one filtered pool, so a host with no Metal
+    /// still prints a noticed case's calls.
+    #[test]
+    fn the_single_leg_pool_keeps_a_noticed_case_apart_rather_than_dropping_it() {
+        let round = |degraded: &[&str], stopped: Option<&str>, wall: u64| CaseRound {
+            observed: vec![seen("dispatch", wall, wall)],
+            window_wall: wall,
+            window_on_cpu: wall,
+            window_process_cpu: wall,
+            stopped: stopped.map(ToOwned::to_owned),
+            degraded: degraded.iter().map(|code| (*code).to_owned()).collect(),
+        };
+        let cases: Vec<Box<dyn crate::case::Case>> =
+            crate::cases::all().into_iter().take(3).collect();
+        assert_eq!(cases.len(), 3, "the suite holds fewer than three cases");
+        let taken = vec![vec![
+            round(&[], None, 10),
+            round(&["a-notice"], None, 700),
+            round(&[], Some("the venue lacks it"), 50_000),
+        ]];
+        let folded = fold(
+            Leg::Ours,
+            "test".to_owned(),
+            1,
+            crate::slow_calls::Calibration {
+                before: 1,
+                after: 1,
+            },
+            &cases,
+            &taken,
+        );
+        let one = |calls: &[CallTimes]| calls.iter().find(|held| held.call == "dispatch").cloned();
+        assert_eq!(
+            one(&folded.calls).map(|held| held.wall_total),
+            Some(10),
+            "the exact pool is not the clean case alone"
+        );
+        assert_eq!(
+            one(&folded.noticed_calls).map(|held| held.wall_total),
+            Some(700),
+            "the noticed case's calls reached no pool"
+        );
     }
 
     /// A span measures what it was asked to and nothing else: the call's name reaches the

@@ -179,13 +179,114 @@ const SPARED: &[(&str, &str)] = &[(
      while `variant_pipelines_made` rises into the room an upper bound leaves",
 )];
 
-/// Every count gated from below, with its reason ([`SPARED`]), so a test can hold the table in
+/// The name the gate's **derived** row carries, which is not a field of
+/// [`metal2vulkan_runtime::WorkCounts`] and never comes out of [`Counts`].
+///
+/// A breach of the pipelines-per-state ratio is reported as an [`Overrun`] like any other, because
+/// that is what it is — this case made more pipelines than its bound allows — and a reader should
+/// not have to learn a second shape to read it. It is named apart so nobody greps the runtime for
+/// it: the two counts it is derived from are `creation_pipelines_made` and
+/// `variant_pipelines_made`, and the denominator is the suite's own ([`crate::states`]).
+pub const PER_STATE: &str = "pipelines_per_pipeline_state";
+
+/// The `VkPipeline`s our leg made over the Metal pipeline states the case created: **the ratio**,
+/// kept as the two counts it is the quotient of so the gate never compares two floats.
+///
+/// # Why a ratio is gated where two counts already are
+///
+/// `variant_pipelines_made` is gated from above and `creation_pipelines_drawn` from below
+/// (the `SPARED` table), and **both pass a change that makes one more pipeline per state while the
+/// case
+/// grows a state**: the absolute counts rise for two reasons at once and an absolute bound cannot
+/// tell them apart. A re-bless then writes the higher number down, which is how the doubled
+/// predicted pipeline on `integer-vertex-attributes` came to sit in a committed recording as the
+/// blessed ceiling — 64 states, 64 predicted, 128 made — for three passes.
+///
+/// The ratio separates the two. A case that grows a state grows both halves and reads the same
+/// ratio; a change that makes more pipelines per state raises it. Measured on this M3 Max over all
+/// 1,103 cases, 8 runs of the whole selection at a one-minute load of 5.35, in the 539 cases that
+/// create a state and carry a cost record: 1,560 states, 2,634 `VkPipeline`s, **1.69 each**, of
+/// which 1,259 were made at a state's creation and 470 of those were taken by no command.
+///
+/// # Why it needs no timing window
+///
+/// It is a count, like everything else this half gates, so it is judgeable on a host running nine
+/// other builds. The same cost read as time is 3.62x worst per case, under the times half's
+/// per-case margin of 10x, and spread across a call the per-call gate reads at 31x while that
+/// call's own cases run faster than Metal. Neither half of the times instrument can see it. This
+/// is the form that can.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PipelinesPerState {
+    /// The `VkPipeline`s the measurement saw made: `creation_pipelines_made` plus
+    /// `variant_pipelines_made`.
+    pub pipelines: u64,
+    /// The Metal pipeline states the case created in the same run ([`crate::states`]). Never zero
+    /// in a record: a case that creates none has no ratio and carries no bound.
+    pub states: u64,
+}
+
+impl PipelinesPerState {
+    /// The ratio this measurement read, where it read one.
+    pub fn ratio(&self) -> Option<f64> {
+        (self.states > 0).then(|| self.pipelines as f64 / self.states as f64)
+    }
+
+    /// The most pipelines this bound allows a run that created `states` states.
+    ///
+    /// Floored, and that is exact rather than lenient: for an integer count, `made > p * s / b` and
+    /// `made > floor(p * s / b)` are the same condition, so the number printed in a failure is the
+    /// number the gate judged by. In `u128`, because a case has reached 128 pipelines and a
+    /// cross-multiplication of two such counts has no business being the thing that overflows.
+    pub fn allows(&self, states: u64) -> u64 {
+        if self.states == 0 {
+            return u64::MAX;
+        }
+        let allowed = u128::from(self.pipelines) * u128::from(states) / u128::from(self.states);
+        u64::try_from(allowed).unwrap_or(u64::MAX)
+    }
+
+    /// Whether `made` pipelines over `states` states is more per state than this bound.
+    pub fn exceeded_by(&self, made: u64, states: u64) -> bool {
+        self.states > 0 && made > self.allows(states)
+    }
+}
+
+impl std::fmt::Display for PipelinesPerState {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.ratio() {
+            Some(ratio) => write!(
+                out,
+                "{} pipeline(s) over {} state(s), {ratio:.3} each",
+                self.pipelines, self.states
+            ),
+            None => write!(out, "{} pipeline(s) over no state", self.pipelines),
+        }
+    }
+}
+
+/// The two counts the ratio's numerator adds: every `VkPipeline` our leg made for a case.
+///
+/// Named here rather than summed at each reader, because a third counter of made pipelines would
+/// otherwise have to be remembered in several places. `pipelines_linked` is deliberately not one of
+/// them: the runtime's own doc says a linked render variant is "each counted in
+/// `variant_pipelines_made` too", so adding it would count those pipelines twice.
+pub const PIPELINES_MADE: [&str; 2] = ["creation_pipelines_made", "variant_pipelines_made"];
+
+/// The `VkPipeline`s `counts` says were made.
+pub fn pipelines_made(counts: &Counts) -> u64 {
+    PIPELINES_MADE.iter().map(|count| counts.get(count)).sum()
+}
+
+/// Every count gated from below, with its reason (this module's own `SPARED` table), so a test
+/// can hold the table in
 /// both directions.
 pub fn spared_table() -> impl Iterator<Item = (&'static str, &'static str)> {
     SPARED.iter().copied()
 }
 
-/// Whether `count` measures work the runtime avoided, and why it is gated from below ([`SPARED`]).
+/// Whether `count` measures work the runtime avoided, and why it is gated from below (the
+/// `SPARED` table).
 pub fn spared(count: &str) -> Option<&'static str> {
     SPARED
         .iter()
@@ -427,9 +528,28 @@ const RACY: [(&str, &str); 32] = [
 /// number no regression can reach, and a bound that cannot fail is worse than no bound. It stays
 /// reported, with both readings, where a reader can see it.
 ///
+/// **A count of bytes can never take a row here**, which is the general form of the paragraph
+/// above and is held by `tests::no_monotone_bound_is_a_count_of_bytes` rather than left to whoever
+/// reads it. The gap between the two shapes scales with the allocation and the bound is the larger
+/// shape's, so for bytes the bound lands orders of magnitude above anything a regression reaches
+/// while looking exactly like a bound that bites.
+///
 /// A ninth name earns a row here on data: a measurement over the whole case set in both shapes
 /// showing no case where the lone run reads lower, and a gap small enough that the bound still
 /// bites. Never by resembling one of these.
+///
+/// **And a count of this shape needs no row to be handled correctly meanwhile**, which is worth
+/// saying because the shape keeps arriving. The runtime builds some compute kernels of its own
+/// lazily, inside whichever Metal call first needs one (`owned_kernel.rs`), so a case run alone
+/// builds one and reads non-zero where the same case run after another that needed it reads zero.
+/// That is this family exactly. The contrast already answers it: a count the two shapes read
+/// differently lands in [`CostRecord::composed`] and is reported rather than gated, with both
+/// readings where a reader can see them, and every committed record now carries a contrast
+/// (`tests::the_contrast` holds that). A `MONOTONE` row is the **opt-in** that keeps such a count
+/// *gated*, at the
+/// lone run's ceiling, and it is the thing that needs the measurement. So the order is: let the
+/// contrast report it, then earn the row. `owned_kernels_made` is the next candidate on that path
+/// and `owned_kernel_spirv_bytes` can never be one, by the bytes rule above.
 const MONOTONE: [(&str, &str); 7] = [
     ("addressable_buffers_made", "2 alone against 0 in company"),
     ("pooled_memory_blocks_made", "4 alone against 0 in company"),
@@ -566,7 +686,21 @@ impl Region {
 
 /// The name prefixes that put a count in [`Region::Translation`]: making a module, a layout or a
 /// pipeline.
-const TRANSLATION: [&str; 15] = [
+const TRANSLATION: [&str; 17] = [
+    // The AIR decode and specialization a pipeline creation does for its stages, and the question
+    // it asks about a linked function's uses. Translation work by definition -- an entry's
+    // specialization depends on the functions and the constants, never on the pipeline state -- so
+    // without these rows all three score as the device API's residual and read as a call costing
+    // nothing. They are named here before the counters land, which costs nothing: `region_of`
+    // matches a prefix, and a prefix nothing is named with classifies nothing.
+    //
+    // They exist because the render-pipeline row's cause turned out to be exactly this work being
+    // redone: every creation decoded and specialized its stages' AIR again, and
+    // `stage_entries_specialized` fell from 64 to 2 on `integer-vertex-attributes` and from 45 to 1
+    // on `vertex-format-constant-step`. A count that large landing in the wrong region would have
+    // hidden the fix as well as the bug.
+    "stage_entries_",
+    "linked_use_questions_asked",
     "shader_modules_",
     "pipeline_layouts_",
     "variant_pipelines_",
@@ -915,6 +1049,28 @@ pub struct CostRecord {
     /// back.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ceilings: BTreeMap<String, u64>,
+    /// The `VkPipeline`s the measurement made over the Metal pipeline states the case created:
+    /// the one bound in this record that is a **ratio** and not a count
+    /// ([`PipelinesPerState`]).
+    ///
+    /// It is gated, and it is the only bound here taken in one shape alone. Every count is bounded
+    /// at whichever shape is its ceiling, but the lone run makes *more* pipelines per state than
+    /// the set does — it finds nothing already made — so its ratio is looser than the gate's own
+    /// run will ever read, and keeping the larger of the two would give up the gate entirely.
+    /// [`judge`] refuses any selection but the whole set, so the whole set is the only shape this
+    /// is ever judged in, and it is measured there.
+    ///
+    /// **A re-bless of this field means one thing: that the tree now makes this many pipelines per
+    /// Metal pipeline state in this case, and that whoever blessed it looked at why.** A case that
+    /// grew a state needs no re-bless, because the ratio did not move; a number that moved is a
+    /// number of pipelines per state that moved, and the only honest reasons to write a larger one
+    /// down are that the case asks for work it did not ask for before, or that a device cannot do
+    /// what it did before — and the second shows up as a changed `degraded` set, which makes the
+    /// record `Unmeasured` rather than comparable.
+    ///
+    /// A record taken before this field existed holds none, and gates no ratio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_state: Option<PipelinesPerState>,
     /// Why the venue cannot measure this case at all, where it cannot.
     ///
     /// A run the venue stops -- it lacks a feature the case needs, or the case could not be
@@ -981,6 +1137,11 @@ impl CostRecord {
     /// that: applying it to a record that already carries a contrast changes no byte.
     pub fn carrying_the_contrast_of(mut self, held: &CostRecord) -> CostRecord {
         self.contrasted = held.contrasted.clone();
+        // The ratio is this measurement's own: a fresh whole-set run is the shape the ratio is
+        // taken in, so there is nothing of the contrast to carry. It is named rather than left to
+        // the reader of a field list, because the ceiling defect this method exists for was
+        // exactly a field nobody carried.
+        self.per_state = self.per_state.or(held.per_state);
         for (count, least) in &held.moving {
             if racy(count).is_some() {
                 continue;
@@ -1032,6 +1193,11 @@ pub struct Drift {
     pub was: Option<u64>,
     /// What the fresh measurement read, where it read anything.
     pub now: Option<u64>,
+    /// The ratio each side holds, where this drift is about one ([`Drifted::PerState`]). A ratio
+    /// is two numbers and `was`/`now` are one each, so it needs its own pair rather than a
+    /// quotient nobody can read back.
+    pub was_ratio: Option<PipelinesPerState>,
+    pub now_ratio: Option<PipelinesPerState>,
 }
 
 /// Which load-bearing fact a [`Drift`] is about.
@@ -1049,6 +1215,10 @@ pub enum Drifted {
     /// A count the record does not gate now is. Reach the gate gains, which is not a failure but
     /// is not silent either.
     GateGained,
+    /// The pipelines-per-state ratio moved, or went missing. A gated number like a bound, and the
+    /// one a re-bless must be read for: the counts under it move whenever a case grows, and the
+    /// ratio moves only when the tree makes more pipelines for the same work.
+    PerState,
 }
 
 impl Drifted {
@@ -1058,7 +1228,10 @@ impl Drifted {
     /// deliberate work and the person doing it is reading the output. A number moving under a gate
     /// that still looks the same is the thing nobody reads.
     pub fn is_load_bearing(&self) -> bool {
-        matches!(self, Drifted::GatedBound | Drifted::Ceiling)
+        matches!(
+            self,
+            Drifted::GatedBound | Drifted::Ceiling | Drifted::PerState
+        )
     }
 
     /// The words a report prints.
@@ -1068,6 +1241,7 @@ impl Drifted {
             Drifted::Ceiling => "a ceiling moved or went missing",
             Drifted::GateLost => "no longer gated",
             Drifted::GateGained => "now gated",
+            Drifted::PerState => "the pipelines-per-state ratio moved or went missing",
         }
     }
 }
@@ -1078,6 +1252,21 @@ impl std::fmt::Display for Drift {
             Some(number) => number.to_string(),
             None => "none".to_owned(),
         };
+        if self.what == Drifted::PerState {
+            let ratio = |held: Option<PipelinesPerState>| match held {
+                Some(held) => held.to_string(),
+                None => "none".to_owned(),
+            };
+            return write!(
+                out,
+                "{} ({}): {}, {} in the record and {} in this measurement",
+                self.count,
+                self.region.word(),
+                self.what.word(),
+                ratio(self.was_ratio),
+                ratio(self.now_ratio)
+            );
+        }
         write!(
             out,
             "{} ({}): {}, {} in the record and {} in this measurement",
@@ -1125,6 +1314,8 @@ pub fn drift(held: &CostRecord, fresh: &CostRecord) -> Vec<Drift> {
             what,
             was,
             now,
+            was_ratio: None,
+            now_ratio: None,
         };
         // A ceiling is compared by presence as well as by value: losing one is the defect, and it
         // leaves a bound that still looks like a bound.
@@ -1164,6 +1355,19 @@ pub fn drift(held: &CostRecord, fresh: &CostRecord) -> Vec<Drift> {
             }
             _ => {}
         }
+    }
+    // The ratio, which no count name reaches: it is derived from two of them and from a count of
+    // the suite's own, so the loop above cannot see it moving.
+    if held.per_state != fresh.per_state {
+        drifted.push(Drift {
+            count: PER_STATE.to_owned(),
+            region: Region::Translation,
+            what: Drifted::PerState,
+            was: held.per_state.map(|held| held.pipelines),
+            now: fresh.per_state.map(|held| held.pipelines),
+            was_ratio: held.per_state,
+            now_ratio: fresh.per_state,
+        });
     }
     drifted
 }
@@ -1269,7 +1473,7 @@ impl std::fmt::Display for Overrun {
     }
 }
 
-/// A gated count of work avoided that read below its bound ([`SPARED`]): this case stopped
+/// A gated count of work avoided that read below its bound (the `SPARED` table): this case stopped
 /// avoiding work it avoided every run of the measurement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Underrun {
@@ -1278,7 +1482,7 @@ pub struct Underrun {
     /// The reading every run of the measurement saw, which is the floor as well as the ceiling.
     pub bound: u64,
     pub found: u64,
-    /// Why the count is gated from below ([`SPARED`]).
+    /// Why the count is gated from below (the `SPARED` table).
     pub why: &'static str,
 }
 
@@ -1307,7 +1511,8 @@ pub enum CostVerdict {
     },
     /// A gated count went over its bound: this case now does more work than the measurement saw.
     Over { over: Vec<Overrun> },
-    /// A gated count of work avoided ([`SPARED`]) read below its bound: this case stopped avoiding
+    /// A gated count of work avoided (the `SPARED` table) read below its bound: this case stopped
+    /// avoiding
     /// work it avoided every run of the measurement. Held apart from [`CostVerdict::Over`] because
     /// the two say opposite things about the same case, and a report that printed one word for both
     /// would read as "more work" where the finding is "a saving gone".
@@ -1370,6 +1575,7 @@ pub fn judge(
     venue: &str,
     whole_set: bool,
     observed: &Counts,
+    states: u64,
     stopped: Option<&str>,
     degraded: &[String],
 ) -> CostVerdict {
@@ -1440,6 +1646,21 @@ pub fn judge(
             });
         }
     }
+    // The ratio, which is the one bound here that is not a count ([`PipelinesPerState`]). It is
+    // judged from the record's own field rather than from `observed`, because a run that made no
+    // pipeline at all moved neither count and must still be held: a case that stopped predicting
+    // reads zero made at creation and more variants, and only the ratio sees the total.
+    if let Some(per_state) = record.per_state {
+        let made = pipelines_made(observed);
+        if per_state.exceeded_by(made, states) {
+            over.push(Overrun {
+                count: PER_STATE.to_owned(),
+                region: Region::Translation,
+                bound: per_state.allows(states),
+                found: made,
+            });
+        }
+    }
     // A count of work avoided is gated from below as well ([`SPARED`]), read from the record's own
     // names rather than from the run's: a count the run never moved is absent from `observed`, and
     // a saving that went to nothing is exactly the reading this gate is for. A count the
@@ -1500,6 +1721,13 @@ pub struct CaseCost {
     pub least: Counts,
     /// The runs taken.
     pub runs: u32,
+    /// The **most** Metal pipeline states any run of the case created ([`crate::states`]): the
+    /// denominator of the pipelines-per-state ratio.
+    ///
+    /// The most rather than the least, to match `counts`: both halves of the ratio come from the
+    /// run that did the most, so the quotient is of one shape of the measurement and not of two.
+    /// A case that creates none reads zero and carries no ratio bound.
+    pub states: u64,
     /// Why the run stopped before the case finished, where it did. Its counts are of a part of the
     /// case, so nothing is recorded or gated from them.
     pub stopped: Option<String>,
@@ -1521,6 +1749,18 @@ pub struct CaseCost {
 }
 
 impl CaseCost {
+    /// The ratio this measurement justifies, where the case created a state at all.
+    ///
+    /// A case that creates none has no denominator and carries no bound: nothing is gated at a
+    /// ratio of zero states, because every such case would read as infinitely over the moment it
+    /// made one pipeline.
+    pub fn per_state(&self) -> Option<PipelinesPerState> {
+        (self.states > 0).then(|| PipelinesPerState {
+            pipelines: pipelines_made(&self.counts),
+            states: self.states,
+        })
+    }
+
     /// The record this measurement justifies, for `venue`, with `measured` the words that say what
     /// was run.
     ///
@@ -1551,6 +1791,7 @@ impl CaseCost {
             moving,
             composed: BTreeMap::new(),
             ceilings: BTreeMap::new(),
+            per_state: self.per_state(),
             unmeasurable: None,
         }
     }
@@ -1568,6 +1809,11 @@ impl CaseCost {
     pub fn fold_alone_into(&self, held: &CostRecord, measured: String) -> CostRecord {
         let mut folded = held.clone();
         folded.contrasted = Some(measured);
+        // `folded.per_state` stays the whole-set measurement's. A case alone makes more pipelines
+        // per state than the same case in company, because it finds nothing already made, so this
+        // leg's ratio is looser than anything the gate will ever read and writing it down would
+        // give the gate up. Measured: `xr-two-planes-rgb10a8-2p-xr10-srgb` makes 8 variants alone
+        // and 4 in the set over the same states.
         // The counts the selection decides are the ones the command prints ([`apart_from`]), the
         // same list and not a second computation of it. The rule it applies — which counts the two
         // shapes disagree on, less the ones the race rule already reports and the ones whose
@@ -1663,4 +1909,315 @@ pub fn by_region(counts: &Counts) -> BTreeMap<Region, usize> {
         *many.entry(region_of(name)).or_default() += 1;
     }
     many
+}
+
+/// Every cost record carries the **contrast** its gated bounds rest on, held over the committed
+/// recordings.
+///
+/// # The defect this is for, found by chasing two cases
+///
+/// Two cases read `over` on four real breaches in a whole-set replay —
+/// `render-state-render-barriers` and `render-state-heap-residency`, over
+/// `creation_pipelines_made`, `variant_pipelines_made`, `pipeline_layouts_made` and
+/// `shader_modules_made` — and a `--write` pass wrote the same numbers back. Neither a regression
+/// nor a case that grew: **their records have no contrast at all**, so the one protection those
+/// four counts have was never applied to them.
+///
+/// The four are all in [`MONOTONE`], whose whole purpose is that they be gated at the **lone run's**
+/// reading, which is their ceiling, so company can only lower them. That reading comes from
+/// `cost --alone --write` and is kept in [`CostRecord::ceilings`]. With no contrast there are no
+/// ceilings, and the bound is the single in-set reading the measurement happened to take.
+///
+/// For these two that reading was taken in a run where the variant **took back a released
+/// variant's objects**. The runtime's own docs say what that does: a variant made again whose
+/// released twin's objects were kept makes no `VkPipeline`, no layout and no module
+/// (`pipeline/kept.rs`), and `variants_taken_back` counts it. So:
+///
+/// | case | made (creation/variant/layout/module) | taken back | binds | draws |
+/// |---|---|---|---|---|
+/// | `render-state-heap-residency` | 0 / 0 / 0 / 0 | 1 | 1 | 1 |
+/// | `render-state-render-barriers` | 1 / 1 / 1 / 2 | 1 | 2 | 2 |
+/// | `render-state-boxes` | 2 / 2 / 2 / 3 | 0 | 2 | 6 |
+/// | `render-state-facing` | 1 / 2 / 1 / 2 | 0 | 3 | 10 |
+/// | `render-state-depth-clip` | 0 / 1 / 0 / 0 | 2 | 4 | 5 |
+///
+/// `render-state-heap-residency` bound and drew a pipeline it made **nothing** for and shared
+/// nothing either: it took one back, so all four bounds are zero, and a run where the release had
+/// not landed makes them itself and reads four counts over bounds of nought. The siblings whose
+/// measurement caught no take-back carry the full counts, and the two that read `over` are the two
+/// cases in the suite that share the identical shader reference
+/// (`tob_renders.ll`, `tob_rect+tob_solid+tob_write+tob_read`), which is what makes a take-back
+/// between them possible at all.
+///
+/// And the count that decides it is one this half **refuses to gate**: [`FOUND`] names
+/// `variants_taken_back` as the first of its family measured to go *up* with more cases around it,
+/// 0 alone against 4 in the set. So whether those four `_made` counts read 0 or 1 turns on whether
+/// a release on one of our own threads had landed — the composition class, exactly.
+///
+/// # What the gate is
+///
+/// A record with no contrast gates its `MONOTONE` counts on whichever composition the measurement
+/// met, and nothing says so. **All 1,045 records that hold bounds carry one**, so this is a gate at
+/// zero rather than a ledger: a record written without a contrast fails here.
+///
+/// What the contrast did to the two cases that sent this stream looking:
+/// `render-state-heap-residency`'s four bounds went from 0 / 0 / 0 / 0 to **1 / 1 / 1 / 2**, each
+/// now a recorded ceiling, and `render-state-render-barriers`'s from 1 / 1 / 1 / 2 to
+/// **2 / 2 / 2 / 4**. Those are the readings the breaches had been showing all along. Both now also
+/// report `creation_pipelines_drawn` rather than gating it — 0 in the set against 1 alone for the
+/// first, 1 against 2 for the second — which is a floor honestly given up by the contrast instead
+/// of one resting on a single composition.
+///
+/// **Those four numbers were measured twice, by two legs that did not know about each other**, and
+/// the agreement is worth more than either reading. This stream took the eleven records' missing
+/// contrast with `cost --alone` and got 1 / 1 / 1 / 2 and 2 / 2 / 2 / 4; the whole-set cost landing
+/// measured all 1,103 cases in both shapes independently and wrote the same four numbers for both
+/// cases. A composition-decided bound reproduced across two separate measurements is the strongest
+/// form the diagnosis below could have, so the records are the landing's and the diagnosis is kept
+/// here.
+#[cfg(test)]
+mod the_contrast {
+    /// Every cost record that holds bounds holds the contrast they rest on.
+    ///
+    /// A gate at zero and not a ledger, because the bill is paid: the way to pay it is
+    /// `cost --alone --runs 8 --write <the cases>`, and it takes a selection rather than the whole
+    /// set, because the alone shape is per-case by construction -- each case on a fresh device
+    /// nothing else has touched -- and folds into the whole-set record the gate's own shape wrote.
+    #[test]
+    fn every_cost_record_carries_its_contrast() {
+        let mut without: Vec<String> = Vec::new();
+        let mut held = 0;
+        for case in crate::cases::all() {
+            let Ok(recording) = crate::recording::read(case.name()) else {
+                continue;
+            };
+            for record in &recording.costs {
+                // A record of a refusal holds no bounds, so it has nothing for a contrast to say
+                // anything about.
+                if record.unmeasurable.is_some() || record.bounds.is_empty() {
+                    continue;
+                }
+                if record.contrasted.is_some() {
+                    held += 1;
+                } else {
+                    without.push(format!("{} on {}", case.name(), record.venue));
+                }
+            }
+        }
+        println!(
+            "{held} cost record(s) carry the contrast their gated bounds rest on, {} do not",
+            without.len()
+        );
+        assert!(
+            held > 600,
+            "only {held} record(s) were found to carry a contrast, so this census is reading the \
+             wrong thing"
+        );
+        assert!(
+            without.is_empty(),
+            "{} cost record(s) hold bounds with no contrast behind them. Such a record gates its \
+             MONOTONE counts -- creation_pipelines_made, \
+             variant_pipelines_made, pipeline_layouts_made, shader_modules_made and the rest -- on \
+             whichever composition its one measurement met, which is how two cases came to be \
+             bounded at the reading where their variant took back a released twin's objects and \
+             made nothing. Take the contrast with `cost --alone --runs 8 --write <the cases>`:\n  {}",
+            without.len(),
+            without.join("\n  ")
+        );
+    }
+}
+
+/// The creation-time prediction's ledger, held over the **committed recordings** rather than over a
+/// run.
+///
+/// # What it holds and why it can be held at all
+///
+/// A pipeline state's creation makes a `VkPipeline` for the key it predicts the first command will
+/// use ([`PipelinesPerState`] is the ratio above it). `creation_pipelines_made` counts those and
+/// `creation_pipelines_drawn` the ones a command then took; the difference is a compile nothing
+/// used yet.
+///
+/// **The difference is not a defect, and no rule here says it must be zero.** A creation cannot
+/// know whether a draw or a dispatch will come, and paying the compile there is the whole point,
+/// because Metal pays it at library creation. What is a defect is the difference *widening*, and
+/// nothing held that. So this is a ceiling on the quantity.
+///
+/// It needs no device and no quiet host: every number comes from the bounds the cases' own
+/// recordings already carry, so it holds in CI and on a machine running nine other builds.
+///
+/// # The census these numbers are, read off the committed recordings
+///
+/// 585 recordings carry a cost record that makes a creation pipeline at all. Over them: **1,439
+/// made, 815 taken by a command, 624 taken by none.** 158 cases take every one they make, 411 take
+/// none of theirs, and 16 take some and not others — the `xr-blend-planes-*` family at 3 made and 1
+/// taken, `topology-class-plain-function` and `frame-length-chain` at 4 and 2.
+///
+/// **The ceiling rose from 508 to 624 because the coverage did, and the rate improved sharply while
+/// it did.** Every one of the 1,103 recordings carries a cost record now, where 399 carried none,
+/// and the cases that landing added are largely the many-pipeline sweeps that take every pipeline
+/// they make: `vertex-format-constant-step` and `vertex-format-float4` at 45 made and 45 taken,
+/// `blend-sweep-write-masks` at 32 and 32, `integer-vertex-attributes` at 64 and 64. So the taken
+/// share went from 242 of 750 (32%) to 815 of 1,439 (57%) as the number of rows grew by 225. A
+/// ceiling that rises with coverage is the honest reading of a bigger census; what it must not do
+/// is rise while the rows stay the same, and that is what this fails on.
+#[cfg(test)]
+mod the_creation_prediction {
+    /// The most `VkPipeline`s the committed recordings may hold made at a creation and taken by no
+    /// command: the waste where it stands today, over the whole suite.
+    ///
+    /// A ceiling and not a target. Lowering it is a fix and raising it is a change somebody has to
+    /// mean: the first thing a reader of a raise should ask is whether the cases that grew were
+    /// cases that never draw — legitimate — or cases that mispredict a draw they do make, which
+    /// is the 121-pipeline bug this family has had once already.
+    const WASTED: u64 = 624;
+
+    /// The cases whose prediction the existing pair of bounds already holds **exactly**, and the
+    /// reach that must not be lost.
+    ///
+    /// Where `creation_pipelines_made` is gated at `n` from above and `creation_pipelines_drawn` is
+    /// gated at `n` from below ([`super::SPARED`]), the two together say the case takes every
+    /// pipeline its creations make — a stricter statement than either bound, held by nothing that
+    /// says so. 111 of the 158 cases that take every one are in that position.
+    ///
+    /// The other 47 are **not**, and they are families rather than a list of names: 19
+    /// `rotated-planes-*` rows, 8 `visibility-*` rows, and then ones and twos across
+    /// `blend-sweep-*`, `depthstencil-*` and `blend-interaction-mask-blend`. The
+    /// `rotated-planes-*` ones are the clean compute examples, where the prediction is right
+    /// because the case follows Apple's own threadgroup guide, and their
+    /// `creation_pipelines_drawn` is reported rather than gated because the two measurement shapes
+    /// read it differently: the record carries bound 1 with the lone run's 1 in `composed`, so the
+    /// case in company read 0 made and 0 taken where alone it read 1 and 1. **The equality
+    /// survives that and neither count does**, which is the same thing the ratio above exploits,
+    /// so holding those wants a recorded relation rather than a recorded count. The `visibility-*`
+    /// rows give up `creation_pipelines_made` as well, so for them even the ceiling is the
+    /// selection's. The four `render-state-*` rows reached this class by being **fixed**: taking
+    /// their missing contrast (`the_contrast`, beside this module) raised their `_made` bounds to
+    /// the lone
+    /// run's ceiling and moved `creation_pipelines_drawn` into `composed`, which is a floor
+    /// honestly given up rather than a floor lost. Blessing a relation needs a whole-set and an
+    /// alone measurement on a device, so the gap is recorded here and not guessed at.
+    const EXACTLY_HELD: usize = 111;
+
+    /// One recording's reading of the prediction.
+    struct Row {
+        case: String,
+        made: u64,
+        drawn: u64,
+        /// Whether both counts are gated, so the pair already says the case takes every one.
+        held: bool,
+    }
+
+    /// Every committed cost record that makes a creation pipeline, read off the recordings.
+    fn census() -> Vec<Row> {
+        let mut rows = Vec::new();
+        for case in crate::cases::all() {
+            let Ok(recording) = crate::recording::read(case.name()) else {
+                continue;
+            };
+            for record in &recording.costs {
+                let made = record.bounds.get("creation_pipelines_made").copied();
+                let Some(made) = made.filter(|made| *made > 0) else {
+                    continue;
+                };
+                let drawn = record
+                    .bounds
+                    .get("creation_pipelines_drawn")
+                    .copied()
+                    .unwrap_or(0);
+                let gated = |count: &str| record.bound(count).is_some_and(|bound| bound.gated());
+                rows.push(Row {
+                    case: case.name().to_owned(),
+                    made,
+                    drawn,
+                    held: made == drawn
+                        && gated("creation_pipelines_made")
+                        && gated("creation_pipelines_drawn"),
+                });
+            }
+        }
+        rows
+    }
+
+    /// **The suite-wide ceiling on predicted pipelines no command took.**
+    ///
+    /// The one gate in this family that needs nothing but the committed files. A change that makes
+    /// the prediction miss more often widens the difference and fails here, naming the rows that
+    /// waste most so the reader starts from the cause rather than from the total.
+    #[test]
+    fn the_creation_prediction_wastes_no_more_than_it_does_today() {
+        let rows = census();
+        let made: u64 = rows.iter().map(|row| row.made).sum();
+        let drawn: u64 = rows.iter().map(|row| row.drawn).sum();
+        let wasted = made - drawn;
+        println!(
+            "{} recording(s) make a creation pipeline: {made} made, {drawn} taken by a command, \
+             {wasted} by none",
+            rows.len()
+        );
+        if wasted > WASTED {
+            let mut worst: Vec<&Row> = rows.iter().filter(|row| row.made > row.drawn).collect();
+            worst.sort_by_key(|row| std::cmp::Reverse(row.made - row.drawn));
+            let named: Vec<String> = worst
+                .iter()
+                .take(12)
+                .map(|row| format!("{} made {} took {}", row.case, row.made, row.drawn))
+                .collect();
+            panic!(
+                "the committed recordings now hold {wasted} predicted pipeline(s) no command \
+                 took, where the ceiling is {WASTED}. A creation cannot know whether a command \
+                 will come, so a difference is not a defect -- but a WIDENING one is, and this is \
+                 the number that says so. Either fix the prediction, or, if the cases that grew \
+                 are cases that never draw at all, raise the ceiling in the same commit as the \
+                 measurement that justifies it. The rows that waste most:\n  {}",
+                named.join("\n  ")
+            );
+        }
+        // A floor under the ceiling, because a gate that reads the wrong thing passes for ever: a
+        // tree where this census found nothing would pass this test while holding nothing.
+        assert!(
+            rows.len() > 300,
+            "only {} recording(s) were found to make a creation pipeline at all, so this census \
+             is reading the wrong thing",
+            rows.len()
+        );
+    }
+
+    /// **The reach over the cases whose prediction is already held exactly must not be lost.**
+    ///
+    /// For those cases the ceiling on `creation_pipelines_made` and the floor on
+    /// `creation_pipelines_drawn` together say the case takes every pipeline its creations make.
+    /// Nothing says that in so many words, so nothing notices it going away: a re-bless that raises
+    /// the made bound, or that moves the drawn count into `moving` or `composed`, gives the
+    /// statement up with no output saying so. This counts it.
+    #[test]
+    fn the_cases_that_take_every_predicted_pipeline_are_still_held_to_it() {
+        let rows = census();
+        let exact: Vec<&Row> = rows
+            .iter()
+            .filter(|row| row.made == row.drawn && row.made > 0)
+            .collect();
+        let held: Vec<&&Row> = exact.iter().filter(|row| row.held).collect();
+        println!(
+            "{} case(s) take every predicted pipeline they make, {} of them held to it by a gated \
+             ceiling and a gated floor together",
+            exact.len(),
+            held.len()
+        );
+        if held.len() < EXACTLY_HELD {
+            let lost: Vec<&str> = exact
+                .iter()
+                .filter(|row| !row.held)
+                .map(|row| row.case.as_str())
+                .take(12)
+                .collect();
+            panic!(
+                "{} case(s) are held to taking every predicted pipeline they make, where {} were. \
+                 A case loses that statement when its made bound rises or its drawn count stops \
+                 being gated, and neither says so in any output. Cases that take every one and \
+                 are NOT held to it: {lost:?}",
+                held.len(),
+                EXACTLY_HELD
+            );
+        }
+    }
 }

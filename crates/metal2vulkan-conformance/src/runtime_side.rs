@@ -1883,8 +1883,7 @@ impl Side for RuntimeSide<'_> {
         // links and the rest do not.
         let maker = match spec.maker {
             Maker::Compute => {
-                let state = self
-                    .device
+                let state = crate::states::making_a_state(self.device)
                     .new_compute_pipeline_state(
                         &ComputePipelineDescriptor::new(StageSource::Function(descriptor)),
                         &PipelineOptions::default(),
@@ -1895,8 +1894,7 @@ impl Side for RuntimeSide<'_> {
             Maker::DrawingStage(stage) | Maker::TileStage(stage) => {
                 let mut pipeline = RenderPipelineDescriptor::new(StageSource::Function(descriptor));
                 pipeline.rasterization_enabled = false;
-                let state = self
-                    .device
+                let state = crate::states::making_a_state(self.device)
                     .new_render_pipeline_state(&pipeline, &PipelineOptions::default())
                     .map_err(|error| Failure::of(&error))?;
                 RuntimeMaker::Render(state, stage.stages())
@@ -2061,8 +2059,7 @@ impl Side for RuntimeSide<'_> {
         let descriptor = metal2vulkan::pipeline::ComputePipelineDescriptor::new(
             metal2vulkan::pipeline::StageSource::Function(function.function_descriptor()),
         );
-        let pipeline = self
-            .device
+        let pipeline = crate::states::making_a_state(self.device)
             .new_compute_pipeline_state(&descriptor, &PipelineOptions::default())
             .map_err(|error| Failure::of(&error))?;
         Ok(keep(&mut self.pipelines, pipeline))
@@ -2640,8 +2637,7 @@ impl Side for RuntimeSide<'_> {
             .map_err(|error| Failure::of(&error))?;
         let mut options = PipelineOptions::default();
         options.options = PipelineOption::BINDING_INFO;
-        let (_, reflection) = self
-            .device
+        let (_, reflection) = crate::states::making_a_state(self.device)
             .new_compute_pipeline_state_with_function_and_reflection(&function, &options)
             .map_err(|error| Failure::of(&error))?;
         let reflection = reflection.ok_or_else(|| {
@@ -2662,8 +2658,7 @@ impl Side for RuntimeSide<'_> {
         let function = self.our_function(library, entry)?;
         let mut built = PipelineOptions::default();
         built.options = PipelineOption::from_raw(options);
-        let made = self
-            .device
+        let made = crate::states::making_a_state(self.device)
             .new_compute_pipeline_state_with_function_and_reflection(&function, &built);
         let Ok((state, reflection)) = made else {
             return Ok(UnderOptions::refused());
@@ -2732,8 +2727,7 @@ impl Side for RuntimeSide<'_> {
         // The case's raw option word, whole: the runtime keeps every bit and acts on the ones
         // Metal defines, which is the claim the sweep holds to Metal.
         let options = PipelineOptions::new(PipelineOption::from_raw(options));
-        let (_state, reflection) = self
-            .device
+        let (_state, reflection) = crate::states::making_a_state(self.device)
             .new_compute_pipeline_state_with_function_and_reflection(&function, &options)
             .map_err(|error| Failure::of(&error))?;
         Ok(match reflection {
@@ -2772,8 +2766,7 @@ impl Side for RuntimeSide<'_> {
         descriptor.fragment = Some(stage(fragment)?);
         descriptor.color_attachments[0] = Some(ColorAttachmentDescriptor::new(attachment));
         let options = PipelineOptions::new(PipelineOption::from_raw(options));
-        let (_state, reflection) = self
-            .device
+        let (_state, reflection) = crate::states::making_a_state(self.device)
             .new_render_pipeline_state_with_reflection(&descriptor, &options)
             .map_err(Failure::from_error)?;
         Ok(match reflection {
@@ -2868,8 +2861,7 @@ impl Side for RuntimeSide<'_> {
         spec: &ComputeStateSpec<'_>,
     ) -> Answer<Handle> {
         let (descriptor, options) = self.our_compute_descriptor(library, spec)?;
-        let state = self
-            .device
+        let state = crate::states::making_a_state(self.device)
             .new_compute_pipeline_state(&descriptor, &options)
             .map_err(|error| Failure::of(&error))?;
         Ok(keep(&mut self.pipelines, state))
@@ -3244,8 +3236,7 @@ impl Side for RuntimeSide<'_> {
             metal2vulkan::pipeline::StageSource::Function(function.function_descriptor()),
         );
         descriptor.stage_input = Some(stage_input_descriptor(stage_input));
-        let pipeline = self
-            .device
+        let pipeline = crate::states::making_a_state(self.device)
             .new_compute_pipeline_state(&descriptor, &PipelineOptions::default())
             .map_err(|error| Failure::of(&error))?;
         Ok(keep(&mut self.pipelines, pipeline))
@@ -3389,7 +3380,7 @@ impl Side for RuntimeSide<'_> {
             let mut descriptor = RenderPipelineDescriptor::new(function(fill.vertex)?);
             descriptor.fragment = Some(function(fill.fragment)?);
             descriptor.color_attachments[0] = Some(ColorAttachmentDescriptor::new(fill.format));
-            self.device
+            crate::states::making_a_state(self.device)
                 .new_render_pipeline_state(&descriptor, &PipelineOptions::default())
                 .map_err(Failure::from_error)?
         };
@@ -3448,8 +3439,7 @@ impl Side for RuntimeSide<'_> {
 
     fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {
         let descriptor = self.mesh_descriptor(library, functions)?;
-        let state = self
-            .device
+        let state = crate::states::making_a_state(self.device)
             .new_mesh_render_pipeline_state(&descriptor, &PipelineOptions::default())
             .map_err(Failure::from_error)?;
         Ok(keep(&mut self.render_pipelines, state))
@@ -3464,8 +3454,7 @@ impl Side for RuntimeSide<'_> {
         let descriptor = self.mesh_reflection_descriptor(library, spec)?;
         let mut built = PipelineOptions::default();
         built.options = PipelineOption::from_raw(options);
-        let made = self
-            .device
+        let made = crate::states::making_a_state(self.device)
             .new_mesh_render_pipeline_state_with_reflection(&descriptor, &built);
         let Ok((state, reflection)) = made else {
             return Ok(StageReflection::refused());
@@ -3649,8 +3638,7 @@ impl Side for RuntimeSide<'_> {
     ) -> Answer<Handle> {
         let mut descriptor = self.mesh_descriptor(library, functions)?;
         descriptor.support_indirect_command_buffers = true;
-        let state = self
-            .device
+        let state = crate::states::making_a_state(self.device)
             .new_mesh_render_pipeline_state(&descriptor, &PipelineOptions::default())
             .map_err(Failure::from_error)?;
         Ok(keep(&mut self.render_pipelines, state))
@@ -3736,8 +3724,7 @@ impl Side for RuntimeSide<'_> {
         );
         descriptor.support_indirect_command_buffers = true;
         descriptor.stage_input = stage_input.map(stage_input_descriptor);
-        let pipeline = self
-            .device
+        let pipeline = crate::states::making_a_state(self.device)
             .new_compute_pipeline_state(&descriptor, &PipelineOptions::default())
             .map_err(|error| Failure::of(&error))?;
         Ok(keep(&mut self.pipelines, pipeline))
@@ -4154,8 +4141,7 @@ impl Side for RuntimeSide<'_> {
         // The reflection out-parameter is asked for, as the case's Metal side asks for it, and
         // dropped here: what the case reads is `texture_access`, the state's own answer, and the
         // runtime's rule is that asking for a reflection may change what the creation computes.
-        let (state, _) = self
-            .device
+        let (state, _) = crate::states::making_a_state(self.device)
             .new_render_pipeline_state_with_reflection(&descriptor, &options)
             .map_err(Failure::from_error)?;
         Ok(keep(&mut self.render_pipelines, state))
@@ -4184,8 +4170,7 @@ impl Side for RuntimeSide<'_> {
 
     fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
         let descriptor = self.our_tile_descriptor(library, spec)?;
-        let state = self
-            .device
+        let state = crate::states::making_a_state(self.device)
             .new_tile_render_pipeline_state(&descriptor, &PipelineOptions::default())
             .map_err(Failure::from_error)?;
         Ok(keep(&mut self.render_pipelines, state))
@@ -4200,8 +4185,7 @@ impl Side for RuntimeSide<'_> {
         let descriptor = self.our_tile_descriptor(library, spec)?;
         let mut built = PipelineOptions::default();
         built.options = PipelineOption::from_raw(options);
-        let made = self
-            .device
+        let made = crate::states::making_a_state(self.device)
             .new_tile_render_pipeline_state_with_reflection(&descriptor, &built);
         let Ok((state, reflection)) = made else {
             return Ok(StageReflection::refused());
@@ -4268,8 +4252,7 @@ impl Side for RuntimeSide<'_> {
         spec: &RenderPipelineSpec<'_>,
     ) -> Answer<Handle> {
         let (descriptor, options) = self.our_render_descriptor(library, spec)?;
-        let state = self
-            .device
+        let state = crate::states::making_a_state(self.device)
             .new_render_pipeline_state(&descriptor, &options)
             .map_err(Failure::from_error)?;
         Ok(keep(&mut self.render_pipelines, state))
@@ -6545,7 +6528,9 @@ impl RuntimeSide<'_> {
                 options: None,
             } => {
                 let (descriptor, options) = self.our_render_descriptor(library, spec)?;
-                let made = || match self.device.new_render_pipeline_state(&descriptor, &options) {
+                let made = || match crate::states::making_a_state(self.device)
+                    .new_render_pipeline_state(&descriptor, &options)
+                {
                     Ok(state) => Delivered::made(StateFacts::Render(our_render_state_facts(
                         &state,
                         registry,
@@ -6561,8 +6546,7 @@ impl RuntimeSide<'_> {
             } => {
                 let (descriptor, mut options) = self.our_render_descriptor(library, spec)?;
                 options.options = PipelineOption::from_raw(*bits);
-                let made = || match self
-                    .device
+                let made = || match crate::states::making_a_state(self.device)
                     .new_render_pipeline_state_with_reflection(&descriptor, &options)
                 {
                     Ok((state, reflection)) => Delivered::reflected(
@@ -6583,8 +6567,7 @@ impl RuntimeSide<'_> {
             } => {
                 let function = self.our_function(library, entry)?;
                 let options = PipelineOptions::default();
-                let made = || match self
-                    .device
+                let made = || match crate::states::making_a_state(self.device)
                     .new_compute_pipeline_state_with_function(&function, &options)
                 {
                     Ok(state) => Delivered::made(StateFacts::Compute(our_compute_state_facts(
@@ -6603,8 +6586,7 @@ impl RuntimeSide<'_> {
                 let function = self.our_function(library, entry)?;
                 let mut options = PipelineOptions::default();
                 options.options = PipelineOption::from_raw(*bits);
-                let made = || match self
-                    .device
+                let made = || match crate::states::making_a_state(self.device)
                     .new_compute_pipeline_state_with_function_and_reflection(&function, &options)
                 {
                     Ok((state, reflection)) => Delivered::reflected(
@@ -6622,8 +6604,7 @@ impl RuntimeSide<'_> {
             PipelineForm::ComputeDescriptor { spec, options } => {
                 let (descriptor, mut built) = self.our_compute_descriptor(library, spec)?;
                 built.options = PipelineOption::from_raw(*options);
-                let made = || match self
-                    .device
+                let made = || match crate::states::making_a_state(self.device)
                     .new_compute_pipeline_state_with_reflection(&descriptor, &built)
                 {
                     Ok((state, reflection)) => Delivered::reflected(
@@ -6642,8 +6623,7 @@ impl RuntimeSide<'_> {
                 let descriptor = self.our_tile_descriptor(library, spec)?;
                 let mut built = PipelineOptions::default();
                 built.options = PipelineOption::from_raw(*options);
-                let made = || match self
-                    .device
+                let made = || match crate::states::making_a_state(self.device)
                     .new_tile_render_pipeline_state_with_reflection(&descriptor, &built)
                 {
                     Ok((state, reflection)) => Delivered::reflected(
@@ -6658,8 +6638,7 @@ impl RuntimeSide<'_> {
                 let descriptor = self.mesh_descriptor(library, functions)?;
                 let mut built = PipelineOptions::default();
                 built.options = PipelineOption::from_raw(*options);
-                let made = || match self
-                    .device
+                let made = || match crate::states::making_a_state(self.device)
                     .new_mesh_render_pipeline_state_with_reflection(&descriptor, &built)
                 {
                     Ok((state, reflection)) => Delivered::reflected(
@@ -8013,7 +7992,7 @@ fn runtime_step(
             let mut options = PipelineOptions::new(PipelineOption::from_raw(options));
             options.binary_archives = listed;
             let refused = match what {
-                Created::Compute { library, kernel } => device
+                Created::Compute { library, kernel } => crate::states::making_a_state(device)
                     .new_compute_pipeline_state(
                         &ComputePipelineDescriptor::new(runtime_stage(built, library, kernel)?),
                         &options,
@@ -8024,7 +8003,7 @@ fn runtime_step(
                     vertex,
                     fragment,
                     attachments,
-                } => device
+                } => crate::states::making_a_state(device)
                     .new_render_pipeline_state(
                         &runtime_render_descriptor(
                             program,

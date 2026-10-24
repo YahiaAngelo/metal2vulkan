@@ -362,6 +362,52 @@ venue the measurement was not taken on, a selection that is not the whole case s
 depend on what ran before it in the same process), a run that stopped part way, and a run the device
 degraded otherwise.
 
+**The one bound that is a ratio, and why it had to be one.** Our largest unfixed cost against Metal
+is that we make more `VkPipeline`s per Metal pipeline state than we need: measured over all 1,103
+cases, 1.69 each, with 37% of the ones made at a state's creation taken by no command. Nothing held
+it. `variant_pipelines_made` is gated from above and `creation_pipelines_drawn` from below, and both
+pass a change that makes one more pipeline per state while the case grows a state, because the
+absolute counts rise for two reasons at once. So `cost::PipelinesPerState` is a bound on the
+quotient, kept as its two counts and judged by cross-multiplication: a case that grows a state reads
+the same ratio and needs no re-bless, and a tree that makes more pipelines for the same work fails.
+The denominator is the suite's own (`states::making_a_state`, the one door every creation on our leg
+goes through, held by a source guard), because the states a case asks for are the case's doing and
+not the runtime's. It is the only bound taken in one shape alone: a case alone makes more pipelines
+per state than the same case in company, and `judge` refuses any selection but the whole set anyway.
+
+**Every record carries its contrast, and that is a gate.** A record with none gates its `MONOTONE`
+counts -- `creation_pipelines_made`, `variant_pipelines_made`, `pipeline_layouts_made`,
+`shader_modules_made` and the rest -- on whichever composition its one measurement met. Two cases
+showed what that costs: `render-state-render-barriers` and `render-state-heap-residency` read `over`
+on all four, a `--write` pass wrote the same numbers back, and neither a regression nor case growth
+was involved. Their one in-set reading was taken in a run where the variant **took back a released
+variant's objects**, which makes no pipeline, layout or module at all (`pipeline/kept.rs`), so
+heap-residency was bounded at 0/0/0/0 while binding and drawing a pipeline it had taken back. The
+count that decides it, `variants_taken_back`, is one this half refuses to gate. Taking the contrast
+raised them to 1/1/1/2 and 2/2/2/4 as recorded ceilings -- the readings the breaches had been
+showing -- and all 700 records that hold bounds now carry one.
+
+**Two gates over the committed files, needing no device.** The suite-wide ceiling on predicted
+pipelines no command took (1,439 made, 815 taken, 624 by none over 585 rows; a difference is not a
+defect, since a creation cannot know whether a command will come, but a widening one is), and the
+reach over the 111 of 158 cases whose made ceiling and drawn floor together already say they take
+every one. The ceiling rose with the coverage and the rate improved as it did, from 32% of predicted
+pipelines taken to 57%: a ceiling that rises with a bigger census is honest, and what it must not do
+is rise while the rows stay the same.
+
+**Every recording carries a cost record.** 399 of the 1,103 used to carry none, among them
+`vertex-format-constant-step`, `vertex-format-float4` and every `blend-sweep-*` -- exactly the
+many-pipeline sweeps with the worst per-case ratios against Metal, so the fix that halved their
+pipeline count was held by nothing on the cases that most needed it. They now read 45 made / 45
+taken, 45 / 45 and 32 / 32, and `integer-vertex-attributes` reads 64 / 64 / 64 where its blessed
+ceiling had been 64 / 0 / 128.
+
+**What is still owed is one run.** No recording carries a `per_state` ratio bound yet, because the
+records were written by a binary predating the field, so the ratio is measured and printed per case
+and gates nothing until a whole-set `cost --runs 8 --write` writes it. A bound measured over a
+selection would not do: `judge` refuses any selection but the whole set, which is the shape the gate
+runs in.
+
 `cost`'s own per-case wall-clock figure stays **advisory**: it is printed so a reader can see where
 the counts are large, and it is neither recorded nor gated. Timing against Metal is the times half,
 below.
@@ -431,6 +477,27 @@ ratio is on the **totals**, so a call is weighted by how often it runs.
 notice did a different amount of work: the device lacked the exact form and the runtime did something
 cheaper and said so. Its cost is `unmeasured`, never a fast row. Without that rule a device's honest
 gap reads as a cost win, which is the most flattering lie the suite could tell.
+
+**But the rule withholds the verdict and no longer deletes the figures, which it used to.** Every
+function that pooled, ranked or printed a figure asked `judge` whether a case was `unmeasured` and
+skipped it, so a case with any notice left the per-call table, the `--call` triage and every total,
+figures and all. Decomposed offline over the stored recordings: the paired cases carry 2,811 ms of
+excess, 18.6% of it pipeline creation; the cases with no notice carry 658 ms of it, 74.5% pipeline
+creation; and the cases a notice erased carry **2,154 ms — 3.3x the whole comparable excess — of
+which 1.5% is pipeline creation.** So the filter was removing the larger half of the finding and
+skewing what was left towards the one cause that survived it. A notice also need not explain what it
+hides: the largest cluster in the set (`extended-swizzles-*`, 1,884 ms) sits behind a notice all 15
+siblings do while four of them run 3x *faster* than Metal, and `depth16-texel-reads` hides 173 ms of
+purely **blocked** cost behind `fast-math-rewrites`, a notice about arithmetic, which cannot make a
+caller wait. The withheld rows now print as their own per-call table, their own `--call` block and a
+per-case ratio marked with a trailing `?`; nothing gated reads any of them.
+
+**What is still erased, on purpose.** A leg that **stopped** part way, and a case Metal spent nothing
+measurable on, have no comparison to withhold rather than a withheld one — 72 `texture-fills-*` and
+`sample-fills-*` cases have no Metal leg at all, because Metal fills a texture through private API
+alone, and ranked beside the rest they would read as the largest non-pipeline item in the set while
+meaning nothing. `times::Comparison` is the three classes apart, `times::judge` reads it rather than
+applying the rule a second time, and the two `times::paired*` tables are the two reportable classes.
 
 **The per-case margin is reported, never gated.** `times::MARGIN` is an order of magnitude,
 computed and printed as a verdict, and the **per-case** rows decide no exit status. Measured twice

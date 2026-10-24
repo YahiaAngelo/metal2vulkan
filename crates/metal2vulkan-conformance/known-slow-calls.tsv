@@ -172,9 +172,40 @@
 #
 # So 1.69 VkPipelines per Metal pipeline state, 0.30 of them per state made for a command that never
 # came. `variant_pipelines_made` is gated per case as an upper bound and `creation_pipelines_drawn`
-# from below, but the RATIO is gated nowhere: a change that makes one more pipeline per state while
-# the case grows a state passes both. That ratio is the per-pipeline translation expressed as a
-# count, it needs no timing window, and it is the gate this cluster still wants.
+# from below, and a change that makes one more pipeline per state while the case grows a state used
+# to pass both: the absolute counts rise for two reasons at once and an absolute bound cannot tell
+# them apart.
+#
+# THAT GATE NOW EXISTS, as a count and with no timing window, which is why it is judgeable on a
+# loaded host. `cost::PipelinesPerState` is a per-case bound in the case's own recording, kept as
+# the two counts it is the quotient of and judged by cross-multiplication: the pipelines our leg
+# made (`creation_pipelines_made` plus `variant_pipelines_made`) over the Metal pipeline states the
+# case created. The denominator is the suite's own, because the runtime has no count of the states a
+# case asks for -- that is a thing the CASE does, through the vocabulary, identically on both legs;
+# `states::making_a_state` is the one door every creation on our leg goes through and a source guard
+# fails any creation that does not. A case that grows a state reads the same ratio and needs no
+# re-bless; a tree that makes more pipelines for the same work fails. A re-bless of that field means
+# one thing, and `cost.rs` says so where the field is declared.
+#
+# TWO MORE COUNTS NOW HELD, over the committed recordings and so without a device at all: the
+# suite-wide ceiling on predicted pipelines no command took (585 rows carry one, 1,439 made, 815
+# taken, 624 by none -- a difference is not a defect, since a creation cannot know whether a command
+# will come, but a WIDENING one is), and the reach over the 111 of 158 cases whose made ceiling and
+# drawn floor together already say they take every one.
+#
+# AND THE COVERAGE HOLE THIS CLUSTER KEPT POINTING AT IS CLOSED. 399 of the 1,103 recordings used to
+# carry no cost record, among them `vertex-format-constant-step`, `vertex-format-float4` and every
+# `blend-sweep-*` -- exactly the many-pipeline sweeps with the worst per-case ratios, so the fix
+# that halved their pipeline count was held by nothing on the cases that most needed it. Every
+# recording carries one now. The sweeps read 45 made / 45 taken, 45 / 45 and 32 / 32, and
+# `integer-vertex-attributes` reads 64 / 64 / 64 where its blessed ceiling had been 64 / 0 / 128:
+# the doubled predicted pipeline is gone from the record as well as from the code.
+#
+# WHAT IS STILL OWED, and it is one run rather than a gap: no recording carries a `per_state` ratio
+# bound yet, because the records were written by a binary that predates the field. A whole-set
+# `cost --runs 8 --write` on a quiet host writes them, and until it does the ratio is measured and
+# printed per case but gates nothing. A bound measured over a selection would not do: `judge`
+# refuses any selection but the whole set, which is the shape the gate runs in.
 #
 # The largest single share of the 470 is the compute prediction missing because the dispatch names
 # its own threadgroup size -- not a defect in the prediction, which a device test now pins as

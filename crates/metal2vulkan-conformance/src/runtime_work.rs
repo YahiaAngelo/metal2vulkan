@@ -870,8 +870,7 @@ impl Run<'_> {
         let function = library
             .new_function_with_name(kernel)
             .map_err(|error| Failure::of(&error))?;
-        let pipeline = self
-            .device
+        let pipeline = crate::states::making_a_state(self.device)
             .new_compute_pipeline_state(
                 &ComputePipelineDescriptor::new(StageSource::Function(
                     function.function_descriptor(),
