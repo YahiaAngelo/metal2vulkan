@@ -66,6 +66,7 @@ pub mod compute_pipeline_descriptors;
 pub mod compute_render_chains;
 pub mod compute_threadgroups;
 pub mod denormal_word_fetches;
+pub mod depth_stencil_space;
 pub mod depth_texel_reads;
 pub mod device_queries;
 pub mod discard_hoist;
@@ -455,6 +456,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(render_state::all());
     cases.extend(render_draw_forms::all());
     cases.extend(render_depth_stencil_state::all());
+    cases.extend(depth_stencil_space::all());
     cases.extend(render_residency::all());
     cases.extend(frame_chains::boxed());
     cases
