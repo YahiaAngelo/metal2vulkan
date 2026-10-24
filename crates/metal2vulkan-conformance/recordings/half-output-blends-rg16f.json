@@ -122,6 +122,16 @@
                       }
                     },
                     {
+                      "name": "blend-color",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6ca841056d16d47af129ea9204b07ceae4aa3c0956d3e300b62743bcc8f902ef"
+                        }
+                      }
+                    },
+                    {
                       "name": "blend:one-zero",
                       "observed": {
                         "value": "absent",
@@ -288,6 +298,46 @@
                         "digest": {
                           "kind": "sha256",
                           "hex": "3dd053dd6e5e4280898bcad24d4faa11b71d9fa08ce9103478818b4108e9b90d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "blend:bc-1mbc",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "1bea44750db67cf65eadb73e06b6f99b0689690865028b77b933cd1a4a3c4c0c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "blend:1mbc-zero",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "392898276346942af2bc4cdb4ed1945aa0604dbbdce5dede6bb39a685996e427"
+                        }
+                      }
+                    },
+                    {
+                      "name": "blend:ba-1mba",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "bf36e6e94253c3ced025e698bbc09699eba6996be33f792b73e382ee26f6b6f6"
+                        }
+                      }
+                    },
+                    {
+                      "name": "blend:bc-1msa",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "1a11483adca9343439903aa87afa24a3bdd49aca5145d7e3a3efc8656d028b9a"
                         }
                       }
                     }
@@ -1075,6 +1125,182 @@
                   }
                 },
                 {
+                  "name": "pipeline/bc-1mbc",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/bc-1mbc",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/bc-1mbc",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/bc-1mbc",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/1mbc-zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/1mbc-zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/1mbc-zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/1mbc-zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/ba-1mba",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/ba-1mba",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/ba-1mba",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/ba-1mba",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/bc-1msa",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/bc-1msa",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/bc-1msa",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/bc-1msa",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
                   "name": "render",
                   "observed": {
                     "value": {
@@ -1282,6 +1508,50 @@
                 },
                 {
                   "name": "read-back/one-one-sub",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/bc-1mbc",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/1mbc-zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/ba-1mba",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/bc-1msa",
                   "observed": {
                     "value": {
                       "variant": {
@@ -1942,6 +2212,158 @@
                           }
                         }
                       }
+                    },
+                    {
+                      "name": "bc-1mbc",
+                      "observed": {
+                        "value": {
+                          "bytes": "JbaYulm1hrn1K6G6DyguuT0iurYYrqS4gS40tty1B7cssWq3xDFPt3GskreDK3m0urWHtKGxv7V4LES0QSgprIc00ag7M+8pK7Q1rrU0oygwNlIxazPcnrw22TFJN9Cj+q5PM4kgmRnamxYxV6xdMRguPTVPKXE3pTeINWI2LDjWOLI4ojimOJo3wzijK244KjJiOL448zezNnI6xjkgOtw4JzqDOcE7XjjmOxE5uzltOmM7DTdyPIs2vzrENhQ8UDuaOwI2lDxiOOM7ujoqPRM5YT0wN7s9zjhpPMw3CD7ZORM+azu8u+46JLshPFe6NTh6u207pLkrOb25LzuSu+a1+LliKQe5FzA0unKvurnvs1C2xa6etSihg7XpKPG327XeuDEyLLQxl6W0Nq2NtXg0MK6Ur76wLSnsqIu0p7WEp2O16TVStL41PCpdpSeyFKN/Mb4oIjNXNLYz66GLK1EzfDUcLCY1AzXNLiE4fjbJLSM3zjiWNYw4STgBNfE4jDdeNnc41jaYOCc4Xzh2ODM6kjguOEI3eDo8OYw6FDkEOaI7mzoLO2U1gjvUN6U7Azq/O8k59DriOQk8vzpxPIc49TsvNnI8gTYuPRc3ID1pOTc9JTeTPE84nTw2ODg9YTobPsU4h7yVPH+6tzlqu7A8L7wVPIi5KDnFupY6r7mJsOW4NrLiuO4YmLjWsw64UqyJuJm1yrZ7Lna2Irb+tLi2FLd7taW3lbMUt0e2v7f4tVK0PSvPtMU0MbKZtGS00qqvrECzkaj+MQqwzS/PqfurvzHHrwIzqzbsLqU1EiwOF8wxYTjTLUkpCDT3qZotHjaaNNU41TY4OJY3mjTaNNMqvjiWOcI2YDmVN6M1BzltMnc5hjV1OPU4sTk9OLw6uDaaOJ83DDrSOaE5JTodPEk7xzsxNc07ojtCPDA7YjzTNrk7zzlJPNc3Az2+OIY8MDkbPR83cTyuO488GTw8Pf46lD3YOBe8CjhdvFQ7W7rZOju7rzlLu5E6TbpWPKW4HizIuiK4CLpDsaW56DBOt7ysg7cWsK+3yTBXuZS1HrWir+y0brIuuKWzfbTstAq0E7RYtVWzXK6uJoq2Mi7CtLmw7bNvobW0zrIntNquvi9ZN+SwqLCBr3Kcra3fKUesSjIMLcY1cDBBqBE0KjRdMQI2DjUsKOU0wDD9NP4YbDi1MTo39zdTN7Q5BjihOWs2sjBJOKo2xjidOYY4GTEZOus2gjvNNtM74zhsO/k6hDmfOD08EzmzOgE4WTyMNiU8sjtsPBk2bDvaN+U75jsmPGs6VjyaOK08rzczPbs6TD0+O8o8mjrbu5o80bqcOJa7WjtJvDQ8C7yfOsa7vDlcuw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "u16",
+                            "row_offset": 0,
+                            "row_elements": 2,
+                            "row_pitch": 4,
+                            "rows": 256,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "1mbc-zero",
+                      "observed": {
+                        "value": {
+                          "bytes": "mr0AuW29zLhAvZm4FL1muOe8M7i6vAC4jbyZt2C8M7c0vMy2B7xmtrS7ALZau5m1ALsztae6zLRNuma09LkAtJq5M7NAuWay57iZsY24zLA0uACwtLdmrgC3zKxNtmaqmrVmpue0AAA0tGYmALNmKpqxzCw0sGYumq0AMJqpzDAAAJkxmilmMpotMzM0MAA0mjFmNAAzzDQ0NDM15zSZNZo1ADZNNmY2ADfMNrQ3Mzc0OJk3jTgAOOc4MzhAOWY4mjmZOPQ5zDhNOgA5pzozOQA7ZjlaO5k5tDvMOQc8ADo0PDM6YDxmuo08M7q6PAC65zzMuRQ9mblAPWa5bT0zuZq9ALltvcy4QL2ZuBS9ZrjnvDO4urwAuI28mbdgvDO3NLzMtge8Zra0uwC2WruZtQC7M7Wnusy0TbpmtPS5ALSauTOzQLlmsue4mbGNuMywNLgAsLS3Zq4At8ysTbZmqpq1ZqbntAAANLRmJgCzZiqascwsNLBmLpqtADCaqcwwAACZMZopZjKaLTMzNDAANJoxZjQAM8w0NDQzNec0mTWaNQA2TTZmNgA3zDa0NzM3NDiZN404ADjnODM4QDlmOJo5mTj0Ocw4TToAOac6MzkAO2Y5WjuZObQ7zDkHPAA6NDwzOmA8ZrqNPDO6ujwAuuc8zLkUPZm5QD1muW09M7mavQC5bb3MuEC9mbgUvWa457wzuLq8ALiNvJm3YLwztzS8zLYHvGa2tLsAtlq7mbUAuzO1p7rMtE26ZrT0uQC0mrkzs0C5ZrLnuJmxjbjMsDS4ALC0t2auALfMrE22ZqqatWam57QAADS0ZiYAs2YqmrHMLDSwZi6arQAwmqnMMAAAmTGaKWYymi0zMzQwADSaMWY0ADPMNDQ0MzXnNJk1mjUANk02ZjYAN8w2tDczNzQ4mTeNOAA45zgzOEA5ZjiaOZk49DnMOE06ADmnOjM5ADtmOVo7mTm0O8w5BzwAOjQ8MzpgPGa6jTwzuro8ALrnPMy5FD2ZuUA9ZrltPTO5mr0AuW29zLhAvZm4FL1muOe8M7i6vAC4jbyZt2C8M7c0vMy2B7xmtrS7ALZau5m1ALsztae6zLRNuma09LkAtJq5M7NAuWay57iZsY24zLA0uACwtLdmrgC3zKxNtmaqmrVmpue0AAA0tGYmALNmKpqxzCw0sGYumq0AMJqpzDAAAJkxmilmMpotMzM0MAA0mjFmNAAzzDQ0NDM15zSZNZo1ADZNNmY2ADfMNrQ3Mzc0OJk3jTgAOOc4MzhAOWY4mjmZOPQ5zDhNOgA5pzozOQA7ZjlaO5k5tDvMOQc8ADo0PDM6YDxmuo08M7q6PAC65zzMuRQ9mblAPWa5bT0zuQ=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "u16",
+                            "row_offset": 0,
+                            "row_elements": 2,
+                            "row_pitch": 4,
+                            "rows": 256,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "ba-1mba",
+                      "observed": {
+                        "value": {
+                          "bytes": "2LlguGy5K7amtc240LX9tdm1e638tkG1SrSZrfu407Est6KzU7EMtJa1yLSEsy6rZbhirUe2y7L3sfKuc7KkMB4gGDEDpgU0RrbgJ04rGTKVMIg1dihpLUsyJTWWM6ImK7JmNY+tshtVrT4ysq/fMW4lEzbBn144lDW7Nc00nDiYNyU5fzfkOGY23DiSLTc4jjLuN0M4bjaMNm06STnMOaw4pjlLOak7gDisOyk5gDhVOpc6KTg8PBI4VTlEOBc7dTsjOi44CzxgOSc6UjupPCE63TwSOUE9ITqwOoc5ez0qO3E9QTyhuB08ALixPC62TjrXuHg8ArVGO6e1ezyIub65CrccttG007Q3uK23freQuH6qHbfGorG1aafgtCu037gBtwCxQiS8tBmqhbXEsDuqgTGPtfgstLKQMja3BbSYswm0ty3gsQguZTMYsumvfbGnNZCvaDYPLW02JrAYMKMs6zeMqRQ3TjHZL2o1Fzh3JFg46DYuNrY29DhvM6s57TUiNjo3ZjalNwY4gjdDOEw5OTijN3o1uTnCOOQ5WzjMOK47JzqvOmI2IjtBOCM7AjoVO+85zzkfOig76DoLPEU5oTpAOLo7fDjHPNI4mzxlOqM8DjlUO705QDvGOV08lTt9PW06dbr9PDu2YTuRuC89ELrCPLm0RDtAuD883bVRuBi0irhqtGW2BbSluNSx27aXtBe5V69MtAKvF7minja5tbKeuIO0sbcbtLe4ZrV9uECst7I3sC6fKKBBt5GwGbQPLxC2bzAvqd+gAq0DLbWy0zXFs1I2MDICMwIxTTDFrlw0YTUBMCGqKzWhrrMs5TMzNfM25DcyNkc4zDJrNFwpNDl/OEo2cDgNNxI1CjnDMnQ5aTXBN4k4YzkUOKI6/jYGN+s3UDmlOY04ATrwOwI7IDvdNvk6fzvFO0E77DtlOE46YjpJOwI5jDzCOY87ODp8PAs59joyPBk7czxiPAg8wzx8OkG59DkvulM8PrYxPIK4kjvJuDA8M7cRPQ6yDLajuJG6lbc/uOa2SbQor++27LBktyGyYbONt964i6Sktjumdbd9tbe3YaguuN+kfbfxsPO2ojAQs9202rCVsUm1JrCysvGyrLUqsiG06jRnMvGtL7RQrGWwm6pqrcKpDCo4MBIyGTLQrjg1ZjDfMbkz0zVzozo1vy37NOCh9Dh8ME83eTYSN7I4sTe+OBM1ZzGoN042UDgNOY83ATPCOSY3gjtGN8I76TgEO6c6NjjqOAs8YDl2OaU4AjwuOEY7wjvYOzc4tDkDOSs6HjyIOi873DrcOZo7YDluPME7eDwhPFo73TvPuAI9G7eDOsy4YzxYuto837k1PKC50zs9uQ=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "u16",
+                            "row_offset": 0,
+                            "row_elements": 2,
+                            "row_pitch": 4,
+                            "rows": 256,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "bc-1msa",
+                      "observed": {
+                        "value": {
+                          "bytes": "GK1Vt2aguKmoOte5hDkUsaE4QTjQNEWx7zipNZK09isEKbavazhMsvAuM7ULNLUtorUEoC+wBLRVMGiveiucMl00szF+MbozLbSWp38wgS4IMWQySScApGAtkC/uKtKoc7CULc2uABOUrjsrAK7NLMatDi24rJgqnrFCL2CxFilRtIwggbSoKI2zHSvkKtww/KQaM6G1CDYGsqerA7i7LBi2kzC1t6SyrbTZsRNA3TtOQYRANjywQs46tjyyOlNAUUHNPUE4AkFvPPs8LEDmQRw9E0KnOKZCIjyyPOQ4kEJQPTdCcj9AKWo+YzMFQFA4NziJtUs+jTg6OjQ1fT3KulCpKbDtOooy1DsruPI1pLaKKf04fjT+OIk25Tf+Nm2v7LRouJU4rDXAMiMxuCobrQI43TaMq70yei6QNYG0WLVgqGG1zDQMtJMzmzFqreSx862UMtysYzJuJDwxNa94IDiqgjArrnAuxKwtKgCuzSy/rbsrjrGeLWSyQiZksDSlvbIDMVO0yDHEtHEwtLSwMM23DDKgtB03krhuMte4HDV2tm+zOLnAopyiUqytPY9B3kAtQWxAbT5TQLFA+kCTQUg9AD+VOJRAuTh0QlU5xkGzPZJBlDhrPqA64T3lOUZAJD5PQtc6u7raQCs5ZjxCsKFAFbtIPwc5MzoqtL887DELOPc2GTV1NJg5MzQqLtw1nzZ4HVyy7DXtONE0D7VjN2K2XauetBq0rLDHs0W2w7b1ta4lHTHer2c2KSiQtPSxYKt+L3CzPC9SLoqsdyQAj+Wv2jImsUcyRC2pK3sk+CEAryosJqFIJ1KujCwArs0saq90LZOxECwKss0qGrCkMRim2ByGte8xvrUHMvewciusphcoMLCGNCu2lC67tGWsO7FMOOeyJjRJuLo3O0GoQjRCPEGaOLxAFUJ4QWpBXkFJOjY+Yj8NQCo76kHOPMo/Tz08QYs4oT1xQJA9rEBQQBk/3UASOyq0TjhWurQ+NDjEPWqy7Tt2tu08CB9bP/85Ajx4uOS257Q8Nfuzmjt2OG02qjWcM68xpzmDuBC0+zYiL3o11qsatsSw9zFVtAIx2LIWsFGyFDVqLXm2DDBWs9Cw3LESqai0HrMhtK2wpDJ8Msmwj7Gir8SuAq7lrXmsUqteJI6pjCnArpIsAK7NLGCvKi2erHwulq0jML2mLCUZrVovnrPeMCe2ATGAtno1cCSqMziyDzN1t6o1ey4nLa+xa7LZsESzErZzqR5CRTrSPoVCZD+EPeA8yEFEOo5Ar0H8QGs4VDwvOwM9OEF0PXM/yz0JPAM/FzmiQAA/fUB+P2c9Mz6gqeJADjelOZKzdj4IvJo/8Lr/PJ26XDvcuQ=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "u16",
+                            "row_offset": 0,
+                            "row_elements": 2,
+                            "row_pitch": 4,
+                            "rows": 256,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
                     }
                   ]
                 },
@@ -2101,121 +2523,121 @@
       "chip": "apple-m3-max",
       "os_build": "26A434",
       "rounds": 8,
-      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; Metal's leg ran at a one-minute load average of 3.18 and ours at 2.63; the legs run one after the other, so the per-call margin is judged only when both are 26.0 or under and within 2.0x of each other",
-      "instrument": 236,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; Metal's leg ran at a one-minute load average of 75.84 and ours at 73.91; the legs run one after the other, so the per-call margin is judged only when both are 26.0 or under and within 2.0x of each other",
+      "instrument": 288,
       "times": {
         "case": "half-output-blends-rg16f",
-        "calls": 89,
-        "in_calls": 36852911,
-        "on_cpu": 1890548,
-        "blocked": 34974042,
-        "elsewhere": 7961917,
-        "spend": 44875494,
-        "spend_least": 42284246,
-        "spend_most": 49051044,
+        "calls": 109,
+        "in_calls": 79233420,
+        "on_cpu": 6203246,
+        "blocked": 74032543,
+        "elsewhere": 12062792,
+        "spend": 89990212,
+        "spend_least": 85275792,
+        "spend_most": 102309291,
         "per_call": [
           {
             "call": "buffer",
             "least_calls": 2,
             "most_calls": 2,
-            "wall": 2333,
-            "on_cpu": 2500,
+            "wall": 9542,
+            "on_cpu": 9750,
             "blocked": 0,
-            "wall_least": 2083,
-            "wall_most": 4833,
-            "wall_total": 24416,
-            "on_cpu_total": 24834,
+            "wall_least": 7916,
+            "wall_most": 26375,
+            "wall_total": 55625,
+            "on_cpu_total": 56208,
             "blocked_total": 0
           },
           {
             "call": "library",
             "least_calls": 1,
             "most_calls": 1,
-            "wall": 26656625,
-            "on_cpu": 651875,
-            "blocked": 25976542,
-            "wall_least": 25059417,
-            "wall_most": 27452250,
-            "wall_total": 26656625,
-            "on_cpu_total": 651875,
-            "blocked_total": 25976542
+            "wall": 57896667,
+            "on_cpu": 1259958,
+            "blocked": 56534375,
+            "wall_least": 45713708,
+            "wall_most": 71455625,
+            "wall_total": 57896667,
+            "on_cpu_total": 1259958,
+            "blocked_total": 56534375
           },
           {
             "call": "read_buffer",
-            "least_calls": 17,
-            "most_calls": 17,
-            "wall": 208,
-            "on_cpu": 666,
+            "least_calls": 21,
+            "most_calls": 21,
+            "wall": 2916,
+            "on_cpu": 3042,
             "blocked": 0,
-            "wall_least": 83,
-            "wall_most": 250,
-            "wall_total": 10165,
-            "on_cpu_total": 16166,
+            "wall_least": 2625,
+            "wall_most": 6000,
+            "wall_total": 133332,
+            "on_cpu_total": 115209,
             "blocked_total": 0
           },
           {
             "call": "render",
             "least_calls": 1,
             "most_calls": 1,
-            "wall": 9523875,
-            "on_cpu": 547875,
-            "blocked": 8984709,
-            "wall_least": 9063083,
-            "wall_most": 11170292,
-            "wall_total": 9523875,
-            "on_cpu_total": 547875,
-            "blocked_total": 8984709
+            "wall": 15613625,
+            "on_cpu": 1848500,
+            "blocked": 13779167,
+            "wall_least": 13479500,
+            "wall_most": 38787625,
+            "wall_total": 15613625,
+            "on_cpu_total": 1848500,
+            "blocked_total": 13779167
           },
           {
             "call": "render_pipeline",
-            "least_calls": 17,
-            "most_calls": 17,
-            "wall": 23417,
-            "on_cpu": 23625,
+            "least_calls": 21,
+            "most_calls": 21,
+            "wall": 71375,
+            "on_cpu": 71583,
             "blocked": 0,
-            "wall_least": 23084,
-            "wall_most": 30250,
-            "wall_total": 514460,
-            "on_cpu_total": 517335,
+            "wall_least": 69292,
+            "wall_most": 165917,
+            "wall_total": 1975456,
+            "on_cpu_total": 1980126,
             "blocked_total": 0
           },
           {
             "call": "replace_region",
-            "least_calls": 17,
-            "most_calls": 17,
-            "wall": 209,
-            "on_cpu": 334,
+            "least_calls": 21,
+            "most_calls": 21,
+            "wall": 5583,
+            "on_cpu": 5750,
             "blocked": 0,
-            "wall_least": 208,
-            "wall_most": 250,
-            "wall_total": 5877,
-            "on_cpu_total": 7918,
+            "wall_least": 5417,
+            "wall_most": 13209,
+            "wall_total": 127584,
+            "on_cpu_total": 130708,
             "blocked_total": 0
           },
           {
             "call": "target",
-            "least_calls": 17,
-            "most_calls": 17,
-            "wall": 3750,
-            "on_cpu": 3875,
+            "least_calls": 21,
+            "most_calls": 21,
+            "wall": 13250,
+            "on_cpu": 13416,
             "blocked": 0,
-            "wall_least": 3666,
-            "wall_most": 3917,
-            "wall_total": 74372,
-            "on_cpu_total": 76711,
+            "wall_least": 12625,
+            "wall_most": 34625,
+            "wall_total": 315663,
+            "on_cpu_total": 319291,
             "blocked_total": 0
           },
           {
             "call": "zeroed_buffer",
-            "least_calls": 17,
-            "most_calls": 17,
-            "wall": 1625,
-            "on_cpu": 1791,
+            "least_calls": 21,
+            "most_calls": 21,
+            "wall": 4625,
+            "on_cpu": 4792,
             "blocked": 0,
-            "wall_least": 1542,
-            "wall_most": 1791,
-            "wall_total": 28249,
-            "on_cpu_total": 30251,
+            "wall_least": 4417,
+            "wall_most": 10791,
+            "wall_total": 102960,
+            "on_cpu_total": 106002,
             "blocked_total": 0
           }
         ]
@@ -2227,18 +2649,18 @@
       "chip": "apple-m3-max",
       "os_build": "26A434",
       "rounds": 8,
-      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; Metal's leg ran at a one-minute load average of 3.18 and ours at 2.63; the legs run one after the other, so the per-call margin is judged only when both are 26.0 or under and within 2.0x of each other",
-      "instrument": 233,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; Metal's leg ran at a one-minute load average of 75.84 and ours at 73.91; the legs run one after the other, so the per-call margin is judged only when both are 26.0 or under and within 2.0x of each other",
+      "instrument": 285,
       "times": {
         "case": "half-output-blends-rg16f",
-        "calls": 89,
-        "in_calls": 33970207,
-        "on_cpu": 29529748,
-        "blocked": 4421208,
-        "elsewhere": 3128292,
-        "spend": 37172540,
-        "spend_least": 35963415,
-        "spend_most": 40330882,
+        "calls": 109,
+        "in_calls": 475231585,
+        "on_cpu": 337710707,
+        "blocked": 115591420,
+        "elsewhere": 15246000,
+        "spend": 492040752,
+        "spend_least": 355223544,
+        "spend_most": 903698001,
         "degraded": [
           "metal2vulkan-degrade-half-output-fast-math-blend",
           "metal2vulkan-degrade-shader-half-color-bits"
@@ -2248,104 +2670,104 @@
             "call": "buffer",
             "least_calls": 2,
             "most_calls": 2,
-            "wall": 875,
-            "on_cpu": 1000,
+            "wall": 10750,
+            "on_cpu": 11000,
             "blocked": 0,
-            "wall_least": 833,
-            "wall_most": 959,
-            "wall_total": 3708,
-            "on_cpu_total": 3959,
+            "wall_least": 10000,
+            "wall_most": 19667,
+            "wall_total": 66917,
+            "on_cpu_total": 67417,
             "blocked_total": 0
           },
           {
             "call": "library",
             "least_calls": 1,
             "most_calls": 1,
-            "wall": 384250,
-            "on_cpu": 384583,
+            "wall": 3908917,
+            "on_cpu": 3911542,
             "blocked": 0,
-            "wall_least": 370959,
-            "wall_most": 459792,
-            "wall_total": 384250,
-            "on_cpu_total": 384583,
+            "wall_least": 3881541,
+            "wall_most": 13571917,
+            "wall_total": 3908917,
+            "on_cpu_total": 3911542,
             "blocked_total": 0
           },
           {
             "call": "read_buffer",
-            "least_calls": 17,
-            "most_calls": 17,
-            "wall": 83,
-            "on_cpu": 209,
+            "least_calls": 21,
+            "most_calls": 21,
+            "wall": 375,
+            "on_cpu": 667,
             "blocked": 0,
-            "wall_least": 42,
-            "wall_most": 84,
-            "wall_total": 1913,
-            "on_cpu_total": 4212,
+            "wall_least": 125,
+            "wall_most": 417,
+            "wall_total": 12417,
+            "on_cpu_total": 18165,
             "blocked_total": 0
           },
           {
             "call": "render",
             "least_calls": 1,
             "most_calls": 1,
-            "wall": 2872916,
-            "on_cpu": 362042,
-            "blocked": 2468708,
-            "wall_least": 2690667,
-            "wall_most": 3034375,
-            "wall_total": 2872916,
-            "on_cpu_total": 362042,
-            "blocked_total": 2468708
+            "wall": 12654500,
+            "on_cpu": 5057625,
+            "blocked": 6112541,
+            "wall_least": 8324667,
+            "wall_most": 24084125,
+            "wall_total": 12654500,
+            "on_cpu_total": 5057625,
+            "blocked_total": 6112541
           },
           {
             "call": "render_pipeline",
-            "least_calls": 17,
-            "most_calls": 17,
-            "wall": 1718167,
-            "on_cpu": 1619708,
-            "blocked": 98833,
-            "wall_least": 1682916,
-            "wall_most": 1864459,
-            "wall_total": 30433415,
-            "on_cpu_total": 28501751,
-            "blocked_total": 1852208
+            "least_calls": 21,
+            "most_calls": 21,
+            "wall": 18858625,
+            "on_cpu": 15333625,
+            "blocked": 3778583,
+            "wall_least": 14852667,
+            "wall_most": 32801125,
+            "wall_total": 446513002,
+            "on_cpu_total": 310946957,
+            "blocked_total": 109402213
           },
           {
             "call": "replace_region",
-            "least_calls": 17,
-            "most_calls": 17,
-            "wall": 541,
-            "on_cpu": 666,
+            "least_calls": 21,
+            "most_calls": 21,
+            "wall": 22125,
+            "on_cpu": 22583,
             "blocked": 0,
-            "wall_least": 459,
-            "wall_most": 666,
-            "wall_total": 9999,
-            "on_cpu_total": 12041,
+            "wall_least": 18458,
+            "wall_most": 23959,
+            "wall_total": 476544,
+            "on_cpu_total": 469541,
             "blocked_total": 0
           },
           {
             "call": "target",
-            "least_calls": 17,
-            "most_calls": 17,
-            "wall": 11209,
-            "on_cpu": 11375,
+            "least_calls": 21,
+            "most_calls": 21,
+            "wall": 290667,
+            "on_cpu": 292125,
             "blocked": 0,
-            "wall_least": 10125,
-            "wall_most": 14416,
-            "wall_total": 225084,
-            "on_cpu_total": 228208,
-            "blocked_total": 0
+            "wall_least": 276500,
+            "wall_most": 326875,
+            "wall_total": 6005708,
+            "on_cpu_total": 5990666,
+            "blocked_total": 66416
           },
           {
             "call": "zeroed_buffer",
-            "least_calls": 17,
-            "most_calls": 17,
-            "wall": 1333,
-            "on_cpu": 1459,
+            "least_calls": 21,
+            "most_calls": 21,
+            "wall": 41416,
+            "on_cpu": 41625,
             "blocked": 0,
-            "wall_least": 1167,
-            "wall_most": 1625,
-            "wall_total": 24080,
-            "on_cpu_total": 26293,
+            "wall_least": 34333,
+            "wall_most": 45084,
+            "wall_total": 849419,
+            "on_cpu_total": 849165,
             "blocked_total": 0
           }
         ]
