@@ -3973,6 +3973,12 @@ impl Side for RuntimeSide<'_> {
         let textures: Vec<Texture> = self.textures.clone();
         let samplers: Vec<SamplerState> = self.samplers.clone();
         let states: Vec<ComputePipelineState> = self.pipelines.clone();
+        let held_heaps: Vec<Heap> = self.heaps.clone();
+        let heap = |handle: Handle| -> Answer<&Heap> {
+            held_heaps
+                .get(handle.0 as usize)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("heap {}", handle.0)))
+        };
         let buffer = |handle: Handle| -> Answer<&Buffer> {
             buffers
                 .get(handle.0 as usize)
@@ -4049,6 +4055,54 @@ impl Side for RuntimeSide<'_> {
                     }),
                 ComputeStep::Bytes { bytes, index } => encoder
                     .set_bytes(bytes, *index)
+                    .map_err(Failure::from_error),
+                ComputeStep::BufferWithStride {
+                    buffer: handle,
+                    offset,
+                    stride,
+                    index,
+                } => buffer(*handle).and_then(|held| {
+                    encoder
+                        .set_buffer_with_stride(Some(held), *offset, *stride, *index)
+                        .map_err(Failure::from_error)
+                }),
+                ComputeStep::BuffersWithStrides {
+                    buffers: named,
+                    first,
+                } => named
+                    .iter()
+                    .map(|(handle, _, _)| buffer(*handle).map(Some))
+                    .collect::<Answer<Vec<Option<&Buffer>>>>()
+                    .and_then(|held| {
+                        let offsets: Vec<u64> = named.iter().map(|(_, at, _)| *at).collect();
+                        let strides: Vec<u64> = named.iter().map(|(_, _, by)| *by).collect();
+                        encoder
+                            .set_buffers_with_strides(&held, &offsets, &strides, *first)
+                            .map_err(Failure::from_error)
+                    }),
+                ComputeStep::BufferOffsetWithStride {
+                    offset,
+                    stride,
+                    index,
+                } => encoder
+                    .set_buffer_offset_with_stride(*offset, *stride, *index)
+                    .map_err(Failure::from_error),
+                ComputeStep::BytesWithStride {
+                    bytes,
+                    stride,
+                    index,
+                } => encoder
+                    .set_bytes_with_stride(bytes, *stride, *index)
+                    .map_err(Failure::from_error),
+                ComputeStep::StageInRegion { origin, size } => encoder
+                    .set_stage_in_region(Region::new_3d(
+                        origin[0].into(),
+                        origin[1].into(),
+                        origin[2].into(),
+                        size[0].into(),
+                        size[1].into(),
+                        size[2].into(),
+                    ))
                     .map_err(Failure::from_error),
                 ComputeStep::Texture {
                     texture: handle,
@@ -4137,6 +4191,13 @@ impl Side for RuntimeSide<'_> {
                             .use_resources(&held, resource_usage(*usage)?)
                             .map_err(Failure::from_error)
                     }),
+                ComputeStep::UseHeap { heap: handle } => heap(*handle)
+                    .and_then(|held| encoder.use_heap(held).map_err(Failure::from_error)),
+                ComputeStep::UseHeaps { heaps: named } => named
+                    .iter()
+                    .map(|handle| heap(*handle))
+                    .collect::<Answer<Vec<&Heap>>>()
+                    .and_then(|held| encoder.use_heaps(&held).map_err(Failure::from_error)),
                 ComputeStep::BarrierScope { scope } => barrier_scope(*scope).map(|scope| {
                     encoder.memory_barrier_with_scope(scope);
                 }),
@@ -4343,6 +4404,50 @@ impl Side for RuntimeSide<'_> {
                         .execute_commands_in_buffer(icb, *first..*first + *count)
                         .map_err(Failure::from_error)?;
                     encoder.end_encoding().map_err(Failure::from_error)
+                }),
+                RenderWork::ResetCommands {
+                    commands,
+                    first,
+                    count,
+                } => pools.indirect(*commands).and_then(|icb| {
+                    let mut blit = command_buffer
+                        .blit_command_encoder()
+                        .map_err(Failure::from_error)?;
+                    blit.reset_commands_in_buffer(icb, *first..*first + *count)
+                        .map_err(Failure::from_error)?;
+                    blit.end_encoding().map_err(Failure::from_error)
+                }),
+                RenderWork::CopyCommands {
+                    from,
+                    first,
+                    count,
+                    into,
+                    into_index,
+                } => pools.indirect(*from).and_then(|source| {
+                    let destination = pools.indirect(*into)?;
+                    let mut blit = command_buffer
+                        .blit_command_encoder()
+                        .map_err(Failure::from_error)?;
+                    blit.copy_indirect_command_buffer(
+                        source,
+                        *first..*first + *count,
+                        destination,
+                        *into_index,
+                    )
+                    .map_err(Failure::from_error)?;
+                    blit.end_encoding().map_err(Failure::from_error)
+                }),
+                RenderWork::OptimizeCommands {
+                    commands,
+                    first,
+                    count,
+                } => pools.indirect(*commands).and_then(|icb| {
+                    let mut blit = command_buffer
+                        .blit_command_encoder()
+                        .map_err(Failure::from_error)?;
+                    blit.optimize_indirect_command_buffer(icb, *first..*first + *count)
+                        .map_err(Failure::from_error)?;
+                    blit.end_encoding().map_err(Failure::from_error)
                 }),
             };
             refused.push(answered.err());

@@ -2078,6 +2078,41 @@ pub enum RenderWork {
         /// The buffers the commands' functions reach, and whether they are written.
         used: Vec<(Handle, bool)>,
     },
+    /// One blit encoder holding `resetCommandsInBuffer:withRange:` over `count` of an indirect
+    /// command buffer's commands from `first`, which puts them back as a fresh buffer's **as the
+    /// command buffer runs**.
+    ///
+    /// It is the GPU-timeline twin of `resetWithRange:`
+    /// ([`Side::reset_indirect_commands`](crate::case::Side::reset_indirect_commands)), which the
+    /// host runs at once. A case tells them apart by where it puts this: a reset encoded before an
+    /// execution of the same command buffer resets commands the execution then runs, so the words
+    /// a reset command's function would have written stay as the case made them.
+    ResetCommands {
+        commands: Handle,
+        first: u64,
+        count: u64,
+    },
+    /// One blit encoder holding `copyIndirectCommandBuffer:sourceRange:destination:
+    /// destinationIndex:`: `count` commands from `first` of one buffer become the commands from
+    /// `into_index` of another, as the command buffer runs.
+    CopyCommands {
+        from: Handle,
+        first: u64,
+        count: u64,
+        into: Handle,
+        into_index: u64,
+    },
+    /// One blit encoder holding `optimizeIndirectCommandBuffer:withRange:` over `count` of a
+    /// buffer's commands from `first`.
+    ///
+    /// Stated plainly: **nothing Metal's optimize changes is observable**, so a case over it asks
+    /// whether encoding it leaves every command's own answer alone, which is what a consumer that
+    /// optimizes its buffers needs to hold.
+    OptimizeCommands {
+        commands: Handle,
+        first: u64,
+        count: u64,
+    },
 }
 
 impl RenderWork {
@@ -2089,6 +2124,9 @@ impl RenderWork {
             RenderWork::Dispatch(_) => "dispatchThreads",
             RenderWork::CopyBuffer { .. } => "copyFromBufferToBuffer",
             RenderWork::ComputeCommands { .. } => "executeCommandsInBuffer",
+            RenderWork::ResetCommands { .. } => "resetCommandsInBuffer",
+            RenderWork::CopyCommands { .. } => "copyIndirectCommandBuffer",
+            RenderWork::OptimizeCommands { .. } => "optimizeIndirectCommandBuffer",
         }
     }
 }
@@ -2254,7 +2292,24 @@ mod tests {
                 count: 1,
                 used: Vec::new(),
             },
-            RenderWork::ComputeCommands { .. } => return None,
+            RenderWork::ComputeCommands { .. } => RenderWork::ResetCommands {
+                commands: handle(),
+                first: 0,
+                count: 1,
+            },
+            RenderWork::ResetCommands { .. } => RenderWork::CopyCommands {
+                from: handle(),
+                first: 0,
+                count: 1,
+                into: handle(),
+                into_index: 0,
+            },
+            RenderWork::CopyCommands { .. } => RenderWork::OptimizeCommands {
+                commands: handle(),
+                first: 0,
+                count: 1,
+            },
+            RenderWork::OptimizeCommands { .. } => return None,
         })
     }
 

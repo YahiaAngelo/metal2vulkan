@@ -291,6 +291,29 @@ fn range_of<T>(first: u32, elements: &[T]) -> Answer<NSRange> {
     Ok(NSRange::new(first as usize, elements.len()))
 }
 
+/// `count` commands from `first` of `commands` as Metal's range, refused where they leave the
+/// buffer.
+///
+/// The blit encoder's three indirect-command calls take a range past the buffer's commands without
+/// complaint — a copy that runs past the destination corrupts its command 0 on plain Metal, and
+/// Metal's own validation stops neither — so the side refuses such a range here rather than asking
+/// a device what a corruption reads as. `what` names which buffer a refusal is about.
+fn commands_range(
+    commands: &ProtocolObject<dyn MTLIndirectCommandBuffer>,
+    first: u64,
+    count: u64,
+    what: &str,
+) -> Answer<NSRange> {
+    let held = commands.size() as u64;
+    if first.checked_add(count).is_none_or(|end| end > held) {
+        return Err(Failure::named(
+            "PastTheCommands",
+            format!("{count} commands at {first} of {what}, of {held}"),
+        ));
+    }
+    Ok(NSRange::new(first as usize, count as usize))
+}
+
 /// A binding as the subprotocol it conforms to, with the conformance **asked of the object**
 /// rather than assumed from its `type`.
 ///
@@ -4780,6 +4803,66 @@ impl Side for MetalSide {
                 } => {
                     self.encode_compute_commands(&command_buffer, *commands, *first, *count, used)?;
                 }
+                RenderWork::ResetCommands {
+                    commands,
+                    first,
+                    count,
+                } => {
+                    let icb = self.held_commands(*commands)?;
+                    let range = commands_range(&icb, *first, *count, "the buffer")?;
+                    let blit = command_buffer.blitCommandEncoder().ok_or_else(|| {
+                        Failure::named("BlitCommandEncoder", "returned nil".to_owned())
+                    })?;
+                    // SAFETY: the range lies inside the buffer's commands, checked just above,
+                    // and the buffer outlives the call.
+                    unsafe { blit.resetCommandsInBuffer_withRange(&icb, range) };
+                    blit.endEncoding();
+                }
+                RenderWork::CopyCommands {
+                    from,
+                    first,
+                    count,
+                    into,
+                    into_index,
+                } => {
+                    let source = self.held_commands(*from)?;
+                    let destination = self.held_commands(*into)?;
+                    let range = commands_range(&source, *first, *count, "the source")?;
+                    // A copy that runs past the destination's end corrupts its command 0 on plain
+                    // Metal and its validation stops neither, so the side refuses it here rather
+                    // than asking a device what a corruption reads as.
+                    commands_range(&destination, *into_index, *count, "the destination")?;
+                    let blit = command_buffer.blitCommandEncoder().ok_or_else(|| {
+                        Failure::named("BlitCommandEncoder", "returned nil".to_owned())
+                    })?;
+                    // SAFETY: the source range lies inside the source and the same count from
+                    // `into_index` lies inside the destination, both checked just above, and both
+                    // buffers outlive the call.
+                    unsafe {
+                        blit.copyIndirectCommandBuffer_sourceRange_destination_destinationIndex(
+                            &source,
+                            range,
+                            &destination,
+                            *into_index as usize,
+                        );
+                    }
+                    blit.endEncoding();
+                }
+                RenderWork::OptimizeCommands {
+                    commands,
+                    first,
+                    count,
+                } => {
+                    let icb = self.held_commands(*commands)?;
+                    let range = commands_range(&icb, *first, *count, "the buffer")?;
+                    let blit = command_buffer.blitCommandEncoder().ok_or_else(|| {
+                        Failure::named("BlitCommandEncoder", "returned nil".to_owned())
+                    })?;
+                    // SAFETY: the range lies inside the buffer's commands, checked just above,
+                    // and the buffer outlives the call.
+                    unsafe { blit.optimizeIndirectCommandBuffer_withRange(&icb, range) };
+                    blit.endEncoding();
+                }
             }
         }
         command_buffer.commit();
@@ -8789,6 +8872,96 @@ impl MetalSide {
                 // as the kernel's binding at that slot.
                 unsafe { encoder.setBytes_length_atIndex(pointer, bytes.len(), *index as usize) };
             }
+            ComputeStep::BufferWithStride {
+                buffer,
+                offset,
+                stride,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: as for `setBuffer:offset:atIndex:`; the stride is a number Metal reads
+                // by value, and the case states the buffer's own length beside it.
+                unsafe {
+                    encoder.setBuffer_offset_attributeStride_atIndex(
+                        held,
+                        *offset as usize,
+                        *stride as usize,
+                        *index as usize,
+                    );
+                }
+            }
+            ComputeStep::BuffersWithStrides { buffers, first } => {
+                let held: Vec<Option<Retained<ProtocolObject<dyn MTLBuffer>>>> = buffers
+                    .iter()
+                    .map(|(handle, _, _)| self.held(*handle).map(|held| Some(Retained::from(held))))
+                    .collect::<Answer<Vec<_>>>()?;
+                let pointers = pointer_array(&held);
+                let offsets: Vec<usize> = buffers.iter().map(|(_, at, _)| *at as usize).collect();
+                let strides: Vec<usize> = buffers
+                    .iter()
+                    .map(|(_, _, stride)| *stride as usize)
+                    .collect();
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: the three arrays hold the range's length of elements, each buffer
+                // outlives the call, and each binding lies inside its buffer from its offset.
+                unsafe {
+                    encoder.setBuffers_offsets_attributeStrides_withRange(
+                        array_head(&pointers)?,
+                        array_head(&offsets)?,
+                        array_head(&strides)?,
+                        range,
+                    );
+                }
+            }
+            ComputeStep::BufferOffsetWithStride {
+                offset,
+                stride,
+                index,
+            } => {
+                // SAFETY: a buffer is bound at that index already — the case states the binding
+                // before this command — and the offset leaves the kernel's binding inside it.
+                unsafe {
+                    encoder.setBufferOffset_attributeStride_atIndex(
+                        *offset as usize,
+                        *stride as usize,
+                        *index as usize,
+                    );
+                }
+            }
+            ComputeStep::BytesWithStride {
+                bytes,
+                stride,
+                index,
+            } => {
+                // `bytes.as_ptr()`, never `NonNull::from(bytes)`: see `ComputeStep::Bytes`.
+                let pointer =
+                    std::ptr::NonNull::new(bytes.as_ptr().cast::<std::ffi::c_void>().cast_mut())
+                        .ok_or_else(|| Failure::named("NoBytes", "an empty inline binding"))?;
+                // SAFETY: `bytes` lives for the call, which copies them, and is at least as long
+                // as the kernel's binding at that slot.
+                unsafe {
+                    encoder.setBytes_length_attributeStride_atIndex(
+                        pointer,
+                        bytes.len(),
+                        *stride as usize,
+                        *index as usize,
+                    );
+                }
+            }
+            ComputeStep::StageInRegion { origin, size } => {
+                encoder.setStageInRegion(MTLRegion {
+                    origin: MTLOrigin {
+                        x: origin[0] as usize,
+                        y: origin[1] as usize,
+                        z: origin[2] as usize,
+                    },
+                    size: MTLSize {
+                        width: size[0] as usize,
+                        height: size[1] as usize,
+                        depth: size[2] as usize,
+                    },
+                });
+            }
             ComputeStep::Texture { texture, index } => {
                 let held = self.held_texture(*texture)?;
                 // SAFETY: the texture is of the kind and access the kernel declares at that slot,
@@ -8899,6 +9072,19 @@ impl MetalSide {
                         MTLResourceUsage(*usage as usize),
                     );
                 }
+            }
+            ComputeStep::UseHeap { heap } => {
+                let held = self.held_heap(*heap)?;
+                encoder.useHeap(held);
+            }
+            ComputeStep::UseHeaps { heaps } => {
+                let held = self.heap_range(heaps)?;
+                let pointers: Vec<std::ptr::NonNull<ProtocolObject<dyn MTLHeap>>> = held
+                    .iter()
+                    .map(|one| std::ptr::NonNull::from(&**one))
+                    .collect();
+                // SAFETY: the array holds `count` pointers and each heap outlives the call.
+                unsafe { encoder.useHeaps_count(array_head(&pointers)?, pointers.len()) };
             }
             ComputeStep::BarrierScope { scope } => {
                 encoder.memoryBarrierWithScope(MTLBarrierScope(*scope as usize));

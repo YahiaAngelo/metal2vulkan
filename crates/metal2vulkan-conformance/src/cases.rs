@@ -44,9 +44,11 @@
 
 pub mod argument_encoders;
 pub mod astc_textures;
+pub mod attribute_strides;
 pub mod binary_archives;
 pub mod blend_sweeps;
 pub mod blit_encoder_commands;
+pub mod blit_indirect_commands;
 pub mod border_swizzles;
 pub mod buffer_blits;
 pub mod buffer_depth_samples;
@@ -62,6 +64,7 @@ pub mod compressed_decode;
 pub mod compressed_moves;
 pub mod compressed_views;
 pub mod compute_encoder_commands;
+pub mod compute_heap_residency;
 pub mod compute_pipeline_descriptors;
 pub mod compute_render_chains;
 pub mod compute_threadgroups;
@@ -401,6 +404,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(buffer_blits::all());
     cases.extend(blit_encoder_commands::all());
     cases.extend(compute_encoder_commands::all());
+    cases.extend(attribute_strides::all());
+    cases.extend(blit_indirect_commands::all());
+    cases.push(Box::new(compute_heap_residency::heap_residency()));
     cases.extend(buffer_texture_blits::all());
     cases.extend(buffer_textures::all());
     cases.extend(buffer_target_clears::all());
