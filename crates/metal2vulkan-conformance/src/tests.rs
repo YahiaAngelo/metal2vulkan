@@ -4726,6 +4726,16 @@ fn the_runtime_side_forwards_every_field_of_a_pipeline_spec() {
     });
     spec.label = Some("a-pipeline-spec-label");
     spec.support_indirect_command_buffers = true;
+    // Every tessellation field away from Metal's default, and no two of them equal as ordinals, so
+    // a field forwarded from another's reads wrong rather than passing.
+    spec.tessellation = Some(
+        crate::render::TessellationState::new()
+            .partitioned(metal2vulkan::metal::TessellationPartitionMode::FractionalOdd)
+            .stepping(metal2vulkan::metal::TessellationFactorStepFunction::PerPatchAndPerInstance)
+            .clamped_to(12)
+            .indexed_by(metal2vulkan::metal::TessellationControlPointIndexType::UInt16)
+            .wound(metal2vulkan::metal::Winding::CounterClockwise),
+    );
     assert_ne!(
         spec.depth_format, spec.stencil_format,
         "the two formats must differ, or swapping them would pass"
@@ -4752,6 +4762,37 @@ fn the_runtime_side_forwards_every_field_of_a_pipeline_spec() {
     assert!(
         made.support_indirect_command_buffers,
         "support_indirect_command_buffers"
+    );
+    let tessellation = made.tessellation.expect("the tessellation fields");
+    assert_eq!(tessellation.max_tessellation_factor, 12, "max_factor");
+    assert_eq!(
+        tessellation.partition_mode,
+        metal2vulkan::metal::TessellationPartitionMode::FractionalOdd,
+        "partition"
+    );
+    assert_eq!(
+        tessellation.factor_step_function,
+        metal2vulkan::metal::TessellationFactorStepFunction::PerPatchAndPerInstance,
+        "factor_step"
+    );
+    assert_eq!(
+        tessellation.output_winding_order,
+        metal2vulkan::metal::Winding::CounterClockwise,
+        "winding"
+    );
+    assert_eq!(
+        tessellation.control_point_index_type,
+        metal2vulkan::metal::TessellationControlPointIndexType::UInt16,
+        "control_point_index_type"
+    );
+    assert_eq!(
+        tessellation.factor_format,
+        metal2vulkan::metal::TessellationFactorFormat::Half,
+        "factor_format"
+    );
+    assert!(
+        !tessellation.factor_scale_enabled,
+        "factor_scale_enabled stays where the spec left it"
     );
 
     let first = made.color_attachments[0].expect("color 0");

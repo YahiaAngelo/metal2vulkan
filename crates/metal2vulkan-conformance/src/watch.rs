@@ -401,6 +401,16 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
             .compute_pipeline_under_options(library, entry, options)
     }
 
+    fn visible_function_table(
+        &mut self,
+        caller: Handle,
+        functions: Handle,
+        spec: &crate::visible_tables::TableSpec<'_>,
+    ) -> Answer<crate::visible_tables::TableOutcome> {
+        let _span = self.watch("visible_function_table");
+        self.inner.visible_function_table(caller, functions, spec)
+    }
+
     fn render_pipeline_under_options(
         &mut self,
         library: Handle,

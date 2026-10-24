@@ -79,6 +79,10 @@ use crate::tile_descriptors::{
     AWAY as TILE_AWAY,
 };
 use crate::transcript::{Negative, Value};
+use crate::visible_tables::{
+    Asked, Binding, Entry, HandleFacts, LinkedList as SpecLinkedList, Made, Maker, TableFacts,
+    TableOutcome, TableSpec, Writes,
+};
 use metal2vulkan::bind::{
     ArgumentDescriptor, RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor, TileMapping,
 };
@@ -88,7 +92,7 @@ use metal2vulkan::metal::{
     PixelFormat, PrimitiveType, RenderStages, ResourceUsage, TextureType, TextureUsage,
 };
 use metal2vulkan::pipeline::{
-    ColorAttachmentDescriptor, ComputePipelineDescriptor, MeshPipelineDescriptor,
+    ColorAttachmentDescriptor, ComputePipelineDescriptor, LinkedFunctions, MeshPipelineDescriptor,
     RenderPipelineDescriptor, StageInputAttributeDescriptor, StageInputDescriptor,
     StageInputLayoutDescriptor, StageSource, TessellationDescriptor, TileRenderPipelineDescriptor,
     VertexAttributeDescriptor, VertexBufferLayoutDescriptor, VertexDescriptor,
@@ -105,7 +109,8 @@ use metal2vulkan_runtime::{
     RenderPassStencilAttachmentDescriptor, RenderPipelineFunctionsDescriptor, RenderPipelineState,
     ResourceOptions, ResourceRef, ResourceStateCommandEncoder, SamplePosition, SamplerState,
     SamplerStateOptions, ScissorRect, Size, SparseTextureRegionAlignmentMode, StoreAction,
-    StoreActionOptions, Texture, TextureDescriptor, Viewport,
+    StoreActionOptions, Texture, TextureDescriptor, Viewport, VisibleFunctionTable,
+    VisibleFunctionTableDescriptor,
 };
 use std::time::Duration;
 /// The `MTLResourceUsage` the raw bits a case states name, refused where they name a bit Metal has
@@ -1159,6 +1164,8 @@ pub(crate) struct PipelineFields {
     /// The label the creation's options carry, which is where the runtime takes
     /// `MTLRenderPipelineDescriptor.label` from rather than from the descriptor itself.
     pub label: Option<String>,
+    /// The tessellation fields, where the case states them.
+    pub tessellation: Option<metal2vulkan::pipeline::TessellationDescriptor>,
 }
 
 /// [`PipelineFields`] of `spec`: `Err` where the spec names a colour attachment past the eight a
@@ -1181,7 +1188,24 @@ pub(crate) fn pipeline_fields(spec: &RenderPipelineSpec<'_>) -> Answer<PipelineF
         vertex_descriptor: spec.vertex_layout.as_ref().map(vertex_descriptor),
         support_indirect_command_buffers: spec.support_indirect_command_buffers,
         label: spec.label.map(str::to_owned),
+        tessellation: spec.tessellation.as_ref().map(tessellation_descriptor),
     })
+}
+
+/// The runtime's `TessellationDescriptor` for `state`: every field the case names, since the
+/// vocabulary is Metal's own and there is no second spelling to keep in step.
+fn tessellation_descriptor(
+    state: &crate::render::TessellationState,
+) -> metal2vulkan::pipeline::TessellationDescriptor {
+    let mut descriptor = metal2vulkan::pipeline::TessellationDescriptor::default();
+    descriptor.max_tessellation_factor = state.max_factor;
+    descriptor.partition_mode = state.partition;
+    descriptor.factor_format = state.factor_format;
+    descriptor.factor_step_function = state.factor_step;
+    descriptor.output_winding_order = state.winding;
+    descriptor.control_point_index_type = state.control_point_index_type;
+    descriptor.factor_scale_enabled = state.factor_scale_enabled;
+    descriptor
 }
 
 /// The runtime's vertex descriptor for `layout`: the same attribute indices, buffer indices and
@@ -1743,6 +1767,214 @@ impl Side for RuntimeSide<'_> {
         let library = new_library_with_air(self.device, source.bitcode)
             .map_err(|error| Failure::of(&error))?;
         Ok(keep(&mut self.libraries, library))
+    }
+
+    fn visible_function_table(
+        &mut self,
+        caller: Handle,
+        functions: Handle,
+        spec: &TableSpec<'_>,
+    ) -> Answer<TableOutcome> {
+        let caller = self
+            .libraries
+            .get(caller.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", caller.0)))?
+            .clone();
+        let defining = self
+            .libraries
+            .get(functions.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", functions.0)))?
+            .clone();
+        let registry = self.device.registry_id();
+        let named = |name: &str| {
+            defining
+                .new_function_with_name(name)
+                .map_err(|error| Failure::of(&error))
+        };
+        // What the stage links, in the order the spec states: a handle's word is the function's
+        // position among the callable ones, so the order is the question.
+        let mut linked = LinkedFunctions::new();
+        for (name, list) in spec.linked.functions {
+            let function = named(name)?.linked_function();
+            linked = match list {
+                SpecLinkedList::Functions => linked.with_function(function),
+                SpecLinkedList::PrivateFunctions => linked.with_private_function(function),
+            };
+        }
+        let entry = caller
+            .new_function_with_name(spec.entry)
+            .map_err(|error| Failure::of(&error))?;
+        let descriptor = entry.function_descriptor().with_linked(linked);
+        // The two makers the vocabulary has: a compute state, or a drawing state whose vertex
+        // function is the case's entry and which has no fragment function, so one stage of it
+        // links and the rest do not.
+        let maker = match spec.maker {
+            Maker::Compute => {
+                let state = self
+                    .device
+                    .new_compute_pipeline_state(
+                        &ComputePipelineDescriptor::new(StageSource::Function(descriptor)),
+                        &PipelineOptions::default(),
+                    )
+                    .map_err(|error| Failure::of(&error))?;
+                RuntimeMaker::Compute(state)
+            }
+            Maker::DrawingStage(stage) | Maker::TileStage(stage) => {
+                let mut pipeline = RenderPipelineDescriptor::new(StageSource::Function(descriptor));
+                pipeline.rasterization_enabled = false;
+                let state = self
+                    .device
+                    .new_render_pipeline_state(&pipeline, &PipelineOptions::default())
+                    .map_err(|error| Failure::of(&error))?;
+                RuntimeMaker::Render(state, stage.stages())
+            }
+        };
+        // Every asked function's handle and its own `functionType`, in the order asked.
+        let mut handles = Vec::new();
+        let mut function_types = Vec::new();
+        let mut held = Vec::new();
+        for name in spec.handles {
+            let function = named(name)?;
+            function_types.push(
+                function
+                    .function_type()
+                    .map_err(|error| Failure::of(&error))?,
+            );
+            let answer = maker.function_handle(&function).map(|handle| {
+                let facts = handle.as_ref().map(|handle| HandleFacts {
+                    name: handle.name().to_owned(),
+                    device_is_the_cases: handle.device().registry_id() == registry,
+                });
+                held.push((*name, handle));
+                facts
+            });
+            handles.push(Asked::of(answer));
+        }
+        let handle_of = |name: &str| {
+            held.iter()
+                .find(|(of, _)| *of == name)
+                .and_then(|(_, handle)| handle.as_ref())
+        };
+        // The table, and a second one of the same descriptor where the case asks, so it can say
+        // whether two tables of one state answer different resource IDs.
+        let wanted = VisibleFunctionTableDescriptor::new(u64::from(spec.function_count));
+        let made = maker.new_visible_function_table(&wanted);
+        let second = spec
+            .second_table
+            .then(|| maker.new_visible_function_table(&wanted));
+        let table = match &made {
+            Ok(table) => Some(table.clone()),
+            Err(_) => None,
+        };
+        let facts = made.map(|table| {
+            Some(TableFacts {
+                resource_id_is_non_zero: table.gpu_resource_id().0 != 0,
+                a_second_tables_id_differs: second.map(|second| match second {
+                    Ok(second) => second.gpu_resource_id() != table.gpu_resource_id(),
+                    // A second table the state would not make: not "the same ID", which is what
+                    // `false` would say, so the case reads the creation's refusal at the site
+                    // above and this stays the honest answer for a table there is not.
+                    Err(_) => false,
+                }),
+                device_is_the_cases: table.device().registry_id() == registry,
+            })
+        });
+        // The entries, by whichever setter the case names.
+        let mut entries_written = Ok(());
+        if let Some(table) = &table {
+            let mut taken = Vec::new();
+            for entry in spec.entries {
+                taken.push(match entry {
+                    Entry::Function(name) => handle_of(name),
+                    Entry::Nil => None,
+                });
+            }
+            entries_written = match spec.writes {
+                Writes::OneAtATime => {
+                    let mut answer = Ok(());
+                    for (at, handle) in taken.iter().enumerate() {
+                        answer = table.set_function(*handle, at as u32);
+                        if answer.is_err() {
+                            break;
+                        }
+                    }
+                    answer
+                }
+                Writes::WholeRange if taken.is_empty() => Ok(()),
+                Writes::WholeRange => table.set_functions(&taken, 0),
+            }
+            .map_err(|error| Failure::of(&error));
+        }
+        let Some(threads) = spec.threads else {
+            let mut outcome = TableOutcome::read_only(
+                handles,
+                wanted.function_count,
+                function_types,
+                Made::of(facts),
+            );
+            outcome.entries_written = entries_written;
+            return Ok(outcome);
+        };
+        let RuntimeMaker::Compute(state) = &maker else {
+            return Err(Failure::named(
+                "NoDispatch",
+                "a render stage's table has no dispatch in this family".to_owned(),
+            ));
+        };
+        // One command buffer, one compute encoder: the output at buffer 0, the table at its own
+        // index where the case binds it, and one dispatch of `threads` single-thread threadgroups.
+        let out = self
+            .device
+            .new_buffer(u64::from(threads) * 4, ResourceOptions::default())
+            .map_err(|error| Failure::of(&error))?;
+        let command_buffer = self
+            .queue()?
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        let mut encoder = command_buffer
+            .compute_command_encoder()
+            .map_err(Failure::from_error)?;
+        encoder
+            .set_compute_pipeline_state(state)
+            .map_err(Failure::from_error)?;
+        encoder
+            .set_buffer(Some(&out), 0, 0)
+            .map_err(Failure::from_error)?;
+        if let (Binding::Bound, Some(table)) = (spec.binding, &table) {
+            encoder
+                .set_visible_function_table(Some(table), TABLE_INDEX)
+                .map_err(Failure::from_error)?;
+        }
+        encoder
+            .dispatch_threadgroups(size([threads, 1, 1]), size([1, 1, 1]))
+            .map_err(Failure::from_error)?;
+        encoder.end_encoding().map_err(Failure::from_error)?;
+        command_buffer.commit().map_err(Failure::from_error)?;
+        let status = match command_buffer.wait_until_completed_for(WAIT) {
+            Ok(()) => status_value(command_buffer.status()),
+            Err(_) => Value::Nothing(Negative::NeverReturned),
+        };
+        let contents = out
+            .contents()
+            .ok_or_else(|| Failure::named("NoContents", "a buffer the host does not reach"))?;
+        // SAFETY: the buffer is `threads * 4` bytes long, the host reaches them, and the wait
+        // above returned before they are read.
+        let bytes = unsafe { std::slice::from_raw_parts(contents.as_ptr(), threads as usize * 4) };
+        let words = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|word| u32::from_le_bytes(*word))
+            .collect();
+        Ok(TableOutcome {
+            handles,
+            descriptor_function_count: wanted.function_count,
+            function_types,
+            table: Made::of(facts),
+            entries_written,
+            words,
+            status,
+        })
     }
 
     fn compute_pipeline(&mut self, library: Handle, entry: &str) -> Answer<Handle> {
@@ -6050,6 +6282,7 @@ impl RuntimeSide<'_> {
         descriptor.rasterization_enabled = apart.rasterization_enabled;
         descriptor.vertex_descriptor = apart.vertex_descriptor;
         descriptor.support_indirect_command_buffers = apart.support_indirect_command_buffers;
+        descriptor.tessellation = apart.tessellation;
         let mut options = PipelineOptions::default();
         options.label = apart.label;
         Ok((descriptor, options))
@@ -6979,6 +7212,64 @@ fn encode_pass(command_buffer: &CommandBuffer, pass: &RenderPass, pools: &Pools)
                     .use_heaps(&over, *stages)
                     .map_err(Failure::from_error)?;
             }
+            RenderStep::TessellationFactorBuffer {
+                buffer: held,
+                offset,
+                instance_stride,
+            } => {
+                let factors = held.map(&buffer).transpose()?;
+                encoder
+                    .set_tessellation_factor_buffer(factors, *offset, *instance_stride)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::DrawPatches {
+                control_points,
+                first,
+                count,
+                patch_indices,
+                patch_index_offset,
+                instances,
+                base_instance,
+            } => {
+                let indices = patch_indices.map(&buffer).transpose()?;
+                encoder
+                    .draw_patches(
+                        *control_points,
+                        *first,
+                        *count,
+                        indices,
+                        *patch_index_offset,
+                        *instances,
+                        *base_instance,
+                    )
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::DrawIndexedPatches {
+                control_points,
+                first,
+                count,
+                patch_indices,
+                patch_index_offset,
+                control_point_indices,
+                control_point_index_offset,
+                instances,
+                base_instance,
+            } => {
+                let indices = patch_indices.map(&buffer).transpose()?;
+                encoder
+                    .draw_indexed_patches(
+                        *control_points,
+                        *first,
+                        *count,
+                        indices,
+                        *patch_index_offset,
+                        buffer(*control_point_indices)?,
+                        *control_point_index_offset,
+                        *instances,
+                        *base_instance,
+                    )
+                    .map_err(Failure::from_error)?;
+            }
         }
     }
     encoder.end_encoding().map_err(Failure::from_error)
@@ -7655,6 +7946,48 @@ fn runtime_step(
             };
             let refused = dynamic.serialize_to_url(&scratch.path(to)).is_err();
             Ok(Observation::Made { refused })
+        }
+    }
+}
+
+/// The Metal buffer index the owned callers declare their `visible_function_table` at, which is
+/// the index the encoder binds the case's table at. It is the fixtures' own `[[buffer(1)]]` and
+/// not a choice of this side's.
+const TABLE_INDEX: u32 = 1;
+
+/// The pipeline state a case's handles and table come from, on this side: a compute state, or a
+/// render state and the one stage the case asks about.
+///
+/// It exists because the two states' selectors are two different calls of the runtime's — a
+/// kernel's take no stage and a render state's take one — and the case's answer must not depend
+/// on which, so both go through one pair of methods here.
+enum RuntimeMaker {
+    Compute(ComputePipelineState),
+    Render(RenderPipelineState, RenderStages),
+}
+
+impl RuntimeMaker {
+    /// `functionHandleWithFunction:`, or its `:stage:` spelling.
+    fn function_handle(
+        &self,
+        function: &metal2vulkan_runtime::Function,
+    ) -> Result<Option<metal2vulkan_runtime::FunctionHandle>, metal2vulkan_runtime::Error> {
+        match self {
+            RuntimeMaker::Compute(state) => state.function_handle(function),
+            RuntimeMaker::Render(state, stage) => state.function_handle(function, *stage),
+        }
+    }
+
+    /// `newVisibleFunctionTableWithDescriptor:`, or its `:stage:` spelling.
+    fn new_visible_function_table(
+        &self,
+        descriptor: &VisibleFunctionTableDescriptor,
+    ) -> Result<VisibleFunctionTable, metal2vulkan_runtime::Error> {
+        match self {
+            RuntimeMaker::Compute(state) => state.new_visible_function_table(descriptor),
+            RuntimeMaker::Render(state, stage) => {
+                state.new_visible_function_table(descriptor, *stage)
+            }
         }
     }
 }

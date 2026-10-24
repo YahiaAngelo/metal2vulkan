@@ -2052,6 +2052,35 @@ pub trait Side {
         Err(Failure::unavailable("scheduled_handler_order"))
     }
 
+    /// The handles a pipeline state gives, the visible-function table it makes, and what a
+    /// dispatch through that table wrote ([`crate::visible_tables`]).
+    ///
+    /// One call, because the four objects a case here compares only exist in sequence: a handle
+    /// comes from a state, a table comes from the same state, an entry takes a handle of that
+    /// table's state, and the words come from a dispatch through the filled table. Asking them
+    /// apart would be four handle spaces whose members could each belong to another case's state,
+    /// and the one shape the family may never reach is exactly that
+    /// (`FunctionTableProblem::HandleOfAnotherState`).
+    ///
+    /// `caller` holds `spec.entry`; `functions` holds the `[[visible]]` functions the stage links
+    /// and the case takes handles of. Two libraries because Metal's own linking takes them so: the
+    /// caller declares the visible functions and another module defines them.
+    ///
+    /// **Three shapes a case must not state**, each measured and each this method's caller's to
+    /// avoid rather than this method's to guess at: a `stage` of no stage at all, where plain
+    /// Metal faults ([`crate::visible_tables::StageAsked`] holds no such value); a
+    /// `function_count` near the device's maximum, where Metal ended an M4's process; and a handle
+    /// of a state other than the one that made the table.
+    fn visible_function_table(
+        &mut self,
+        caller: Handle,
+        functions: Handle,
+        spec: &crate::visible_tables::TableSpec<'_>,
+    ) -> Answer<crate::visible_tables::TableOutcome> {
+        let _ = (caller, functions, spec);
+        Err(Failure::unavailable("visible_function_table"))
+    }
+
     /// `newHeapWithDescriptor:` of the automatic or placement heap `spec` names
     /// ([`crate::heap_query::HeapSpec`]).
     ///

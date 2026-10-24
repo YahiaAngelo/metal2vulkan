@@ -103,6 +103,7 @@ pub mod times;
 pub mod transcript;
 pub mod validated;
 pub mod verdict;
+pub mod visible_tables;
 pub mod watch;
 pub mod work;
 

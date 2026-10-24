@@ -83,6 +83,10 @@ use crate::tile_descriptors::{
     AWAY as TILE_AWAY,
 };
 use crate::transcript::Value;
+use crate::visible_tables::{
+    Asked, Binding, Entry, HandleFacts, LinkedList as SpecLinkedList, Made as MadeTable, Maker,
+    TableFacts, TableOutcome, TableSpec, Writes,
+};
 use metal2vulkan::library::LibraryType;
 use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
 use metal2vulkan::metal::{
@@ -105,14 +109,15 @@ use objc2_metal::{
     MTLComputePipelineReflection, MTLComputePipelineState, MTLCreateSystemDefaultDevice,
     MTLCullMode, MTLDataType, MTLDepthClipMode, MTLDepthStencilDescriptor, MTLDepthStencilState,
     MTLDevice, MTLDispatchType, MTLDynamicLibrary, MTLEvent, MTLFence, MTLFunction,
-    MTLFunctionConstant, MTLFunctionConstantValues, MTLFunctionDescriptor, MTLFunctionOptions,
-    MTLHazardTrackingMode, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType,
-    MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
-    MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary, MTLLinkedFunctions,
-    MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
-    MTLMultisampleStencilResolveFilter, MTLMutability, MTLObjectPayloadBinding, MTLOrigin,
-    MTLPipelineBufferDescriptor, MTLPipelineBufferDescriptorArray, MTLPipelineOption,
-    MTLPixelFormat, MTLPointerType, MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLPurgeableState,
+    MTLFunctionConstant, MTLFunctionConstantValues, MTLFunctionDescriptor, MTLFunctionHandle,
+    MTLFunctionOptions, MTLHazardTrackingMode, MTLHeap, MTLHeapDescriptor, MTLHeapType,
+    MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
+    MTLIndirectCommandType, MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary,
+    MTLLinkedFunctions, MTLLoadAction, MTLMeshRenderPipelineDescriptor,
+    MTLMultisampleDepthResolveFilter, MTLMultisampleStencilResolveFilter, MTLMutability,
+    MTLObjectPayloadBinding, MTLOrigin, MTLPipelineBufferDescriptor,
+    MTLPipelineBufferDescriptorArray, MTLPipelineOption, MTLPixelFormat, MTLPointerType,
+    MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLPurgeableState,
     MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder,
     MTLRenderPassAttachmentDescriptor, MTLRenderPassColorAttachmentDescriptor,
@@ -137,7 +142,7 @@ use objc2_metal::{
     MTLVertexAttributeDescriptorArray, MTLVertexBufferLayoutDescriptor,
     MTLVertexBufferLayoutDescriptorArray, MTLVertexDescriptor, MTLVertexFormat,
     MTLVertexStepFunction, MTLViewport, MTLVisibilityResultMode, MTLVisibleFunctionTable,
-    MTLWinding,
+    MTLVisibleFunctionTableDescriptor, MTLWinding,
 };
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
 /// on.
@@ -2217,6 +2222,249 @@ impl Side for MetalSide {
             .newComputePipelineStateWithFunction_error(&function)
             .map_err(|error| Failure::named("NewComputePipelineState", error.to_string()))?;
         Ok(keep(&mut self.pipelines, pipeline))
+    }
+
+    fn visible_function_table(
+        &mut self,
+        caller: Handle,
+        functions: Handle,
+        spec: &TableSpec<'_>,
+    ) -> Answer<TableOutcome> {
+        let caller = self
+            .libraries
+            .get(caller.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", caller.0)))?
+            .clone();
+        let defining = self
+            .libraries
+            .get(functions.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", functions.0)))?
+            .clone();
+        let named = |library: &ProtocolObject<dyn MTLLibrary>,
+                     name: &str|
+         -> Answer<Retained<ProtocolObject<dyn MTLFunction>>> {
+            library
+                .newFunctionWithName(&NSString::from_str(name))
+                .ok_or_else(|| Failure::named("NewFunctionWithName", name.to_owned()))
+        };
+        // `MTLLinkedFunctions`: each list in the order the spec states, because a handle's word is
+        // the function's position among the callable ones.
+        let linked = MTLLinkedFunctions::linkedFunctions();
+        for list in [SpecLinkedList::Functions, SpecLinkedList::PrivateFunctions] {
+            let mut held = Vec::new();
+            for (name, of) in spec.linked.functions {
+                if *of == list {
+                    held.push(named(&defining, name)?);
+                }
+            }
+            if held.is_empty() {
+                continue;
+            }
+            let array = NSArray::from_retained_slice(&held);
+            match list {
+                SpecLinkedList::Functions => linked.setFunctions(Some(&array)),
+                SpecLinkedList::PrivateFunctions => linked.setPrivateFunctions(Some(&array)),
+            }
+        }
+        let entry = named(&caller, spec.entry)?;
+        let maker = match spec.maker {
+            Maker::Compute => {
+                let descriptor = MTLComputePipelineDescriptor::new();
+                descriptor.setComputeFunction(Some(&entry));
+                descriptor.setLinkedFunctions(Some(&linked));
+                let state = self
+                    .device
+                    .newComputePipelineStateWithDescriptor_options_reflection_error(
+                        &descriptor,
+                        MTLPipelineOption::None,
+                        None,
+                    )
+                    .map_err(|error| {
+                        Failure::named(
+                            "NewComputePipelineState",
+                            error.localizedDescription().to_string(),
+                        )
+                    })?;
+                MetalMaker::Compute(state)
+            }
+            Maker::DrawingStage(stage) | Maker::TileStage(stage) => {
+                let descriptor = MTLRenderPipelineDescriptor::new();
+                descriptor.setVertexFunction(Some(&entry));
+                descriptor.setVertexLinkedFunctions(Some(&linked));
+                // The caller's vertex function returns nothing and the state has no fragment
+                // function, so the state rasterizes nothing and declares no attachment.
+                descriptor.setRasterizationEnabled(false);
+                let state = self
+                    .device
+                    .newRenderPipelineStateWithDescriptor_error(&descriptor)
+                    .map_err(|error| {
+                        Failure::named(
+                            "NewRenderPipelineState",
+                            error.localizedDescription().to_string(),
+                        )
+                    })?;
+                MetalMaker::Render(state, MTLRenderStages(stage.stages().as_raw() as usize))
+            }
+        };
+        let registry = self.device.registryID();
+        let mut handles = Vec::new();
+        let mut function_types = Vec::new();
+        let mut held: Vec<AskedHandle<'_>> = Vec::new();
+        for name in spec.handles {
+            let function = named(&defining, name)?;
+            function_types.push(our_function_type(function.functionType().0)?);
+            // The receivers below name their Metal type where a pattern or an inference would
+            // leave it unspelled. The coverage derivation types a receiver from a declaration
+            // alone, and an untyped one costs its selector the credit and reads in the generated
+            // document exactly like a call no case makes.
+            let handle: Option<Retained<ProtocolObject<dyn MTLFunctionHandle>>> =
+                maker.function_handle(&function);
+            let facts =
+                handle
+                    .as_ref()
+                    .map(
+                        |handle: &Retained<ProtocolObject<dyn MTLFunctionHandle>>| HandleFacts {
+                            name: handle.name().to_string(),
+                            device_is_the_cases: handle.device().registryID() == registry,
+                        },
+                    );
+            handles.push(Asked::answered(facts));
+            held.push((*name, handle));
+        }
+        let handle_of = |name: &str| {
+            held.iter()
+                .find(|(of, _)| *of == name)
+                .and_then(|(_, handle)| handle.as_deref())
+        };
+        let wanted = MTLVisibleFunctionTableDescriptor::visibleFunctionTableDescriptor();
+        // SAFETY: the count is the case's own, which the family caps at 3 — a count near the
+        // device's maximum ends the process, which `crate::visible_tables` records.
+        unsafe { wanted.setFunctionCount(spec.function_count as NSUInteger) };
+        let table: Option<Retained<ProtocolObject<dyn MTLVisibleFunctionTable>>> =
+            maker.new_visible_function_table(&wanted);
+        let second: Option<Option<Retained<ProtocolObject<dyn MTLVisibleFunctionTable>>>> = spec
+            .second_table
+            .then(|| maker.new_visible_function_table(&wanted));
+        let descriptor_function_count = wanted.functionCount() as u64;
+        let facts = table.as_ref().map(
+            |table: &Retained<ProtocolObject<dyn MTLVisibleFunctionTable>>| TableFacts {
+                resource_id_is_non_zero: table.gpuResourceID().to_raw() != 0,
+                a_second_tables_id_differs: second.map(
+                    |second: Option<Retained<ProtocolObject<dyn MTLVisibleFunctionTable>>>| {
+                        second.is_some_and(
+                            |second: Retained<ProtocolObject<dyn MTLVisibleFunctionTable>>| {
+                                second.gpuResourceID().to_raw() != table.gpuResourceID().to_raw()
+                            },
+                        )
+                    },
+                ),
+                device_is_the_cases: table.device().registryID() == registry,
+            },
+        );
+        // The entries, by whichever setter the case names. Metal's setters answer nothing, so a
+        // side that took them records `Ok`.
+        if let Some(table) = &table {
+            let table: &ProtocolObject<dyn MTLVisibleFunctionTable> = table;
+            let taken: Vec<Option<&ProtocolObject<dyn MTLFunctionHandle>>> = spec
+                .entries
+                .iter()
+                .map(|entry| match entry {
+                    Entry::Function(name) => handle_of(name),
+                    Entry::Nil => None,
+                })
+                .collect();
+            match spec.writes {
+                Writes::OneAtATime => {
+                    for (at, handle) in taken.iter().enumerate() {
+                        // SAFETY: the handle is the table's own state's, and `at` is below the
+                        // count the table was made with (the case states no more entries than its
+                        // `function_count`), so Metal bounds-checks nothing this call needs.
+                        unsafe { table.setFunction_atIndex(*handle, at as NSUInteger) };
+                    }
+                }
+                Writes::WholeRange if taken.is_empty() => {}
+                Writes::WholeRange => {
+                    let raw: Vec<*const ProtocolObject<dyn MTLFunctionHandle>> = taken
+                        .iter()
+                        .map(|handle| match handle {
+                            Some(handle) => std::ptr::from_ref(*handle),
+                            None => std::ptr::null(),
+                        })
+                        .collect();
+                    let range = NSRange::new(0, raw.len());
+                    // SAFETY: `raw` holds `range.length` pointers, each a handle of the table's
+                    // own state or null, and the range lies inside the table's count.
+                    unsafe {
+                        table.setFunctions_withRange(
+                            std::ptr::NonNull::new(raw.as_ptr().cast_mut()).unwrap_unchecked(),
+                            range,
+                        );
+                    }
+                }
+            }
+        }
+        let Some(threads) = spec.threads else {
+            return Ok(TableOutcome::read_only(
+                handles,
+                descriptor_function_count,
+                function_types,
+                MadeTable::answered(facts),
+            ));
+        };
+        let MetalMaker::Compute(state) = &maker else {
+            return Err(Failure::named(
+                "NoDispatch",
+                "a render stage's table has no dispatch in this family".to_owned(),
+            ));
+        };
+        let out = self
+            .device
+            .newBufferWithLength_options(
+                threads as NSUInteger * 4,
+                MTLResourceOptions::StorageModeShared,
+            )
+            .ok_or_else(|| Failure::named("NewBuffer", "returned nil".to_owned()))?;
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        let encoder = command_buffer
+            .computeCommandEncoder()
+            .ok_or_else(|| Failure::named("ComputeCommandEncoder", "returned nil".to_owned()))?;
+        encoder.setComputePipelineState(state);
+        // SAFETY: the buffer is `threads * 4` bytes, which is what the kernel writes at slot 0,
+        // and the encoder outlives the call.
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&out), 0, 0) };
+        if let (Binding::Bound, Some(table)) = (spec.binding, &table) {
+            // SAFETY: the table is this state's own and `TABLE_INDEX` is the index the fixture
+            // declares its `visible_function_table` at; the encoder outlives the call.
+            unsafe { encoder.setVisibleFunctionTable_atBufferIndex(Some(table), TABLE_INDEX) };
+        }
+        encoder.dispatchThreadgroups_threadsPerThreadgroup(size([threads, 1, 1]), size([1, 1, 1]));
+        encoder.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        let status = Value::unit_variant(status_word(command_buffer.status()));
+        // SAFETY: the buffer is `threads * 4` bytes of shared storage the host reaches, and the
+        // wait above returned before they are read.
+        let bytes = unsafe {
+            std::slice::from_raw_parts(out.contents().as_ptr().cast::<u8>(), threads as usize * 4)
+        };
+        let words = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|word| u32::from_le_bytes(*word))
+            .collect();
+        Ok(TableOutcome {
+            handles,
+            descriptor_function_count,
+            function_types,
+            table: MadeTable::answered(facts),
+            entries_written: Ok(()),
+            words,
+            status,
+        })
     }
 
     fn static_threadgroup_memory_length(&mut self, pipeline: Handle) -> Answer<u64> {
@@ -7282,6 +7530,34 @@ impl MetalSide {
         descriptor.setRasterSampleCount(spec.samples as usize);
         descriptor.setRasterizationEnabled(spec.rasterization);
         descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
+        // Every tessellation field, and only where the case states them: a pipeline that names no
+        // tessellation state leaves Metal's own defaults alone, which is what every other family's
+        // pipeline has always been made with.
+        if let Some(state) = &spec.tessellation {
+            // SAFETY: each value is an enumerator of the SDK's own table or, for the factor, a
+            // count the case keeps inside `MTLDevice`'s documented 1..=64, and the descriptor is
+            // this call's own. The three setters `objc2` marks unsafe take a raw `NSUInteger`.
+            unsafe {
+                descriptor.setMaxTessellationFactor(state.max_factor as usize);
+                descriptor.setTessellationPartitionMode(MTLTessellationPartitionMode(
+                    state.partition.as_raw() as usize,
+                ));
+                descriptor.setTessellationControlPointIndexType(
+                    MTLTessellationControlPointIndexType(
+                        state.control_point_index_type.as_raw() as usize
+                    ),
+                );
+            }
+            descriptor.setTessellationFactorFormat(MTLTessellationFactorFormat(
+                state.factor_format.as_raw() as usize,
+            ));
+            descriptor.setTessellationFactorStepFunction(MTLTessellationFactorStepFunction(
+                state.factor_step.as_raw() as usize,
+            ));
+            descriptor
+                .setTessellationOutputWindingOrder(MTLWinding(state.winding.as_raw() as usize));
+            descriptor.setTessellationFactorScaleEnabled(state.factor_scale_enabled);
+        }
         if let Some(layout) = &spec.vertex_layout {
             descriptor.setVertexDescriptor(Some(&vertex_descriptor(layout)));
         }
@@ -8457,6 +8733,76 @@ impl MetalSide {
                         at,
                         count,
                         MTLRenderStages(stages.as_raw() as usize),
+                    );
+                }
+            }
+            RenderStep::TessellationFactorBuffer {
+                buffer,
+                offset,
+                instance_stride,
+            } => {
+                let held = buffer.map(|handle| self.held(handle)).transpose()?;
+                // SAFETY: the buffer is one of this side's own, and the case states a range inside
+                // it; a nil buffer is Metal's own "no factors bound" and takes no range.
+                unsafe {
+                    encoder.setTessellationFactorBuffer_offset_instanceStride(
+                        held,
+                        *offset as usize,
+                        *instance_stride as usize,
+                    );
+                }
+            }
+            RenderStep::DrawPatches {
+                control_points,
+                first,
+                count,
+                patch_indices,
+                patch_index_offset,
+                instances,
+                base_instance,
+            } => {
+                let indices = patch_indices.map(|handle| self.held(handle)).transpose()?;
+                // SAFETY: the patch index buffer is one of this side's own and the case states a
+                // range inside it; the factor buffer the draw reads was bound by a step before it.
+                unsafe {
+                    encoder.drawPatches_patchStart_patchCount_patchIndexBuffer_patchIndexBufferOffset_instanceCount_baseInstance(
+                        *control_points as usize,
+                        *first as usize,
+                        *count as usize,
+                        indices,
+                        *patch_index_offset as usize,
+                        *instances as usize,
+                        *base_instance as usize,
+                    );
+                }
+            }
+            RenderStep::DrawIndexedPatches {
+                control_points,
+                first,
+                count,
+                patch_indices,
+                patch_index_offset,
+                control_point_indices,
+                control_point_index_offset,
+                instances,
+                base_instance,
+            } => {
+                let indices = patch_indices.map(|handle| self.held(handle)).transpose()?;
+                let control = self.held(*control_point_indices)?;
+                // SAFETY: both index buffers are this side's own, and the case states a range
+                // inside each: `(first + count) · control_points` control-point indices from the
+                // control-point offset, which is what Metal reads.
+                unsafe {
+                    encoder.drawIndexedPatches_patchStart_patchCount_patchIndexBuffer_patchIndexBufferOffset_controlPointIndexBuffer_controlPointIndexBufferOffset_instanceCount_baseInstance(
+                        *control_points as usize,
+                        *first as usize,
+                        *count as usize,
+                        indices,
+                        *patch_index_offset as usize,
+                        control,
+                        *control_point_index_offset as usize,
+                        *instances as usize,
+                        *base_instance as usize,
                     );
                 }
             }
@@ -10431,4 +10777,74 @@ fn metal_library_facts(
         install_name: install.map(|name| name.to_string()),
         device_is_the_cases: library.device().registryID() == registry,
     })
+}
+
+/// The Metal buffer index the owned callers declare their `visible_function_table` at, which is
+/// the index the encoder binds the case's table at. It is the fixtures' own `[[buffer(1)]]`.
+const TABLE_INDEX: NSUInteger = 1;
+
+/// One function a case asked a handle of, and what the state answered: nil where the stage does
+/// not link it.
+type AskedHandle<'a> = (
+    &'a str,
+    Option<Retained<ProtocolObject<dyn MTLFunctionHandle>>>,
+);
+
+/// The pipeline state a case's handles and table come from, on this side: a compute state, or a
+/// render state and the one stage the case asks about.
+///
+/// Both of Metal's spellings behind one pair of methods, for the reason the runtime side's own
+/// maker gives: the case's answer must not depend on which selector took it.
+///
+/// Each arm names its receiver's Metal type in a `let` rather than taking it straight out of the
+/// pattern. That is for the coverage derivation, which types a receiver from a declaration and
+/// attributes a selector two Metal types bind — `functionHandleWithFunction:`, which
+/// `MTLComputePipelineState` and `MTLDevice` both bind — only where it can: an untyped receiver
+/// costs the item its credit and reads in the generated document exactly like a selector no case
+/// calls.
+enum MetalMaker {
+    Compute(Retained<ProtocolObject<dyn MTLComputePipelineState>>),
+    Render(
+        Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+        MTLRenderStages,
+    ),
+}
+
+impl MetalMaker {
+    /// `functionHandleWithFunction:`, or its `:stage:` spelling.
+    fn function_handle(
+        &self,
+        function: &ProtocolObject<dyn MTLFunction>,
+    ) -> Option<Retained<ProtocolObject<dyn MTLFunctionHandle>>> {
+        match self {
+            MetalMaker::Compute(state) => {
+                let state: &ProtocolObject<dyn MTLComputePipelineState> = state;
+                state.functionHandleWithFunction(function)
+            }
+            // SAFETY: the function is a `[[visible]]` function of the case's own library, whose
+            // argument and return types are the table's own, and `stage` is one stage or two —
+            // never the empty set, on which plain Metal faults.
+            MetalMaker::Render(state, stage) => unsafe {
+                let state: &ProtocolObject<dyn MTLRenderPipelineState> = state;
+                state.functionHandleWithFunction_stage(function, *stage)
+            },
+        }
+    }
+
+    /// `newVisibleFunctionTableWithDescriptor:`, or its `:stage:` spelling.
+    fn new_visible_function_table(
+        &self,
+        descriptor: &MTLVisibleFunctionTableDescriptor,
+    ) -> Option<Retained<ProtocolObject<dyn MTLVisibleFunctionTable>>> {
+        match self {
+            MetalMaker::Compute(state) => {
+                let state: &ProtocolObject<dyn MTLComputePipelineState> = state;
+                state.newVisibleFunctionTableWithDescriptor(descriptor)
+            }
+            MetalMaker::Render(state, stage) => {
+                let state: &ProtocolObject<dyn MTLRenderPipelineState> = state;
+                state.newVisibleFunctionTableWithDescriptor_stage(descriptor, *stage)
+            }
+        }
+    }
 }

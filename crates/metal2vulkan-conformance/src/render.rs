@@ -60,8 +60,9 @@ use crate::case::Failure;
 use crate::case::Handle;
 use metal2vulkan::metal::{
     BarrierScope, BlendFactor, BlendOperation, ColorWriteMask, CullMode, DepthClipMode, IndexType,
-    PixelFormat, PrimitiveType, RenderStages, ResourceUsage, TriangleFillMode, VertexFormat,
-    VertexStepFunction, Winding,
+    PixelFormat, PrimitiveType, RenderStages, ResourceUsage, TessellationControlPointIndexType,
+    TessellationFactorFormat, TessellationFactorStepFunction, TessellationPartitionMode,
+    TriangleFillMode, VertexFormat, VertexStepFunction, Winding,
 };
 use metal2vulkan_runtime::{
     LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, SamplePosition,
@@ -544,6 +545,103 @@ impl<'a> VertexLayout<'a> {
     }
 }
 
+/// The tessellation fields of `MTLRenderPipelineDescriptor`, which a pipeline whose vertex stage is
+/// a post-tessellation vertex function states: what the synthesized control stage does with a
+/// patch's factors, and how the tessellator places the points it generates from them.
+///
+/// Every field is Metal's own, and so is every default: `maxTessellationFactor` 16, `pow2`
+/// partitioning, `half` factors, the constant factor step, clockwise output and no control-point
+/// index type. The struct carries the defaults rather than `Option`s so a case states the one axis
+/// it sweeps and says nothing about the rest, and so a field this suite forgets to forward is a
+/// difference in an answer rather than an absence nobody looks at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TessellationState {
+    /// `maxTessellationFactor`: the ceiling every edge and inside factor is clamped to.
+    pub max_factor: u32,
+    /// `tessellationPartitionMode`.
+    pub partition: TessellationPartitionMode,
+    /// `tessellationFactorFormat`.
+    pub factor_format: TessellationFactorFormat,
+    /// `tessellationFactorStepFunction`: which patch's and which instance's factors a patch reads.
+    pub factor_step: TessellationFactorStepFunction,
+    /// `tessellationOutputWindingOrder`.
+    pub winding: Winding,
+    /// `tessellationControlPointIndexType`, which a `drawIndexedPatches:…` draw reads its
+    /// control-point indices as.
+    pub control_point_index_type: TessellationControlPointIndexType,
+    /// `tessellationFactorScaleEnabled`.
+    pub factor_scale_enabled: bool,
+}
+
+impl Default for TessellationState {
+    fn default() -> Self {
+        Self {
+            max_factor: 16,
+            partition: TessellationPartitionMode::Pow2,
+            factor_format: TessellationFactorFormat::Half,
+            factor_step: TessellationFactorStepFunction::Constant,
+            winding: Winding::Clockwise,
+            control_point_index_type: TessellationControlPointIndexType::None,
+            factor_scale_enabled: false,
+        }
+    }
+}
+
+impl TessellationState {
+    /// Metal's own defaults, every field as a descriptor that states none of them answers.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The state under `partition`.
+    #[must_use]
+    pub const fn partitioned(mut self, partition: TessellationPartitionMode) -> Self {
+        self.partition = partition;
+        self
+    }
+
+    /// The state whose factors step by `step`.
+    #[must_use]
+    pub const fn stepping(mut self, step: TessellationFactorStepFunction) -> Self {
+        self.factor_step = step;
+        self
+    }
+
+    /// The state whose ceiling is `max_factor`.
+    #[must_use]
+    pub const fn clamped_to(mut self, max_factor: u32) -> Self {
+        self.max_factor = max_factor;
+        self
+    }
+
+    /// The state whose control-point indices are read as `index_type`.
+    #[must_use]
+    pub const fn indexed_by(mut self, index_type: TessellationControlPointIndexType) -> Self {
+        self.control_point_index_type = index_type;
+        self
+    }
+
+    /// The state whose tessellator winds its output `winding`.
+    #[must_use]
+    pub const fn wound(mut self, winding: Winding) -> Self {
+        self.winding = winding;
+        self
+    }
+
+    /// The words a case's input fingerprint covers: every field, so any one of them moving moves
+    /// the case's key.
+    pub fn words(&self) -> Vec<u8> {
+        let mut bytes = self.max_factor.to_le_bytes().to_vec();
+        bytes.extend(self.partition.as_raw().to_le_bytes());
+        bytes.extend(self.factor_format.as_raw().to_le_bytes());
+        bytes.extend(self.factor_step.as_raw().to_le_bytes());
+        bytes.extend(self.winding.as_raw().to_le_bytes());
+        bytes.extend(self.control_point_index_type.as_raw().to_le_bytes());
+        bytes.push(u8::from(self.factor_scale_enabled));
+        bytes
+    }
+}
+
 /// A vertex-and-fragment render pipeline a case makes:
 /// `newRenderPipelineStateWithDescriptor:error:`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -571,6 +669,10 @@ pub struct RenderPipelineSpec<'a> {
     /// `supportIndirectCommandBuffers`: an indirect command buffer's render commands may set the
     /// state, which the made state answers back.
     pub support_indirect_command_buffers: bool,
+    /// The tessellation fields, where the pipeline's vertex stage is a post-tessellation vertex
+    /// function; `None` leaves every one of them at Metal's default, which is what a pipeline of an
+    /// ordinary vertex function states.
+    pub tessellation: Option<TessellationState>,
 }
 
 impl<'a> RenderPipelineSpec<'a> {
@@ -602,6 +704,7 @@ impl<'a> RenderPipelineSpec<'a> {
             rasterization: true,
             label: None,
             support_indirect_command_buffers: false,
+            tessellation: None,
         }
     }
 
@@ -627,6 +730,20 @@ impl<'a> RenderPipelineSpec<'a> {
         let mut spec = Self::of(vertex, None, &[]);
         spec.vertex_layout = Some(layout);
         spec.rasterization = false;
+        spec
+    }
+
+    /// The pipeline of a `vertex void` **post-tessellation** vertex function that writes its answer
+    /// through a buffer: [`RenderPipelineSpec::converting`] with the tessellation fields `state`
+    /// names, which is the shape a patch draw of such a function needs.
+    #[must_use]
+    pub const fn tessellating(
+        vertex: StageFunction<'a>,
+        layout: VertexLayout<'a>,
+        state: TessellationState,
+    ) -> Self {
+        let mut spec = Self::converting(vertex, layout);
+        spec.tessellation = Some(state);
         spec
     }
 
@@ -687,6 +804,10 @@ impl<'a> RenderPipelineSpec<'a> {
         }
         if self.support_indirect_command_buffers {
             bytes.push(0xfc);
+        }
+        if let Some(state) = &self.tessellation {
+            bytes.push(0xfb);
+            bytes.extend(state.words());
         }
         bytes
     }
@@ -1440,6 +1561,41 @@ pub enum RenderStep {
         heaps: Vec<Handle>,
         stages: RenderStages,
     },
+    /// `setTessellationFactorBuffer:offset:instanceStride:`, the buffer a patch draw of a
+    /// tessellation pipeline reads its edge and inside factors from. `None` is Metal's nil.
+    TessellationFactorBuffer {
+        buffer: Option<Handle>,
+        offset: u64,
+        instance_stride: u64,
+    },
+    /// `drawPatches:patchStart:patchCount:patchIndexBuffer:patchIndexBufferOffset:instanceCount:
+    /// baseInstance:`: `count` patches of `control_points` control points from `first`, `instances`
+    /// instances from `base_instance`, each patch's index taken from `patch_indices` where one is
+    /// given and from its own position where it is nil.
+    DrawPatches {
+        control_points: u32,
+        first: u32,
+        count: u32,
+        patch_indices: Option<Handle>,
+        patch_index_offset: u64,
+        instances: u32,
+        base_instance: u32,
+    },
+    /// `drawIndexedPatches:patchStart:patchCount:patchIndexBuffer:patchIndexBufferOffset:
+    /// controlPointIndexBuffer:controlPointIndexBufferOffset:instanceCount:baseInstance:`, which
+    /// reads control point `k` of patch `p` at position `p · control_points + k` of the
+    /// control-point index buffer, as the index type the pipeline states.
+    DrawIndexedPatches {
+        control_points: u32,
+        first: u32,
+        count: u32,
+        patch_indices: Option<Handle>,
+        patch_index_offset: u64,
+        control_point_indices: Handle,
+        control_point_index_offset: u64,
+        instances: u32,
+        base_instance: u32,
+    },
 }
 
 impl RenderStep {
@@ -1545,6 +1701,9 @@ impl RenderStep {
             RenderStep::UseHeapInStages { .. } => "useHeapWithStages",
             RenderStep::UseHeaps(_) => "useHeaps",
             RenderStep::UseHeapsInStages { .. } => "useHeapsWithStages",
+            RenderStep::TessellationFactorBuffer { .. } => "setTessellationFactorBuffer",
+            RenderStep::DrawPatches { .. } => "drawPatches",
+            RenderStep::DrawIndexedPatches { .. } => "drawIndexedPatches",
         }
     }
 
@@ -1816,6 +1975,54 @@ impl RenderStep {
             RenderStep::UseHeapsInStages { heaps, stages } => {
                 bytes.extend((heaps.len() as u32).to_le_bytes());
                 bytes.extend(stages.as_raw().to_le_bytes());
+            }
+            RenderStep::TessellationFactorBuffer {
+                buffer,
+                offset,
+                instance_stride,
+            } => {
+                // Whether the call names a buffer at all is the call's own parameter and not a
+                // handle: a nil factor buffer is a shape of its own.
+                bytes.push(u8::from(buffer.is_some()));
+                bytes.extend(offset.to_le_bytes());
+                bytes.extend(instance_stride.to_le_bytes());
+            }
+            RenderStep::DrawPatches {
+                control_points,
+                first,
+                count,
+                patch_indices,
+                patch_index_offset,
+                instances,
+                base_instance,
+            } => {
+                bytes.extend(control_points.to_le_bytes());
+                bytes.extend(first.to_le_bytes());
+                bytes.extend(count.to_le_bytes());
+                bytes.push(u8::from(patch_indices.is_some()));
+                bytes.extend(patch_index_offset.to_le_bytes());
+                bytes.extend(instances.to_le_bytes());
+                bytes.extend(base_instance.to_le_bytes());
+            }
+            RenderStep::DrawIndexedPatches {
+                control_points,
+                first,
+                count,
+                patch_indices,
+                patch_index_offset,
+                control_point_index_offset,
+                instances,
+                base_instance,
+                ..
+            } => {
+                bytes.extend(control_points.to_le_bytes());
+                bytes.extend(first.to_le_bytes());
+                bytes.extend(count.to_le_bytes());
+                bytes.push(u8::from(patch_indices.is_some()));
+                bytes.extend(patch_index_offset.to_le_bytes());
+                bytes.extend(control_point_index_offset.to_le_bytes());
+                bytes.extend(instances.to_le_bytes());
+                bytes.extend(base_instance.to_le_bytes());
             }
         }
         bytes
@@ -2518,7 +2725,32 @@ mod tests {
                 heaps: vec![handle()],
                 stages: stages(),
             },
-            RenderStep::UseHeapsInStages { .. } => return None,
+            RenderStep::UseHeapsInStages { .. } => RenderStep::TessellationFactorBuffer {
+                buffer: Some(handle()),
+                offset: 0,
+                instance_stride: 0,
+            },
+            RenderStep::TessellationFactorBuffer { .. } => RenderStep::DrawPatches {
+                control_points: 1,
+                first: 0,
+                count: 1,
+                patch_indices: None,
+                patch_index_offset: 0,
+                instances: 1,
+                base_instance: 0,
+            },
+            RenderStep::DrawPatches { .. } => RenderStep::DrawIndexedPatches {
+                control_points: 1,
+                first: 0,
+                count: 1,
+                patch_indices: None,
+                patch_index_offset: 0,
+                control_point_indices: handle(),
+                control_point_index_offset: 0,
+                instances: 1,
+                base_instance: 0,
+            },
+            RenderStep::DrawIndexedPatches { .. } => return None,
         })
     }
 
