@@ -677,8 +677,9 @@ driver's. Each is open work.
 
 - **A multisampled `Depth32Float` texture's fill of a denormal on RADV**: Metal's private fill
   stores the pattern's bytes, `0x00000001`, where this stores `0x00000000` (`sample-fills-d32-2`,
-  `-d32-4`, `-d32s8-4`, and `runtime_lane::sample_fills::multisample_fills_write_metal_s_samples`
-  independently; both RADV chips, exact on MoltenVK). **The device's, and announced**: RADV gives a
+  `-d32-4`, `-d32s8-4`; both RADV chips, exact on MoltenVK;
+  `runtime_lane::sample_fills::multisample_fills_write_metal_s_samples` takes the word where the
+  device announces the loss and compares every other). **The device's, and announced**: RADV gives a
   denormal that a GPU write puts into a `D32_SFLOAT` depth image back as a zero and keeps only a CPU
   store's, which is why it carries no `DriverFact::DepthImageKeepsDenormals`
   (`device/driver_facts.rs`), and a multisampled image takes no CPU store. The runtime announces
@@ -701,11 +702,6 @@ driver's. Each is open work.
   open (`|p - x| + |q - y| < 0.5`), so a line that only touches a vertex exits no diamond and
   neither pixel is required; both choices conform and there is no Vulkan control over the tie, so
   this is the driver's and not ours. RADV and ANV unrun.
-
-- **A heap texture at an offset below the device's own alignment on Navi31**: `new_texture_at_offset`
-  answers nil at offset 327680, two and a half times the 128 KiB a Navi31 depth image wants
-  (`texture/heap.rs`, whose `HEAP_BASE_ALIGNMENT` of 256 KiB no longer refuses the alignment itself).
-  One of eight `heap_layouts` tests; the other seven pass.
 
 - **Reflection after a compute descriptor reset on RADV**: `max_total_threads_per_threadgroup`
   answers 0 where Metal answers 96, `required_threads_per_threadgroup` `0x0x0` where Metal answers
