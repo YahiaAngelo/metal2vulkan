@@ -472,12 +472,15 @@ impl Case for BoundReach {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // **Nothing is loosened and nothing is declared.** Every texel Metal leaves is one we must
-        // leave, every attachment of every pass here is stored with `Store`, and no cell states a
-        // `DontCare` load, which is the one shape of this subject our runtime reaches by a
-        // near-equivalent. A case that declared a notice it cannot provoke would be a case nobody
-        // can read.
-        Vec::new()
+        // **Nothing is loosened.** Every texel Metal leaves is one we must leave, every attachment
+        // of every pass here is stored with `Store`, and no cell states a `DontCare` load, which
+        // is the one shape of this subject our runtime reaches by a near-equivalent.
+        //
+        // One notice is declared. The case reads its attachments back through a `Shared` buffer,
+        // and a device with no unified memory keeps a `Shared` allocation in system memory because
+        // that is the only memory both sides can reach: the venue's memory model, not this
+        // subject. A device whose driver is Metal announces nothing for it.
+        vec![crate::replay::shared_memory_notice()]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -625,6 +628,8 @@ impl Case for BoundReach {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::allowance::Loosening;
+    use crate::replay::NOTICES_SITE;
     use crate::transcript::Transcript;
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -878,9 +883,13 @@ mod tests {
         assert!(primed.steps.is_empty());
         assert_eq!(primed.colors[0].load, LoadAction::Clear);
         assert_eq!(primed.colors[0].store, StoreAction::Store);
-        // The case loosens nothing at all.
+        // The case loosens no value: its one allowance is the declaration of the notice a
+        // device with no unified memory announces for the read-back buffer, over the notices site.
         for case in all() {
-            assert!(case.allowances().is_empty());
+            let allowances = case.allowances();
+            assert_eq!(allowances.len(), 1, "{allowances:?}");
+            assert_eq!(allowances[0].path, format!("case/{NOTICES_SITE}/*"));
+            assert_eq!(allowances[0].loosening, Loosening::Unchecked);
             assert_eq!(case.record_runs(), RUNS);
             assert!(matches!(case.metal_source(), MetalSource::Run));
         }

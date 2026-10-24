@@ -29,6 +29,7 @@
 //! The coordinates do reach outside the texture, which is what the address modes are here for and
 //! what Metal defines.
 
+use crate::allowance::Allowance;
 use crate::case::{
     made, Abort, Bindings, Case, Failure, Handle, Input, MetalSource, SamplerSpec, Side,
     TextureRole, TextureSpec,
@@ -377,6 +378,13 @@ impl Case for TwoPlaneSamples {
 
     fn metal_source(&self) -> MetalSource {
         MetalSource::Run
+    }
+
+    fn allowances(&self) -> Vec<Allowance> {
+        // One declaration and no tolerance: the buffer each pass writes its samples into is `Shared`, which is
+        // what [`crate::replay::shared_memory_notice`] is for. It loosens the notices site alone,
+        // so every value this case reads still compares exactly.
+        vec![crate::replay::shared_memory_notice()]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

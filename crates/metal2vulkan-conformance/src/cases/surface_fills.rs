@@ -472,6 +472,11 @@ impl Case for SurfaceFills {
                 Justification::notice(kind),
             )
         })
+        .chain([
+            // The buffer the case reads the filled surfaces back through is `Shared`
+            // ([`crate::replay::shared_memory_notice`]).
+            crate::replay::shared_memory_notice(),
+        ])
         .collect()
     }
 

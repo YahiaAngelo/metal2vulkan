@@ -50,6 +50,7 @@
 //! and one dispatch of 960 threads, and the one pair it hands Metal — format 500 over a `420v`
 //! surface — is the pair the committed probe already ran on this machine.
 
+use crate::allowance::Allowance;
 use crate::case::{made, Abort, Bindings, Case, Failure, Input, MetalSource, PlaneTexture, Side};
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
@@ -351,6 +352,13 @@ impl Case for TexelReads {
 
     fn metal_source(&self) -> MetalSource {
         MetalSource::Run
+    }
+
+    fn allowances(&self) -> Vec<Allowance> {
+        // One declaration and no tolerance: the buffer the texel-read case writes its reads into is `Shared`, which is
+        // what [`crate::replay::shared_memory_notice`] is for. It loosens the notices site alone,
+        // so every value this case reads still compares exactly.
+        vec![crate::replay::shared_memory_notice()]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

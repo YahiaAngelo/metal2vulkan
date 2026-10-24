@@ -35,6 +35,7 @@
 //! Nothing here can fault a GPU: one compute pass a row, one 64-thread threadgroup, two shared
 //! buffers, no texture, and each loop bounded by a buffer word's count or by 8.
 
+use crate::allowance::Allowance;
 use crate::case::{call, made, Abort, Bindings, Case, Failure, Input, MetalSource, Side};
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
@@ -143,6 +144,13 @@ impl Case for Lockstep {
 
     fn metal_source(&self) -> MetalSource {
         MetalSource::Run
+    }
+
+    fn allowances(&self) -> Vec<Allowance> {
+        // One declaration and no tolerance: the buffer each dispatch writes its per-lane record into is `Shared`, which is
+        // what [`crate::replay::shared_memory_notice`] is for. It loosens the notices site alone,
+        // so every value this case reads still compares exactly.
+        vec![crate::replay::shared_memory_notice()]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

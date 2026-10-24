@@ -589,6 +589,11 @@ impl Case for HeapBlits {
         ]
         .into_iter()
         .map(|kind| notice_allowance(kind.code()))
+        .chain([
+            // The buffer the case reads the blitted planes back through is `Shared`
+            // ([`crate::replay::shared_memory_notice`]).
+            crate::replay::shared_memory_notice(),
+        ])
         .collect()
     }
 

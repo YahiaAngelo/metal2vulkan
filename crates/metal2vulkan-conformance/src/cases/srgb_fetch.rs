@@ -231,6 +231,11 @@ impl Case for SrgbFetch {
         ]
         .iter()
         .map(|notice| crate::replay::notice_allowance(notice.code()))
+        .chain([
+            // The buffer each pass reads its target back through is `Shared`
+            // ([`crate::replay::shared_memory_notice`]).
+            crate::replay::shared_memory_notice(),
+        ])
         .collect()
     }
 

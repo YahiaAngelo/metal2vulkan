@@ -355,7 +355,11 @@ impl Case for VertexFormats {
         // widened, a packed field extracted -- so a component that differs is a difference in the
         // decode and not a rounding, and a tolerance written here would hide the bug the sweep
         // exists to find.
-        Vec::new()
+        //
+        // One notice is declared, and it is the venue's and not this sweep's: the buffer each draw
+        // reads its fetched rows back through is `Shared`, which a device with no unified memory
+        // keeps in system memory because that is the only memory both sides can reach.
+        vec![crate::replay::shared_memory_notice()]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

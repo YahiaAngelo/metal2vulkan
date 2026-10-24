@@ -472,8 +472,9 @@ impl Case for PixelSamplers {
         // Two more are named from the run that shows them, which is what the paragraph above asks
         // for: on lavapipe the device's texel decode keeps a denormal where Metal flushes it
         // (`device-texel-denormals`) and decodes an sRGB code its own way (`srgb-texel-decode`).
-        // Both are declarations and loosen nothing: every texel of these cases compares exactly
-        // with Metal on both venues.
+        //
+        // **Every one of these is a declaration and loosens nothing.** Each sits at the notices
+        // site alone, so a texel that differs still fails the case wherever it differs.
         [
             Degradation::ArgumentPixelSamplerScaling,
             Degradation::FloatSampleFilter,
@@ -482,6 +483,11 @@ impl Case for PixelSamplers {
         ]
         .iter()
         .map(|kind| notice_allowance(kind.code()))
+        .chain([
+            // The buffer each pass writes its sampled texels into is `Shared`
+            // ([`crate::replay::shared_memory_notice`]).
+            crate::replay::shared_memory_notice(),
+        ])
         .collect()
     }
 

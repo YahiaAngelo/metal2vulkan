@@ -237,14 +237,34 @@ impl Case for TopologyClassCase {
         // announces nothing, which is why its case declares no allowance at all -- and that
         // asymmetry is itself a small confirmation that the notice is the arithmetic's and not the
         // topology class's.
-        match self.subject.vertex == PLAIN_VERTEX {
-            true => vec![Allowance::new(
+        //
+        // Two more are declared for both cases, and both belong to the venue rather than to a
+        // topology class: a device whose own conversion of a float written to a normalized colour
+        // attachment is not Metal's converts it in the shader instead (`shader-color-conversion`,
+        // measured on llvmpipe and on the RTX 5080), and the positions and the read-back are
+        // `Shared` ([`crate::replay::shared_memory_notice`], measured on the 5080). Neither
+        // loosens a texel.
+        let mut allowances: Vec<Allowance> = vec![
+            crate::replay::notice_allowance(Degradation::ShaderColorConversion.code()),
+            crate::replay::shared_memory_notice(),
+        ];
+        // And the point-size function's case alone declares what a device without
+        // `shaderPointSize`'s guarantee announces for the size it writes: measured on llvmpipe for
+        // that row and for neither the plain row nor any venue whose driver is Metal. It is the
+        // same asymmetry the fast-math notice has, read the other way round.
+        if self.subject.vertex == POINT_VERTEX {
+            allowances.push(crate::replay::notice_allowance(
+                Degradation::DevicePointSize.code(),
+            ));
+        }
+        if self.subject.vertex == PLAIN_VERTEX {
+            allowances.push(Allowance::new(
                 format!("case/{NOTICES_SITE}/*"),
                 Loosening::Unchecked,
                 Justification::notice(Degradation::FastMathRewrites),
-            )],
-            false => Vec::new(),
+            ));
         }
+        allowances
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -509,9 +529,11 @@ mod tests {
                     assert_ne!(a, b, "{}: two classes fingerprint alike", case.name());
                 }
             }
-            // Only the notices site may be loosened, and only for the case whose function has
-            // arithmetic to rewrite: the point-size function computes nothing and declares nothing,
-            // which is what says the notice is the arithmetic's and not the topology class's.
+            // Only the notices site may be loosened. Both cases declare the three kinds that
+            // belong to the device -- its colour conversion, its point-size guarantee and its
+            // memory model -- and only the case whose function has arithmetic to rewrite declares
+            // the fast-math notice: the point-size function computes nothing, which is what says
+            // that notice is the arithmetic's and not the topology class's.
             for allowance in case.allowances() {
                 assert_eq!(
                     allowance.path,
@@ -520,10 +542,22 @@ mod tests {
                     case.name()
                 );
             }
+            let fast_math =
+                Justification::Degradation(Degradation::FastMathRewrites.code().to_owned());
+            let names_fast_math = case
+                .allowances()
+                .iter()
+                .any(|allowance| allowance.justified_by == fast_math);
             assert_eq!(
-                case.allowances().is_empty(),
-                writes_point_size(&case.subject),
-                "{}: the point-size case declares a notice, or the plain one declares none",
+                names_fast_math,
+                !writes_point_size(&case.subject),
+                "{}: the point-size case declares the fast-math notice, or the plain one does not",
+                case.name()
+            );
+            assert_eq!(
+                case.allowances().len(),
+                2 + usize::from(writes_point_size(&case.subject)) + usize::from(names_fast_math),
+                "{}: an unexpected number of declarations",
                 case.name()
             );
             case.shaders().unwrap();

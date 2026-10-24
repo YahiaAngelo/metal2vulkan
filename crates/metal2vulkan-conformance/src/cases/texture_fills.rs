@@ -886,9 +886,13 @@ impl Case for TwoPlaneHeapFill {
     /// heap's bytes, which is the whole point of the case. Metal announces nothing, so the notices
     /// site differs and this is what names it; every byte of the heap still compares exactly.
     fn allowances(&self) -> Vec<Allowance> {
-        vec![notice_allowance(
-            metal2vulkan_runtime::Degradation::ShadowedTexture.code(),
-        )]
+        // The second is the venue's own: the buffer this case reads the filled planes back
+        // through is `Shared`, which a device with no unified memory keeps in system memory
+        // because that is the only memory both sides can reach.
+        vec![
+            notice_allowance(metal2vulkan_runtime::Degradation::ShadowedTexture.code()),
+            crate::replay::shared_memory_notice(),
+        ]
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
