@@ -15,9 +15,14 @@ is `MTLResource`'s item).
 The resolution checks itself: a receiver typed `T` sent a selector that `objc2-metal` does not bind
 on `T` or any of its supertypes is a **typing error**, not a Metal call, and
 [`Leg.mistyped`][Leg] carries it so the caller can fail rather than quietly count the wrong item.
-The honest limit is the other direction: a receiver this cannot type is reported in
-[`Leg.unresolved`][Leg] and attributed to no item, and so is a message to a Metal class whose name
-`objc2-metal` declares on no Metal type. Neither is dropped.
+The honest limit is the other direction, and it is kept in two piles rather than one, because they
+cost different things. A site whose selector `objc2-metal` binds on no Metal type at all
+(`alloc`, `class`) is in [`Leg.foreign`][Leg]: no item exists, so nothing is hidden. A site whose
+selector some Metal type DOES bind, but whose receiver this could not type, is in
+[`Leg.unresolved`][Leg], and that one hides items: the call is real, one of the types binding the
+name received it, and the caller can enumerate which. Pooled together they read as one harmless
+limit, which is how eight items of one family read as uncalled while the leg demonstrably called
+them. Neither pile is dropped.
 
 A message to a class — `MTLRenderPassDescriptor::renderPassDescriptor()` — needs no typing at all:
 the path names its receiver. It is resolved against that class the same way an instance send is
@@ -233,10 +238,15 @@ class Leg:
     """Every Metal call the leg makes, and what the typing could not reach."""
 
     calls: list[Call] = field(default_factory=list)
-    #: Call sites this attributes to no item, as `(file, function, rust name, receiver text)`:
-    #: an instance send whose receiver did not type, or a message to a Metal class whose name
-    #: `objc2-metal` declares on no Metal type.
+    #: Call sites this attributes to no item although some Metal type binds the selector, as
+    #: `(file, function, rust name, receiver text)`. The call is real and one of those types
+    #: received it; which one is what the typing could not say, so these are the sites that hide
+    #: items, and the candidates are enumerable from `receivers`.
     unresolved: list[tuple[str, str, str, str]] = field(default_factory=list)
+    #: Call sites whose selector `objc2-metal` binds on no Metal type at all, as
+    #: `(file, function, rust name, receiver text)`: `alloc` and `class`, which are `NSObject`'s.
+    #: There is no item to hide, so these are counted apart from `unresolved`.
+    foreign: list[tuple[str, str, str, str]] = field(default_factory=list)
     #: Call sites whose receiver typed to something that does not bind the selector: a bug in this
     #: typing, never a Metal call.
     mistyped: list[tuple[str, str, str, str]] = field(default_factory=list)
@@ -741,12 +751,13 @@ def read_leg(api: Api, src: Path, files: list[str], enums: set[str]) -> Leg:
                 here = tuple(v for lo, hi, v in arms if lo <= at < hi)
                 item = api.binds(ty, rust)
                 if item is None:
-                    # A message to a Metal class that `objc2-metal` declares on no Metal type, so
-                    # it is an item of no Metal container: `alloc`, which is `NSObject`'s. Counted
-                    # as a call site, attributed to no item, and named in `unresolved` rather than
-                    # dropped. Not `mistyped`: nothing was typed wrongly, the SDK simply has no
-                    # item here.
-                    leg.unresolved.append((name, fn.name, rust, ty))
+                    # The class named here does not bind this selector. Not `mistyped`: nothing was
+                    # typed wrongly, the path says its own receiver. Which pile it belongs in is
+                    # whether ANY Metal type binds the name: `alloc` and `class` are `NSObject`'s
+                    # and so are an item of no Metal container, while a name some other Metal type
+                    # binds means a real item received this call and the table cannot say which.
+                    pile = leg.unresolved if api.receivers(rust) else leg.foreign
+                    pile.append((name, fn.name, rust, ty))
                     leg.calls.append(Call(name, fn.name, here, rust, "", None))
                     continue
                 leg.calls.append(Call(name, fn.name, here, rust, ty, item))

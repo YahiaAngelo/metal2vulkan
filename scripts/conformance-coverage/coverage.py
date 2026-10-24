@@ -881,26 +881,65 @@ def write(data) -> str:
         f"{len(leg.by_uniqueness)} of those resolve because only one type in `objc2-metal` binds "
         "the name at all, so no typing was needed."
     )
-    only = sorted({r for _, _, r, _ in leg.unresolved} - {c.rust for c in leg.calls if c.item})
     w(
-        f"- **{len(leg.unresolved)} call sites resolve to no item**: an instance send whose "
-        "receiver this could not type, or a message to a Metal class whose name `objc2-metal` "
-        f"declares on no Metal type. They cost the count {len(only)} selectors, which the suite "
-        "calls and which this attributes to no item:"
+        f"- **{len(leg.foreign)} call sites send a selector `objc2-metal` binds on no Metal type "
+        "at all**, so they are an item of no Metal container and there is no count for them to "
+        "cost: " + ", ".join(f"`{rust}`" for rust in sorted({r for _, _, r, _ in leg.foreign}))
+        + ", which are `NSObject`'s."
     )
-    for rust in only:
-        owners = sorted(api.receivers(rust))
-        if owners:
-            spelled = api.selector[next((t, n) for t, n in api.selector if n == rust)]
-            w(f"  - `{spelled}`, bound by " + ", ".join(f"`{ty}`" for ty in owners))
-        else:
-            w(f"  - `{rust}`, which `objc2-metal` declares on no Metal type, so it is an item of "
-              "no Metal container")
-    w(
-        "  So every per-item count below is a **floor**, by at least these. That list is what "
-        "this derivation recognises as a call to Metal and cannot attribute; it is not a proof "
-        "that nothing else is unmeasured."
+    # The sites that DO cost something, stated in items rather than selector names. Listing the
+    # selector names alone -- which this did until 2026-10-24 -- hides exactly what a reader wants:
+    # eight items of one family read as uncalled while the leg demonstrably called them, and the
+    # document said only that some selectors were ambiguous.
+    #
+    # The careful part is the bound. An untyped site sent its selector to ONE receiver, so one of
+    # the items binding that name is exercised -- but where another call site already credits one
+    # of them, that may be the one, and the site proves nothing. What proves something is a
+    # selector NONE of whose candidates anything else credits: then whichever type received it,
+    # an item that reads here as uncalled was called. Candidates of different selectors are
+    # disjoint, so each such selector contributes at least one.
+    credited = set(data["called"])
+    candidates: dict[str, set[tuple[str, str]]] = {}
+    for _, _, rust, _ in leg.unresolved:
+        if rust not in candidates:
+            candidates[rust] = {
+                item
+                for ty in api.receivers(rust)
+                if (item := api.binds(ty, rust)) and item in keys
+            }
+    blind = {rust: items for rust, items in candidates.items() if items and not items & credited}
+    hidden = sorted({item for items in blind.values() for item in items})
+    head = (
+        f"- **{len(leg.unresolved)} call sites resolve to no item although some Metal type binds "
+        "the selector**: an instance send whose receiver this could not type, or a message to a "
+        "class that does not bind the name sent to it. Each sent its selector to exactly one "
+        "receiver, so each exercised one item; which one is what the typing could not say."
     )
+    if blind:
+        w(
+            head + f" {len(blind)} of the selectors they send are bound only by items **nothing "
+            "else credits**, so whichever type received those calls, an item that reads below as "
+            f"not exercised was exercised: at least {len(blind)} of the {len(hidden)} candidates "
+            "listed here, and at most all of them."
+        )
+        for item in hidden:
+            w(f"  - `{item[0]}`'s `{item[1]}`")
+        w(
+            "  So every per-item count below is a **floor**, by at least these. To close one, "
+            "spell the receiver's type at the call site — a `let` with a type, rather than a "
+            "pattern binding or an inferred one — and this re-derives with the item credited to "
+            "the case that calls it."
+        )
+    else:
+        w(
+            head + " **Every one of their selectors is bound by at least one item some other call "
+            "site credits**, so none of these sites proves an item is missing from the count. That "
+            "is not a proof that the count is complete: such a site may have sent its selector to "
+            "a type other than the credited one, and this cannot tell. To rule it out, spell the "
+            "receiver's type at the call site — a `let` with a type, rather than a pattern binding "
+            "or an inferred one — and this re-derives with the item credited to the case that "
+            "calls it."
+        )
     w(
         "- **0 call sites typed to a receiver that does not bind the selector sent to it.** The "
         "generator fails rather than writing this document if any does, which is what keeps the "
