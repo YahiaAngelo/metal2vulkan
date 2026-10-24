@@ -996,7 +996,8 @@ impl StageInputAttributeDescriptor {
 }
 
 /// The tessellation fields of `MTLRenderPipelineDescriptor`: the synthesized control stage's factor
-/// rules and modes. A control-point index type other than `None` is not implemented.
+/// rules and modes. A control-point index type other than `None` adds the control-point index
+/// buffer to the control stage's slots and carries the width in its state; both widths are exact.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
