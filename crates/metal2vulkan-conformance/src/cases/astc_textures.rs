@@ -1,4 +1,4 @@
-//! How ASTC LDR texels decode, ported from `runtime_lane::astc_textures`'s first lane.
+//! How ASTC texels decode, ported from `runtime_lane::astc_textures`'s first lane.
 //!
 //! An ASTC texture is a texture no desktop GPU and no lavapipe holds in its own format, so the
 //! runtime keeps its blocks in a carrier image and its reads go through a **decoded twin** it fills
@@ -15,10 +15,50 @@
 //! `every_recorded_texel_is_the_decoders`), which is the one direction in which a difference says
 //! something: either Apple's ASTC decode is not what we implement, or it moved.
 //!
+//! # The three profiles, and what each one compares
+//!
+//! Forty-two cases: the fourteen 2D footprints in each of ASTC's three profiles. The `_LDR` and
+//! `_sRGB` ones are the port described above, where the subject is **our** decoder, because no
+//! desktop GPU and no lavapipe holds an ASTC block and the texels a guest reads are ours.
+//!
+//! The fourteen `_HDR` ones are a different comparison, and a stronger one where the venue has the
+//! block. This crate has **no** ASTC HDR decode (`AstcDecode::of` holds the LDR and sRGB profiles
+//! alone), so there is no decoded twin: a device either holds `ASTC_*_SFLOAT_BLOCK` natively —
+//! which needs `textureCompressionASTC_HDR`, Vulkan 1.3 core or
+//! `VK_EXT_texture_compression_astc_hdr` — or refuses the texture, and the site is then the
+//! venue's own gap rather than a refusal of ours. Where it does hold it, the case compares
+//! **Apple's ASTC HDR decode against the driver's**, with nothing of ours in between, which is a
+//! thing no other case in this suite does. On MoltenVK over this M3 Max (the extension and the
+//! feature both present) all fourteen are exact over both rounds, every texel and every channel.
+//!
+//! That is also why an HDR case names **no allowance at all**: the twin notices
+//! (`carried-decoded-twin`, `cpu-block-decode`) and the compact tolerance
+//! (`decoded-texel-precision`) are all facts about a twin, and an HDR texture has none.
+//!
+//! ## Which footprints the sweep can tell apart, measured
+//!
+//! Of the two rounds, **`seeded-blocks` distinguishes all fourteen footprints**: the fourteen HDR
+//! recordings hold fourteen distinct texel images, because the footprint decides how many blocks a
+//! 16 x 16 level takes and therefore which of the seeded stream's bytes land where.
+//!
+//! **`zero-blocks` distinguishes none of them**, and that is by construction rather than by
+//! oversight: a zero block is an error block in every profile and at every footprint, so every
+//! texel of every one of the fourteen reads the same error colour and the fourteen recordings are
+//! byte-identical. The round still compares something — Metal's error-block colour against ours,
+//! which is the one value a device answers for a malformed block — but it is not what tells one
+//! footprint from another, and a sweep that had only this round would be comparing one answer
+//! fourteen times.
+//!
 //! **One case per format**, so a venue that holds no texture of one answers its typed refusal there
 //! and the suite counts that format as [`LacksFeature`](crate::verdict::Verdict::LacksFeature). The
 //! lane walks all twenty-eight formats in one test, where a device missing one would take the whole
 //! lane down.
+//!
+//! The footprint itself comes from [`metal2vulkan::metal::format::block_extent`], the translator's
+//! public query, and not from the decoder: the decoder holds two of the three profiles, while the
+//! footprint is a fact about the `MTLPixelFormat` that every profile shares. Until that query
+//! existed this family could state only the formats `AstcDecode::of` answered for, which is what
+//! kept the fourteen HDR formats out of it.
 //!
 //! Each case is two 16 x 16 textures, read whole by the owned fixture `format_scout`'s
 //! `scout_read_f`, one thread a texel: one of **zero blocks**, which are error blocks and read
@@ -48,7 +88,7 @@
 //! round one. The fourteen sRGB forms hold Metal's own 8-bit codes, which their slots decode through
 //! Metal's table, so they are exact under either value and name **no tolerance at all**; and neither
 //! does any format under `DecodedTexelsPolicy::Exact`, where the twin holds Metal's values as
-//! `float`s.
+//! `float`s. An `_HDR` format names none under any policy, having no twin.
 //!
 //! Nothing here can fault a GPU: one compute pass a read, one read-only texture, one buffer, one
 //! thread a texel inside the texture, no loop and no sampling.
@@ -62,7 +102,7 @@ use crate::transcript::{
     Aspect, ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value,
 };
 use metal2vulkan::bind::{AstcDecode, AstcTexels};
-use metal2vulkan::metal::PixelFormat;
+use metal2vulkan::metal::{format::block_extent, PixelFormat};
 use metal2vulkan_runtime::Degradation;
 
 /// The fixture whose kernel reads a texture's texels as floats.
@@ -97,18 +137,23 @@ const VOID_EXTENT: [u8; 16] = [
     0xfc, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x40, 0x00, 0x80, 0x00, 0xc0, 0xff, 0xff,
 ];
 
-/// One format the lane reads: the case's name and the `MTLPixelFormat`. Its footprint and whether
-/// its colour is sRGB follow from the format ([`AstcDecode::of`]), so there is no second spelling
-/// of either to keep in step.
+/// One format the lane reads: the case's name and the `MTLPixelFormat`. Its footprint follows
+/// from the format ([`metal2vulkan::metal::format::block_extent`]) and its profile from whether
+/// the decoder has an answer for it ([`AstcDecode::of`]), so there is no second spelling of either
+/// to keep in step.
 struct Format {
     name: &'static str,
     format: PixelFormat,
 }
 
-/// Every ASTC LDR format, in the lane's order, because the seed of a round is the format's place
-/// in that order and the bytes must stay the bytes the lane measured: the fourteen linear
-/// footprints, then the fourteen sRGB ones.
-const FORMATS: [Format; 28] = [
+/// Every ASTC format, in the lane's order, because the seed of a round is the format's place in
+/// that order and the bytes must stay the bytes the lane measured: the fourteen linear footprints,
+/// then the fourteen sRGB ones, then the fourteen HDR ones.
+///
+/// The HDR fourteen are appended rather than interleaved for exactly that reason — a place in this
+/// list is a seed, so inserting a format anywhere but the end would change the blocks of every
+/// format after it and invalidate twenty-eight committed recordings for no change in subject.
+const FORMATS: [Format; 42] = [
     Format {
         name: "astc-4x4-ldr",
         format: PixelFormat::ASTC4x4LDR,
@@ -221,6 +266,62 @@ const FORMATS: [Format; 28] = [
         name: "astc-12x12-srgb",
         format: PixelFormat::ASTC12x12SRGB,
     },
+    Format {
+        name: "astc-4x4-hdr",
+        format: PixelFormat::ASTC4x4HDR,
+    },
+    Format {
+        name: "astc-5x4-hdr",
+        format: PixelFormat::ASTC5x4HDR,
+    },
+    Format {
+        name: "astc-5x5-hdr",
+        format: PixelFormat::ASTC5x5HDR,
+    },
+    Format {
+        name: "astc-6x5-hdr",
+        format: PixelFormat::ASTC6x5HDR,
+    },
+    Format {
+        name: "astc-6x6-hdr",
+        format: PixelFormat::ASTC6x6HDR,
+    },
+    Format {
+        name: "astc-8x5-hdr",
+        format: PixelFormat::ASTC8x5HDR,
+    },
+    Format {
+        name: "astc-8x6-hdr",
+        format: PixelFormat::ASTC8x6HDR,
+    },
+    Format {
+        name: "astc-8x8-hdr",
+        format: PixelFormat::ASTC8x8HDR,
+    },
+    Format {
+        name: "astc-10x5-hdr",
+        format: PixelFormat::ASTC10x5HDR,
+    },
+    Format {
+        name: "astc-10x6-hdr",
+        format: PixelFormat::ASTC10x6HDR,
+    },
+    Format {
+        name: "astc-10x8-hdr",
+        format: PixelFormat::ASTC10x8HDR,
+    },
+    Format {
+        name: "astc-10x10-hdr",
+        format: PixelFormat::ASTC10x10HDR,
+    },
+    Format {
+        name: "astc-12x10-hdr",
+        format: PixelFormat::ASTC12x10HDR,
+    },
+    Format {
+        name: "astc-12x12-hdr",
+        format: PixelFormat::ASTC12x12HDR,
+    },
 ];
 
 /// `count` 16-byte blocks of the lane's own seeded xorshift, so a round's blocks are the lane's
@@ -247,16 +348,16 @@ fn seeded_blocks(seed: u64, count: usize) -> Vec<u8> {
     blocks
 }
 
-/// The blocks across and down a 16 x 16 level of `decode`'s footprint: a block covering texels
+/// The blocks across and down a 16 x 16 level of the footprint `extent`: a block covering texels
 /// past the level's edge counts, as Metal counts it.
-fn blocks_across_and_down(decode: AstcDecode) -> [u32; 2] {
-    decode.block_extent().map(|side| SIDE.div_ceil(side))
+fn blocks_across_and_down(extent: [u32; 2]) -> [u32; 2] {
+    extent.map(|side| SIDE.div_ceil(side))
 }
 
 /// The blocks of round `round` of the format at place `at`: zeros, which are error blocks, then
 /// the lane's own seeded stream at the lane's own seed for that format's place.
-fn blocks(at: usize, round: usize, decode: AstcDecode) -> Vec<u8> {
-    let [across, down] = blocks_across_and_down(decode);
+fn blocks(at: usize, round: usize, extent: [u32; 2]) -> Vec<u8> {
+    let [across, down] = blocks_across_and_down(extent);
     let count = (across * down) as usize;
     match round {
         0 => vec![0; count * AstcDecode::BLOCK_BYTES as usize],
@@ -300,9 +401,18 @@ impl AstcTextures {
         &FORMATS[self.at]
     }
 
-    /// How the format's blocks decode.
-    fn decode(&self) -> AstcDecode {
-        AstcDecode::of(self.format().format).expect("an ASTC LDR format")
+    /// The format's footprint, which every ASTC format of every profile answers.
+    fn footprint(&self) -> [u32; 2] {
+        block_extent(self.format().format).expect("an ASTC format")
+    }
+
+    /// How the format's blocks decode on a device with no ASTC block, where this crate has an
+    /// answer: `None` for the HDR profile, whose textures have no decoded twin at all
+    /// (`AstcDecode::of` holds the LDR and sRGB profiles alone). That `None` is the structural
+    /// reason an HDR case names no tolerance and no twin notice: there is nothing of ours between
+    /// the blocks and the texels, so a device either holds the format natively or refuses it.
+    fn decode(&self) -> Option<AstcDecode> {
+        AstcDecode::of(self.format().format)
     }
 
     /// The fixture the case runs.
@@ -315,13 +425,13 @@ impl AstcTextures {
 
     /// The bytes a row of blocks takes: the blocks across a 16-texel row, 16 bytes each.
     fn row_pitch(&self) -> u32 {
-        blocks_across_and_down(self.decode())[0] * AstcDecode::BLOCK_BYTES
+        blocks_across_and_down(self.footprint())[0] * AstcDecode::BLOCK_BYTES
     }
 
     /// The block rows a 16-texel level holds, which is what an upload hands rather than its texel
     /// rows: the difference the compressed families are about.
     fn block_rows(&self) -> u32 {
-        blocks_across_and_down(self.decode())[1]
+        blocks_across_and_down(self.footprint())[1]
     }
 
     /// The texture of one round: the format, 16 x 16 texels, read-only and shared, loaded with the
@@ -332,9 +442,12 @@ impl AstcTextures {
 
     /// How far a compact texel of this format may be off Metal's value, where that is not zero:
     /// a linear format's half 8-bit step. `None` for an sRGB form, whose twin holds Metal's own
-    /// codes and whose slots decode them through Metal's table, so it names no tolerance.
+    /// codes and whose slots decode them through Metal's table, so it names no tolerance, and
+    /// `None` for an HDR form, which has no twin to be compact about.
     fn compact_bound(&self) -> Option<f64> {
-        (!self.decode().srgb).then_some(LEDGERS_COMPACT_BOUND)
+        self.decode()
+            .filter(|decode| !decode.srgb)
+            .map(|_| LEDGERS_COMPACT_BOUND)
     }
 
     /// The layout a round's texels read back under: one row of the layout per row of texels, four
@@ -382,10 +495,17 @@ impl Case for AstcTextures {
         // mechanism the line above names, measured on lavapipe for every format of this family. It
         // is a declaration and not a tolerance -- every texel the case reads still compares
         // exactly with Metal.
-        let mut all = vec![
-            crate::replay::notice_allowance(Degradation::CarriedDecodedTwin.code()),
-            crate::replay::notice_allowance(Degradation::CpuBlockDecode.code()),
-        ];
+        // Named only where this crate has a decode for the format, which is the LDR and sRGB
+        // profiles. An HDR texture has no decoded twin: a device either holds the ASTC HDR block
+        // natively, in which case nothing of ours sits between the blocks and the texels and no
+        // notice fires, or it refuses the texture and the site is the venue's own gap.
+        let mut all = match self.decode().is_some() {
+            true => vec![
+                crate::replay::notice_allowance(Degradation::CarriedDecodedTwin.code()),
+                crate::replay::notice_allowance(Degradation::CpuBlockDecode.code()),
+            ],
+            false => Vec::new(),
+        };
         // An sRGB form's twin holds Metal's own 8-bit codes, which its slots decode through Metal's
         // table, so its texels compare exactly under either policy and it names nothing further. A
         // linear format's compact twin holds the 8-bit code nearest Metal's 12-bit value, which the
@@ -439,7 +559,7 @@ impl Case for AstcTextures {
         // a round whose format, extent, pitch or blocks move is `Unrecorded` rather than compared
         // against Metal's answer over other bytes.
         for (round, name) in ROUNDS.iter().enumerate() {
-            let bytes = blocks(self.at, round, self.decode());
+            let bytes = blocks(self.at, round, self.footprint());
             let uploads = [Upload::level_0(
                 [SIDE, SIDE],
                 self.row_pitch(),
@@ -470,7 +590,7 @@ impl Case for AstcTextures {
         )?;
         for (round, name) in ROUNDS.iter().enumerate() {
             let at = |site: &str| format!("{name}/{site}");
-            let bytes = blocks(self.at, round, self.decode());
+            let bytes = blocks(self.at, round, self.footprint());
             let uploads = [Upload::level_0(
                 [SIDE, SIDE],
                 self.row_pitch(),
@@ -520,6 +640,16 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
+    /// The profile a case's format decodes with, from the decoder's own answer: the LDR and sRGB
+    /// profiles are the two this crate decodes, and a format it has no decode for is HDR.
+    fn profile(decode: Option<AstcDecode>) -> &'static str {
+        match decode {
+            Some(decode) if decode.srgb => "srgb",
+            Some(_) => "ldr",
+            None => "hdr",
+        }
+    }
+
     /// The cases name distinct recordings, since a case's name is its recording's file name.
     #[test]
     fn the_formats_name_distinct_cases() {
@@ -527,34 +657,43 @@ mod tests {
         assert_eq!(named.len(), FORMATS.len());
     }
 
-    /// Every case names a format the decoder holds, and the twenty-eight cases cover every one of
-    /// the fourteen footprints in both colour spaces exactly once.
+    /// Every case names a format with a footprint, and the forty-two cases cover every one of the
+    /// fourteen footprints in all three profiles exactly once.
+    ///
+    /// The profile comes from the decoder's presence and its `srgb` flag, which within this list
+    /// is exact: ASTC's other two footprints (4x2 and 8x4) also have no decoder, and they are not
+    /// here — [`every_cases_name_states_its_own_footprint`] is what holds that, since a 4x2 case
+    /// would have to be named `astc-4x2-hdr` to pass it and no such case exists.
     #[test]
-    fn the_cases_are_every_footprint_in_both_spaces() {
+    fn the_cases_are_every_footprint_in_all_three_profiles() {
         let mut seen = BTreeSet::new();
-        for format in &FORMATS {
-            let decode = AstcDecode::of(format.format)
-                .unwrap_or_else(|| panic!("{}: no ASTC decode", format.name));
+        for (at, format) in FORMATS.iter().enumerate() {
+            let case = AstcTextures { at };
             assert!(
-                seen.insert((decode.block_extent(), decode.srgb)),
-                "{}: a second case of its footprint and space",
+                seen.insert((case.footprint(), profile(case.decode()))),
+                "{}: a second case of its footprint and profile",
                 format.name
             );
         }
-        assert_eq!(seen.len(), 28);
+        assert_eq!(seen.len(), 42);
+        // Fourteen footprints, each in three profiles.
+        assert_eq!(
+            seen.iter()
+                .map(|(extent, _)| *extent)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            14
+        );
     }
 
-    /// A case's name states the footprint and the space its format decodes with, so a reader of a
-    /// failure is not trusting the table's spelling.
+    /// A case's name states the footprint and the profile its format decodes with, so a reader of
+    /// a failure is not trusting the table's spelling.
     #[test]
     fn every_cases_name_states_its_own_footprint() {
         for (at, format) in FORMATS.iter().enumerate() {
-            let decode = AstcTextures { at }.decode();
-            let [width, height] = decode.block_extent();
-            let space = match decode.srgb {
-                true => "srgb",
-                false => "ldr",
-            };
+            let case = AstcTextures { at };
+            let [width, height] = case.footprint();
+            let space = profile(case.decode());
             assert_eq!(format.name, format!("astc-{width}x{height}-{space}"));
         }
     }
@@ -564,9 +703,9 @@ mod tests {
     fn every_rounds_blocks_fill_its_texture() {
         for (at, format) in FORMATS.iter().enumerate() {
             let case = AstcTextures { at };
-            let [across, down] = blocks_across_and_down(case.decode());
+            let [across, down] = blocks_across_and_down(case.footprint());
             for round in 0..ROUNDS.len() {
-                let bytes = blocks(at, round, case.decode());
+                let bytes = blocks(at, round, case.footprint());
                 assert_eq!(
                     bytes.len() as u32,
                     across * down * AstcDecode::BLOCK_BYTES,
@@ -588,10 +727,10 @@ mod tests {
     #[test]
     fn the_rounds_hand_different_blocks() {
         for (at, format) in FORMATS.iter().enumerate() {
-            let decode = AstcTextures { at }.decode();
+            let extent = AstcTextures { at }.footprint();
             assert_ne!(
-                blocks(at, 0, decode),
-                blocks(at, 1, decode),
+                blocks(at, 0, extent),
+                blocks(at, 1, extent),
                 "{}",
                 format.name
             );
@@ -604,8 +743,8 @@ mod tests {
     #[test]
     fn every_fourth_seeded_block_is_a_void_extent() {
         for (at, format) in FORMATS.iter().enumerate() {
-            let decode = AstcTextures { at }.decode();
-            let bytes = blocks(at, 1, decode);
+            let extent = AstcTextures { at }.footprint();
+            let bytes = blocks(at, 1, extent);
             let mut extents = 0;
             for (index, block) in bytes.as_chunks::<16>().0.iter().enumerate() {
                 if index % 4 == 3 {
@@ -613,7 +752,7 @@ mod tests {
                     extents += 1;
                 }
             }
-            let [across, down] = blocks_across_and_down(decode);
+            let [across, down] = blocks_across_and_down(extent);
             assert_eq!(extents, (across * down) as usize / 4, "{}", format.name);
         }
     }
@@ -635,7 +774,9 @@ mod tests {
                 .filter(|allowance| allowance.path.ends_with("/texels"))
                 .map(|allowance| allowance.loosening)
                 .collect();
-            if case.decode().srgb {
+            // An sRGB form's twin holds Metal's own codes and an HDR format has no twin, so
+            // neither loosens a texel; only the fourteen linear ones do.
+            if case.compact_bound().is_none() {
                 assert!(bounds.is_empty(), "{}: {bounds:?}", format.name);
                 continue;
             }
@@ -679,11 +820,16 @@ mod tests {
                     continue;
                 }
             };
-            let decode = AstcTextures { at }.decode();
+            // The HDR profile has no decode of ours to cross-check against: a device either
+            // holds the ASTC HDR block natively or refuses the texture, so the recording is
+            // Metal's answer and there is no second derivation to hold it to.
+            let Some(decode) = (AstcTextures { at }).decode() else {
+                continue;
+            };
             for answer in &recording.answers {
                 for outcome in &answer.outcomes {
                     for (round, name) in ROUNDS.iter().enumerate() {
-                        let blocks = blocks(at, round, decode);
+                        let blocks = blocks(at, round, decode.block_extent());
                         let node = outcome
                             .transcript
                             .root

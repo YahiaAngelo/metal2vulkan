@@ -15,9 +15,13 @@ use crate::air::abi::{
     StructInfo, StructRef,
 };
 use crate::air::error::{DiagName, Location};
-use crate::air::ir::{FuncId, Module, Value};
+use crate::air::ir::{AddrSpace, FuncId, Module, Value};
 use crate::error::{Error, Feature, Unsupported};
 use crate::metal::{BindingAccess, BindingType, DataType};
+
+/// The least alignment Metal reports for a `constant` buffer binding, whatever its pointee's
+/// own alignment is (the measurement is stated where it is applied, in `buffer`).
+const CONSTANT_ALIGNMENT: u64 = 4;
 
 /// Whose answer a reflection gives. They differ in one measured respect: an argument buffer's
 /// array of textures, samplers, pointers or structs has its element size as its stride in a
@@ -408,7 +412,19 @@ impl Cx<'_> {
         b: &BufferArg,
         argument_buffer: bool,
     ) -> Result<BufferBinding, Error> {
-        let (size, align) = self.size_align(arg, ty)?;
+        let (size, natural) = self.size_align(arg, ty)?;
+        // A `constant` buffer's reported alignment has a floor of 4; a `device` buffer's is the
+        // pointee's own. Measured on an Apple M3 Max under Metal 27.0.1, over the four shapes that
+        // separate the two variables: `constant half&` answers 4 and `device half*` answers 2;
+        // `constant char&` answers 4 and `device char*` answers 1; and wrapping either scalar in a
+        // one-member struct changes neither answer, so it is the address space that decides and
+        // not the pointee's shape. Above the floor the natural value stands on both sides
+        // (`constant half3&` answers 8). The data **size** is never clamped: `constant char&`
+        // answers size 1 beside alignment 4.
+        let align = match b.space {
+            AddrSpace::Constant => natural.max(CONSTANT_ALIGNMENT),
+            _ => natural,
+        };
         let (data_type, detail) = self.pointee(arg, ty, b.layout, argument_buffer)?;
         let struct_type = detail.struct_type().cloned();
         let pointer = PointerType::new(

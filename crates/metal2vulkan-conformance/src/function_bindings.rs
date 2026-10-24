@@ -57,6 +57,8 @@ pub struct BindingFacts {
     pub threadgroup: Option<ThreadgroupFacts>,
     /// `MTLTextureBinding`'s fields, for a texture argument.
     pub texture: Option<TextureFacts>,
+    /// `MTLObjectPayloadBinding`'s fields, for an object or mesh function's payload.
+    pub payload: Option<PayloadFacts>,
 }
 
 /// `MTLBufferBinding`.
@@ -80,6 +82,20 @@ pub struct ThreadgroupFacts {
     /// `threadgroupMemoryAlignment`.
     pub alignment: u64,
     /// `threadgroupMemoryDataSize`.
+    pub data_size: u64,
+}
+
+/// `MTLObjectPayloadBinding`: the payload an object function writes and a mesh function reads.
+///
+/// Metal states only its size and its alignment, and neither is in the source: the payload's
+/// struct is declared in MSL and these two numbers are what Metal's own layout rules make of it,
+/// which is the same class of derivation [`BufferFacts::alignment`] and
+/// [`BufferFacts::data_size`] are for a buffer's pointee.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PayloadFacts {
+    /// `objectPayloadAlignment`.
+    pub alignment: u64,
+    /// `objectPayloadDataSize`.
     pub data_size: u64,
 }
 
@@ -270,6 +286,19 @@ impl BindingFacts {
                     )),
             );
         }
+        if let Some(payload) = &self.payload {
+            node = node.with(
+                Node::branch("payload", Vec::new())
+                    .with(Node::leaf(
+                        "alignment",
+                        Observed::value(Value::Uint(payload.alignment)),
+                    ))
+                    .with(Node::leaf(
+                        "data_size",
+                        Observed::value(Value::Uint(payload.data_size)),
+                    )),
+            );
+        }
         node
     }
 }
@@ -436,6 +465,108 @@ impl TypeFacts {
                             Observed::value(Value::Bool(held.depth)),
                         )),
                 ),
+        }
+    }
+}
+
+/// `MTLRenderPipelineReflection`: **all five** of its stage lists, whichever kind of render
+/// pipeline answered it.
+///
+/// The five are always recorded, for a pipeline of every kind, and that is the point of the type.
+/// A tile pipeline's reflection answers tile bindings and four empty lists; a mesh pipeline's
+/// answers object, mesh and fragment and two empty ones; a drawing pipeline's answers vertex and
+/// fragment and three empty ones (all three measured on an M3 Max under Metal 27.0.1). So the
+/// **shape** of the five is itself the comparable fact: a side that answered a tile function's
+/// arguments under `fragmentBindings`, or a mesh function's under `objectBindings`, holds the same
+/// bindings and differs here, and nothing else in a reflection would see it. An empty list
+/// compared against an empty list says nothing on its own, but the five sites together say which
+/// stage Metal attributes each argument to, and that is a fact with five possible answers.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct StageBindings {
+    /// `vertexBindings`.
+    pub vertex: Vec<BindingFacts>,
+    /// `fragmentBindings`.
+    pub fragment: Vec<BindingFacts>,
+    /// `tileBindings`.
+    pub tile: Vec<BindingFacts>,
+    /// `objectBindings`.
+    pub object: Vec<BindingFacts>,
+    /// `meshBindings`.
+    pub mesh: Vec<BindingFacts>,
+}
+
+impl StageBindings {
+    /// The five lists as the sites a case emits under one node, so both sides emit one shape.
+    pub fn node(&self, name: impl Into<NodeName>) -> Node {
+        Node::branch(name, Vec::new())
+            .with(bindings_node("vertex", &self.vertex))
+            .with(bindings_node("fragment", &self.fragment))
+            .with(bindings_node("tile", &self.tile))
+            .with(bindings_node("object", &self.object))
+            .with(bindings_node("mesh", &self.mesh))
+    }
+}
+
+/// What one render-pipeline creation under one `MTLPipelineOption` value answered: whether it was
+/// refused, and the reflection's five stage lists where one came back.
+///
+/// This is [`crate::pipeline_option_reflection::UnderOptions`]'s shape for a render pipeline
+/// rather than a compute one — the same two questions, over five stage lists instead of one
+/// binding list — and it is a separate type rather than a widening of that one because the two
+/// creations answer two different reflection classes (`MTLComputePipelineReflection` and
+/// `MTLRenderPipelineReflection`), and a type that held both would have to say which half is
+/// absent at every site.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StageReflection {
+    /// Whether the creation was refused.
+    ///
+    /// A bool and not the error, for the reason
+    /// [`UnderOptions::refused`](crate::pipeline_option_reflection::UnderOptions::refused) states.
+    /// Every row of an options sweep must answer `false`: a creation plain Metal makes and we
+    /// refuse is a gap of ours.
+    pub refused: bool,
+    /// The five stage lists, or `None` where the creation answered no reflection at all
+    /// (`MTLPipelineOptionNone`, as Metal leaves `reflection` nil).
+    pub stages: Option<StageBindings>,
+}
+
+impl StageReflection {
+    /// The answer of a creation that was refused.
+    pub fn refused() -> Self {
+        Self {
+            refused: true,
+            stages: None,
+        }
+    }
+
+    /// The answer of a creation that was made and reflected `stages`.
+    pub fn reflected(stages: StageBindings) -> Self {
+        Self {
+            refused: false,
+            stages: Some(stages),
+        }
+    }
+
+    /// The answer of a creation that was made and answered no reflection.
+    pub fn unreflected() -> Self {
+        Self {
+            refused: false,
+            stages: None,
+        }
+    }
+
+    /// The sites a case emits under one node, so both sides emit one shape.
+    pub fn node(&self, name: impl Into<NodeName>) -> Node {
+        let node = Node::branch(name, Vec::new()).with(Node::leaf(
+            "refused",
+            Observed::value(Value::Bool(self.refused)),
+        ));
+        match &self.stages {
+            Some(stages) => node.with(stages.node("reflection")),
+            None => node.with(Node::leaf(
+                "reflection",
+                Observed::value(Value::unit_variant("None")),
+            )),
         }
     }
 }

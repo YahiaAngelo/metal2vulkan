@@ -1279,6 +1279,30 @@ pub trait Side {
         Err(Failure::unavailable("mesh_pipeline"))
     }
 
+    /// `newRenderPipelineStateWithMeshDescriptor:options:reflection:error:` of the pipeline `spec`
+    /// describes ([`MeshReflectionSpec`]), and **all five** stage lists the reflection answers
+    /// ([`StageBindings`](crate::function_bindings::StageBindings)).
+    ///
+    /// The creation and the reading in one call, and the state kept by neither side, for the
+    /// reason [`Side::tile_pipeline_bindings`] states: Metal answers a reflection only at the
+    /// creation.
+    ///
+    /// This is the only call of either side that can answer `MTLBindingTypeObjectPayload`, and so
+    /// the only one whose answer can hold `MTLObjectPayloadBinding`'s two fields
+    /// ([`PayloadFacts`](crate::function_bindings::PayloadFacts)): a payload is an argument of an
+    /// object or a mesh function and of nothing else.
+    /// `options` is the raw `MTLPipelineOption` word and a refusal is an `Ok`, for the reasons
+    /// [`Side::tile_pipeline_bindings`] states.
+    fn mesh_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        spec: &MeshReflectionSpec<'_>,
+        options: u64,
+    ) -> Answer<crate::function_bindings::StageReflection> {
+        let _ = (library, spec, options);
+        Err(Failure::unavailable("mesh_pipeline_bindings"))
+    }
+
     /// `newTextureWithDescriptor:` of a 2D [`TARGET_FORMAT`] render target of `width` by
     /// `height`, whose bytes the host reads.
     ///
@@ -1472,6 +1496,37 @@ pub trait Side {
     fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
         let _ = (library, spec);
         Err(Failure::unavailable("tile_pipeline"))
+    }
+
+    /// `newRenderPipelineStateWithTileDescriptor:options:reflection:error:` of the pipeline `spec`
+    /// describes, asking for binding information, and **all five** stage lists the reflection
+    /// answers ([`StageBindings`](crate::function_bindings::StageBindings)).
+    ///
+    /// [`Side::tile_pipeline`] makes the same pipeline and keeps it by handle; this one asks the
+    /// creation for its reflection and keeps nothing, because Metal answers a reflection **only**
+    /// at the creation — `MTLRenderPipelineState` has no getter for one — which is the reason
+    /// [`Side::compute_pipeline_bindings`] states for the compute half.
+    ///
+    /// The whole reflection rather than `tileBindings` alone, for the reason
+    /// [`StageBindings`](crate::function_bindings::StageBindings) states: which stage Metal
+    /// attributes a tile function's arguments to is the fact, and reading one list could not see
+    /// a side that answered them under another's name.
+    ///
+    /// `options` is the **raw** `MTLPipelineOption` word, so a case states Metal's own value
+    /// rather than a vocabulary of modes, which is the choice
+    /// [`Side::compute_pipeline_reflection_under`] already makes for the compute creation. A
+    /// refused creation is an `Ok` whose answer says it was refused
+    /// ([`StageReflection::refused`](crate::function_bindings::StageReflection::refused)), not an
+    /// `Err`: what an options value does is the question, and "this value is refused" is one of
+    /// the answers the case compares.
+    fn tile_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        spec: &TilePipelineSpec<'_>,
+        options: u64,
+    ) -> Answer<crate::function_bindings::StageReflection> {
+        let _ = (library, spec, options);
+        Err(Failure::unavailable("tile_pipeline_bindings"))
     }
 
     /// What a tile render pipeline state answers ([`TileFacts`]).
@@ -2673,6 +2728,47 @@ pub struct MeshFunctions<'a> {
     pub fragment: &'a str,
     /// The color attachments of [`TARGET_FORMAT`] the pipeline writes.
     pub attachments: u32,
+}
+
+/// A mesh render pipeline a case makes **for its reflection**: the three stages, and the colour
+/// attachment formats.
+///
+/// Separate from [`MeshFunctions`], which is what the drawing families state, and the difference
+/// is the attachments. `MeshFunctions` takes a **count** and the sides fill that many attachments
+/// with [`TARGET_FORMAT`], because a family that draws reads its target back and
+/// [`TARGET_FORMAT`] is the format those readers share. A reflection case draws nothing, so it has
+/// no reason to want that format and one strong reason not to: [`TARGET_FORMAT`] is an integer
+/// format, and a fragment function returning `float4` over an integer attachment is a pipeline
+/// **Metal refuses** ("output of type float4 is not compatible with a MTLPixelFormatRGBA32Uint
+/// color attachment", measured on an M3 Max under Metal 27.0.1). A reflection case given that
+/// count would compare a refusal against a refusal at every site and reflect nothing.
+///
+/// So this spec names its formats the way [`TilePipelineSpec`] already names its own, and a case
+/// states a format its fragment function's output is compatible with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MeshReflectionSpec<'a> {
+    /// The object function, where the pipeline has one.
+    pub object: Option<&'a str>,
+    /// The mesh function.
+    pub mesh: &'a str,
+    /// The fragment function.
+    pub fragment: &'a str,
+    /// The colour attachment formats, at attachment index 0 up in this order.
+    pub attachments: &'a [PixelFormat],
+}
+
+impl MeshReflectionSpec<'_> {
+    /// The words a case's input fingerprint covers: every stage and every format, so a pipeline
+    /// that moves is a change to the case's inputs.
+    pub fn words(&self) -> Vec<u8> {
+        let mut out = self.mesh.as_bytes().to_vec();
+        out.extend(self.fragment.as_bytes());
+        out.extend(self.object.unwrap_or("").as_bytes());
+        for format in self.attachments {
+            out.extend(format.as_raw().to_le_bytes());
+        }
+        out
+    }
 }
 
 /// One command a case encodes into a render pass.

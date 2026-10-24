@@ -903,6 +903,7 @@ surface! {
         fn direct_format;
         fn byte_format;
         fn srgb_raw_twin;
+        fn block_extent;
         fn imageblock_sample_length;
         fn color_record;
         fn explicit_imageblock_sample_length;

@@ -17,10 +17,10 @@ use crate::archives::{
 use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
     Answer, ArgumentSlot, Bindings, CommandDraw, CoordinateProbe, Failure, FragmentFill,
-    FragmentFilled, Handle, MappedCoordinates, MeshCommand, MeshFunctions, MeshStep, PassOutcome,
-    RateMapFacts, RateMapForm, RateMapLayer, RateMapRequest, SamplerSpec, ShaderSource, Side,
-    StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep,
-    Venue,
+    FragmentFilled, Handle, MappedCoordinates, MeshCommand, MeshFunctions, MeshReflectionSpec,
+    MeshStep, PassOutcome, RateMapFacts, RateMapForm, RateMapLayer, RateMapRequest, SamplerSpec,
+    ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
+    TilePipelineSpec, TileStep, Venue,
 };
 use crate::command_buffer_facts::CommandBufferFacts;
 use crate::compute_descriptors::{
@@ -32,8 +32,8 @@ use crate::compute_pass::{
 };
 use crate::device_queries::{Box6, HeapBufferQuery, RegionQuery};
 use crate::function_bindings::{
-    ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
-    TextureFacts, ThreadgroupFacts, TypeFacts,
+    ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PayloadFacts, PointerFacts, ReferenceFacts,
+    StageBindings, StageReflection, StructFacts, TextureFacts, ThreadgroupFacts, TypeFacts,
 };
 use crate::function_facts::{
     AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
@@ -110,9 +110,9 @@ use objc2_metal::{
     MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
     MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary, MTLLinkedFunctions,
     MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
-    MTLMultisampleStencilResolveFilter, MTLMutability, MTLOrigin, MTLPipelineBufferDescriptor,
-    MTLPipelineBufferDescriptorArray, MTLPipelineOption, MTLPixelFormat, MTLPointerType,
-    MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLPurgeableState,
+    MTLMultisampleStencilResolveFilter, MTLMutability, MTLObjectPayloadBinding, MTLOrigin,
+    MTLPipelineBufferDescriptor, MTLPipelineBufferDescriptorArray, MTLPipelineOption,
+    MTLPixelFormat, MTLPointerType, MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLPurgeableState,
     MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder,
     MTLRenderPassAttachmentDescriptor, MTLRenderPassColorAttachmentDescriptor,
@@ -571,6 +571,7 @@ fn metal_binding(binding: &ProtocolObject<dyn MTLBinding>) -> Answer<BindingFact
         buffer: None,
         threadgroup: None,
         texture: None,
+        payload: None,
     };
     if kind == MTLBindingType::Buffer {
         let held: &ProtocolObject<dyn MTLBufferBinding> = conforming(binding, c"MTLBufferBinding")?;
@@ -608,7 +609,43 @@ fn metal_binding(binding: &ProtocolObject<dyn MTLBinding>) -> Answer<BindingFact
             array_length: held.arrayLength() as u32,
         });
     }
+    if kind == MTLBindingType::ObjectPayload {
+        let held: &ProtocolObject<dyn MTLObjectPayloadBinding> =
+            conforming(binding, c"MTLObjectPayloadBinding")?;
+        facts.payload = Some(PayloadFacts {
+            alignment: held.objectPayloadAlignment() as u64,
+            data_size: held.objectPayloadDataSize() as u64,
+        });
+    }
     Ok(facts)
+}
+
+/// All five stage lists of one `MTLRenderPipelineReflection`, whichever creation answered it.
+///
+/// Each list is bound to a local rather than called in the `for` header, for the reason
+/// [`Side::compute_pipeline_bindings`](crate::case::Side::compute_pipeline_bindings) states: the
+/// coverage derivation reads a receiver by walking back from the dot, and in a `for` header that
+/// walk swallows the loop variable.
+fn metal_stage_bindings(reflection: &MTLRenderPipelineReflection) -> Answer<StageBindings> {
+    let read = |bindings: &NSArray<ProtocolObject<dyn MTLBinding>>| -> Answer<Vec<BindingFacts>> {
+        let mut found = Vec::new();
+        for binding in bindings {
+            found.push(metal_binding(&binding)?);
+        }
+        Ok(found)
+    };
+    let vertex = reflection.vertexBindings();
+    let fragment = reflection.fragmentBindings();
+    let tile = reflection.tileBindings();
+    let object = reflection.objectBindings();
+    let mesh = reflection.meshBindings();
+    Ok(StageBindings {
+        vertex: read(&vertex)?,
+        fragment: read(&fragment)?,
+        tile: read(&tile)?,
+        object: read(&object)?,
+        mesh: read(&mesh)?,
+    })
 }
 
 /// A struct type of Metal's: its members, and whether `memberByName:` finds each of them.
@@ -4094,6 +4131,41 @@ impl Side for MetalSide {
         self.made_mesh_pipeline(&descriptor)
     }
 
+    fn mesh_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        spec: &MeshReflectionSpec<'_>,
+        options: u64,
+    ) -> Answer<StageReflection> {
+        let descriptor = self.mesh_reflection_descriptor(library, spec)?;
+        let mut reflection = None;
+        // The options are the named bits, for the reason `tile_pipeline_bindings` states.
+        let made = self
+            .device
+            .newRenderPipelineStateWithMeshDescriptor_options_reflection_error(
+                &descriptor,
+                MTLPipelineOption(options as NSUInteger),
+                Some(&mut reflection),
+            );
+        let Ok(state) = made else {
+            return Ok(StageReflection::refused());
+        };
+        // Declared, not inferred, for the reason `tile_pipeline_bindings` states.
+        let found = match reflection {
+            Some(reflection) => {
+                let reflection: Retained<MTLRenderPipelineReflection> = reflection;
+                StageReflection::reflected(metal_stage_bindings(&reflection)?)
+            }
+            None => StageReflection::unreflected(),
+        };
+        // The state is kept so it outlives the reflection its creation answered.
+        keep(
+            &mut self.render_pipelines,
+            RenderPipeline::unreflected(state),
+        );
+        Ok(found)
+    }
+
     fn render_target(&mut self, width: u32, height: u32) -> Answer<Handle> {
         // SAFETY: the extent is a case's own small one, and the descriptor is this call's own.
         let descriptor = unsafe {
@@ -4532,6 +4604,44 @@ impl Side for MetalSide {
             &mut self.render_pipelines,
             RenderPipeline::unreflected(state),
         ))
+    }
+
+    fn tile_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        spec: &TilePipelineSpec<'_>,
+        options: u64,
+    ) -> Answer<StageReflection> {
+        let descriptor = self.tile_descriptor_from(library, spec)?;
+        let mut reflection = None;
+        // The options are bits Apple's header names
+        // ([`crate::pipeline_option_reflection::MASKS`]), so nothing undefined reaches Metal here.
+        let made = self
+            .device
+            .newRenderPipelineStateWithTileDescriptor_options_reflection_error(
+                &descriptor,
+                MTLPipelineOption(options as NSUInteger),
+                Some(&mut reflection),
+            );
+        let Ok(state) = made else {
+            return Ok(StageReflection::refused());
+        };
+        // Declared, not inferred: the coverage derivation types a receiver from what bound it, and
+        // an `Option` the creation filled in through an out-parameter names no type at all.
+        let found = match reflection {
+            Some(reflection) => {
+                let reflection: Retained<MTLRenderPipelineReflection> = reflection;
+                StageReflection::reflected(metal_stage_bindings(&reflection)?)
+            }
+            None => StageReflection::unreflected(),
+        };
+        // The state is kept so it outlives the reflection its creation answered, as the compute
+        // half's is.
+        keep(
+            &mut self.render_pipelines,
+            RenderPipeline::unreflected(state),
+        );
+        Ok(found)
     }
 
     fn pipeline_both_paths(
@@ -7268,6 +7378,40 @@ impl MetalSide {
                 attachments
                     .objectAtIndexedSubscript(at)
                     .setPixelFormat(TARGET_PIXEL_FORMAT);
+            }
+        }
+        Ok(descriptor)
+    }
+
+    /// The mesh descriptor `spec` describes, whose attachments are the formats the case names.
+    fn mesh_reflection_descriptor(
+        &self,
+        library: Handle,
+        spec: &MeshReflectionSpec<'_>,
+    ) -> Answer<Retained<MTLMeshRenderPipelineDescriptor>> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = |name: &str| {
+            library
+                .newFunctionWithName(&NSString::from_str(name))
+                .ok_or_else(|| Failure::named("NoSuchFunction", name.to_owned()))
+        };
+        let descriptor = MTLMeshRenderPipelineDescriptor::new();
+        // SAFETY: each function is of this library, and the descriptor is this call's own.
+        unsafe {
+            descriptor.setMeshFunction(Some(&*function(spec.mesh)?));
+            if let Some(object) = spec.object {
+                descriptor.setObjectFunction(Some(&*function(object)?));
+            }
+            descriptor.setFragmentFunction(Some(&*function(spec.fragment)?));
+            let attachments = descriptor.colorAttachments();
+            for (at, format) in spec.attachments.iter().enumerate() {
+                // SAFETY: `at` is below the eight attachments the descriptor's array holds.
+                attachments
+                    .objectAtIndexedSubscript(at)
+                    .setPixelFormat(MTLPixelFormat(format.as_raw() as usize));
             }
         }
         Ok(descriptor)

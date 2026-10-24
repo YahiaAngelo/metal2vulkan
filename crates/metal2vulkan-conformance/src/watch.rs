@@ -31,9 +31,9 @@
 use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
     Answer, ArgumentSlot, Bindings, CoordinateProbe, Fill, FragmentFill, FragmentFilled, Handle,
-    IndirectReadBack, MappedCoordinates, MeshCommand, MeshFunctions, MeshStep, PassOutcome,
-    PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion,
-    StageInput, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
+    IndirectReadBack, MappedCoordinates, MeshCommand, MeshFunctions, MeshReflectionSpec, MeshStep,
+    PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side,
+    StageInRegion, StageInput, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
 use crate::function_bindings::BindingFacts;
 use crate::indirect_commands::{CommandsMade, EncodedCommand, IcbDescriptor};
@@ -510,6 +510,16 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.mesh_pipeline(library, functions)
     }
 
+    fn mesh_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        spec: &MeshReflectionSpec<'_>,
+        options: u64,
+    ) -> Answer<crate::function_bindings::StageReflection> {
+        let _span = self.watch("mesh_pipeline_bindings");
+        self.inner.mesh_pipeline_bindings(library, spec, options)
+    }
+
     fn mesh_pipeline_for_commands(
         &mut self,
         library: Handle,
@@ -616,6 +626,16 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
     fn tile_pipeline(&mut self, library: Handle, spec: &TilePipelineSpec<'_>) -> Answer<Handle> {
         let _span = self.watch("tile_pipeline");
         self.inner.tile_pipeline(library, spec)
+    }
+
+    fn tile_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        spec: &TilePipelineSpec<'_>,
+        options: u64,
+    ) -> Answer<crate::function_bindings::StageReflection> {
+        let _span = self.watch("tile_pipeline_bindings");
+        self.inner.tile_pipeline_bindings(library, spec, options)
     }
 
     fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {

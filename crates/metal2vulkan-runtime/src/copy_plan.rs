@@ -148,61 +148,10 @@ pub(super) struct CopyUnit {
 
 /// The texel extent of a block of the compressed format `pf` (`None` for an uncompressed
 /// format).
-pub(super) fn block_extent(pf: PixelFormat) -> Option<[u32; 2]> {
-    use PixelFormat as P;
-    Some(match pf {
-        P::BC1RGBA
-        | P::BC1RGBASRGB
-        | P::BC2RGBA
-        | P::BC2RGBASRGB
-        | P::BC3RGBA
-        | P::BC3RGBASRGB
-        | P::BC4RUnorm
-        | P::BC4RSnorm
-        | P::BC5RGUnorm
-        | P::BC5RGSnorm
-        | P::BC6HRGBFloat
-        | P::BC6HRGBUfloat
-        | P::BC7RGBAUnorm
-        | P::BC7RGBAUnormSRGB
-        | P::EACR11Unorm
-        | P::EACR11Snorm
-        | P::EACRG11Unorm
-        | P::EACRG11Snorm
-        | P::EACRGBA8
-        | P::EACRGBA8SRGB
-        | P::ETC2RGB8
-        | P::ETC2RGB8SRGB
-        | P::ETC2RGB8A1
-        | P::ETC2RGB8A1SRGB
-        | P::PVRTCRGB4BPP
-        | P::PVRTCRGB4BPPSRGB
-        | P::PVRTCRGBA4BPP
-        | P::PVRTCRGBA4BPPSRGB
-        | P::ASTC4x4LDR
-        | P::ASTC4x4SRGB
-        | P::ASTC4x4HDR => [4, 4],
-        P::PVRTCRGB2BPP | P::PVRTCRGB2BPPSRGB | P::PVRTCRGBA2BPP | P::PVRTCRGBA2BPPSRGB => [8, 4],
-        P::ASTC5x4LDR | P::ASTC5x4SRGB | P::ASTC5x4HDR => [5, 4],
-        P::ASTC5x5LDR | P::ASTC5x5SRGB | P::ASTC5x5HDR => [5, 5],
-        P::ASTC6x5LDR | P::ASTC6x5SRGB | P::ASTC6x5HDR => [6, 5],
-        P::ASTC6x6LDR | P::ASTC6x6SRGB | P::ASTC6x6HDR => [6, 6],
-        P::ASTC8x5LDR | P::ASTC8x5SRGB | P::ASTC8x5HDR => [8, 5],
-        P::ASTC8x6LDR | P::ASTC8x6SRGB | P::ASTC8x6HDR => [8, 6],
-        P::ASTC8x8LDR | P::ASTC8x8SRGB | P::ASTC8x8HDR => [8, 8],
-        P::ASTC10x5LDR | P::ASTC10x5SRGB | P::ASTC10x5HDR => [10, 5],
-        P::ASTC10x6LDR | P::ASTC10x6SRGB | P::ASTC10x6HDR => [10, 6],
-        P::ASTC10x8LDR | P::ASTC10x8SRGB | P::ASTC10x8HDR => [10, 8],
-        P::ASTC10x10LDR | P::ASTC10x10SRGB | P::ASTC10x10HDR => [10, 10],
-        P::ASTC12x10LDR | P::ASTC12x10SRGB | P::ASTC12x10HDR => [12, 10],
-        P::ASTC12x12LDR | P::ASTC12x12SRGB | P::ASTC12x12HDR => [12, 12],
-        // Formats the runtime holds no texture of (`NotImplemented`): their extents give the
-        // descriptor the type rules Metal applies to them, every compressed format's.
-        P::ASTC4x2LDR | P::ASTC4x2SRGB | P::ASTC4x2HDR => [4, 2],
-        P::ASTC8x4LDR | P::ASTC8x4SRGB | P::ASTC8x4HDR => [8, 4],
-        _ => return None,
-    })
-}
+///
+/// The translator owns the fact ([`metal2vulkan::metal::format::block_extent`]), since it is a
+/// property of the `MTLPixelFormat` and not of a copy: this is the name this module reads it by.
+pub(super) use metal2vulkan::metal::format::block_extent;
 
 /// The bytes of a block (a texel, uncompressed) of the colour format `pf`: its byte format's
 /// (`metal::format::byte_format`, the format whose image holds Metal's bytes), and a PVRTC

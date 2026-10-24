@@ -14,9 +14,9 @@ use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFac
 use crate::case::{
     Answer, ArgumentSlot, Bindings, CommandDraw, CoordinateProbe, Failure, Fill, FragmentFill,
     FragmentFilled, Handle, IndirectReadBack, MappedCoordinates, MeshCommand, MeshFunctions,
-    MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapForm, RateMapRequest, SamplerSpec,
-    ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
-    TilePipelineSpec, TileStep, Venue,
+    MeshReflectionSpec, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapForm,
+    RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion, StageInput, TextureRole,
+    TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
 use crate::command_buffer_facts::CommandBufferFacts;
 use crate::compute_descriptors::{
@@ -28,8 +28,8 @@ use crate::compute_pass::{
 };
 use crate::device_queries::{Box6, HeapBufferQuery, RegionQuery};
 use crate::function_bindings::{
-    ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
-    TextureFacts, ThreadgroupFacts, TypeFacts, DEPTH,
+    ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PayloadFacts, PointerFacts, ReferenceFacts,
+    StageBindings, StageReflection, StructFacts, TextureFacts, ThreadgroupFacts, TypeFacts, DEPTH,
 };
 use crate::function_facts::{
     AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
@@ -1375,6 +1375,26 @@ fn our_binding(binding: &metal2vulkan::reflection::Binding) -> BindingFacts {
             depth: texture.is_depth_texture(),
             array_length: texture.array_length(),
         }),
+        payload: binding.object_payload().map(|payload| PayloadFacts {
+            alignment: payload.object_payload_alignment(),
+            data_size: payload.object_payload_data_size(),
+        }),
+    }
+}
+
+/// All five stage lists of one reflection of ours, as the Metal side reads Metal's five.
+fn our_stage_bindings(
+    reflection: &metal2vulkan::reflection::RenderPipelineReflection,
+) -> StageBindings {
+    let read = |bindings: &[metal2vulkan::reflection::Binding]| -> Vec<BindingFacts> {
+        bindings.iter().map(our_binding).collect()
+    };
+    StageBindings {
+        vertex: read(reflection.vertex_bindings()),
+        fragment: read(reflection.fragment_bindings()),
+        tile: read(reflection.tile_bindings()),
+        object: read(reflection.object_bindings()),
+        mesh: read(reflection.mesh_bindings()),
     }
 }
 
@@ -3101,6 +3121,30 @@ impl Side for RuntimeSide<'_> {
         Ok(keep(&mut self.render_pipelines, state))
     }
 
+    fn mesh_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        spec: &MeshReflectionSpec<'_>,
+        options: u64,
+    ) -> Answer<StageReflection> {
+        let descriptor = self.mesh_reflection_descriptor(library, spec)?;
+        let mut built = PipelineOptions::default();
+        built.options = PipelineOption::from_raw(options);
+        let made = self
+            .device
+            .new_mesh_render_pipeline_state_with_reflection(&descriptor, &built);
+        let Ok((state, reflection)) = made else {
+            return Ok(StageReflection::refused());
+        };
+        let found = match reflection {
+            Some(reflection) => StageReflection::reflected(our_stage_bindings(&reflection)),
+            None => StageReflection::unreflected(),
+        };
+        // The state is kept so it outlives the reflection its creation answered.
+        keep(&mut self.render_pipelines, state);
+        Ok(found)
+    }
+
     fn render_target(&mut self, width: u32, height: u32) -> Answer<Handle> {
         let mut descriptor = TextureDescriptor::texture_2d(
             TARGET_PIXEL_FORMAT,
@@ -3811,6 +3855,31 @@ impl Side for RuntimeSide<'_> {
             .new_tile_render_pipeline_state(&descriptor, &PipelineOptions::default())
             .map_err(Failure::from_error)?;
         Ok(keep(&mut self.render_pipelines, state))
+    }
+
+    fn tile_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        spec: &TilePipelineSpec<'_>,
+        options: u64,
+    ) -> Answer<StageReflection> {
+        let descriptor = self.our_tile_descriptor(library, spec)?;
+        let mut built = PipelineOptions::default();
+        built.options = PipelineOption::from_raw(options);
+        let made = self
+            .device
+            .new_tile_render_pipeline_state_with_reflection(&descriptor, &built);
+        let Ok((state, reflection)) = made else {
+            return Ok(StageReflection::refused());
+        };
+        let found = match reflection {
+            Some(reflection) => StageReflection::reflected(our_stage_bindings(&reflection)),
+            None => StageReflection::unreflected(),
+        };
+        // The state is kept so it outlives the reflection its creation answered, as the Metal
+        // side's is.
+        keep(&mut self.render_pipelines, state);
+        Ok(found)
     }
 
     fn target(&mut self, spec: &TargetSpec) -> Answer<Handle> {
@@ -6007,6 +6076,37 @@ impl RuntimeSide<'_> {
     ///
     /// Its own method for the reason [`RuntimeSide::our_render_descriptor`]'s is. A tile
     /// descriptor carries no label, so there are no options to build beside it.
+    /// The mesh descriptor `spec` describes, whose attachments are the formats the case names.
+    fn mesh_reflection_descriptor(
+        &self,
+        library: Handle,
+        spec: &MeshReflectionSpec<'_>,
+    ) -> Answer<MeshPipelineDescriptor> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let stage = |name: &str| -> Answer<StageSource> {
+            Ok(StageSource::Function(
+                library
+                    .new_function_with_name(name)
+                    .map_err(Failure::from_error)?
+                    .function_descriptor(),
+            ))
+        };
+        let mut descriptor = MeshPipelineDescriptor::new(stage(spec.mesh)?);
+        descriptor.object = spec.object.map(stage).transpose()?;
+        descriptor.fragment = Some(stage(spec.fragment)?);
+        for (slot, format) in descriptor
+            .color_attachments
+            .iter_mut()
+            .zip(spec.attachments)
+        {
+            *slot = Some(ColorAttachmentDescriptor::new(*format));
+        }
+        Ok(descriptor)
+    }
+
     fn our_tile_descriptor(
         &self,
         library: Handle,

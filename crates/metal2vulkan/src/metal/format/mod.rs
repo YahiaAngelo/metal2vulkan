@@ -1230,6 +1230,77 @@ pub fn padded_words(pf: PixelFormat) -> bool {
     )
 }
 
+/// The texel extent of one block of the compressed format `pf`, `None` for an uncompressed one.
+///
+/// Metal states this nowhere: `MTLPixelFormat` has no block-extent getter, and a program that
+/// needs the number reads it off Apple's format tables. It is still a fact of the format and not
+/// of any one use of it, so it lives here beside the rest of what a format is, and every caller
+/// that has to round an extent up to whole blocks — a copy's region, a level's row pitch, the
+/// blocks a `replaceRegion:` hands over — reads this rather than keeping a table of its own.
+///
+/// Every compressed format Metal names answers, the ones this crate holds no texture of
+/// included: ASTC's 4x2 and 8x4 footprints, which no Vulkan ASTC block has, answer `[4, 2]` and
+/// `[8, 4]`, because the extent is what decides the type rules Metal applies to a texture of the
+/// format and those rules hold whether or not a device can sample it. An ASTC format's three
+/// forms — `_LDR`, `_sRGB` and `_HDR` — share one footprint, since the profile changes how a
+/// block decodes and not how many texels it covers.
+///
+/// A block's **bytes** are not here: they are a property of the Vulkan format this crate maps
+/// `pf` to, which [`vk_format`] answers, and the two numbers are wanted in different places.
+pub fn block_extent(pf: PixelFormat) -> Option<[u32; 2]> {
+    use PixelFormat as P;
+    Some(match pf {
+        P::BC1RGBA
+        | P::BC1RGBASRGB
+        | P::BC2RGBA
+        | P::BC2RGBASRGB
+        | P::BC3RGBA
+        | P::BC3RGBASRGB
+        | P::BC4RUnorm
+        | P::BC4RSnorm
+        | P::BC5RGUnorm
+        | P::BC5RGSnorm
+        | P::BC6HRGBFloat
+        | P::BC6HRGBUfloat
+        | P::BC7RGBAUnorm
+        | P::BC7RGBAUnormSRGB
+        | P::EACR11Unorm
+        | P::EACR11Snorm
+        | P::EACRG11Unorm
+        | P::EACRG11Snorm
+        | P::EACRGBA8
+        | P::EACRGBA8SRGB
+        | P::ETC2RGB8
+        | P::ETC2RGB8SRGB
+        | P::ETC2RGB8A1
+        | P::ETC2RGB8A1SRGB
+        | P::PVRTCRGB4BPP
+        | P::PVRTCRGB4BPPSRGB
+        | P::PVRTCRGBA4BPP
+        | P::PVRTCRGBA4BPPSRGB
+        | P::ASTC4x4LDR
+        | P::ASTC4x4SRGB
+        | P::ASTC4x4HDR => [4, 4],
+        P::PVRTCRGB2BPP | P::PVRTCRGB2BPPSRGB | P::PVRTCRGBA2BPP | P::PVRTCRGBA2BPPSRGB => [8, 4],
+        P::ASTC5x4LDR | P::ASTC5x4SRGB | P::ASTC5x4HDR => [5, 4],
+        P::ASTC5x5LDR | P::ASTC5x5SRGB | P::ASTC5x5HDR => [5, 5],
+        P::ASTC6x5LDR | P::ASTC6x5SRGB | P::ASTC6x5HDR => [6, 5],
+        P::ASTC6x6LDR | P::ASTC6x6SRGB | P::ASTC6x6HDR => [6, 6],
+        P::ASTC8x5LDR | P::ASTC8x5SRGB | P::ASTC8x5HDR => [8, 5],
+        P::ASTC8x6LDR | P::ASTC8x6SRGB | P::ASTC8x6HDR => [8, 6],
+        P::ASTC8x8LDR | P::ASTC8x8SRGB | P::ASTC8x8HDR => [8, 8],
+        P::ASTC10x5LDR | P::ASTC10x5SRGB | P::ASTC10x5HDR => [10, 5],
+        P::ASTC10x6LDR | P::ASTC10x6SRGB | P::ASTC10x6HDR => [10, 6],
+        P::ASTC10x8LDR | P::ASTC10x8SRGB | P::ASTC10x8HDR => [10, 8],
+        P::ASTC10x10LDR | P::ASTC10x10SRGB | P::ASTC10x10HDR => [10, 10],
+        P::ASTC12x10LDR | P::ASTC12x10SRGB | P::ASTC12x10HDR => [12, 10],
+        P::ASTC12x12LDR | P::ASTC12x12SRGB | P::ASTC12x12HDR => [12, 12],
+        P::ASTC4x2LDR | P::ASTC4x2SRGB | P::ASTC4x2HDR => [4, 2],
+        P::ASTC8x4LDR | P::ASTC8x4SRGB | P::ASTC8x4HDR => [8, 4],
+        _ => return None,
+    })
+}
+
 /// Whether `pf`'s image holds Metal's channels rotated ([`FormatEmulation::RotatedView`],
 /// `ARGB8Unorm`): a color attachment of it takes the function's output, its clear color and its
 /// write mask through [`to_rotated_image`], and its border texel is read through the rotation.

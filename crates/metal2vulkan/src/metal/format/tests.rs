@@ -2851,3 +2851,95 @@ fn the_format_table_holds_each_format_s_entry() {
         assert_eq!(summary(repr(pf)), summary(&make_repr(pf)), "{pf:?}");
     }
 }
+
+/// Every footprint [`block_extent`] states is the one Khronos's registry states for the Vulkan
+/// block this crate maps the format to, and no uncompressed format answers one.
+///
+/// This is a cross-check and not a restatement: the width and height come from
+/// [`block_extent`]'s own match, and the texels per block come from `Format::block`, which
+/// `scripts/regen-vk-types` writes out of Khronos's `vk.xml` and nothing here may hand-edit. A
+/// footprint mistyped in either place makes the two disagree. It holds for every BC, EAC, ETC2
+/// and ASTC format of a footprint Vulkan has — 56 of this crate's 80 compressed formats.
+///
+/// The other 24 have no registry footprint to be checked against, and the test names both
+/// reasons rather than skipping them quietly:
+///
+/// - **the 8 PVRTC formats**, because the pinned registry gives
+///   `VK_FORMAT_PVRTC1_*_BLOCK_IMG` a `texelsPerBlock` of **1** and so states no footprint for
+///   them at all; four of them this crate holds only through a decoded twin, which covers one
+///   texel by construction;
+/// - **ASTC's 4x2 and 8x4 footprints in all three profiles**, 6 formats, which no Vulkan ASTC
+///   block has, so they are `NotImplemented` and must still answer a footprint — a texture's type
+///   rules follow from it whether or not a device can sample the format.
+///
+/// For those the assertion runs the other way: each must answer a footprint, and each must fall
+/// in one of the two named groups.
+#[test]
+fn every_block_extent_is_the_vulkan_blocks() {
+    use PixelFormat as P;
+    // The compressed Vulkan block among a format's candidates, where the registry states a
+    // footprint for one: a decoded twin's candidate is the uncompressed image the runtime fills,
+    // which covers one texel, and so does a PVRTC block in the pinned registry.
+    let vulkan_block = |pf| match repr(pf) {
+        Repr::Candidates(_, candidates) => candidates.iter().find_map(|candidate| {
+            let block = candidate.format.block().expect("a named Vulkan format");
+            (block.texels > 1).then_some((candidate.format, block.texels))
+        }),
+        _ => None,
+    };
+    // Whether any candidate of `pf` is a PVRTC block, whose registry entry states no footprint.
+    let pvrtc = |pf| match repr(pf) {
+        Repr::Candidates(_, candidates) => candidates.iter().any(|candidate| {
+            candidate
+                .format
+                .block()
+                .is_some_and(|block| block.class.starts_with("PVRTC"))
+        }),
+        _ => false,
+    };
+    let mut compressed = 0;
+    let mut checked = 0;
+    let mut unchecked = Vec::new();
+    for &pf in PixelFormat::ALL {
+        let Some([width, height]) = block_extent(pf) else {
+            // An uncompressed format maps to no compressed block.
+            assert!(vulkan_block(pf).is_none(), "{pf:?}");
+            continue;
+        };
+        compressed += 1;
+        match vulkan_block(pf) {
+            Some((format, texels)) => {
+                assert_eq!(
+                    texels,
+                    width * height,
+                    "{pf:?}: {width}x{height} against {format:?}"
+                );
+                checked += 1;
+            }
+            None => unchecked.push(pf),
+        }
+    }
+    // 14 BC, 6 EAC, 4 ETC2, 8 PVRTC, and ASTC's 16 footprints in 3 profiles.
+    assert_eq!(compressed, 14 + 6 + 4 + 8 + 16 * 3, "compressed formats");
+    assert_eq!(checked, 14 + 6 + 4 + 14 * 3, "checked against the registry");
+    // The 8 PVRTC formats and ASTC's 4x2 and 8x4 in 3 profiles.
+    assert_eq!(unchecked.len(), 8 + 6, "{unchecked:?}");
+    for &pf in &unchecked {
+        assert!(
+            pvrtc(pf)
+                || matches!(pf, astc_without_a_vulkan_block!())
+                || matches!(
+                    repr(pf),
+                    Repr::Candidates(_, ref candidates)
+                        if candidates
+                            .iter()
+                            .all(|c| c.emulation == FormatEmulation::Decoded)
+                ),
+            "{pf:?}: a compressed format unchecked for no named reason"
+        );
+    }
+    assert_eq!(block_extent(P::RGBA8Unorm), None);
+    assert_eq!(block_extent(P::ASTC4x4HDR), Some([4, 4]));
+    assert_eq!(block_extent(P::ASTC12x10SRGB), Some([12, 10]));
+    assert_eq!(block_extent(P::ASTC4x2LDR), Some([4, 2]));
+}
