@@ -971,6 +971,15 @@ pub enum RuntimeDriverDefect {
     /// stays in memory of its own class, and its CPU copies go through a submission, as on a
     /// device without `VK_EXT_host_image_copy`.
     HostTransferImagesCopiedAtBind,
+    /// A host wait for any of several semaphores or fences to be signaled (`vkWaitSemaphores`
+    /// with `VK_SEMAPHORE_WAIT_ANY_BIT`, `vkWaitForFences` with `waitAll` false) loses a signal
+    /// that lands while the call is still registering a later one of them: it sleeps on to its
+    /// timeout although the condition it waited for was met. A wait that names one object loses
+    /// none. Nothing is refused: every host wait of the runtime names one object there — each
+    /// queue's completion waiter its queue's next fence or timeline value — and the scheduler's
+    /// thread sleeps on its condition variable, woken by the completion turns, in place of
+    /// waiting for the signals its held batches wait for to land on the GPU itself.
+    WaitForAnyObjectLosesASignal,
 }
 
 /// One device capability a refusal can name.

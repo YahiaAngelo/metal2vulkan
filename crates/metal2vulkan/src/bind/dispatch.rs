@@ -669,7 +669,8 @@ impl BindingPlan {
     ///   dispatch.
     /// - A `Threads` dispatch runs at group counts of its own, enough threadgroups of its own
     ///   threadgroup size to cover the grid, whatever a whole number of them that grid is
-    ///   ([`regions`]); the record is [`DispatchCommands::region_record`], which the consumer
+    ///   (`regions`, a private reader that spreads the count a grid needs over the axes the
+    ///   device admits); the record is [`DispatchCommands::region_record`], which the consumer
     ///   writes.
     ///
     /// Any other form is `Unsupported{GpuEncodedIndirectCommands, NotImplemented}`.

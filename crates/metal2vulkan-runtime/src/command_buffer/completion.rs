@@ -46,7 +46,8 @@
 //!   submitted to an idle `VkQueue` is waited for by that queue's own waiter, so it completes when
 //!   its work does, not when another queue's does. No wait names several objects: MoltenVK 1.4.1's
 //!   wait for any of several timelines (`vkWaitSemaphores` with `VK_SEMAPHORE_WAIT_ANY_BIT`,
-//!   `mvkWaitSemaphores`) loses a signal that lands while it is still registering a later timeline,
+//!   `mvkWaitSemaphores`) loses a signal that lands while it is still registering a later timeline
+//!   (`RuntimeDriverDefect::WaitForAnyObjectLosesASignal`, `driver_defects.rs`),
 //!   so the waiter saw the batch only when its 100 ms wait ran out (the consumer's guest presented
 //!   at about a quarter of Metal's rate); its wait for any of several fences has the same flaw. A
 //!   wait for one timeline or one fence counts its one signal under a lock, and loses none. The

@@ -29,6 +29,7 @@ const BAKED_SAMPLERS: RuntimeDriverDefect = RuntimeDriverDefect::ImmutableSample
 const SET_SUPPORT: RuntimeDriverDefect = RuntimeDriverDefect::SetLayoutSupportUnderstated;
 const PART_VIEWS: RuntimeDriverDefect = RuntimeDriverDefect::LazilyAllocatedSubresourceViews;
 const BIND_COPIES: RuntimeDriverDefect = RuntimeDriverDefect::HostTransferImagesCopiedAtBind;
+const LOST_SIGNALS: RuntimeDriverDefect = RuntimeDriverDefect::WaitForAnyObjectLosesASignal;
 
 /// Every committed profile's driver has its defects at every release and GPU but those a probe
 /// found clean: MoltenVK the multisampled depth/stencil colour copies, the inexact depths past
@@ -36,11 +37,11 @@ const BIND_COPIES: RuntimeDriverDefect = RuntimeDriverDefect::HostTransferImages
 /// compiled at load, the copies of compressed images that rewrite texels, the reads of command
 /// buffers after their signal, the frees that fail pending work, the destroys that fail a
 /// submission encoding meanwhile, the pushed sets' unset buffer sizes, the set layouts its support
-/// query refuses though it runs them and the textureless views of some of a lazily allocated
-/// image's levels or layers and the block-compressed image it copies out of host memory at bind
-/// time with a one-block row pitch; lavapipe the colour copies, the depth/stencil resolve of the
-/// first layer and level, the explicit plane's rows past its height and the baked samplers lost
-/// after a copy;
+/// query refuses though it runs them, the textureless views of some of a lazily allocated image's
+/// levels or layers, the block-compressed image it copies out of host memory at bind time with a
+/// one-block row pitch and the signal its wait for any of several objects loses; lavapipe the
+/// colour copies, the depth/stencil resolve of the first layer and level, the explicit plane's
+/// rows past its height and the baked samplers lost after a copy;
 /// RADV the multisampled copies that convert float NaNs, and the implicit
 /// preprocessing after an execution set on every GPU but the 780M at 26.2.4 (Phoenix's and Hawk
 /// Point's), measured clean; ANV
@@ -75,6 +76,7 @@ fn the_committed_profiles_drivers_have_their_defects() {
                     SET_SUPPORT,
                     PART_VIEWS,
                     BIND_COPIES,
+                    LOST_SIGNALS,
                 ]
             }
             Some(DriverId::MESA_LLVMPIPE) => vec![COPIES, RESOLVES, PAST_HEIGHT, BAKED_SAMPLERS],
@@ -245,6 +247,40 @@ fn hawk_points_780m_is_phoenixs_measured_identity() {
         assert!(properties.driver_facts.is_empty(), "{text}");
         assert!(of(&other).contains(&PREPROCESS), "{device:#x} {release:#x}");
     }
+}
+
+/// The scheduler's thread waits for the GPU itself (one `vkWaitSemaphores` for any of the event
+/// values its heads wait for, or the device's nudge) on every driver whose wait for any of several
+/// objects loses no signal, and sleeps on its condition variable where one is lost
+/// (`scheduler::waits_on_gpu`). On every committed MoltenVK profile it does not wait on the GPU,
+/// and on every other committed profile it does; the decision reads the device's defects, so a
+/// driver that gains or loses the row moves with it, and the driver's name decides nothing.
+#[test]
+fn the_scheduler_waits_on_the_gpu_where_no_signal_is_lost() {
+    use crate::scheduler::waits_on_gpu;
+    let mut moltenvk = 0;
+    let mut others = 0;
+    for (stem, desc) in super::capabilities::committed_descriptions() {
+        let defects = of(&desc);
+        let loses = desc.driver_id == Some(DriverId::MOLTENVK);
+        assert_eq!(defects.contains(&LOST_SIGNALS), loses, "{stem}");
+        assert_eq!(waits_on_gpu(&defects), !loses, "{stem}");
+        *(if loses { &mut moltenvk } else { &mut others }) += 1;
+    }
+    assert!(
+        moltenvk > 0 && others > 0,
+        "{moltenvk} MoltenVK, {others} other"
+    );
+    // The defect alone decides: a set holding it waits on no GPU, and one without it does,
+    // whatever else the set holds.
+    assert!(!waits_on_gpu(&[LOST_SIGNALS].into_iter().collect()));
+    assert!(!waits_on_gpu(
+        &[LOST_SIGNALS, LATE_READS].into_iter().collect()
+    ));
+    assert!(waits_on_gpu(&Default::default()));
+    assert!(waits_on_gpu(
+        &[LATE_READS, BIND_COPIES].into_iter().collect()
+    ));
 }
 
 /// Each clean identity is a measured one: a committed profile of the driver, GPU and release

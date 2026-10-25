@@ -106,9 +106,11 @@
 //!   (`EventShared::value`, which waits for what it reads), then checks and submits. Every other
 //!   waker (a commit, a host signal, a finished decode, a lost device, a stop) signals the nudge,
 //!   under the lock, where the thread waits so; a completion turn needs not, as the thread's own
-//!   wait sees the signal the turn saw. Not on MoltenVK 1.4.1, whose wait for any of several
-//!   semaphores loses a signal that lands while it registers a later one (`completion.rs`): there
-//!   the thread sleeps on its condition variable, woken by the turns. Counted:
+//!   wait sees the signal the turn saw. Not where the driver's wait for any of several objects
+//!   loses a signal that lands while it registers a later one
+//!   (`RuntimeDriverDefect::WaitForAnyObjectLosesASignal`, `driver_defects.rs`; MoltenVK's):
+//!   there the thread sleeps on its condition variable, woken by the turns, and
+//!   [`waits_on_gpu`] says which. Counted:
 //!   `WorkCounts::scheduler_gpu_waits`; checked by `runtime_lane::event_round_trips`, a host
 //!   signal included.
 //! - **Exit.** Each submission is a section of the exit guard ([`exit_guard`]); once the process
@@ -156,8 +158,9 @@ use ash::vk;
 use binary::{BinarySignals, Needs};
 use inbox::Inbox;
 use left::{work_through, Kind, Left};
+use metal2vulkan::error::RuntimeDriverDefect;
 use order::{Behind, Order};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{fence, AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
@@ -171,6 +174,16 @@ const WAIT_SLICE: Duration = Duration::from_millis(100);
 /// command buffer's waiters wait for about that many submissions, not for every ready batch's.
 /// A multiple of a group's batches (`command_buffer/group.rs`).
 const PASS_SUBMISSIONS: usize = 16;
+
+/// Whether the thread of a device whose driver has `defects` waits for the GPU itself where its
+/// heads wait only for submitted signals to land (the module docs,
+/// [`Scheduler::wait_on_gpu`]): its one `vkWaitSemaphores` names several objects, which a driver
+/// that loses a signal landing while it registers a later one would miss, so the thread sleeps on
+/// its condition variable there instead, woken by the completion turns. The question is the
+/// driver's, and the defect answers it, never the driver's name.
+pub(crate) fn waits_on_gpu(defects: &BTreeSet<RuntimeDriverDefect>) -> bool {
+    !defects.contains(&RuntimeDriverDefect::WaitForAnyObjectLosesASignal)
+}
 
 /// The device's nudge (the module docs): a timeline semaphore of its own, which a waker signals
 /// to the value the thread waits for beside the GPU's signals.
@@ -558,8 +571,8 @@ impl Scheduler {
 
     /// Wait for the GPU itself where heads wait for signals to land, with `semaphore`, a timeline
     /// semaphore at 0 of the device of `functions`, which destroys it after stopping the thread,
-    /// as its nudge (the module docs): on a device whose wait for any of several semaphores loses
-    /// no signal.
+    /// as its nudge (the module docs): on a device whose driver loses no signal in a wait for any
+    /// of several objects ([`waits_on_gpu`]).
     pub(crate) fn wait_on_gpu(&self, functions: Functions, semaphore: vk::Semaphore) {
         let _ = self.shared.nudge.set(Nudge {
             functions,

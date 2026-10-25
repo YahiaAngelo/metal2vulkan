@@ -181,6 +181,27 @@ pub(super) struct Affected {
 ///   fences are signaled with it, so a fence there only added a `vkCreateFence` to the commit
 ///   path, which NVIDIA's 615.71.09 held for up to 1.9 s while other processes' work ran.
 ///
+/// `WaitForAnyObjectLosesASignal`:
+/// - MoltenVK (`MOLTENVK`): a host wait for any of several objects to be signaled, which the
+///   driver serves by registering a wait on each of them in turn (`vkWaitSemaphores` with
+///   `VK_SEMAPHORE_WAIT_ANY_BIT`, `mvkWaitSemaphores` in `MVKSync.mm`, over the shared events its
+///   timeline semaphores are signaled through; `vkWaitForFences` with `waitAll` false has the same
+///   shape), loses a signal that lands on an object it registered already while it is still
+///   registering a later one, and sleeps on to its timeout although the condition it waited for
+///   was met. A wait that names one object loses none. Measured on 1.4.1 (driverVersion 10401): a
+///   completion waiter waiting for any of the device's queue timelines to reach its batch's value
+///   saw the batch only when its 100 ms slice ran out, where a wait naming that one timeline
+///   returns at the signal (the Vulkan consumer's guest presented at about a quarter of Metal's
+///   rate meanwhile). Known broken through 1.4.1; 1.4.2 is unprobed and takes it. The scheduler's
+///   wait on the GPU is a wait of that shape and is not measured apart. Nothing is refused: no
+///   host wait of the runtime names several objects there. Each `VkQueue`'s completion waiter
+///   waits for its queue's first pending batch, for that batch's fence or else for that one
+///   timeline value (`command_buffer/completion.rs`), and the scheduler's thread sleeps on its
+///   condition variable, woken by the completion turns, in place of waiting on the GPU for the
+///   signals its heads wait for to land (`scheduler::waits_on_gpu`). Every other driver's thread
+///   waits on the GPU, one `vkWaitSemaphores` for any of those event values or the nudge's next,
+///   so a signal wakes it from the driver with no completion turn and no waker between.
+///
 /// `ImplicitPreprocessAfterExecutionSet`:
 /// - Mesa's RADV (`MESA_RADV`): `vkCmdExecuteGeneratedCommandsEXT` of a layout not made for
 ///   explicit preprocessing dispatches the layout's preprocessing pipeline itself
@@ -427,6 +448,11 @@ pub(super) const AFFECTED: &[Affected] = &[
     },
     Affected {
         defect: RuntimeDriverDefect::ReadsCommandBuffersAfterTheirSignal,
+        driver: DriverId::MOLTENVK,
+        clean: &[],
+    },
+    Affected {
+        defect: RuntimeDriverDefect::WaitForAnyObjectLosesASignal,
         driver: DriverId::MOLTENVK,
         clean: &[],
     },

@@ -88,7 +88,6 @@ use functions::{Functions, Vk};
 use metal2vulkan::bind::RegionLimits;
 use metal2vulkan::device::{DeviceDescription, EnableSet};
 use metal2vulkan::error::RuntimeDriverDefect;
-use metal2vulkan::vk::DriverId;
 use relay::Flights;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1613,9 +1612,9 @@ impl Device {
         let lost = Arc::new(AtomicBool::new(false));
         let relays = (properties.description.driver_facts())
             .contains(&metal2vulkan::device::DriverFact::QueueFailuresReportedByMessenger);
-        // Read before the properties move into the device's shared state (below): still keyed on
-        // the driver's name, for the scheduler's wait alone.
-        let moltenvk = properties.description.driver_id == Some(DriverId::MOLTENVK);
+        // Read before the properties move into the device's shared state (below): whether the
+        // scheduler's thread waits for the GPU itself (`scheduler::waits_on_gpu`).
+        let waits_on_gpu = crate::scheduler::waits_on_gpu(&properties.driver_defects);
         if let (Some(relay), true) = (instance.relay(), relays) {
             for slot in &queues {
                 let queue = slot.with(|queue| queue);
@@ -1762,11 +1761,10 @@ impl Device {
             exit_guard::runs_in_process(device);
         }
         // The scheduler's thread waits for the GPU itself where heads wait for signals to land,
-        // but on MoltenVK, whose wait for any of several semaphores loses a signal that lands
-        // while it registers a later one (`command_buffer/completion.rs`). Still keyed on the
-        // driver's name: its home is a `RuntimeDriverDefect` beside
-        // `ReadsCommandBuffersAfterTheirSignal`, which this commit does not open.
-        if !moltenvk {
+        // but not where the driver loses a signal that lands while its wait for any of several
+        // objects registers a later one (`RuntimeDriverDefect::WaitForAnyObjectLosesASignal`,
+        // `driver_defects.rs`): there the turns wake it. A defect fact, never the driver's name.
+        if waits_on_gpu {
             (shared.scheduler).wait_on_gpu(Functions::clone(&shared.functions), shared.nudge);
         }
         let device = Device(shared);
