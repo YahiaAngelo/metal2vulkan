@@ -186,7 +186,8 @@ fn buffers_back_exactly_the_formats_metal_answers_for() {
     // Probe 9 took none of the formats Metal makes no texture of alone (the 69 two-plane YCbCr
     // formats and three more): a buffer's texture of one is refused before this rule
     // (`texture_over`). It did take `R10Unorm_PACKED` and `RG10Unorm_PACKED`, which answer 16 for
-    // the alignment and nil for every texture, so they stay in the sweep.
+    // the alignment and whose texture over a buffer Metal does make
+    // (`metal::format::packed_codes`), so they stay in the sweep.
     let skipped =
         |pf: P| no_texture_alone(pf) && !matches!(pf, P::R10UnormPACKED | P::RG10UnormPACKED);
     let unprobed = P::ALL.iter().copied().filter(|&pf| skipped(pf)).count();

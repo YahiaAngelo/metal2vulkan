@@ -2313,9 +2313,13 @@ impl Device {
         offset: Option<u64>,
         planned: &mut Option<Planned>,
     ) -> Result<Texture, Error> {
-        let (call, heap_type) = match offset {
-            Some(_) => ("new_texture_at_offset", HeapType::Placement),
-            None => ("new_texture", HeapType::Automatic),
+        let (call, heap_type, creator) = match offset {
+            Some(_) => (
+                "new_texture_at_offset",
+                HeapType::Placement,
+                Creator::Placement,
+            ),
+            None => ("new_texture", HeapType::Automatic, Creator::Device),
         };
         let bytes = heap.check_type(call, heap_type)?.clone();
         // A detach waits for none being made in the heap (`detach.rs`), nor does a rebind of it
@@ -2324,7 +2328,7 @@ impl Device {
         // The descriptor first: what plain Metal answers nil for (a format of which it makes no
         // texture alone, `Unspecialized`) comes before the heap's storage mode and
         // `framebufferOnly`, which Metal stops for another format.
-        let layout = match self.heap_layout(call, descriptor, Creator::Device) {
+        let layout = match self.heap_layout(call, descriptor, creator) {
             // A placement heap makes a two-plane extended-range cube or cube array, which the
             // device and an automatic heap answer nil for: the runtime's gap.
             Err(Error::Nil(Nil {

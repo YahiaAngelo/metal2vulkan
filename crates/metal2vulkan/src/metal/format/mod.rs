@@ -36,9 +36,11 @@ use crate::vk;
 
 pub(crate) mod extended_srgb;
 mod footprint;
+mod packed_codes;
 pub(crate) mod padded_srgb;
 mod word;
 pub use footprint::{footprint, Footprint};
+pub(crate) use packed_codes::packed_codes;
 pub use word::{WordAttachment, WordField};
 
 /// How a Metal pixel format is represented on a device, for a set of usages.

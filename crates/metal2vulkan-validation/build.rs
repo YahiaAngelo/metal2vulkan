@@ -158,6 +158,7 @@ fn main() {
         "metal2vulkan/src/metal/format/extended_srgb.rs",
         "metal2vulkan/src/metal/format/footprint.rs",
         "metal2vulkan/src/metal/format/mod.rs",
+        "metal2vulkan/src/metal/format/packed_codes.rs",
         "metal2vulkan/src/metal/format/padded_srgb.rs",
         "metal2vulkan/src/metal/format/word.rs",
         "metal2vulkan/src/metal/generated.rs",

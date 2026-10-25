@@ -21,6 +21,7 @@
 //! `tests::heap_footprint_formats` replays.
 
 use super::block_extent;
+use super::packed_codes;
 use crate::metal::PixelFormat;
 
 /// The bytes of one ASTC block, whatever its texel extent.
@@ -60,8 +61,18 @@ pub enum Footprint {
     /// already answers for the extended-range twins of it
     /// ([`ExtendedRange::Planes`](super::ExtendedRange::Planes)).
     TwoPlanes,
-    /// Metal describes the format, takes a descriptor naming it, and makes no texture of it in
-    /// any type: the query answers 0 bytes.
+    /// Metal describes the format, takes a descriptor naming it, and lays out no image storage
+    /// for it anywhere: the query answers 0 bytes. It does make a **texture** of such a format
+    /// from every creator that needs no image laid out — a placement heap's offset, the shared
+    /// creator, a buffer, an IOSurface plane and `Memoryless` storage — and answers nil from the
+    /// device's own creator and from an automatic heap, which would each have to lay the image
+    /// out.
+    ///
+    /// Its whole membership is `R10Unorm_PACKED` and `RG10Unorm_PACKED`, whose texels are a
+    /// stream of 10-bit codes three to a 32-bit word: a code crosses byte boundaries, so the
+    /// format has no element size to lay out and Metal lays out none. This crate holds no image
+    /// of such a stream, so a texture of one is refused `NotImplemented(Format)` from the
+    /// creators Metal makes it from, rather than answered Metal's nil.
     NoTexture,
 }
 
@@ -138,13 +149,12 @@ pub fn footprint(pf: PixelFormat) -> Option<Footprint> {
         P::RGB10A82P | P::RGB10A82PSRGB | P::RGB10A82PPQ | P::RGB10A82PHLG => {
             Some(Footprint::TwoPlanes)
         }
-        // `R10Unorm_PACKED` and `RG10Unorm_PACKED`: Metal takes a descriptor naming either and
-        // makes no texture of it in any type in a mode that holds memory, so the query answers 0
-        // bytes. A packed 10-bit code crosses byte boundaries, so there is no element size to count
-        // and Metal counts none. `Memoryless` storage is the one mode where
-        // `newTextureWithDescriptor:` answers a texture of either, which is why this crate's
-        // refusal there names the format and is its own gap rather than Metal's nil.
-        P::R10UnormPACKED | P::RG10UnormPACKED => Some(Footprint::NoTexture),
+        // `R10Unorm_PACKED` and `RG10Unorm_PACKED`: Metal lays out no image storage for either
+        // (`packed_codes`), so the query answers 0 bytes. A packed 10-bit code crosses byte
+        // boundaries, so there is no element size to count and Metal counts none. The creators
+        // that need no image laid out do make a texture of both, which is why this crate's
+        // refusal from each of them names the format and is its own gap rather than Metal's nil.
+        _ if packed_codes(pf) => Some(Footprint::NoTexture),
         _ => None,
     }
 }

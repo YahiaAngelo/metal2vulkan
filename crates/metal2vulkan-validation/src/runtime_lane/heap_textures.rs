@@ -1286,9 +1286,11 @@ fn tiling_refusal(error: &Error) -> Option<LinearNeed> {
 /// (`TextureProblem::Unspecialized`, Metal's nil; an M4 under macOS 27.0.1, every
 /// usage). A format Metal makes no texture of from a descriptor alone, such as a two-plane YCbCr
 /// one, takes Metal's answers too: 0 bytes from the query, at 16 for a two-plane YCbCr 2D texture
-/// and 128 for another, and nil from the call (`Error::Nil`, `TextureProblem::NoTextureOfFormat`);
-/// so do `R10Unorm_PACKED` and `RG10Unorm_PACKED`, whose footprint is Metal's `NoTexture` shape,
-/// at 16.
+/// and 128 for another, and nil from the call (`Error::Nil`, `TextureProblem::NoTextureOfFormat`).
+/// `R10Unorm_PACKED` and `RG10Unorm_PACKED` take the query's 0 bytes at 16 and the **gap's**
+/// refusal from the call: plain Metal lays out no image storage for either, which is the 0 bytes,
+/// and a placement heap of its makes a texture of either at offset 0 all the same
+/// (`Footprint::NoTexture`), so a nil here would claim a refusal Metal does not make.
 /// A format whose heap footprint its own structure decides and of which this crate holds no image
 /// (`metal::format::footprint`) answers that footprint, non-zero, and refuses the call alone
 /// `NotImplemented(Format)`: on an Apple M3 Max under macOS 27.0.1 (26A434) plain Metal answers
@@ -1380,15 +1382,13 @@ fn shared_heap_textures_are_made_or_refused_for_linear_tiling() {
                 (Ok(answer), Err(error)) if error == no_texture => {
                     let pf = descriptor.pixel_format;
                     // The two-plane YCbCr formats, `RGBA16Float_XR`, `AnyDepth` and `AnyStencil`
-                    // (`no_texture_alone`), and the two packed 10-bit formats, whose footprint is
-                    // Metal's `NoTexture` shape: a packed 10-bit code crosses byte boundaries, so
-                    // there is no element to count and Metal counts none. A **placement** heap of
-                    // plain Metal's answers one of the packed pair a texture of 0 allocated bytes
-                    // at offset 0 all the same, where its device and its automatic heap answer
-                    // nil; this crate's nil here is its own gap, not Metal's answer.
-                    let packed = footprint(pf) == Some(Footprint::NoTexture);
-                    assert!(no_texture_alone(pf) || packed, "{what}: {error:?}");
-                    let rows = metal2vulkan::metal::format::ycbcr_format(pf).is_some() || packed;
+                    // (`no_texture_alone`). The two packed 10-bit formats are **not** here: a
+                    // placement heap of plain Metal's answers one of them a texture of 0
+                    // allocated bytes at offset 0, where the device's creator and an automatic
+                    // heap answer nil, so this creator's refusal of them is this crate's own gap
+                    // and reaches the arm below.
+                    assert!(no_texture_alone(pf), "{what}: {error:?}");
+                    let rows = metal2vulkan::metal::format::ycbcr_format(pf).is_some();
                     let align = if rows { 16 } else { 128 };
                     assert_eq!((answer.size, answer.align), (0, align), "{what}")
                 }
@@ -1404,12 +1404,26 @@ fn shared_heap_textures_are_made_or_refused_for_linear_tiling() {
                     let Some(shape) = footprint(pf) else {
                         panic!("{what}: answered {answer:?} with no footprint of its own")
                     };
-                    assert_ne!(
-                        shape,
-                        Footprint::NoTexture,
-                        "{what}: a format Metal makes no texture of answered {answer:?}"
-                    );
-                    assert!(answer.size > 0, "{what}: answered {answer:?}");
+                    // A packed 10-bit format is the one whose footprint is `NoTexture`, 0 bytes
+                    // at 16: Metal lays out no image storage for it anywhere, which is why the
+                    // query counts nothing, and a placement heap makes a texture of it over the
+                    // caller's offset all the same (`Footprint::NoTexture`'s own docs). So its 0-byte
+                    // answer stands beside the refusal here, where every other format of this arm
+                    // answers a footprint of its own.
+                    if shape == Footprint::NoTexture {
+                        assert_eq!(
+                            (answer.size, answer.align),
+                            (0, 16),
+                            "{what}: answered {answer:?}"
+                        );
+                    } else {
+                        assert_ne!(
+                            shape,
+                            Footprint::NoTexture,
+                            "{what}: a format Metal makes no texture of answered {answer:?}"
+                        );
+                        assert!(answer.size > 0, "{what}: answered {answer:?}");
+                    }
                     no_image.push(format!("{what}: {answer:?}"));
                 }
                 (Ok(answer), Err(error)) => panic!("{what}: answered {answer:?}, made {error:?}"),

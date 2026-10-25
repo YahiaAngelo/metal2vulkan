@@ -731,9 +731,11 @@ fn texture_types_follow_probe_5s_verdicts_per_format() {
         // Probe 5 took no format Metal makes no texture of from a descriptor alone, which
         // answers nil for every type here, but `AnyDepth` and `AnyStencil`, whose 1D, 1D array
         // and 3D textures Metal stops. `R10Unorm_PACKED` and `RG10Unorm_PACKED` are here too:
-        // Metal takes a descriptor naming either in every type and makes a texture of neither
-        // (an M3 Max under macOS 27.0.1, the `format-footprints-packed-without-textures`
-        // recording).
+        // Metal takes a descriptor naming either in every type and the **device's** creator,
+        // which these descriptors ask in `Shared` storage, makes a texture of neither (an M3 Max
+        // under macOS 27.0.1, the `format-footprints-packed-without-textures` recording). The
+        // creators that lay out no image storage of their own do make one, which
+        // `a_packed_ten_bit_descriptor_is_made_where_metal_lays_out_no_storage` holds.
         if no_texture_alone(pf) {
             let any_depth = matches!(pf, PixelFormat::AnyDepth | PixelFormat::AnyStencil);
             for ty in TYPES {
@@ -1240,4 +1242,111 @@ fn two_plane_ycbcr_textures_follow_metal_s_rules() {
             "{pf:?}"
         );
     }
+}
+
+/// A packed 10-bit format's descriptor is made from exactly the creators that lay out no image
+/// storage of their own, and answers Metal's nil from the two that lay the image out themselves.
+///
+/// Metal lays out no image storage for `R10Unorm_PACKED` or `RG10Unorm_PACKED`
+/// (`metal::format::packed_codes`, which carries the measurement), so the rule is one rule and
+/// not five special cases: a placement heap's offset, the shared creator's 16 bytes, a buffer's
+/// or an IOSurface plane's own memory and `Memoryless` storage each need no layout and Metal
+/// makes a texture of either format from them; the device's own creator and an automatic heap
+/// would each have to lay it out, and Metal answers nil. The heap size query makes nothing, so it
+/// keeps the nil and answers the footprint's 0 bytes.
+///
+/// `check_made`'s `Ok` here is not a texture: the creator's own image or texel planning answers
+/// `Unsupported(Format, NotImplemented)` after it, this crate holding no image of a packed code
+/// stream. What this test pins is that the descriptor is no longer refused as **Metal's** nil
+/// where Metal makes one.
+///
+/// Every storage mode is asked of every creator, in two texture types, with `RGBA8Unorm` beside
+/// each cell: a mode's or a type's refusal would show in the control first and the cell would say
+/// nothing.
+#[test]
+fn a_packed_ten_bit_descriptor_is_made_where_metal_lays_out_no_storage() {
+    use PixelFormat as P;
+    let modes = [
+        StorageMode::Shared,
+        StorageMode::Managed,
+        StorageMode::Private,
+        StorageMode::Memoryless,
+    ];
+    let creators = [
+        Creator::Device,
+        Creator::Placement,
+        Creator::Shared,
+        Creator::Buffer,
+        Creator::OverSurface,
+        Creator::SizeQuery,
+    ];
+    // The cells plain Metal answered a texture in, one entry per (creator, storage) it was asked
+    // at: a placement heap and a buffer in either mode, the shared creator in `Private` (its other
+    // modes are nil for every format), and the device's own creator memoryless. A heap holds no
+    // memoryless texture and no buffer is memoryless, so those two cells are the rule carried
+    // where nothing was asked, as `no_storage_laid_out` says.
+    const MADE_WITHOUT_STORAGE: &[(Creator, StorageMode)] = &[
+        (Creator::Placement, StorageMode::Shared),
+        (Creator::Placement, StorageMode::Managed),
+        (Creator::Placement, StorageMode::Private),
+        (Creator::Placement, StorageMode::Memoryless),
+        (Creator::Buffer, StorageMode::Shared),
+        (Creator::Buffer, StorageMode::Managed),
+        (Creator::Buffer, StorageMode::Private),
+        (Creator::Buffer, StorageMode::Memoryless),
+        (Creator::Shared, StorageMode::Private),
+        (Creator::Device, StorageMode::Memoryless),
+    ];
+    let mut made = 0usize;
+    let mut nil = 0usize;
+    for ty in [TextureType::Type2D, TextureType::Type2DArray] {
+        for mode in modes {
+            let options = ResourceOptions::new(
+                mode,
+                CpuCacheMode::DefaultCache,
+                HazardTrackingMode::Default,
+            );
+            for creator in creators {
+                let of_format = |pf| TextureDescriptor {
+                    pixel_format: pf,
+                    resource_options: options,
+                    usage: TextureUsage::SHADER_READ,
+                    ..of(ty, [8, 8, 1])
+                };
+                // The control: this creator, this mode and this type make an ordinary texture, so
+                // nothing below is a refusal of the cell's shape.
+                assert_eq!(
+                    of_format(P::RGBA8Unorm)
+                        .check_made(creator, APPLE)
+                        .map(|_| ()),
+                    Ok(()),
+                    "the control at {creator:?} {mode:?} {ty:?}"
+                );
+                for pf in [P::R10UnormPACKED, P::RG10UnormPACKED] {
+                    // Metal's answer, read off the measurement rather than off the rule under
+                    // test: the pairs below are the cells it made a texture in, and a rule that
+                    // agreed with itself but not with them fails here.
+                    let no_layout = MADE_WITHOUT_STORAGE.contains(&(creator, mode));
+                    let want = if no_layout {
+                        Ok(())
+                    } else {
+                        Err(Refused::Nil(TextureProblem::NoTextureOfFormat))
+                    };
+                    assert_eq!(
+                        of_format(pf).check_made(creator, APPLE).map(|_| ()),
+                        want,
+                        "{pf:?} at {creator:?} {mode:?} {ty:?}"
+                    );
+                    if no_layout {
+                        made += 1;
+                    } else {
+                        nil += 1;
+                    }
+                }
+            }
+        }
+    }
+    // 2 formats x 2 types x (a placement heap and a buffer in 4 modes, the shared creator in
+    // `Private`, the device's in `Memoryless`) made; the rest Metal's nil.
+    assert_eq!((made, nil), (40, 56));
 }
