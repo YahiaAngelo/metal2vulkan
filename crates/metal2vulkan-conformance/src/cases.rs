@@ -135,6 +135,7 @@ pub mod pixel_samplers;
 pub mod primitive_type_crossings;
 pub mod pvrtc_cpu_order;
 pub mod pvrtc_rows;
+pub mod rate_map_degenerate_forms;
 pub mod rate_map_sweeps;
 pub mod rate_maps;
 pub mod render_chains;
@@ -398,6 +399,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in rate_map_sweeps::parameter_data() {
+        cases.push(Box::new(case));
+    }
+    for case in rate_map_degenerate_forms::all() {
         cases.push(Box::new(case));
     }
     for case in tile_threadgroups::all() {

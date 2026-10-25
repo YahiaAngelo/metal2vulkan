@@ -6585,10 +6585,21 @@ fn every_case_carries_a_cost_recording() {
     /// Cases a whole-set `cost --write` has not covered because they were authored after the last
     /// one ran.
     ///
-    /// Empty, and a name here is a bill rather than a property of the case: nothing in authoring a
-    /// case produces a record, so a case is covered only where a later whole-set run includes it,
-    /// and the next one empties the list again.
-    const AFTER_THE_LAST_RUN: [&str; 0] = [];
+    /// A name here is a bill rather than a property of the case: nothing in authoring a case
+    /// produces a record, so a case is covered only where a later whole-set run includes it, and
+    /// the next one empties the list again.
+    ///
+    /// These four are the degenerate screen extent crossed with the descriptor's construction
+    /// routes ([`crate::cases::rate_map_degenerate_forms`] and `rate-map-degenerate-form-sweep`),
+    /// authored after the last whole-set `cost --write`. A cost record needs the whole set measured
+    /// in both shapes -- a case's counts depend on what ran before it in the same process -- so a
+    /// selection cannot pay it and the next whole-set run empties these four lines again.
+    const AFTER_THE_LAST_RUN: [&str; 4] = [
+        "rate-map-degenerate-form-sweep",
+        "rate-map-zero-width-layers-subscript",
+        "rate-map-zero-width-with-layer-count-and-layers",
+        "rate-map-zero-width-with-screen-size-and-layer",
+    ];
 
     /// Cases a whole-set run did not cover although they were committed before it ran.
     ///

@@ -41,6 +41,20 @@
 //! rather than one twice. That is a real finding about the quantization, not a case passing by
 //! coincidence.
 //!
+//! # The degenerate screen extent, crossed with every construction route
+//!
+//! A screen extent of 0 is a descriptor Metal's own API validation refuses and plain Metal
+//! compiles, and [`crate::cases::rate_maps`]'s `rate-map-zero-screen-width` compares one of them
+//! whole, parameter data included. It compares exactly **one** construction route, because it
+//! predates the others; [`Walk::Forms`] compares all five routes but only at
+//! [`space::SWEEP_EXTENT`], where nothing is degenerate. So the crossing of the two — a route
+//! other than `setLayer:atIndex:` reaching a descriptor whose screen has a zero axis — was
+//! covered by nothing. [`Walk::DegenerateForms`] is that crossing: every route that builds a
+//! descriptor of one layer, over each of the three degenerate screens
+//! ([`DEGENERATE_SCREENS`]), with `setLayer:atIndex:` among them as the control the other three
+//! are read against. The three one-layer routes at `0` by `64` are compared whole, parameter data
+//! included, by [`crate::cases::rate_map_degenerate_forms`].
+//!
 //! # Why every case here is safe
 //!
 //! Nothing reaches the GPU. A rate map is compiled on the CPU, its getters are CPU reads, and both
@@ -85,6 +99,39 @@ pub const LAYERS: &str = "rate-map-layer-sweep";
 /// compiles.
 pub const FORMS: &str = "rate-map-descriptor-forms";
 
+/// The descriptor forms again, over a screen with a zero axis: the crossing neither the forms walk
+/// nor `rate-map-zero-screen-width` reaches (the module docs).
+pub const DEGENERATE_FORMS: &str = "rate-map-degenerate-form-sweep";
+
+/// The three screens with a zero axis, which are the whole of the degenerate space: a zero width, a
+/// zero height, and both.
+///
+/// Each one is a shape whose compiled answer is already **measured** on this family's oracle and
+/// pinned by the runtime's own table — `0` by `64` derives `0` by `33`, `64` by `0` derives `33` by
+/// `0`, and `0` by `0` derives `0` by `0` — so none of them is a compile nobody has run on this
+/// chip. What is unmeasured, and what this walk measures, is whether the construction **route**
+/// changes any of them. The table is here rather than in [`crate::rate_map_space`] because it is
+/// not a point of the swept space: `space::SCREENS` deliberately omits 0, with its reason written
+/// down, and a degenerate extent is a shape the space holds every other walk away from.
+pub const DEGENERATE_SCREENS: &[[u32; 2]] = &[[0, 64], [64, 0], [0, 0]];
+
+/// The construction routes [`Walk::DegenerateForms`] crosses the degenerate screens with: every
+/// route that builds a descriptor of **one** layer.
+///
+/// [`RateMapForm::Holed`] is not among them, and that is a bound rather than an omission. It builds
+/// a descriptor Metal counts as having **no** layers, and a map of no layers over a zero screen
+/// extent is a shape nobody has run on this chip: the two halves of it are each measured safe
+/// alone (`rate-map-no-layers` at 256 by 256, `rate-map-zero-screen-width` at 0 by 64) and their
+/// crossing is not. A descriptor of three layers and both coordinate maps over a map of no layers
+/// are measured to end plain Metal's process, so an unmeasured crossing of two shapes next to
+/// those is not one to reach for in a recording run.
+const DEGENERATE_ROUTES: &[RateMapForm] = &[
+    RateMapForm::ScreenSizeThenSetLayer,
+    RateMapForm::ScreenSizeAndLayer,
+    RateMapForm::ScreenSizeLayerCountLayers,
+    RateMapForm::LayersSubscript,
+];
+
 /// Which sweep a case is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Walk {
@@ -98,6 +145,8 @@ enum Walk {
     Layers,
     /// The descriptor's construction forms, at one shape.
     Forms,
+    /// The descriptor's construction forms again, over each screen with a zero axis.
+    DegenerateForms,
 }
 
 /// One sweep of the space.
@@ -128,6 +177,10 @@ pub fn all() -> Vec<RateMapSweep> {
         RateMapSweep {
             name: FORMS,
             walk: Walk::Forms,
+        },
+        RateMapSweep {
+            name: DEGENERATE_FORMS,
+            walk: Walk::DegenerateForms,
         },
     ]
 }
@@ -231,6 +284,31 @@ impl Walk {
                 }
                 out
             }
+            // Every one-layer construction route over every screen with a zero axis. The layer is
+            // the one `rate-map-zero-screen-width` states — a half on each axis — so the descriptor
+            // of the `0` by `64` row is that case's descriptor exactly and the route is the only
+            // thing that moved. `setLayer:atIndex:` is swept here too, as the control the other
+            // three are read against: a difference between routes shows as a row of this walk
+            // differing from its own control row, in one recording, rather than against another
+            // case's file.
+            Walk::DegenerateForms => {
+                let layers = vec![RateMapLayer::uniform(
+                    space::SCREEN_SWEEP_QUALITY,
+                    space::SCREEN_SWEEP_QUALITY,
+                )];
+                let mut out = Vec::new();
+                for screen in DEGENERATE_SCREENS {
+                    for form in DEGENERATE_ROUTES {
+                        out.push(Point {
+                            at: format!("{}-at-{}x{}", form.at(), screen[0], screen[1]),
+                            screen: *screen,
+                            layers: layers.clone(),
+                            form: *form,
+                        });
+                    }
+                }
+                out
+            }
         }
     }
 }
@@ -266,18 +344,28 @@ impl Point {
     /// Whether the compiled map is the identity inside its screen, so that making it announces
     /// nothing.
     ///
-    /// A map whose every quality sample is 1 maps every screen pixel to itself; anything else is
-    /// drawn region by region, which the runtime announces as the `rasterization-rate-map`
-    /// degradation when the map is made. A point that is not the identity is why this family keeps
-    /// a notice allowance.
+    /// A map whose every tile spans as many screen pixels as physical ones maps every screen pixel
+    /// to itself; anything else is drawn region by region, which the runtime announces as the
+    /// `rasterization-rate-map` degradation when the map is made. A point that is not the identity
+    /// is why this family keeps a notice allowance.
+    ///
+    /// It is decided **per axis**, which only a degenerate screen distinguishes. An axis of no
+    /// screen pixels is one tile of nothing — no screen pixels and no physical ones — so it is the
+    /// identity whatever quality it was given, while the *other* axis of the same map is not if its
+    /// quality is below 1. `0` by `64` at a half is exactly that shape, and it is the one
+    /// `rate-map-zero-screen-width` compares and declares the notice for. Reading a zero extent as
+    /// making the whole map the identity would leave this walk's `0` by `64` and `64` by `0` rows
+    /// declaring no notice while the runtime announces one, which is a divergence of the suite's
+    /// own making.
     fn identity(&self) -> bool {
-        self.screen[0] == 0
-            || self.screen[1] == 0
-            || self.layers.iter().all(|layer| {
-                [&layer.horizontal, &layer.vertical]
-                    .into_iter()
-                    .all(|axis| axis.iter().all(|sample| *sample >= 1.0))
-            })
+        self.layers.iter().all(|layer| {
+            [
+                (&layer.horizontal, self.screen[0]),
+                (&layer.vertical, self.screen[1]),
+            ]
+            .into_iter()
+            .all(|(axis, extent)| extent == 0 || axis.iter().all(|sample| *sample >= 1.0))
+        })
     }
 
     /// The coordinate grid over this point's map, with each physical probe scaled to the layer's
@@ -1122,6 +1210,125 @@ mod tests {
             .map(|point| point.form.at())
             .collect();
         assert_eq!(forms.len(), 5, "a descriptor form is not stated: {forms:?}");
+    }
+
+    /// The degenerate cross states **every** one-layer construction route at **every** screen with
+    /// a zero axis, and nothing else: the crossing is complete or it is not a crossing.
+    #[test]
+    fn the_degenerate_cross_is_every_route_by_every_degenerate_screen() {
+        let points = Walk::DegenerateForms.points();
+        assert_eq!(
+            points.len(),
+            DEGENERATE_ROUTES.len() * DEGENERATE_SCREENS.len(),
+            "the degenerate cross states {} points for {} routes over {} screens",
+            points.len(),
+            DEGENERATE_ROUTES.len(),
+            DEGENERATE_SCREENS.len()
+        );
+        let mut seen = BTreeSet::new();
+        for point in &points {
+            assert!(
+                DEGENERATE_SCREENS.contains(&point.screen),
+                "the cross states {:?}, which is not a degenerate screen",
+                point.screen
+            );
+            assert!(
+                point.screen[0] == 0 || point.screen[1] == 0,
+                "the cross states {:?}, which has no zero axis, so the point is not degenerate",
+                point.screen
+            );
+            assert!(
+                point.form.takes(point.layers.len()),
+                "the cross states {:?} at {} layers, which it does not take",
+                point.form,
+                point.layers.len()
+            );
+            seen.insert((point.form.at(), point.screen));
+        }
+        assert_eq!(
+            seen.len(),
+            points.len(),
+            "a route and screen pair is stated twice"
+        );
+        // And the control is in it: without `setLayer:atIndex:` the walk would have nothing of its
+        // own to read the other three routes against.
+        assert!(
+            DEGENERATE_ROUTES.contains(&RateMapForm::ScreenSizeThenSetLayer),
+            "the cross drops its own control route"
+        );
+    }
+
+    /// The degenerate screens derive **three** answers and not one, so the cross is comparing
+    /// something at each of them rather than one constant twelve times.
+    ///
+    /// Only `physicalSizeForLayer:` is read here: the coordinate maps over a zero screen extent are
+    /// a shape the whole family keeps away from. Our side reaching three answers is a statement
+    /// about the walk's design, never about what Metal should answer — the recording is that.
+    #[test]
+    fn the_degenerate_screens_derive_their_own_answers() {
+        let mut answers = BTreeSet::new();
+        for point in Walk::DegenerateForms.points() {
+            let extent = extent(point.screen, &point.layers)
+                .unwrap_or_else(|| panic!("{} compiles", point.at));
+            answers.insert((point.screen, extent));
+        }
+        let distinct: BTreeSet<[u32; 2]> = answers.iter().map(|(_, extent)| *extent).collect();
+        assert_eq!(
+            distinct.len(),
+            DEGENERATE_SCREENS.len(),
+            "the three degenerate screens derive {} distinct physical extents, so the cross \
+             compares one answer at more than one of them: {answers:?}",
+            distinct.len()
+        );
+    }
+
+    /// The identity is decided **per axis**, which is what a degenerate screen distinguishes: a
+    /// screen with one zero axis and a quality below 1 on the other is **not** the identity, and a
+    /// screen of two zero axes is.
+    ///
+    /// Without this, a zero extent read as making the whole map the identity leaves the `0` by `64`
+    /// and `64` by `0` rows declaring no notice while the runtime announces one — a divergence the
+    /// suite would have manufactured. `rate-map-zero-screen-width` compares the same descriptor and
+    /// declares the notice, so the two halves of the family would also have disagreed about one
+    /// shape.
+    #[test]
+    fn a_degenerate_screen_is_the_identity_only_where_both_axes_are() {
+        let by_screen: std::collections::BTreeMap<[u32; 2], bool> = Walk::DegenerateForms
+            .points()
+            .iter()
+            .map(|point| (point.screen, point.identity()))
+            .collect();
+        assert_eq!(
+            by_screen.get(&[0, 64]),
+            Some(&false),
+            "0 by 64 at a half on each axis is not the identity: its vertical axis lays 64 \
+             screen pixels into 33 physical ones"
+        );
+        assert_eq!(
+            by_screen.get(&[64, 0]),
+            Some(&false),
+            "64 by 0 at a half on each axis is not the identity: its horizontal axis lays 64 \
+             screen pixels into 33 physical ones"
+        );
+        assert_eq!(
+            by_screen.get(&[0, 0]),
+            Some(&true),
+            "0 by 0 is the identity whatever its qualities: both axes are one tile of no \
+             screen pixels and no physical ones"
+        );
+        // And the answer is the compiled map's own, not a rule restated here.
+        for (screen, identity) in &by_screen {
+            let map = compiled(
+                *screen,
+                &[space::uniform_layer(space::SCREEN_SWEEP_QUALITY)],
+            )
+            .expect("a degenerate screen compiles");
+            assert_eq!(
+                map.is_identity(),
+                *identity,
+                "{screen:?}: the walk calls it identity={identity} and the compiled map disagrees"
+            );
+        }
     }
 
     /// The walks fingerprint differently, so no recording of one is read against another's.
