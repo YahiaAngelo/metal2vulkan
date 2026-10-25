@@ -948,8 +948,11 @@ fn command_state(c: &CommandRecord) -> (BindState, BTreeMap<u32, u64>) {
 enum Run {
     /// Compiled plainly, each command its own direct dispatch.
     Plain,
-    /// A flat variant of this many threads per threadgroup.
+    /// A flat variant of this many threads per threadgroup, dispatched indirectly.
     Flat([u32; 3]),
+    /// A flat variant dispatched directly: each `dispatchThreads:` command in one region of its
+    /// own threadgroup size, reading the record `instantiate_dispatch` states.
+    FlatDirect,
     /// A folded variant of each command's threadgroup size.
     Folded,
 }
@@ -963,6 +966,9 @@ enum Run {
 /// (`VariantKey::flat_grid`) and each command runs as one indirect dispatch of that threadgroup
 /// size at the group counts of its flat dispatch ([`flat_groups`]), reading its grid from the
 /// region record at its `ReplayRegionAddress`, as a single-dispatch preprocess writes both. With
+/// [`Run::FlatDirect`], `entry` compiles as a flat variant too and each `dispatchThreads:` command
+/// runs as the one direct region `instantiate_dispatch` plans, of the command's own threadgroup
+/// size, reading the record the plan states (`DispatchCommands::region_record`). With
 /// [`Run::Folded`], `entry` compiles as a folded variant (`VariantKey::folded_groups`) and each
 /// threadgroup command runs as one indirect dispatch of its threadgroup size at its folded group
 /// counts ([`folded_counts`]), reading its group counts and grid from the region record at its
@@ -976,13 +982,16 @@ fn host_replay(
 ) -> Vec<u8> {
     const ROOT: u64 = 0x0000_0040_0000_0000;
     const REGION: u64 = 0x0000_0041_0000_0000;
+    // The variant's own threadgroup size where a flat variant's dispatches are indirect; a direct
+    // one takes each command's.
     let flat = match run {
         Run::Flat(local) => Some(local),
-        Run::Plain | Run::Folded => None,
+        Run::FlatDirect | Run::Plain | Run::Folded => None,
     };
+    let flat_grid = flat.is_some() || run == Run::FlatDirect;
     let folded = run == Run::Folded;
     let mut key = VariantKey::new();
-    key.flat_grid = flat.is_some();
+    key.flat_grid = flat_grid;
     key.folded_groups = folded;
     let inputs = key.lowering_inputs(Stage::Kernel);
     let pipe = pipeline(dev, bc, entry, &inputs).unwrap_or_else(|e| panic!("{stem}: {e}"));
@@ -1022,8 +1031,20 @@ fn host_replay(
             other => panic!("{other:?}"),
         };
         // A flat or folded dispatch's group counts and region record, which its preprocess
-        // writes.
+        // writes; a direct dispatch on a flat variant keeps its own counts and reads the record
+        // the plan states.
         let (dispatch, flat_counts, record) = match flat {
+            None if run == Run::FlatDirect => {
+                let volume = dispatch
+                    .threads_per_group()
+                    .iter()
+                    .map(|&l| u64::from(l))
+                    .product::<u64>();
+                if volume == 0 || volume > u64::from(FLAT_MAX) {
+                    continue;
+                }
+                (dispatch, None, Vec::new())
+            }
             None if folded => {
                 let Some((counts, record)) = folded_counts(dev, &dispatch) else {
                     continue;
@@ -1058,7 +1079,12 @@ fn host_replay(
         let cmds = plan
             .instantiate_dispatch(&state, &dispatch)
             .unwrap_or_else(|e| panic!("{stem}: {dispatch:?}: {e:?}"));
-        if flat.is_some() || folded {
+        // A direct dispatch on a flat variant: the record is the plan's, the consumer's to write.
+        let record = match cmds.region_record {
+            Some(bytes) => bytes.to_vec(),
+            None => record,
+        };
+        if flat_grid || folded {
             assert_eq!(
                 cmds.regions.len(),
                 1,
@@ -1070,6 +1096,11 @@ fn host_replay(
             let expected =
                 (flat.is_some() || folded).then_some(IndirectArgs::Buffer(IndirectRef::new(0, 0)));
             assert_eq!(region.indirect, expected, "{stem}");
+            assert_eq!(
+                cmds.region_record.is_some(),
+                run == Run::FlatDirect,
+                "{stem}: only a direct dispatch on a flat variant states its own record"
+            );
             // Each buffer the region reaches, and the allocation and offset its bytes return to.
             let mut buffers = Vec::new();
             let mut back: Vec<Option<(u64, usize)>> = Vec::new();
@@ -1142,7 +1173,7 @@ fn host_replay(
                 let (offset, address) = match *hole {
                     PushHole::RootTableAddress { offset, .. } => (offset, ROOT),
                     PushHole::ExecutionStatusAddress { offset, .. } => (offset, STATUS),
-                    PushHole::ReplayRegionAddress { offset, .. } if flat.is_some() || folded => {
+                    PushHole::ReplayRegionAddress { offset, .. } if flat_grid || folded => {
                         (offset, REGION)
                     }
                     other => panic!("{stem}: {other:?}"),
@@ -1863,7 +1894,9 @@ fn a_flat_variant_runs_every_grid_of_its_pipeline() {
 /// does, and `instantiate_dispatch` runs each command as one indirect region at its flat group
 /// counts, with no clamp prepass, reading its grid from the region record at its
 /// `ReplayRegionAddress`: each thread once, as Metal computes it, for threadgroup sizes other than
-/// the commands'. A direct dispatch of a flat plan is refused.
+/// the commands'. A direct `dispatchThreads:` of a flat plan is one region of its own threadgroup
+/// size, at group counts that cover the grid, reading the record the plan states; a direct
+/// `dispatchThreadgroups:` of one is refused.
 #[test]
 fn a_flat_variant_dispatches_outside_a_replay() {
     let Some(bc) = assemble("flat", FLAT) else {
@@ -1899,12 +1932,104 @@ fn a_flat_variant_dispatches_outside_a_replay() {
             threads: [10, 3, 1],
             threads_per_group: [8, 1, 1],
         };
-        match plan.instantiate_dispatch(&state, &direct) {
+        let cmds = plan
+            .instantiate_dispatch(&state, &direct)
+            .unwrap_or_else(|e| panic!("{stem}: {e:?}"));
+        assert_eq!(cmds.regions.len(), 1, "{stem}");
+        assert_eq!(cmds.regions[0].indirect, None, "{stem}");
+        assert!(cmds.indirect_clamp.is_none(), "{stem}");
+        // 10 x 3 threads is 30, which 4 threadgroups of 8 cover.
+        assert_eq!(cmds.regions[0].group_count, [4, 1, 1], "{stem}");
+        assert_eq!(
+            cmds.region_record,
+            Some(
+                crate::lower::dispatch::region_bytes([0; 3], [10, 3, 1], [8, 1, 1])
+                    .expect("a packable threadgroup size")
+            ),
+            "{stem}"
+        );
+        // Its threadgroups are the shader's, so a `dispatchThreadgroups:` has no flat form.
+        let groups = Dispatch::Threadgroups {
+            groups: [2, 1, 1],
+            threads_per_group: [8, 1, 1],
+        };
+        match plan.instantiate_dispatch(&state, &groups) {
             Err(BindError::Unsupported(u)) => {
                 assert_eq!(u.feature, Feature::GpuEncodedIndirectCommands, "{stem}")
             }
             other => panic!("{stem}: {:?}", other.map(|_| ())),
         }
+    }
+    assert!(ran > 0, "no profile with device addresses");
+}
+
+/// A direct `dispatchThreads:` whose grid is not a whole number of threadgroups runs, on every
+/// profile with device addresses, as one Vulkan dispatch of its own threadgroup size on the
+/// kernel's flat variant, in place of the interior and ragged-edge regions a split records: the
+/// kernel's own compiled SPIR-V, run over the plan's one region and the record the plan states,
+/// adds exactly what Metal adds. The kernel accumulates into one slot per grid thread, so a thread
+/// run twice, a thread not run, or an invocation past the grid taking a slot all move a word.
+#[test]
+fn a_direct_ragged_dispatch_on_a_flat_variant_runs_each_grid_thread_once() {
+    let Some(bc) = assemble("flat", FLAT) else {
+        return;
+    };
+    // Ragged on two axes (four split regions), ragged with no whole threadgroup along x (one),
+    // ragged on all three (eight), and a grid that is a whole number of threadgroups (one), each
+    // with its own output window inside the fixture's allocation.
+    let commands = vec![
+        flat_record(
+            Action::DispatchThreads {
+                grid: [10, 3, 1],
+                local_size: [4, 2, 1],
+            },
+            0,
+            0,
+        ),
+        flat_record(
+            Action::DispatchThreads {
+                grid: [5, 1, 1],
+                local_size: [8, 1, 1],
+            },
+            4,
+            120,
+        ),
+        flat_record(
+            Action::DispatchThreads {
+                grid: [5, 3, 5],
+                local_size: [4, 2, 3],
+            },
+            8,
+            144,
+        ),
+        flat_record(
+            Action::DispatchThreads {
+                grid: [4, 2, 1],
+                local_size: [4, 2, 1],
+            },
+            12,
+            448,
+        ),
+    ];
+    let mut params = vec![0u8; BYTES];
+    for (at, w) in [(0, 1000u32), (4, 7), (8, 99), (12, 0x8000_0000)] {
+        params[at..at + 4].copy_from_slice(&w.to_le_bytes());
+    }
+    let metal = metal_flat(&commands, &params);
+    let mut ran = 0;
+    for (stem, dev) in devices() {
+        if dev.profile().fields().buffer_access != BufferAccess::Addressed {
+            continue;
+        }
+        ran += 1;
+        let out = host_replay(
+            &stem,
+            (&dev, &bc, "flat"),
+            Run::FlatDirect,
+            &commands,
+            &params,
+        );
+        assert_eq!(words(&out), words(&metal), "{stem}");
     }
     assert!(ran > 0, "no profile with device addresses");
 }

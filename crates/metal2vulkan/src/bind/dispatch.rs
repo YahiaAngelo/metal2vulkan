@@ -9,7 +9,10 @@
 //! - `Threads` with a grid that is not a multiple of the threadgroup size becomes up to eight
 //!   regions per group-count chunk: the interior, and per axis an edge of one threadgroup of the
 //!   remaining threads, all with `MultiRegion = 1`, so the grid and the region base come from the
-//!   `DispatchRegion` push field.
+//!   `DispatchRegion` push field. On the plan of a flat variant ([`VariantKey::flat_grid`]) it is
+//!   one region instead, of the dispatch's own threadgroup size: its invocations count the grid's
+//!   threads in order and each takes the one it counts to, those past the last returning before
+//!   the body, so no edge and no group-count chunk is planned ([`regions`]).
 //! - A count above `maxComputeWorkGroupCount` on an axis is split into chunks, each a region
 //!   with `MultiRegion = 1` and its base in the push field. At most [`MAX_REGIONS`] regions are
 //!   planned; more is `Unsupported{GroupCount}`.
@@ -154,6 +157,13 @@ pub struct DispatchCommands {
     /// Per bound buffer slot, the window this dispatch can touch.
     pub extents: Vec<BufferExtent>,
     pub push_holes: Vec<PushHole>,
+    /// The 32-byte region record a direct dispatch on a flat variant
+    /// ([`VariantKey::flat_grid`]) reads: the consumer writes exactly these bytes where the
+    /// device reads them by address, 16-byte aligned, and fills the single
+    /// [`PushHole::ReplayRegionAddress`] with that address. `None` for every other dispatch: an
+    /// indirect one's record its preprocess writes, and a plan that is not a flat variant's reads
+    /// its region from its own push bytes.
+    pub region_record: Option<[u8; 32]>,
     /// The resident root table, when the function reads it.
     pub root_table: Option<RootTable>,
     /// The indirect-clamp prepass to record before the regions, when group counts are GPU-written
@@ -460,8 +470,37 @@ fn threadgroup_grid(groups: [u32; 3], l: [u32; 3]) -> Result<[u32; 3], BindError
     Ok(grid)
 }
 
-/// The regions of `dispatch` under `rules`.
-pub(crate) fn regions(rules: &LocalRules, dispatch: &Dispatch) -> Result<Planned, BindError> {
+/// The group counts of the one region a flat variant runs `need` threadgroups in: `need` spread
+/// over x, then y, then z within `rules.max_count`, so their product is at least `need` (the
+/// surplus invocations lie past the grid's last thread, which the lowering's guard retires). A
+/// `need` the limits cannot hold is `Unsupported{GroupCount}`.
+fn spread(need: u64, max_count: [u32; 3]) -> Result<[u32; 3], BindError> {
+    let mut left = need;
+    let mut out = [1u32; 3];
+    for i in 0..3 {
+        let max = u64::from(max_count[i].max(1));
+        let take = left.min(max);
+        out[i] = take as u32;
+        left = left.div_ceil(take);
+    }
+    if left > 1 {
+        return Err(BindError::Unsupported(Unsupported::not_representable(
+            Feature::GroupCount {
+                axis: Some(AXES[2]),
+            },
+        )));
+    }
+    Ok(out)
+}
+
+/// The regions of `dispatch` under `rules`, on the plan of a flat variant where `flat`
+/// ([`VariantKey::flat_grid`]): there a `Threads` grid that is not a whole number of threadgroups
+/// is one region of the dispatch's own threadgroup size, not an interior and its edges.
+pub(crate) fn regions(
+    rules: &LocalRules,
+    dispatch: &Dispatch,
+    flat: bool,
+) -> Result<Planned, BindError> {
     if rules.tile {
         check_tile_dispatch(dispatch)?;
     }
@@ -540,6 +579,37 @@ pub(crate) fn regions(rules: &LocalRules, dispatch: &Dispatch) -> Result<Planned
             if empty(threads) {
                 return Ok(planned(Vec::new(), threads, false));
             }
+            // A flat variant runs the whole grid in one region of the dispatch's own threadgroup
+            // size: invocation `((wz · ny + wy) · nx + wx) · N + LocalInvocationIndex`, with
+            // `N = l.x·l.y·l.z`, counts the grid's threads `x` fastest and takes the one it counts
+            // to, and one past the grid's last thread returns before the body. The count runs over
+            // the single dispatch's group counts, so splitting them into regions would restart it
+            // in each and run the same threads again: the region is never chunked, and its counts
+            // only have to cover the grid ([`spread`]).
+            if flat {
+                let fit = fit(rules, &[l])?;
+                let n: u64 = l.iter().map(|&x| u64::from(x)).product();
+                let total: u128 = threads.iter().map(|&x| u128::from(x)).product();
+                let need = u64::try_from(total.div_ceil(u128::from(n))).map_err(|_| {
+                    BindError::Unsupported(Unsupported::not_representable(Feature::GroupCount {
+                        axis: None,
+                    }))
+                })?;
+                let region = Region {
+                    local: l,
+                    groups: spread(need, rules.max_count)?,
+                    base: [0; 3],
+                    // As the one region of a flat variant's indirect dispatch, so that both run on
+                    // the variant's one `VkPipeline`: a flat grid reads its threads from the
+                    // region record whatever this says.
+                    multi: false,
+                };
+                return Ok(planned(
+                    vec![region],
+                    threads,
+                    fit == Fit::EmulatedSimdgroups,
+                ));
+            }
             let mut edges = false;
             let pieces: [Vec<Piece>; 3] = std::array::from_fn(|i| {
                 let (full, rem) = (threads[i] / l[i], threads[i] % l[i]);
@@ -588,14 +658,21 @@ impl BindingPlan {
     /// never on the contents of an indirect buffer. A dispatch that runs on another variant of the
     /// pipeline ([`BindingPlan::dispatch_variant`]) is `BindError::NeedsVariant`.
     ///
-    /// The plan of a flat variant ([`VariantKey::flat_grid`]) runs one region, of the group counts
-    /// a preprocess wrote with the grid's flat dispatch (`flat_dispatch`), which lie within the
-    /// device's limits: `dispatch` is the `ThreadgroupsIndirect` of the variant's threadgroup size
-    /// at those counts, read by `vkCmdDispatchIndirect` with no clamp prepass (any other form is
-    /// `Unsupported{GpuEncodedIndirectCommands, NotImplemented}`). The region reads the grid from
-    /// the 32-byte region record the preprocess wrote beside them, whose device address fills its
-    /// `PushHole::ReplayRegionAddress`; the consumer orders the preprocess's writes of both before
-    /// the dispatch.
+    /// The plan of a flat variant ([`VariantKey::flat_grid`]) runs one region, which reads the
+    /// grid from a 32-byte region record whose device address fills its single
+    /// `PushHole::ReplayRegionAddress`:
+    ///
+    /// - A `ThreadgroupsIndirect` of the variant's threadgroup size runs at the group counts a
+    ///   preprocess wrote with the grid's flat dispatch (`flat_dispatch`), which lie within the
+    ///   device's limits, read by `vkCmdDispatchIndirect` with no clamp prepass; the record is the
+    ///   one the preprocess wrote beside them, and the consumer orders both writes before the
+    ///   dispatch.
+    /// - A `Threads` dispatch runs at group counts of its own, enough threadgroups of its own
+    ///   threadgroup size to cover the grid, whatever a whole number of them that grid is
+    ///   ([`regions`]); the record is [`DispatchCommands::region_record`], which the consumer
+    ///   writes.
+    ///
+    /// Any other form is `Unsupported{GpuEncodedIndirectCommands, NotImplemented}`.
     ///
     /// The plan of a folded variant ([`VariantKey::folded_groups`]) runs one region too, of its
     /// threadgroup size, at the group counts a preprocess wrote (Metal's folded within the device's
@@ -609,15 +686,16 @@ impl BindingPlan {
         dispatch: &Dispatch,
     ) -> Result<DispatchCommands, BindError> {
         let t = self.compute_template("instantiate_dispatch")?;
-        let records = if self.variant.flat_grid || self.variant.folded_groups {
-            if !matches!(dispatch, Dispatch::ThreadgroupsIndirect { .. }) {
-                return Err(not_implemented(Feature::GpuEncodedIndirectCommands));
-            }
-            Records::Flat
-        } else {
-            Records::Binder
+        let flat = self.variant.flat_grid;
+        let records = match (flat || self.variant.folded_groups, dispatch) {
+            (false, _) => Records::Binder,
+            (true, Dispatch::ThreadgroupsIndirect { .. }) => Records::Flat,
+            // A flat variant takes a direct dispatch too, whose record the consumer writes
+            // ([`DispatchCommands::region_record`]).
+            (true, Dispatch::Threads { .. }) if flat => Records::Flat,
+            (true, _) => return Err(not_implemented(Feature::GpuEncodedIndirectCommands)),
         };
-        let mut planned = regions(&t.local, dispatch)?;
+        let mut planned = regions(&t.local, dispatch, flat)?;
         if planned.emulated {
             return Err(BindError::NeedsVariant {
                 variant: Box::new(self.emulated_variant()),
@@ -658,7 +736,7 @@ impl BindingPlan {
             indirect: IndirectRef::new(0, 0),
             threads_per_group,
         };
-        let mut planned = regions(&t.local, &dispatch)?;
+        let mut planned = regions(&t.local, &dispatch, self.variant.flat_grid)?;
         if planned.emulated {
             return Err(BindError::NeedsVariant {
                 variant: Box::new(self.emulated_variant()),
@@ -684,11 +762,13 @@ impl BindingPlan {
     /// only the variant's compile knows.
     pub fn dispatch_variant(&self, dispatch: &Dispatch) -> Result<VariantKey, BindError> {
         let t = self.compute_template("dispatch_variant")?;
-        Ok(if regions(&t.local, dispatch)?.emulated {
-            self.emulated_variant()
-        } else {
-            self.variant.clone()
-        })
+        Ok(
+            if regions(&t.local, dispatch, self.variant.flat_grid)?.emulated {
+                self.emulated_variant()
+            } else {
+                self.variant.clone()
+            },
+        )
     }
 
     /// The plan's variant with emulated simdgroups.
@@ -768,8 +848,10 @@ enum Records {
     /// None: the binder writes each region's `DispatchRegion`, and an indirect dispatch's counts
     /// are Metal's, clamped to the device's limits where it needs.
     Binder,
-    /// A flat or folded variant's preprocess: the record at its `ReplayRegionAddress`, and the
-    /// group counts at its indirect arguments, within the device's limits.
+    /// A flat or folded variant's record at its `ReplayRegionAddress`: for an indirect dispatch
+    /// the preprocess writes it, and the group counts at its indirect arguments within the
+    /// device's limits; for a direct dispatch on a flat variant the consumer writes it
+    /// ([`DispatchCommands::region_record`]) and the region takes its own group counts.
     Flat,
     /// The device replay's preprocess: the records per command and region, the arguments, and the
     /// slot table that stands for the root table.
@@ -959,6 +1041,17 @@ fn instantiate(
         }
         _ => None,
     };
+    // A direct dispatch on a flat variant reads its region from the record the consumer writes
+    // (base 0, the dispatch's threadgroup size, and the grid in threads), since the flat lowering
+    // reads the record by address wherever its group counts come from.
+    let region_record = match (records, *dispatch) {
+        (Records::Flat, Dispatch::ThreadgroupsIndirect { .. }) | (Records::Binder, _) => None,
+        (Records::Flat, _) => Some(
+            region_bytes([0; 3], grid, nominal)
+                .ok_or_else(|| internal("an unpackable nominal threadgroup size"))?,
+        ),
+        (Records::Replay, _) => None,
+    };
     let mut descriptor_bytes = match t.table {
         Some((set, binding, _)) => vec![DescriptorBytes {
             set,
@@ -1002,6 +1095,7 @@ fn instantiate(
         descriptor_ranges,
         extents,
         push_holes,
+        region_record,
         root_table,
         indirect_clamp,
         uses,

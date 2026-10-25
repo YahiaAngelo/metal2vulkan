@@ -1341,10 +1341,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   Vulkan's copy forbids. Cost: the rows go through a tightly packed scratch buffer, which its
   creation clears by a fill it waits for: two copies instead of one.
 - `metal2vulkan-degrade-split-dispatch` (performance). `SplitDispatch`: A dispatch is more than one
-  Vulkan dispatch: its grid is not a whole number of threadgroups, or a group count is past the
-  device's `maxComputeWorkGroupCount`. Cost: one Vulkan dispatch per region (the interior and each
-  partial edge, per chunk of group counts), each on its own specialized pipeline, a barrier between
-  each two.
+  Vulkan dispatch: a group count is past the device's `maxComputeWorkGroupCount`, or its grid is not
+  a whole number of threadgroups and the kernel observes its threadgroup partition (a kernel that
+  does not runs any such grid as one dispatch of its own threadgroup size, every invocation taking
+  the grid thread it counts to). Cost: one Vulkan dispatch per region (the interior and each partial
+  edge, per chunk of group counts), each on its own specialized pipeline, a barrier between each
+  two.
 - `metal2vulkan-degrade-emulated-simdgroups` (performance). `EmulatedSimdgroups`: A dispatch whose
   threadgroups are not whole subgroups of the kernel's pinned subgroup size runs on the kernel's
   emulated-simdgroups variant. Cost: a second compile of the kernel whose simdgroup operations go

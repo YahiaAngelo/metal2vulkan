@@ -89,7 +89,7 @@ use metal2vulkan::bind::{
     BindShape, BindState, BindingPlan, Dispatch, DispatchCommands, FlatIndirect, HeapPlacement,
     ImageblockSize, StageInRegion, UseTarget,
 };
-use metal2vulkan::error::RuntimeDriverDefect;
+use metal2vulkan::error::{BindError, RuntimeDriverDefect};
 use metal2vulkan::metal::{BarrierScope, DispatchType, RenderStages, ResourceUsage};
 use metal2vulkan::pipeline::Stage;
 use std::collections::BTreeMap;
@@ -1778,7 +1778,8 @@ fn settle_indirect(
 ) -> Result<Option<(Arc<Variant>, Arc<BindingPlan>, FlatIndirect)>, Error> {
     if let Some(indirect) = call.indirect(pipeline) {
         let local = indirect.threads_per_threadgroup;
-        if let Some((variant, plan)) = pipeline.settle_flat(shape, local)? {
+        let flat = flat_dispatch(local);
+        if let Some((variant, plan)) = pipeline.settle_flat(shape, local, &flat)? {
             return Ok(Some((variant, plan, indirect)));
         }
     }
@@ -1789,6 +1790,55 @@ fn settle_indirect(
     Ok(pipeline
         .settle_folded(shape, local)?
         .map(|(variant, plan)| (variant, plan, indirect)))
+}
+
+/// The flat variant (`VariantKey::flat_grid`) a direct `dispatchThreads:` runs on, with its plan
+/// for `shape`: one Vulkan dispatch of the call's own threadgroup size, every invocation taking
+/// the grid thread it counts to and one past the grid's last returning before the body, in place
+/// of the interior and ragged-edge regions a split plans — Metal's own one dispatch, on one
+/// `VkPipeline`, with no barrier between regions and no `Degradation::SplitDispatch`.
+///
+/// `None`, so the dispatch keeps its exact split, where its grid is already a whole number of
+/// threadgroups on every axis (the split is one region, which the flat form cannot better), where
+/// the kernel observes its threadgroup partition or the device reaches no memory by device address
+/// (the compile layer's refusal, which the state remembers), where the flat form cannot cover the
+/// grid within the device's `maxComputeWorkGroupCount`, or in the large-buffer form, whose key
+/// `settle_flat` does not take.
+fn flat_direct(
+    pipeline: &ComputePipelineState,
+    shape: &BindShape,
+    dispatch: &Dispatch,
+    forms: BufferForms,
+) -> Result<Option<(Arc<Variant>, Arc<BindingPlan>)>, Error> {
+    let Dispatch::Threads {
+        threads,
+        threads_per_group,
+    } = *dispatch
+    else {
+        return Ok(None);
+    };
+    if forms != BufferForms::Bound {
+        return Ok(None);
+    }
+    // The split's regions per axis: its interior where whole threadgroups fill it, and an edge of
+    // the remainder. More than one region in all is what the flat form replaces with one.
+    let pieces = |i: usize| -> u32 {
+        let (full, rem) = match threads_per_group[i] {
+            0 => return 0,
+            l => (threads[i] / l, threads[i] % l),
+        };
+        u32::from(full > 0) + u32::from(rem > 0)
+    };
+    if (0..3).map(pieces).product::<u32>() <= 1 {
+        return Ok(None);
+    }
+    match pipeline.settle_flat(shape, threads_per_group, dispatch) {
+        Ok(settled) => Ok(settled),
+        // A grid the flat form cannot cover within the device's group-count limits: the split
+        // covers it exactly, region by region.
+        Err(Error::Bind(BindError::Unsupported(_))) | Err(Error::Unsupported(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// Whether a dispatch of `objects`'s variant records in a `VkCommandBuffer` of its own, its
@@ -1854,7 +1904,11 @@ fn settle_dispatch<'a>(
             (Some(last), ..) => (Arc::clone(last), true, None),
             (None, Some(dispatch), _) => {
                 let shape = state.shape();
-                let (variant, plan) = pipeline.settle(&shape, &dispatch, tables.forms)?;
+                let flat = flat_direct(pipeline, &shape, &dispatch, tables.forms)?;
+                let (variant, plan) = match flat {
+                    Some(flat) => flat,
+                    None => pipeline.settle(&shape, &dispatch, tables.forms)?,
+                };
                 let planned = Planned {
                     shape: Arc::new(shape),
                     dispatch,
@@ -2174,6 +2228,24 @@ fn record(
         }
         None => None,
     };
+    // A direct dispatch on a flat variant reads the record the plan states, in the command's own
+    // upload (16-aligned, as the variant reads it): the grid in threads is the call's, so nothing
+    // on the device writes it.
+    if let Some(bytes) = commands.region_record {
+        let device = core.device().clone();
+        let record = {
+            let mut state = core.command_buffer().state();
+            state
+                .uploads
+                .upload_aligned(&device, &bytes, bytes.len() as u64, 16)?
+        };
+        let Some(address) = record.device_address() else {
+            return Err(internal(
+                "a flat dispatch's region record without a device address",
+            ));
+        };
+        bound_tables.region_record = Some(address);
+    }
     // The listed function tables: set 1's elements, or the snapshot a variant without the
     // function-table array reads in set 0, which has no heap of its own.
     bound_tables = bound_tables.with_function_tables(function_tables);

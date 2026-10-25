@@ -398,12 +398,12 @@ fn local_sizes_are_checked_against_every_d4_limit() {
         groups: [1, 1, 1],
         threads_per_group: [0, 1, 1],
     };
-    assert!(regions(&rules(), &d).is_err());
+    assert!(regions(&rules(), &d, false).is_err());
     let d = Dispatch::Threadgroups {
         groups: [1, 1, 1],
         threads_per_group: [1025, 1, 1],
     };
-    assert!(regions(&rules(), &d).is_err());
+    assert!(regions(&rules(), &d, false).is_err());
     // An edge region is checked too: a flattened kernel's partial edge runs on the
     // emulated-simdgroups variant, and a full grid on the flattened pipeline.
     let mut r = rules();
@@ -413,12 +413,12 @@ fn local_sizes_are_checked_against_every_d4_limit() {
         threads: [40, 1, 1],
         threads_per_group: [32, 1, 1],
     };
-    assert!(regions(&r, &d).expect("edge").emulated);
+    assert!(regions(&r, &d, false).expect("edge").emulated);
     let d = Dispatch::Threads {
         threads: [64, 1, 1],
         threads_per_group: [32, 1, 1],
     };
-    assert!(!regions(&r, &d).expect("full").emulated);
+    assert!(!regions(&r, &d, false).expect("full").emulated);
 }
 
 /// A flattened (Direct) kernel's template: `sn` in one spec constant, whole 32-lane subgroups.
@@ -645,12 +645,12 @@ fn emulated_simdgroup_scratch_is_checked_per_region() {
         threads: [300, 1, 1],
         threads_per_group: [300, 1, 1],
     };
-    assert!(regions(&r, &d).is_err());
+    assert!(regions(&r, &d, false).is_err());
     let d = Dispatch::Threads {
         threads: [300, 1, 1],
         threads_per_group: [256, 1, 1],
     };
-    assert!(regions(&r, &d).is_ok(), "256 + an edge of 44");
+    assert!(regions(&r, &d, false).is_ok(), "256 + an edge of 44");
 }
 
 /// A range of a dispatch's threadgroups (a region tile dispatch) runs those threadgroups alone,
@@ -737,4 +737,197 @@ fn a_tile_sized_threadgroup_carries_the_tile_in_every_region() {
     let c = instantiate(&t, &state(0), &d).expect("plain");
     assert_eq!(spec_value(&c.regions[0].specialization, 3), Some(0));
     assert_eq!(push_words(&c.regions[0])[3..7], [7 | 7 << 10, 32, 16, 1]);
+}
+
+/// A flat variant's template (`VariantKey::flat_grid`): the 32-byte region record at
+/// `ReplayRegionAddress`, in place of the `DispatchRegion` push bytes an ordinary kernel reads.
+fn flat_grid_template() -> ComputeTemplate {
+    let f = |field, offset, size| PlacedField {
+        field,
+        loc: PushLoc::Push { offset },
+        size,
+    };
+    ComputeTemplate {
+        fields: vec![
+            f(PushField::ReplayRegionAddress, 0, 8),
+            f(PushField::SlotBindOffset(kslot(0)), 8, 4),
+        ],
+        push_range: Some((0, 12)),
+        ..template()
+    }
+}
+
+fn flat_variant() -> VariantKey {
+    let mut v = VariantKey::new();
+    v.flat_grid = true;
+    v
+}
+
+/// A `dispatchThreads:` whose grid is not a whole number of threadgroups is the interior and its
+/// ragged edges on an ordinary plan, each region a local size of its own; on the plan of a flat
+/// variant it is one region of the dispatch's own threadgroup size, at group counts that cover the
+/// grid, whose record the consumer writes (base 0, the threadgroup size, the grid in threads) where
+/// its `ReplayRegionAddress` hole points. The variant's direct and indirect dispatches take the
+/// same region key, so one `VkPipeline` runs both.
+#[test]
+fn a_flat_plan_runs_a_ragged_dispatch_in_one_region() {
+    let threads = [100, 50, 3];
+    let local = [8, 8, 1];
+    let d = Dispatch::Threads {
+        threads,
+        threads_per_group: local,
+    };
+    let s = state(0);
+
+    // The split: 96 + 4 threads on x, 48 + 2 on y, 3 whole threadgroups on z.
+    let split = instantiate(&template(), &s, &d).expect("the split regions");
+    assert_eq!(split.regions.len(), 4);
+    assert_eq!(split.region_record, None);
+    let locals: Vec<[u32; 3]> = split
+        .regions
+        .iter()
+        .map(|r| [0, 1, 2].map(|id| spec_value(&r.specialization, id).expect("a local size axis")))
+        .collect();
+    assert_eq!(
+        locals,
+        vec![[8, 8, 1], [8, 2, 1], [4, 8, 1], [4, 2, 1]],
+        "the interior and its ragged edges"
+    );
+
+    let t = flat_grid_template();
+    let flat = compute_plan(&t, flat_variant())
+        .instantiate_dispatch(&s, &d)
+        .expect("the flat region");
+    assert_eq!(flat.regions.len(), 1);
+    let r = &flat.regions[0];
+    assert_eq!(r.indirect, None);
+    assert_eq!(
+        [0, 1, 2].map(|id| spec_value(&r.specialization, id)),
+        local.map(Some),
+        "the dispatch's own threadgroup size, not an edge's"
+    );
+    // 100 x 50 x 3 threads is 15,000, which 235 threadgroups of 64 cover.
+    assert_eq!(r.group_count, [235, 1, 1]);
+    let covered: u32 = r.group_count.iter().product::<u32>() * local.iter().product::<u32>();
+    assert!(covered >= threads.iter().product::<u32>());
+    assert_eq!(
+        flat.region_record,
+        Some(region_bytes([0; 3], threads, local).expect("a packable threadgroup size")),
+    );
+    assert_eq!(
+        flat.push_holes,
+        vec![PushHole::ReplayRegionAddress {
+            stages: vk::ShaderStageFlags::COMPUTE,
+            offset: 0,
+        }],
+    );
+
+    // The variant's indirect dispatch: its one region's key is the direct one's, and its record is
+    // the preprocess's.
+    let indirect = Dispatch::ThreadgroupsIndirect {
+        indirect: IndirectRef::new(0, 0),
+        threads_per_group: local,
+    };
+    let gpu = compute_plan(&t, flat_variant())
+        .instantiate_dispatch(&s, &indirect)
+        .expect("the flat indirect region");
+    assert_eq!(gpu.regions.len(), 1);
+    assert_eq!(gpu.regions[0].specialization, r.specialization);
+    assert_eq!(gpu.region_record, None);
+}
+
+/// The flat form's counting, exhaustively over every grid up to 9 x 5 x 3 threads and every
+/// threadgroup up to 4 x 3 x 2, with group counts that spread over all three axes (a tight
+/// `maxComputeWorkGroupCount`) and group counts that do not: the one region's invocation
+/// `((wz · ny + wy) · nx + wx) · N + LocalInvocationIndex`, with `N = l.x·l.y·l.z`, counted over
+/// the grid `x` fastest, reaches every thread of the grid exactly once and no thread outside it,
+/// and the region holds at least the grid's threads (`nx·ny·nz·N >= threads.x·threads.y·threads.z`)
+/// so that none is left out. This is what makes the one region exact where the split's interior and
+/// edges are: every grid thread runs, and no thread past the grid does.
+#[test]
+fn a_flat_region_counts_every_grid_thread_exactly_once() {
+    for max_count in [[8, 8, 8], [65535, 65535, 65535]] {
+        let mut rules = rules();
+        rules.max_count = max_count;
+        for tx in 1..=9 {
+            for ty in 1..=5 {
+                for tz in 1..=3 {
+                    for lx in 1..=4 {
+                        for ly in 1..=3 {
+                            for lz in 1..=2 {
+                                let threads = [tx, ty, tz];
+                                let local = [lx, ly, lz];
+                                let d = Dispatch::Threads {
+                                    threads,
+                                    threads_per_group: local,
+                                };
+                                let planned = regions(&rules, &d, true).expect("one flat region");
+                                let what = format!("{threads:?} threads of {local:?}");
+                                assert_eq!(planned.regions.len(), 1, "{what}");
+                                assert_eq!(planned.grid, threads, "{what}");
+                                assert_eq!(planned.nominal, local, "{what}");
+                                let r = planned.regions[0];
+                                assert_eq!(r.local, local, "{what}");
+                                assert_eq!(r.base, [0; 3], "{what}");
+                                for (&count, &limit) in r.groups.iter().zip(&max_count) {
+                                    assert!(count >= 1 && count <= limit, "{what}");
+                                }
+                                let n = u64::from(lx) * u64::from(ly) * u64::from(lz);
+                                let [nx, ny, nz] = r.groups.map(u64::from);
+                                let [gx, gy, gz] = threads.map(u64::from);
+                                let total = gx * gy * gz;
+                                assert!(nx * ny * nz * n >= total, "{what}");
+                                // The lowering's walk: each invocation takes the grid thread its
+                                // index counts to, and one whose `z` is past the grid returns
+                                // before the body (`lower::dispatch`'s `KernelDecl::flat`).
+                                let mut seen = vec![0u32; total as usize];
+                                for wz in 0..nz {
+                                    for wy in 0..ny {
+                                        for wx in 0..nx {
+                                            for lin in 0..n {
+                                                let group = (wz * ny + wy) * nx + wx;
+                                                let index = group * n + lin;
+                                                let x = index % gx;
+                                                let row = index / gx;
+                                                let (y, z) = (row % gy, row / gy);
+                                                if z >= gz {
+                                                    continue;
+                                                }
+                                                seen[((z * gy + y) * gx + x) as usize] += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                let wrong = seen.iter().filter(|&&n| n != 1).count();
+                                assert_eq!(wrong, 0, "{what}: {wrong} threads not run once");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A grid the flat form's threadgroups cannot cover within the device's `maxComputeWorkGroupCount`
+/// is `Unsupported{GroupCount}`, so the dispatch keeps its exact split (`compute::flat_direct`).
+#[test]
+fn a_flat_region_that_cannot_cover_the_grid_is_refused() {
+    let mut rules = rules();
+    rules.max_count = [2, 2, 2];
+    let d = Dispatch::Threads {
+        threads: [9, 5, 3],
+        threads_per_group: [1, 1, 1],
+    };
+    let e = regions(&rules, &d, true).expect_err("135 threadgroups in 8");
+    assert!(
+        matches!(&e, BindError::Unsupported(u) if matches!(
+            u.feature,
+            Feature::GroupCount { axis: Some(Axis::Z) }
+        )),
+        "{e:?}"
+    );
+    // The split covers it: 9 x 5 x 3 threadgroups in chunks of two per axis.
+    let planned = regions(&rules, &d, false).expect("the split");
+    assert_eq!(planned.regions.len(), 5 * 3 * 2);
 }

@@ -1323,24 +1323,32 @@ impl ComputePipelineState {
         Ok(Some((variant, plan)))
     }
 
-    /// The flat variant (`VariantKey::flat_grid`) an indirect dispatch of a bind state of `shape`
-    /// runs on in threadgroups of `local` threads, with its plan for `shape`: the variant the first
-    /// plan names for that dispatch, with the flat grid, compiled when first needed
-    /// (`indirect_dispatch.rs`). `None` where the compile layer refuses the kernel one,
-    /// `Unsupported{GpuEncodedIndirectCommands}`: the kernel observes its threadgroup partition
-    /// (`KernelFacts::partition_oblivious`), or the device reaches no memory by device address. The
-    /// state remembers the refusal, which no bind shape changes.
+    /// The flat variant (`VariantKey::flat_grid`) `dispatch`, of a bind state of `shape`, runs on
+    /// in threadgroups of `local` threads, with its plan for `shape`: the variant the first plan
+    /// names for one region of `local` threads, with the flat grid, compiled when first needed.
+    /// `dispatch` is an indirect dispatch at the group counts a preprocess writes
+    /// (`indirect_dispatch.rs`) or a direct `dispatchThreads:` whose grid the variant's one region
+    /// covers (`compute::flat_direct`); the variant's plan must run that very dispatch, which the
+    /// check against `key` states. `None` where the compile layer refuses the kernel a flat
+    /// variant, `Unsupported{GpuEncodedIndirectCommands}`: the kernel observes its threadgroup
+    /// partition (`KernelFacts::partition_oblivious`), or the device reaches no memory by device
+    /// address. The state remembers that refusal, which no bind shape changes.
     pub(super) fn settle_flat(
         &self,
         shape: &BindShape,
         local: [u32; 3],
+        dispatch: &Dispatch,
     ) -> Result<Option<(Arc<Variant>, Arc<BindingPlan>)>, Error> {
         if self.0.flat_refused.load(Ordering::Relaxed) {
             return Ok(None);
         }
-        let dispatch = flat_dispatch(local);
         let plan = self.0.base.plan(&self.0.device, shape)?;
-        let mut key = plan.dispatch_variant(&dispatch).map_err(Error::Bind)?;
+        // One region of `local` threads, which every flat dispatch runs: a plan that is not a flat
+        // variant's would split a ragged grid into regions of several sizes instead, and ask for
+        // the emulated-simdgroups variant where one of those cannot run.
+        let mut key = plan
+            .dispatch_variant(&flat_dispatch(local))
+            .map_err(Error::Bind)?;
         key.flat_grid = true;
         let variant = match self.variant(&key) {
             Ok(variant) => variant,
@@ -1353,7 +1361,7 @@ impl ComputePipelineState {
             Err(error) => return Err(error),
         };
         let plan = variant.plan(&self.0.device, shape)?;
-        if plan.dispatch_variant(&dispatch).map_err(Error::Bind)? != key {
+        if plan.dispatch_variant(dispatch).map_err(Error::Bind)? != key {
             return Err(internal(
                 "the plan of a flat variant asks for another variant",
             ));
