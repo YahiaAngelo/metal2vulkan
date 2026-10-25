@@ -4351,10 +4351,13 @@ impl Device {
         };
         // An attachment cleared and resolved into another pixel format by a pass without a draw
         // call renders into a backing of its own, which copies nothing back: its texture keeps
-        // its texels, as Metal's keeps them there (`render.rs`).
+        // its texels, as Metal's keeps them there (`render.rs`). So does one whose samples a
+        // resolve after the pass reads, rendered through the image its texture keeps, from which
+        // the pass copies nothing back either (`resolve::keep_samples`).
         let kept = |color: &ColorTarget| {
-            color.clears_and_resolves_across_formats()
-                && color.stand_in.as_ref().is_some_and(|s| !s.copies())
+            (color.clears_and_resolves_across_formats()
+                && color.stand_in.as_ref().is_some_and(|s| !s.copies()))
+                || (color.stand_in.as_ref()).is_some_and(|s| s.cause == Cause::KeptSamples)
         };
         // A texture over a buffer rendered through an image the pass copies nothing back from
         // where it does not store it (a shadow, `render/shadows.rs`; a stand-in, which copies
@@ -4842,11 +4845,13 @@ impl Device {
                 });
             } else if matches!(
                 stand_in.cause,
-                Cause::Linear | Cause::KeptBytes | Cause::Magnitude
+                Cause::Linear | Cause::KeptBytes | Cause::Magnitude | Cause::KeptSamples
             ) {
                 // Announced where `linear_attachment.rs` or `kept_bytes.rs` chose the kept image; a
                 // magnitude stand-in's pass tests and keeps the depth as Metal's
-                // (`texture/signed_depth.rs`, which announces what it does not).
+                // (`texture/signed_depth.rs`, which announces what it does not). An image that
+                // keeps an attachment's samples for a resolve after the pass makes the pass
+                // Metal's, which no notice names (`resolve::keep_samples`).
             } else if memoryless
                 && (index.is_some_and(fetched) || (index.is_none() && shadow) || !chosen)
             {

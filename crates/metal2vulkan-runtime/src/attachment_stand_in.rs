@@ -52,6 +52,11 @@
 //!   image is linear over the buffer's bytes: Metal leaves the buffer's bytes, so the pass renders
 //!   it through the image its texture keeps, copied into where the pass loads it (`Load`), and
 //!   never back (`kept_bytes.rs`).
+//! - **A multisampled color attachment whose samples a resolve after the pass reads**, which the
+//!   pass stores nothing of (`MultisampleResolve`): Metal leaves the texture's samples as they
+//!   were, and the crate-owned resolve (`color_resolve.rs`) reads the samples the pass stores, so
+//!   the pass renders it through the image its texture keeps, copied into where the pass loads it
+//!   (`Load`), and never back (`resolve::keep_samples`).
 //! - **A render target's depth that may hold a negative value or a NaN**
 //!   (`texture/signed_depth.rs`), which a pass loads: it renders over its magnitude stand-in, the
 //!   image its texture keeps for the queue (`kept_backing`), whose words the pass writes from the
@@ -155,6 +160,12 @@ pub(super) enum Cause {
     /// from the depth before the pass and merged back after it (`texture/signed_depth.rs`), not
     /// by the stand-in's own copies.
     Magnitude,
+    /// A multisampled color attachment the pass stores nothing of (`MultisampleResolve`) whose
+    /// samples a resolve the runtime draws after the pass reads, which the pass must store for it
+    /// (`resolve::keep_samples`): it renders through the image its texture keeps for the queue,
+    /// copied into where the pass loads it and never back, so the texture keeps the samples it
+    /// held before the pass, as Metal's does.
+    KeptSamples,
 }
 
 impl StandIn {

@@ -322,7 +322,9 @@ use super::render_values::{
 };
 use super::replay::Replay;
 use super::residency::Residency;
-use super::resolve::{DepthStencilResolve, Resolve, ResolveCopies, ResolveMode, ResolveSource};
+use super::resolve::{
+    self, DepthStencilResolve, Resolve, ResolveCopies, ResolveMode, ResolveSource,
+};
 use super::resource::ResourceKey;
 use super::sample_planes::{self, Planes, PlanesCommands};
 use super::sample_positions;
@@ -4231,6 +4233,17 @@ impl RenderLowering {
             executes,
             |index| handed.contains(index),
             |index| viewed.contains(index),
+            |index| taken.contains(index),
+        )?;
+        // A multisampled color attachment whose samples a resolve the runtime draws after the
+        // pass reads, where the pass stores nothing of it (`MultisampleResolve`): it renders
+        // through an image its texture keeps, so the texture keeps the samples it held before the
+        // pass, as Metal's does, while the resolve reads what the pass rendered
+        // (`resolve::keep_samples`).
+        resolve::keep_samples(
+            core.command_buffer(),
+            &mut layout.colors,
+            executes,
             |index| taken.contains(index),
         )?;
         linear_attachment::settle(core.command_buffer(), &mut layout.colors, other, |index| {

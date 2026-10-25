@@ -2381,10 +2381,14 @@ field	metal2vulkan-runtime::ShaderCacheStatistics.driver_saves	pub driver_saves:
 field	metal2vulkan-runtime::ShaderCacheStatistics.evictions	pub evictions: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.hits	pub hits: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.misses	pub misses: u64
+field	metal2vulkan-runtime::ShaderCacheStatistics.queued_hits	pub queued_hits: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.read_failures	pub read_failures: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.rejected	pub rejected: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.write_failures	pub write_failures: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.writes	pub writes: u64
+field	metal2vulkan-runtime::ShaderCacheStatistics.writes_on_thread	pub writes_on_thread: u64
+field	metal2vulkan-runtime::ShaderCacheStatistics.writes_queued	pub writes_queued: u64
+field	metal2vulkan-runtime::ShaderCacheStatistics.written_bytes	pub written_bytes: u64
 field	metal2vulkan-runtime::ShadowKeeps.blit_cut	pub blit_cut: u64
 field	metal2vulkan-runtime::ShadowKeeps.blit_cut_texels	pub blit_cut_texels: u64
 field	metal2vulkan-runtime::ShadowKeeps.blit_whole	pub blit_whole: u64
@@ -2540,8 +2544,12 @@ field	metal2vulkan-runtime::WorkCounts.compressed_rows_rewritten	pub compressed_
 field	metal2vulkan-runtime::WorkCounts.copy_regions_split	pub copy_regions_split: u64
 field	metal2vulkan-runtime::WorkCounts.copy_sites	pub copy_sites: [CopySite; 32]
 field	metal2vulkan-runtime::WorkCounts.cpu_block_decodes	pub cpu_block_decodes: u64
+field	metal2vulkan-runtime::WorkCounts.creation_dispatch_pipelines_drawn	pub creation_dispatch_pipelines_drawn: u64
+field	metal2vulkan-runtime::WorkCounts.creation_dispatch_pipelines_made	pub creation_dispatch_pipelines_made: u64
 field	metal2vulkan-runtime::WorkCounts.creation_pipelines_drawn	pub creation_pipelines_drawn: u64
 field	metal2vulkan-runtime::WorkCounts.creation_pipelines_made	pub creation_pipelines_made: u64
+field	metal2vulkan-runtime::WorkCounts.creation_render_pipelines_drawn	pub creation_render_pipelines_drawn: u64
+field	metal2vulkan-runtime::WorkCounts.creation_render_pipelines_made	pub creation_render_pipelines_made: u64
 field	metal2vulkan-runtime::WorkCounts.dedicated_memory_blocks_live	pub dedicated_memory_blocks_live: u64
 field	metal2vulkan-runtime::WorkCounts.depth16_sided_draws	pub depth16_sided_draws: u64
 field	metal2vulkan-runtime::WorkCounts.depth_attachments_moved	pub depth_attachments_moved: u64
@@ -5055,6 +5063,7 @@ macro-member	metal2vulkan-runtime::Degradation::SampleDepthClamp	SampleDepthClam
 macro-member	metal2vulkan-runtime::Degradation::SamplePlanes	SamplePlanes = "sample-planes", Performance,
 macro-member	metal2vulkan-runtime::Degradation::SeparateDepthStencil	SeparateDepthStencil = "separate-depth-stencil", Performance,
 macro-member	metal2vulkan-runtime::Degradation::SetPastLayoutSupport	SetPastLayoutSupport = "set-past-layout-support", Validity,
+macro-member	metal2vulkan-runtime::Degradation::ShaderCacheEntryNotWritten	ShaderCacheEntryNotWritten = "shader-cache-entry-not-written", Performance,
 macro-member	metal2vulkan-runtime::Degradation::ShaderColorConversion	ShaderColorConversion = "shader-color-conversion", Performance,
 macro-member	metal2vulkan-runtime::Degradation::ShaderHalfColorBits	ShaderHalfColorBits = "shader-half-color-bits", Performance,
 macro-member	metal2vulkan-runtime::Degradation::ShaderResolve	ShaderResolve = "shader-resolve", Performance,

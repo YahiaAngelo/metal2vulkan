@@ -140,6 +140,15 @@
 //!   (the exact path is a resolve shader). A resolve into the attachment's format's sRGB twin
 //!   takes no subpass resolve at all: the resolve attachment of a subpass is of the color
 //!   attachment's own format, so only the crate-owned resolve writes the twin's encoding.
+//! - **The samples a resolve after the pass reads.** A resolve the runtime draws after the pass
+//!   (`color_resolve.rs`: the twin's, an extended-range attachment's, and every one under
+//!   `ResolvePolicy::Exact`) reads the samples the pass stores, so the pass stores them
+//!   (`render_target::color_ops`) where Metal's `MultisampleResolve` stores nothing of the
+//!   attachment and leaves its texture as it was. Such a pass renders the attachment through the
+//!   image its texture keeps for the queue, the samples copied into it where the pass loads them
+//!   and never back ([`keep_samples`]): the resolve reads what the pass rendered and the texture
+//!   keeps what it held, as Metal's does. In place where the attachment's image is one a draw
+//!   took a view of or the device copies no samples of, which `dont-care-store` announces.
 //! - **Depth and stencil** through `VkSubpassDescriptionDepthStencilResolve` (core in Vulkan
 //!   1.2, which every runtime device has): `Sample0`, `Min` and `Max` are `SAMPLE_ZERO`, `MIN`
 //!   and `MAX`, and `DepthResolvedSample` after `Sample0` is `SAMPLE_ZERO`. An aspect the pass
@@ -204,6 +213,7 @@
 //! staging buffer, as one aspect at a time does. An aspect the pass does not resolve keeps its
 //! resolve texture's texels. Announced as `one-aspect-resolve`.
 
+use super::attachment_stand_in::{self, Cause, StandIn};
 use super::blit::{reads, writes, TRANSFER};
 use super::buffer::Buffer;
 use super::color_resolve;
@@ -214,7 +224,7 @@ use super::encoder::EncoderCore;
 use super::error::{internal, invalid, Error, Problem, RuntimeGap};
 use super::image_plan::{block_family, sample_count, srgb_twin, ImagePlan};
 use super::linear_attachment;
-use super::render_pass::{Attachment, Facts, PassLayout, RenderPassProblem, Target};
+use super::render_pass::{Attachment, ColorTarget, Facts, PassLayout, RenderPassProblem, Target};
 use super::render_values::{
     LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, StoreAction,
 };
@@ -656,6 +666,78 @@ pub(super) fn color(
     }
     resolve.shader = color_resolve::of_resolve(device, source, &resolve)?;
     Ok(Some(resolve))
+}
+
+/// Whether a resolve the runtime draws after the pass reads `color`'s samples (the crate-owned
+/// color resolve, `color_resolve.rs`) while the pass stores nothing of the attachment
+/// (`MultisampleResolve`, which leaves Metal's texture as it was, the module docs). The pass must
+/// store the samples for that resolve to read (`render_target::color_ops`), so it would write the
+/// texture in place: [`keep_samples`] renders it through an image its texture keeps instead.
+fn samples_read_after(color: &ColorTarget) -> bool {
+    color.store == StoreAction::MultisampleResolve
+        && color.target.samples > 1
+        && color.resolve.as_ref().is_some_and(|r| r.shader.is_some())
+}
+
+/// Render each multisampled color attachment among `colors`, a pass's as it ends, whose samples a
+/// resolve the runtime draws after the pass reads while the pass stores nothing of it
+/// ([`samples_read_after`]), through the image its texture keeps for `maker`'s queue
+/// (`attachment_stand_in::kept_backing`, [`Cause::KeptSamples`]): the samples are copied into it
+/// where the pass loads them and never back, so the texture keeps the samples it held before the
+/// pass, as Metal's does, while the resolve still reads the samples the pass rendered.
+///
+/// In place where the pass executes render commands (`executes`, whose commands record later) or a
+/// draw took a view of the attachment's image (`taken`, as `kept_bytes::settle` asks it: a
+/// framebuffer fetch in place, its sample planes, a view of another format, its extended-range
+/// shadow), where it already renders through a stand-in (whose copy back Metal's store action
+/// decides alike, `attachment_stand_in.rs`), where its texture keeps no texels (memoryless), and
+/// where the device copies no image of the format: there the pass stores the samples it rendered,
+/// Metal's answer where its tiler overflows, which `dont-care-store` announces
+/// (`Device::degrade_pass`). A pass whose color attachments are multisampled has no linear one
+/// (no texture over a buffer is multisampled), so none of this moves what
+/// `VK_NV_linear_color_attachment`'s rule binds (`linear_attachment.rs`).
+pub(super) fn keep_samples(
+    maker: &CommandBuffer,
+    colors: &mut [Option<ColorTarget>],
+    executes: bool,
+    taken: impl Fn(usize) -> bool,
+) -> Result<(), Error> {
+    if executes {
+        return Ok(());
+    }
+    let queue = maker.command_queue().id();
+    for (index, color) in colors.iter_mut().enumerate() {
+        let Some(color) = color else {
+            continue;
+        };
+        if !samples_read_after(color)
+            || color.stand_in.is_some()
+            || color.memoryless
+            || taken(index)
+        {
+            continue;
+        }
+        // A load other than `Clear` copies the attachment's samples into the image first: an
+        // image or a format the device copies no samples of keeps the pass in place.
+        if color.load != LoadAction::Clear
+            && attachment_stand_in::check_copies(&color.target).is_err()
+        {
+            continue;
+        }
+        let own = color.target.clone();
+        let backing = match attachment_stand_in::kept_backing(maker, &own, queue, true) {
+            Ok(backing) => backing,
+            Err(Error::NotImplemented(RuntimeGap::Render)) => continue,
+            Err(error) => return Err(error),
+        };
+        color.target = backing;
+        color.stand_in = Some(StandIn {
+            own,
+            cause: Cause::KeptSamples,
+            area: None,
+        });
+    }
+    Ok(())
 }
 
 /// The resolve of the depth/stencil attachment `source` (one texture for both aspects, one of

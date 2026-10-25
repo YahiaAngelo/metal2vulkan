@@ -1551,6 +1551,149 @@ fn a_resolve_into_the_srgb_twin_resolves_in_the_resolve_texture_s_encoding() {
     quiet(lane, &messages);
 }
 
+/// A multisampled color attachment resolved into its format's sRGB twin keeps the samples it held
+/// before the pass, as plain Metal's does (the DontCare-store probe's rule for
+/// `MultisampleResolve`, which stores nothing of the attachment, an M3 Max under macOS 27.0.1; the
+/// consumer's measurement of the pair at 16x16, both load actions and both resolve-texture shapes).
+/// The twin's resolve is the crate-owned one on every device (no subpass resolve writes the twin's
+/// encoding), which reads the samples the pass stores, so the pass renders the attachment through
+/// an image its texture keeps and copies nothing back (`resolve::keep_samples`). Both directions of
+/// the `BGRA8` and `RGBA8` pairs, a resolve texture and a named view of the twin alike, over a
+/// `Clear` load (whose resolve texels are the measured ones of samples that disagree) and a `Load`
+/// one. Without the kept image the attachment holds the resolving pass's own clear and its draw:
+/// the four runtime files at the branch point leave each `RGBA8Unorm` texel reading `80808080`,
+/// the average of white on samples 0 and 1 over the pass's clear to zero, where Metal keeps
+/// `bf4080ff`, the clear the pass before it stored.
+#[test]
+fn samples_a_twin_resolve_reads_are_kept_as_metal_keeps_them() {
+    let (messages, _cache, lane) = lane();
+    for (attachment, twin) in [
+        (PixelFormat::RGBA8Unorm, PixelFormat::RGBA8UnormSRGB),
+        (PixelFormat::RGBA8UnormSRGB, PixelFormat::RGBA8Unorm),
+        (PixelFormat::BGRA8Unorm, PixelFormat::BGRA8UnormSRGB),
+        (PixelFormat::BGRA8UnormSRGB, PixelFormat::BGRA8Unorm),
+    ] {
+        let pipeline = lane.pipeline((FULL, MASKED), &[attachment], (None, None), 4);
+        // The twin the resolve writes: the resolve texture's own format, or the view the pass
+        // names of a texture of the attachment's format.
+        for (into, view) in [(twin, None), (attachment, Some(twin))] {
+            for load in [LoadAction::Clear, LoadAction::Load] {
+                let label = format!("{attachment:?} into {into:?} through {view:?}, {load:?}");
+                // The samples before the pass: a clear of its own, stored.
+                let msaa = lane.msaa(attachment);
+                let earlier = ClearColor::new(0.75, 0.25, 0.5, 1.0);
+                let mut before = color_pass(&msaa, None, StoreAction::Store, (0, 0));
+                before.color_attachments[0].clear_color = earlier;
+                lane.run(&before, |_, _, _| {}).unwrap();
+                let kept = samples_of(&lane, &msaa, attachment, 4);
+                // The resolving pass: cleared to zero or loaded, white on samples 0 and 1, and
+                // resolved alone into the twin.
+                let resolve = lane.single(into);
+                let target = match view {
+                    Some(pf) => resolve.new_texture_view(pf).unwrap(),
+                    None => resolve.clone(),
+                };
+                let mut pass = color_pass(
+                    &msaa,
+                    Some(&target),
+                    StoreAction::MultisampleResolve,
+                    (0, 0),
+                );
+                pass.color_attachments[0].load_action = load;
+                let mask = buffer_with(&lane.device, &3u32.to_le_bytes()).unwrap();
+                lane.run(&pass, |l, e, h| {
+                    e.set_fragment_buffer(Some(&mask), 0, 0).unwrap();
+                    l.draw(e, h, &pipeline, 0.5);
+                })
+                .unwrap_or_else(|e| panic!("{label}: {e}"));
+                // The resolve texels of the measured case: white on half the samples over a clear
+                // to zero, read by the encoding the resolve texture is in (the twin resolve's own
+                // test asserts every shape of it).
+                if load == LoadAction::Clear {
+                    let srgb = matches!(
+                        twin,
+                        PixelFormat::RGBA8UnormSRGB | PixelFormat::BGRA8UnormSRGB
+                    );
+                    let texel: [u8; 4] = match srgb {
+                        true => [0xbc, 0xbc, 0xbc, 0x80],
+                        false => [0x80, 0x80, 0x80, 0x80],
+                    };
+                    assert_eq!(
+                        hex(&lane.read(&resolve, (0, 0), 4, BlitOption::None)),
+                        hex(&repeat(&texel, (SIZE * SIZE) as usize)),
+                        "{label}: the resolve texture"
+                    );
+                }
+                assert_eq!(
+                    hex(&samples_of(&lane, &msaa, attachment, 4)),
+                    hex(&kept),
+                    "{label}: the attachment's samples"
+                );
+            }
+        }
+    }
+    quiet(lane, &messages);
+}
+
+/// An extended-range attachment's resolve into its own format is the crate-owned one on every
+/// device too (no device's average resolves the codes it holds, `color_resolve.rs`), and it reads
+/// the samples the pass stores alike: the attachment keeps the samples it held before the pass, as
+/// plain Metal's does under `MultisampleResolve`, which stores nothing of it (the DontCare-store
+/// probe's rule, an M3 Max under macOS 27.0.1). `BGRA10_XR` and `BGR10_XR` at 4 samples, over a
+/// `Clear` load and a `Load` one. This resolve took the crate-owned path before the sRGB twin's
+/// did, so its samples were overwritten the same way: without the kept image each `BGRA10_XR` texel
+/// reads `0x80003000` (white on samples 0 and 1 over the pass's clear to zero) where Metal keeps
+/// `0x7bdeef7b`, the clear the pass before it stored.
+#[test]
+fn samples_an_extended_range_resolve_reads_are_kept_as_metal_keeps_them() {
+    let (messages, _cache, lane) = lane();
+    // `BGRA10_XR` holds four 16-bit fields, `BGR10_XR` three 10-bit ones in a word.
+    for (pf, bytes) in [(PixelFormat::BGRA10XR, 8), (PixelFormat::BGR10XR, 4)] {
+        let pipeline = lane.pipeline((FULL, MASKED), &[pf], (None, None), 4);
+        for load in [LoadAction::Clear, LoadAction::Load] {
+            let label = format!("{pf:?}, {load:?}");
+            let msaa = lane.msaa(pf);
+            let mut before = color_pass(&msaa, None, StoreAction::Store, (0, 0));
+            before.color_attachments[0].clear_color = ClearColor::new(0.75, 0.25, 0.5, 1.0);
+            lane.run(&before, |_, _, _| {}).unwrap();
+            let kept = samples_of(&lane, &msaa, pf, bytes);
+            let resolve = lane.single(pf);
+            let mut pass = color_pass(
+                &msaa,
+                Some(&resolve),
+                StoreAction::MultisampleResolve,
+                (0, 0),
+            );
+            pass.color_attachments[0].load_action = load;
+            let mask = buffer_with(&lane.device, &3u32.to_le_bytes()).unwrap();
+            lane.run(&pass, |l, e, h| {
+                e.set_fragment_buffer(Some(&mask), 0, 0).unwrap();
+                l.draw(e, h, &pipeline, 0.5);
+            })
+            .unwrap_or_else(|e| panic!("{label}: {e}"));
+            assert_eq!(
+                hex(&samples_of(&lane, &msaa, pf, bytes)),
+                hex(&kept),
+                "{label}: the attachment's samples"
+            );
+        }
+    }
+    quiet(lane, &messages);
+}
+
+/// What `msaa`, a 4x attachment of `pf` of `bytes` a texel, holds: its samples resolved into a
+/// texture of its own format by a pass that loads it and stores nothing of it, which leaves them
+/// as they are (the
+/// device's resolve of the format, as `a_resolve_metal_does_not_store_leaves_its_texture_untouched`
+/// reads them).
+fn samples_of(lane: &Lane, msaa: &Texture, pf: PixelFormat, bytes: u64) -> Vec<u8> {
+    let held = lane.single(pf);
+    let mut read = color_pass(msaa, Some(&held), StoreAction::MultisampleResolve, (0, 0));
+    read.color_attachments[0].load_action = LoadAction::Load;
+    lane.run(&read, |_, _, _| {}).unwrap();
+    lane.read(&held, (0, 0), bytes, BlitOption::None)
+}
+
 /// A multisampled color attachment's resolve into a texture of a pixel format Metal does not store
 /// its tile into, which Metal's validation stops, as plain Metal runs it (our probe `xres`, the M3
 /// Max under macOS 27.0.1, 2 and 4 samples): the resolve texture keeps its texels (each byte 0x5a
