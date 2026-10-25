@@ -417,6 +417,7 @@
         "pipelines_pooled": 1,
         "pooled_memory_blocks_made": 4,
         "queue_submissions": 1,
+        "queues_sharing_a_vk_queue": 1,
         "render_encoders_ended": 1,
         "render_passes_begun_instances": 1,
         "render_passes_made": 3,

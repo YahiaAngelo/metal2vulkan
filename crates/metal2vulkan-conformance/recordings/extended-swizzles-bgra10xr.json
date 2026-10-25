@@ -3066,7 +3066,7 @@
         "command_buffers_begun_encoders": 35,
         "command_buffers_begun_segments": 35,
         "command_buffers_deferred": 105,
-        "command_buffers_replayed": 105,
+        "command_buffers_replayed": 101,
         "command_buffers_replayed_inline": 17,
         "command_buffers_submitted": 141,
         "commands_replayed.begin_command_buffer": 105,
@@ -3081,12 +3081,13 @@
         "completed_where_seen": 35,
         "completion_arms": 35,
         "completion_arms_after_a_wake": 35,
-        "creation_pipelines_made": 6,
         "device_memory_allocated": 268435712,
         "dispatch_pipelines_pooled": 35,
         "encoder_command_buffers_begun": 105,
         "fence_waits": 35,
         "finales_apart": 35,
+        "functions_shared": 2,
+        "functions_translated": 16,
         "gate_waits": 35,
         "gate_waits_slept": 35,
         "host_texel_copies": 5,
@@ -3108,22 +3109,25 @@
         "pipeline_layouts_shared": 14,
         "pooled_memory_blocks_made": 4,
         "queue_submissions": 35,
+        "queues_sharing_a_vk_queue": 1,
         "scheduled_where_submitted": 35,
-        "scheduler_passes": 119,
+        "scheduler_passes": 118,
         "scheduler_passes_by_waiters": 33,
-        "scheduler_sleep_slices": 4,
-        "scheduler_sleeps": 80,
+        "scheduler_sleep_slices": 2,
+        "scheduler_sleeps": 74,
         "scheduler_wakes_commit": 35,
         "scheduler_wakes_host": 61,
         "shader_modules_made": 18,
         "slot_returns": 35,
         "spare_command_pools_taken": 70,
+        "stage_entries_shared": 12,
+        "stage_entries_specialized": 4,
         "submit_infos": 70,
         "trail_waits": 35,
         "trail_waits_blocked": 1,
-        "variant_pipelines_made": 41,
+        "variant_pipelines_made": 35,
         "wakes_completion_waiters": 35,
-        "wakes_spared": 252
+        "wakes_spared": 246
       },
       "composed": {
         "command_buffers_begun": 141,
@@ -3146,7 +3150,7 @@
         "pooled_memory_blocks_made": 4
       },
       "per_state": {
-        "pipelines": 47,
+        "pipelines": 35,
         "states": 6
       }
     }

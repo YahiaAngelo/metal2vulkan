@@ -5139,7 +5139,7 @@
         "object_churn.images_evicted": 18,
         "object_churn.images_own_memory": 34,
         "object_churn.images_parked": 26,
-        "object_churn.images_recycled": 9,
+        "object_churn.images_recycled": 8,
         "object_churn.textures_image": 34,
         "object_churn.textures_texels": 2,
         "object_churn.vk_buffers_destroyed": 1,

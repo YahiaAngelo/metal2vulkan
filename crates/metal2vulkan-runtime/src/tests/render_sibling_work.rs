@@ -2,7 +2,12 @@
 //! fixed-function state, makes a `VkPipeline` each and **nothing else**: no shader module, no
 //! pipeline layout and no AIR specialization of its own
 //! (`WorkCounts::variant_pipelines_made`, `shader_modules_made`, `pipeline_layouts_made`,
-//! `stage_entries_specialized`).
+//! `stage_entries_specialized`, `functions_translated`).
+//!
+//! It is the render half of the translation counts: both stages of every sibling ask the device's
+//! memo for their function and are answered by it, so one function pair costs one translation a
+//! stage however many states the sweep makes (`tests::functions_translated` holds the compute form,
+//! where the ask comes from the kernel rather than from a render variant's two stages).
 //!
 //! # Why this is a count
 //!
@@ -103,9 +108,20 @@ fn a_run_of_render_creations_shares_every_piece_of_its_shaders() {
             made(|c| c.shader_modules_made),
             made(|c| c.pipeline_layouts_made),
             made(|c| c.stage_entries_specialized),
+            made(|c| c.functions_translated),
         ],
-        [0, 0, 0],
-        "the shader modules, pipeline layouts and AIR specializations {RUN} sibling render \
-         creations of one function pair did, each of them making its own pipeline"
+        [0, 0, 0, 0],
+        "the shader modules, pipeline layouts, AIR specializations and translations {RUN} sibling \
+         render creations of one function pair did, each of them making its own pipeline"
+    );
+    // The floor under the translation zero, and the count that says the render path reaches the
+    // same memo the compute path does: both stages of every sibling asked for their function and
+    // were answered.
+    let shared = made(|c| c.functions_shared);
+    assert_eq!(
+        shared,
+        2 * RUN,
+        "each sibling's vertex and fragment must ask for its function and be answered by the \
+         memo: {shared} asks spared over {RUN} creations of two stages"
     );
 }

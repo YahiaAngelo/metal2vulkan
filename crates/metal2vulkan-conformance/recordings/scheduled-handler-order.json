@@ -190,17 +190,15 @@
         "completion_arms_after_a_wake": 1,
         "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 1,
-        "encoder_primaries_begun_ahead": 1,
         "fence_waits": 1,
         "fills_recorded": 1,
         "finales_folded": 1,
-        "object_churn.buffers_evicted": 49,
         "object_churn.buffers_parked": 1,
         "object_churn.buffers_recycled": 1,
-        "object_churn.vk_buffers_destroyed": 49,
         "pooled_memory_blocks_made": 3,
         "primaries_begun_ahead": 1,
         "queue_submissions": 1,
+        "queues_sharing_a_vk_queue": 1,
         "scheduler_passes": 1,
         "scheduler_sleep_slices": 1,
         "scheduler_sleeps": 2,
@@ -211,7 +209,7 @@
         "wakes_command_buffer_waiters": 2,
         "wakes_completion_waiters": 1,
         "wakes_handler_threads": 1,
-        "wakes_spared": 5
+        "wakes_spared": 4
       },
       "moving": {
         "commands_replayed.begin_command_buffer": 0

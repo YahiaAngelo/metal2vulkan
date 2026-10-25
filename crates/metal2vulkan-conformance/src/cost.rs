@@ -442,7 +442,7 @@ const POOLED: &str = "an object made because no spare was free, where a spare co
 /// replays of a larger case set — which reads like a regression and is not one. See [`BORROWED`].
 /// `slot_returns` beside it stays gated: it counts work items, one a command buffer, and has held
 /// still alone and in both case sets.
-const RACY: [(&str, &str); 32] = [
+const RACY: [(&str, &str); 33] = [
     ("fences_made", POOLED),
     // What is alive, parked or waiting at the instant the counts were read.
     ("memory_blocks_live", INSTANTANEOUS),
@@ -463,6 +463,13 @@ const RACY: [(&str, &str); 32] = [
     // own work, and `_reused` by counts of what a case's own encoder settled once.
     ("pipeline_layouts_shared", FOUND),
     ("shader_modules_shared", FOUND),
+    // An ask for a stage's function answered by the device's memo, a binary archive or the shader
+    // cache on disk. The memo and the cache are the device's and the run's, so whether this case's
+    // *first* ask for a function finds it already translated depends on whether a case before it
+    // in the same run asked under the same compile key -- and in company that turns a translation
+    // into a sharing, which moves this count **up**. Its partner `functions_translated` stays
+    // gated for the same reason the other `_made` partners do: company only ever lowers it.
+    ("functions_shared", FOUND),
     ("sampler_sets_shared", FOUND),
     ("variants_taken_back", FOUND),
     ("draw_shapes_reused", FOUND),
@@ -688,7 +695,7 @@ impl Region {
 
 /// The name prefixes that put a count in [`Region::Translation`]: making a module, a layout or a
 /// pipeline.
-const TRANSLATION: [&str; 18] = [
+const TRANSLATION: [&str; 19] = [
     // The AIR decode and specialization a pipeline creation does for its stages, and the question
     // it asks about a linked function's uses. Translation work by definition -- an entry's
     // specialization depends on the functions and the constants, never on the pipeline state -- so
@@ -707,6 +714,13 @@ const TRANSLATION: [&str; 18] = [
     // reflection up under: a digest of every field of the descriptor, each stage by its compile
     // key, which the creation builds once and passes to all of them.
     "descriptor_keys_built",
+    // The lowering itself: a stage's function translated to SPIR-V, against an ask the memo, an
+    // archive or the disk answered. It sits between the two rows around it and is the region's
+    // whole point -- `stage_entries_` is the AIR decode *before* lowering and `shader_modules_` is
+    // the object made from the SPIR-V *after* it, so a state that translated again and came out
+    // byte-identical moved neither, which is how a compute sweep going from 36 translations to 1
+    // moved no bound in this file.
+    "functions_",
     "shader_modules_",
     "pipeline_layouts_",
     "variant_pipelines_",

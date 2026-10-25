@@ -323,6 +323,7 @@
         "pooled_memory_blocks_made": 3,
         "primaries_begun_ahead": 1,
         "queue_submissions": 4,
+        "queues_sharing_a_vk_queue": 1,
         "scheduled_where_submitted": 4,
         "scheduler_passes": 8,
         "scheduler_passes_by_waiters": 4,
@@ -334,7 +335,7 @@
         "submit_infos": 7,
         "trail_waits": 4,
         "wakes_completion_waiters": 4,
-        "wakes_spared": 29
+        "wakes_spared": 28
       },
       "moving": {
         "gate_waits_slept": 3

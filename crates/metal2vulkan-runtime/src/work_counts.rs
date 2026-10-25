@@ -73,6 +73,8 @@ pub(crate) struct Counters {
     residual_form_makings: AtomicU64,
     stage_entries_specialized: AtomicU64,
     stage_entries_shared: AtomicU64,
+    functions_translated: AtomicU64,
+    functions_shared: AtomicU64,
     linked_use_questions_asked: AtomicU64,
     descriptor_keys_built: AtomicU64,
     shader_modules_made: AtomicU64,
@@ -809,6 +811,20 @@ impl Counters {
             .fetch_add(specialized, Ordering::Relaxed);
         self.stage_entries_shared
             .fetch_add(shared, Ordering::Relaxed);
+    }
+
+    /// A stage's function the runtime translated to SPIR-V, finding it in neither the device's
+    /// memo of compiled functions, nor a creation's binary archives, nor the shader cache on disk
+    /// (`pipeline/sources.rs`).
+    pub(crate) fn function_translated(&self) {
+        self.functions_translated.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// An ask for a stage's function that found it compiled already -- in the device's memo, in a
+    /// creation's binary archive or in the shader cache on disk -- so nothing was translated
+    /// (`pipeline/sources.rs`).
+    pub(crate) fn function_shared(&self) {
+        self.functions_shared.fetch_add(1, Ordering::Relaxed);
     }
 
     /// A render pipeline creation worked out one of its descriptor's linked-use answers rather
@@ -2663,6 +2679,25 @@ pub struct WorkCounts {
     /// Asks for a stage entry that found one specialized already, by this creation or by one
     /// before it on the device: the decodes and specializations the device spared.
     pub stage_entries_shared: u64,
+    /// Stages' functions the runtime translated to SPIR-V: the lowering itself, counted where a
+    /// pipeline creation or a later variant asks for a stage's function and finds it in neither
+    /// the device's memo of compiled functions, nor one of the creation's binary archives, nor
+    /// the shader cache on disk. A compute kernel, a vertex function and a fragment function each
+    /// ask once per stage, so a run of states over one function pair whose lowering inputs come
+    /// out the same translates once however many states it makes.
+    ///
+    /// It is the count between `stage_entries_specialized` and `shader_modules_made`, and neither
+    /// of those sees it: the entry is the AIR decode and specialization *before* lowering, which
+    /// is shared across states of one function whatever their lowering inputs, and the module is
+    /// made from the SPIR-V *after* it, which is shared whenever two translations come out
+    /// byte-identical. A state whose descriptor moves a field the function never reads used to
+    /// translate again and make nothing: one entry, one module, and a translation this count is
+    /// the only record of.
+    pub functions_translated: u64,
+    /// Asks for a stage's function that found it compiled already, so nothing was translated: in
+    /// the device's memo, in one of the creation's binary archives, or in the shader cache on
+    /// disk. With `functions_translated` it adds up to every ask the run made.
+    pub functions_shared: u64,
     /// Linked-use answers render pipeline creations worked out rather than reading from the
     /// shader cache: whether the vertex function returns a value where the state does not
     /// rasterize, the fragment function's unattached depth write, the stages using a direct
@@ -4247,6 +4282,8 @@ impl Device {
             pipeline_pool_busy: self.shared().pipeline_pool.busy() as u64,
             stage_entries_specialized: counters.stage_entries_specialized.load(Ordering::Relaxed),
             stage_entries_shared: counters.stage_entries_shared.load(Ordering::Relaxed),
+            functions_translated: counters.functions_translated.load(Ordering::Relaxed),
+            functions_shared: counters.functions_shared.load(Ordering::Relaxed),
             linked_use_questions_asked: counters.linked_use_questions_asked.load(Ordering::Relaxed),
             descriptor_keys_built: counters.descriptor_keys_built.load(Ordering::Relaxed),
             shader_modules_made: counters.shader_modules_made.load(Ordering::Relaxed),

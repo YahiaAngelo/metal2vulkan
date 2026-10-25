@@ -520,9 +520,12 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "creation_pipelines_made": 4,
+        "creation_render_pipelines_made": 1,
         "descriptor_keys_built": 8,
         "device_memory_allocated": 201326976,
         "driver_diagnostics_withheld": 2,
+        "functions_shared": 11,
+        "functions_translated": 1,
         "linked_use_questions_asked": 4,
         "pipeline_layouts_made": 3,
         "pipeline_layouts_shared": 1,
@@ -556,7 +559,7 @@
         "variant_pipelines_made": 4
       },
       "per_state": {
-        "pipelines": 4,
+        "pipelines": 2,
         "states": 19
       }
     }

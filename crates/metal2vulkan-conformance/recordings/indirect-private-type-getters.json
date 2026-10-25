@@ -1030,8 +1030,8 @@
         "new_buffer_bytes_cleared": 86400,
         "object_churn.buffers_parked": 30,
         "object_churn.buffers_recycled": 28,
-        "object_churn.vk_buffer_bindings": 2,
-        "object_churn.vk_buffers_made": 2,
+        "object_churn.vk_buffer_bindings": 1,
+        "object_churn.vk_buffers_made": 1,
         "pooled_memory_blocks_made": 3
       },
       "composed": {

@@ -4120,6 +4120,12 @@ fn the_work_is_attributed_to_the_three_regions() {
         // cannot arrive in the wrong region with the counters.
         "stage_entries_specialized",
         "stage_entries_shared",
+        // The lowering itself, which sits between the two rows above and `shader_modules_made`:
+        // the AIR decode before it and the module after it are both shared over a sweep of states
+        // over one function, so a translation done again and thrown away moved neither. Landing in
+        // the device API's residual would have read as a call costing nothing.
+        "functions_translated",
+        "functions_shared",
         "linked_use_questions_asked",
     ] {
         assert_eq!(region_of(name), Region::Translation, "{name}");
@@ -4532,6 +4538,11 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         "sampler_sets_destroyed",
         "pipeline_layouts_shared",
         "shader_modules_shared",
+        // An ask for a stage's function the device's memo, an archive or the disk answered. The
+        // memo is the device's, so whether this case's first ask finds the function already
+        // translated depends on whether a case before it in the run asked under the same compile
+        // key -- and company turns a translation into a sharing, which moves this count **up**.
+        "functions_shared",
         "completed_waits",
         // A draw takes none of a shape whose derivation announces a notice the device announces at
         // every occurrence, and this suite sets that over every kind, so what a case reuses
@@ -4558,6 +4569,7 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         "pipeline_layouts_made",
         "shader_modules_made",
         "draw_shapes_made",
+        "functions_translated",
     ] {
         assert!(racy(count).is_none(), "{count}");
     }
@@ -5791,6 +5803,100 @@ fn a_count_whose_ceiling_is_the_lone_run_is_gated_there() {
         Some(&268_435_456)
     );
     assert_eq!(record.gated(), 0);
+}
+
+/// A case that translates a function again, where the measurement translated it once, is **over**.
+///
+/// This is the half of the function counts that is not decoration. `functions_translated` is a
+/// plain gated count -- not racy, not a `_shared` partner, not a reading of an instant, not bytes
+/// -- so the per-case ceiling in `CostRecord::bounds` holds it from above, and that is the whole
+/// mechanism it needs. The test says so in the one direction that matters: a record bounding it at
+/// the 1 translation a compute sweep over 36 states costs judges a run that translates 36 as
+/// `Over`, naming the count, its region and both numbers, and judges the 1 as `Within`.
+///
+/// # Why the per-case ceiling and not the per-state ratio
+///
+/// [`crate::cost::PipelinesPerState`] exists because `variant_pipelines_made` grows for two
+/// reasons at once -- the case grew a state, or the tree makes more pipelines per state -- and an
+/// absolute bound cannot tell them apart. Translations do not have that problem, and dividing by
+/// states would *create* it. The whole content of the narrowing this count was written for is that
+/// translations scale with the **distinct functions** a case needs and not with its states: the
+/// sweep translates 1 over 36 states and would translate 1 over 72. A ratio of 1/36 allows 1 at 36
+/// states and 2 at 72, so a case that grew would buy proportional slack on exactly the quantity the
+/// narrowing collapsed, while the absolute 1 stays 1 for ever. At the measured size the two are the
+/// same number (`allows(36)` of 1/36 is 1), so the ratio is never tighter and goes slack as the
+/// case grows. The absolute bound is the right form here, and this test is what holds it.
+///
+/// A case that genuinely gains a distinct function reads one more and needs a re-bless, which is
+/// the contract `shader_modules_made: 29` already carries on `attribute-format-fetches`.
+#[test]
+fn a_case_that_translates_a_function_again_is_over_its_bound() {
+    let record = crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 8,
+        measured: "eight runs of the whole selection".to_owned(),
+        contrasted: Some("eight runs of each case alone".to_owned()),
+        degraded: Vec::new(),
+        bounds: [
+            ("functions_translated".to_owned(), 1),
+            ("functions_shared".to_owned(), 35),
+            ("shader_modules_made".to_owned(), 1),
+        ]
+        .into_iter()
+        .collect(),
+        moving: Default::default(),
+        composed: Default::default(),
+        ceilings: Default::default(),
+        per_state: None,
+        unmeasurable: None,
+    };
+    let judged = |text: &str| {
+        crate::cost::judge(
+            std::slice::from_ref(&record),
+            "a venue",
+            true,
+            &crate::cost::Counts::read(text).expect("the shape reads"),
+            36,
+            None,
+            &[],
+        )
+    };
+    // The tree as it stands: one translation over the sweep, the other 35 asks answered by the
+    // memo, one module.
+    let within = judged(
+        "WorkCounts {\n    functions_translated: 1,\n    functions_shared: 35,\n    \
+         shader_modules_made: 1,\n}",
+    );
+    assert!(within.is_within(), "{within:?}");
+    // The narrowing removed: every state's descriptor keys its own translation again, and every
+    // one of the 36 comes out the same words, so the module count does not move and nothing else
+    // in the record does either. This is the regression that passed every bound the suite held
+    // before this count existed.
+    let over = judged(
+        "WorkCounts {\n    functions_translated: 36,\n    functions_shared: 0,\n    \
+         shader_modules_made: 1,\n}",
+    );
+    let crate::cost::CostVerdict::Over { over } = &over else {
+        panic!(
+            "re-translating 36 functions where the measurement translated 1 must be over: {over:?}"
+        );
+    };
+    assert_eq!(over.len(), 1, "{over:?}");
+    assert_eq!(over[0].count, "functions_translated");
+    assert_eq!(over[0].region, crate::cost::Region::Translation);
+    assert_eq!((over[0].bound, over[0].found), (1, 36));
+    // And the sharing falling to zero fires nothing by itself, which is why the translation has to
+    // be the gated half: `functions_shared` is in the `FOUND` family and a floor on it would fail
+    // the moment a case landed beside this one.
+    let shared_gone = judged(
+        "WorkCounts {\n    functions_translated: 1,\n    functions_shared: 0,\n    \
+         shader_modules_made: 1,\n}",
+    );
+    assert!(shared_gone.is_within(), "{shared_gone:?}");
+    // Two of the record's three counts are held: the translation and the module. The sharing is
+    // reported, so a tree that classified the translation beside it would gate one and let the
+    // regression above through -- which is what this number is here to catch.
+    assert_eq!(record.gated(), 2);
 }
 
 /// Re-measuring the gate's own shape over an unchanged tree changes **nothing**.

@@ -4923,10 +4923,7 @@
       "degraded": [
         "metal2vulkan-degrade-rasterization-rate-map"
       ],
-      "bounds": {
-        "scheduler_sleep_slices": 1,
-        "scheduler_sleeps": 1
-      }
+      "bounds": {}
     }
   ],
   "times": [

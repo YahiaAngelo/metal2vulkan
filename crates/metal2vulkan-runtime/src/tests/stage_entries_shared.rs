@@ -71,6 +71,12 @@ fn create(device: &crate::Device, library: &crate::Library, step: u32) {
         .unwrap();
 }
 
+/// The entry asks one compute creation of a kernel with a stage-input descriptor makes: one to work
+/// out which `[[stage_in]]` attributes the kernel reads, so the compile key names those and nothing
+/// else (`Device::kernel_inputs_read`), and one for the compile itself
+/// (`compile_function_from_entries`). Both read the device's entry and neither specializes it again.
+const ASKS: u64 = 2;
+
 /// `RUN` sibling compute pipelines of one kernel compile `RUN` modules of their own and specialize
 /// the kernel's AIR not once each but not at all: the entry the warm-up's creation specialized is
 /// the one every one of them reads.
@@ -110,7 +116,7 @@ fn a_run_of_compute_creations_specializes_one_kernel_once() {
     );
     assert_eq!(
         after.stage_entries_shared - before.stage_entries_shared,
-        RUN,
-        "each of the {RUN} siblings must read the entry the warm-up specialized, once"
+        ASKS * RUN,
+        "entry reads {RUN} siblings did, {ASKS} each and specializing none of them"
     );
 }

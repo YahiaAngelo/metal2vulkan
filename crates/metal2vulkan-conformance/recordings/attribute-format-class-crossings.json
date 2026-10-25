@@ -451,12 +451,12 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "device_memory_allocated": 201326592,
+        "functions_translated": 16,
         "pipeline_layouts_made": 1,
         "pipeline_layouts_shared": 16,
         "pooled_memory_blocks_made": 3,
-        "scheduler_sleep_slices": 5,
-        "scheduler_sleeps": 5,
-        "shader_modules_made": 16
+        "shader_modules_made": 16,
+        "stage_entries_shared": 32
       },
       "composed": {
         "device_memory_allocated": 201326592

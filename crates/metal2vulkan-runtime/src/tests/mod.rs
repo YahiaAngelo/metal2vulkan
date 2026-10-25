@@ -101,6 +101,8 @@ mod freed_memory;
 mod fresh_pages;
 mod fresh_unwritten;
 mod function_table;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod functions_translated;
 mod gate;
 mod gpu_pools;
 mod gpu_time;

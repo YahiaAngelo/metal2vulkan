@@ -3087,10 +3087,11 @@
         "device_memory_allocated": 268435712,
         "dispatch_pipelines_pooled": 6,
         "encoder_command_buffers_begun": 47,
-        "encoder_primaries_begun_ahead": 2,
         "fence_waits": 35,
         "finales_apart": 6,
         "finales_folded": 29,
+        "functions_shared": 6,
+        "functions_translated": 5,
         "gate_waits": 35,
         "gate_waits_slept": 35,
         "host_texel_copies": 5,
@@ -3107,10 +3108,10 @@
         "pipeline_layouts_made": 3,
         "pipeline_layouts_shared": 6,
         "pooled_memory_blocks_made": 4,
-        "primaries_begun_ahead": 2,
         "queue_submissions": 35,
+        "queues_sharing_a_vk_queue": 1,
         "scheduled_where_submitted": 35,
-        "scheduler_passes": 50,
+        "scheduler_passes": 48,
         "scheduler_passes_by_waiters": 32,
         "scheduler_sleeps": 42,
         "scheduler_wakes_commit": 35,
@@ -3118,12 +3119,13 @@
         "shader_modules_made": 11,
         "slot_returns": 35,
         "spare_command_pools_taken": 70,
+        "stage_entries_shared": 5,
         "submit_infos": 41,
         "trail_waits": 35,
         "variant_pipelines_made": 17,
         "variants_taken_back": 4,
         "wakes_completion_waiters": 35,
-        "wakes_spared": 247
+        "wakes_spared": 245
       },
       "moving": {
         "batches_submitted_by_waiters": 7,
@@ -3156,7 +3158,7 @@
         "variant_pipelines_made": 17
       },
       "per_state": {
-        "pipelines": 10,
+        "pipelines": 6,
         "states": 6
       }
     }

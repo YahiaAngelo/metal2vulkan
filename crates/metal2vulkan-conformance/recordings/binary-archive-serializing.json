@@ -305,6 +305,7 @@
         "addressable_buffers_made": 2,
         "creation_pipelines_made": 1,
         "device_memory_allocated": 201326720,
+        "functions_shared": 1,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
         "scheduler_sleep_slices": 1,

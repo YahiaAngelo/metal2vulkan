@@ -2593,6 +2593,8 @@ field	metal2vulkan-runtime::WorkCounts.freed_memory_parked	pub freed_memory_park
 field	metal2vulkan-runtime::WorkCounts.freed_memory_waiting	pub freed_memory_waiting: u64
 field	metal2vulkan-runtime::WorkCounts.fresh_page_buffers_made	pub fresh_page_buffers_made: u64
 field	metal2vulkan-runtime::WorkCounts.fresh_page_bytes	pub fresh_page_bytes: u64
+field	metal2vulkan-runtime::WorkCounts.functions_shared	pub functions_shared: u64
+field	metal2vulkan-runtime::WorkCounts.functions_translated	pub functions_translated: u64
 field	metal2vulkan-runtime::WorkCounts.gate_waits	pub gate_waits: u64
 field	metal2vulkan-runtime::WorkCounts.gate_waits_slept	pub gate_waits_slept: u64
 field	metal2vulkan-runtime::WorkCounts.gate_wakes_found_shut	pub gate_wakes_found_shut: u64

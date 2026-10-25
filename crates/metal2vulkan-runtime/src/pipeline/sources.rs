@@ -77,6 +77,13 @@ impl<'a> Sources<'a> {
     /// `budget`, reading its specialized entry from `entries` where given (the device's, which a
     /// render creation's checks and key filled, and which a compute creation's kernel reads too).
     /// A refusal is the compile layer's.
+    ///
+    /// Every ask for a stage's function the runtime makes -- a compute kernel's, a render
+    /// variant's vertex and fragment -- comes here, so the two counts this bumps are the whole of
+    /// the runtime's lowering: one that translated (`WorkCounts::functions_translated`) against
+    /// one answered by the memo, an archive or the disk (`functions_shared`). Counted at the
+    /// translation itself and not at the memo's miss, so a function an archive or the shader cache
+    /// gives reads as spared, which is what it is.
     pub(crate) fn function(
         &self,
         function: &FunctionDescriptor,
@@ -85,9 +92,14 @@ impl<'a> Sources<'a> {
         budget: &Budget,
     ) -> Result<CompiledFunction, metal2vulkan::error::Error> {
         let compile = self.device.compile_device();
-        let cache = &self.device.shared().shader_cache;
+        let shared = self.device.shared();
+        let cache = &shared.shader_cache;
+        let counts = &shared.counts;
         let compiled = match cache.memo.function(key) {
-            Some(compiled) => compiled,
+            Some(compiled) => {
+                counts.function_shared();
+                compiled
+            }
             None => {
                 let found = self
                     .archives()
@@ -95,13 +107,17 @@ impl<'a> Sources<'a> {
                     .find_map(|archive| archive.function(compile, key))
                     .or_else(|| cache.load_function(compile, key));
                 let (compiled, bytes) = match found {
-                    Some(found) => found,
+                    Some(found) => {
+                        counts.function_shared();
+                        found
+                    }
                     None => {
                         let compiled = match entries {
                             Some(entries) => compile
                                 .compile_function_from_entries(function, inputs, budget, entries)?,
                             None => compile.compile_function(function, inputs, budget)?,
                         };
+                        counts.function_translated();
                         let bytes = cache.store_function(compile, &compiled);
                         (compiled, bytes)
                     }

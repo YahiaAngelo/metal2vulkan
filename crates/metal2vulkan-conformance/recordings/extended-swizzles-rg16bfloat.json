@@ -3089,19 +3089,21 @@
         "fence_waits": 35,
         "finales_apart": 30,
         "finales_folded": 5,
+        "functions_shared": 6,
+        "functions_translated": 12,
         "gate_waits": 35,
         "gate_waits_slept": 35,
         "host_texel_copies": 5,
         "images_started_on_the_host": 5,
         "new_buffer_bytes_cleared": 213888,
-        "object_churn.buffers_evicted": 22,
+        "object_churn.buffers_evicted": 19,
         "object_churn.buffers_parked": 67,
         "object_churn.buffers_recycled": 67,
         "object_churn.images_own_memory": 5,
         "object_churn.textures_image": 5,
-        "object_churn.vk_buffer_bindings": 22,
-        "object_churn.vk_buffers_destroyed": 22,
-        "object_churn.vk_buffers_made": 22,
+        "object_churn.vk_buffer_bindings": 19,
+        "object_churn.vk_buffers_destroyed": 19,
+        "object_churn.vk_buffers_made": 19,
         "object_churn.vk_image_bindings": 5,
         "object_churn.vk_image_views_made": 5,
         "object_churn.vk_images_destroyed": 7,
@@ -3110,6 +3112,7 @@
         "pipeline_layouts_shared": 14,
         "pooled_memory_blocks_made": 4,
         "queue_submissions": 35,
+        "queues_sharing_a_vk_queue": 1,
         "scheduled_where_submitted": 35,
         "scheduler_passes": 104,
         "scheduler_passes_by_waiters": 34,
@@ -3119,12 +3122,13 @@
         "shader_modules_made": 18,
         "slot_returns": 35,
         "spare_command_pools_taken": 70,
+        "stage_entries_shared": 12,
         "submit_infos": 65,
         "trail_waits": 35,
         "variant_pipelines_made": 61,
         "variants_taken_back": 4,
         "wakes_completion_waiters": 35,
-        "wakes_spared": 250
+        "wakes_spared": 248
       },
       "moving": {
         "batches_submitted_by_waiters": 0
@@ -3155,7 +3159,7 @@
         "variant_pipelines_made": 61
       },
       "per_state": {
-        "pipelines": 34,
+        "pipelines": 30,
         "states": 6
       }
     }
