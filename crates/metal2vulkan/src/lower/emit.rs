@@ -1,15 +1,14 @@
 //! `lower::Emitter`: the `CodeEmitter` of a `Plan`, and the module driver that runs the
 //! structurizer and emission.
 //!
-//! [`emit_module`] declares the module-scope objects the plan selected (the slots' views, the
-//! push block in placement order, the kernel's workgroup size), structurizes the entry's CFG
-//! through [`EntryView`](crate::lower::view::EntryView), and lets P8 (`structurize::emit`) walk
-//! the tree with an [`Emitter`], which emits each block by routing every instruction's
-//! [`Strategy`] to its family's emit function. It then lets `fragment::wrap_entry` choose the
-//! entry function (the walked body itself, or a raster order group's interlocked wrapper that
-//! calls it), declares the entry point, finalizes, runs P9 (`promote_single_store`), and removes
-//! what no instruction reads, taking the lowering's offers that make the module smaller
-//! (`spirv::dead::remove_dead_keeping`).
+//! [`emit_module`] declares the module-scope objects the plan selected (the slots' views, the push
+//! block in placement order, the kernel's workgroup size), structurizes the entry's CFG through
+//! [`EntryView`], and lets P8 (`structurize::emit`) walk the tree with an [`Emitter`], which emits
+//! each block by routing every instruction's [`Strategy`] to its family's emit function. It then
+//! lets `fragment::wrap_entry` choose the entry function (the walked body itself, or a raster order
+//! group's interlocked wrapper that calls it), declares the entry point, finalizes, runs P9
+//! (`promote_single_store`), and removes what no instruction reads, taking the lowering's offers
+//! that make the module smaller (`spirv::dead::remove_dead_keeping`).
 //!
 //! The emitter owns its value environment: the SPIR-V value of each AIR value in the block being
 //! emitted, reset at the top of every block, and the values the entry hook (`stage_io::emit_entry`;

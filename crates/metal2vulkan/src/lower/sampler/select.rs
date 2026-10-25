@@ -1010,7 +1010,7 @@ fn nearest_fetch(r: SamplerRef, dim: ImageDim, integer: bool) -> Result<bool, Er
 }
 
 /// Whether a sample through `r` reads one texel of one level, its value unfiltered: a constexpr
-/// sampler that does not filter ([`linear::unfiltered`]).
+/// sampler that does not filter ([`linear::unfiltered`](super::linear::unfiltered)).
 fn nearest_texel(r: SamplerRef) -> Result<bool, Error> {
     let SamplerRef::Constexpr(words) = r else {
         return Ok(false);

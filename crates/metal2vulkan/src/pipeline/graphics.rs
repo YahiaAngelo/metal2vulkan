@@ -24,10 +24,10 @@ use crate::vk;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GraphicsState {
-    /// The list topology of the descriptor's topology class (`PATCH_LIST` for tessellation).
-    /// The topology is never dynamic state: the consumer creates the pipeline with the draw's
-    /// topology within the class and the primitive restart Metal applies to it, both from
-    /// [`metal::state::input_assembly`](crate::metal::state::input_assembly).
+    /// The list topology of the descriptor's topology class (`PATCH_LIST` for tessellation). The
+    /// topology is never dynamic state: the consumer creates the pipeline with the draw's topology
+    /// within the class and the primitive restart Metal applies to it, both from
+    /// [`metal::state::input_assembly`].
     pub topology: vk::PrimitiveTopology,
     /// Color attachments by Metal index; `None` for an absent attachment. Build
     /// `VkPipelineColorBlendStateCreateInfo::pAttachments` from

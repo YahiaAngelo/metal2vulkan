@@ -1,8 +1,8 @@
 //! Vertex fetch projection and `VertexInputState`.
 //!
-//! [`vertex_fetch_projection`] is the one function that decides, per attribute a vertex function
-//! reads, whether Vulkan's fixed-function vertex input fetches it or the shader pulls it. The
-//! compile API (`pipeline::compile`), link, and the tests all call it; there is no other copy.
+//! [`vertex_fetch_projection_for`] is the one function that decides, per attribute a vertex
+//! function reads, whether Vulkan's fixed-function vertex input fetches it or the shader pulls it.
+//! The compile API (`pipeline::compile`), link, and the tests all call it; there is no other copy.
 //!
 //! 1. the **numeric class**: the shader declares every attribute `float` or `uint`, and
 //!    `lower::stage_io::fetch::class_match` says how the format meets it. An unnormalized 8- or
@@ -265,7 +265,7 @@ pub fn vertex_fetch_projection(
     vertex_fetch_projection_for(desc, attributes, p, &BTreeSet::new(), false)
 }
 
-/// [`vertex_fetch_projection`] under a pulled-vertex-buffer variant and capture form: the
+/// `vertex_fetch_projection` under a pulled-vertex-buffer variant and capture form: the
 /// attributes of the layouts in `pulled_vertex_buffers` (`VariantKey::pulled_vertex_buffers`)
 /// are pulled (item 7), and every attribute when `pull_every` (the indexed capture form, item 8).
 pub fn vertex_fetch_projection_for(

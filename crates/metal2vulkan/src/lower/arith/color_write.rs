@@ -51,7 +51,7 @@ use crate::spirv::error::{BResult, BuildError, OperandRule};
 use crate::spirv::ids::{GlobalId, TypeId, Value};
 use crate::spirv::ir::{BinOp, ConvOp, GlslOp, Type, UnOp};
 
-/// How [`write`] writes one lane of a color output.
+/// How [`write()`] writes one lane of a color output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lane {
     /// Rounded to the code Metal stores by the channel's rule ([`round`]).
@@ -127,7 +127,7 @@ pub fn words(rules: &[Option<ChannelWrite>; 4]) -> u64 {
     write_words(&rules.map(|r| r.map(Lane::Rounded)))
 }
 
-/// An upper estimate of the SPIR-V words of writing an output by `lanes` ([`write`]), its
+/// An upper estimate of the SPIR-V words of writing an output by `lanes` ([`write()`]), its
 /// extracts and construct included.
 pub fn write_words(lanes: &[Option<Lane>; 4]) -> u64 {
     let written = lanes.iter().flatten().count() as u64;

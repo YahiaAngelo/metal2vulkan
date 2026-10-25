@@ -2,7 +2,7 @@
 //! interface (SPIR-V 1.4+ rule).
 //!
 //! No lowering writes `OpCapability` or `OpExtension`. `ModuleBuilder::finalize` calls
-//! [`recorded`]: [`derive`], one exhaustive walk over what the module actually contains (types,
+//! [`recorded`]: [`derive()`], one exhaustive walk over what the module actually contains (types,
 //! module-scope variables and builtins, execution modes, instructions, terminators), plus the
 //! facts of the module's subgroup requirement (below). It records the resulting [`Requirements`] on
 //! the `TypedModule`, and so do the edits that change a finalized module; the serializer declares
@@ -43,7 +43,7 @@
 //!   outside the SPIR-V (the pipeline's `required_subgroup_size` and stage flags), so derivation
 //!   cannot find what they need of the device. The lowering hands the module its plan's
 //!   [`SubgroupRequirement`] (`ModuleBuilder::subgroup`), and [`recorded`] adds that
-//!   requirement's facts to what [`derive`] finds: `subgroupSizeControl`, the stage in
+//!   requirement's facts to what [`derive()`] finds: `subgroupSizeControl`, the stage in
 //!   `requiredSubgroupSizeStages`, the size range, and `REQUIRE_FULL_SUBGROUPS`. The verifier
 //!   accepts exactly those, and only where the module's own requirement justifies them.
 //! - Device *format* usages are bind facts: the binder checks each format it binds against the
@@ -254,7 +254,7 @@ pub(crate) fn metal_stage(model: ExecModel) -> Stage {
     }
 }
 
-/// What a module records it needs from the device: what it contains ([`derive`]) and what its
+/// What a module records it needs from the device: what it contains ([`derive()`]) and what its
 /// plan's subgroup requirement needs beyond it ([`SubgroupRequirement::add_device_facts`]).
 pub fn recorded(m: &ModuleView<'_>, subgroup: &SubgroupRequirement) -> BResult<Requirements> {
     let mut r = derive(m)?;

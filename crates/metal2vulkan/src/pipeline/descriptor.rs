@@ -799,7 +799,7 @@ impl VertexDescriptor {
     ///   or does not declare it; checked first, in attribute order;
     /// - a layout of a nonzero or dynamic stride whose buffer no set attribute names ("None of
     ///   the attributes set bufferIndex to M, but MTLVertexDescriptor set buffer
-    ///   layout[M].stride(S)"), whatever its step; a stride of 0 passes; then, in buffer order.
+    ///   layout\[M\].stride(S)"), whatever its step; a stride of 0 passes; then, in buffer order.
     ///
     /// An attribute of format `Invalid` is unset, whatever buffer it names.
     pub(crate) fn check_layouts(&self) -> Result<(), crate::error::Error> {

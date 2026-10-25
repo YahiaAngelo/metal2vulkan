@@ -12,10 +12,11 @@
 //!
 //! Emulated, the slice is a loop over its cells (`super::slice`), and in that one invocation it is
 //! serial: a 16 x 32 slice is 512 iterations of a cell load and a texture write in one thread,
-//! which a threadgroup of the drag's blur kernel spent 500 us on where Metal takes 8 us. Where
-//! the shape below holds, every invocation writes a strided share of the cells instead (the loop
-//! starts at its `LocalInvocationIndex` and steps by the workgroup's size), then a workgroup
-//! barrier, and the guard's branch is taken by every invocation ([`TexturePlan::cooperative`]).
+//! which a threadgroup of the drag's blur kernel spent 500 us on where Metal takes 8 us. Where the
+//! shape below holds, every invocation writes a strided share of the cells instead (the loop starts
+//! at its `LocalInvocationIndex` and steps by the workgroup's size), then a workgroup barrier, and
+//! the guard's branch is taken by every invocation
+//! ([`TexturePlan::cooperative`](super::TexturePlan::cooperative)).
 //!
 //! The shape, all read off the IR's structure:
 //!

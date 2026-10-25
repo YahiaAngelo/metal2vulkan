@@ -178,7 +178,7 @@ impl PointerValue {
     }
 
     /// The census name (`access.pointer.<op>`) in the finished plan `slots`: a pointer store
-    /// qualified by the reach of its destination ([`BufferReach`]).
+    /// qualified by the reach of its destination ([`BufferReach`](super::BufferReach)).
     pub fn name(&self, slots: &AccessPlan) -> Cow<'static, str> {
         match self {
             PointerValue::CompareOffsets { .. } => "access.pointer.compare_offsets".into(),

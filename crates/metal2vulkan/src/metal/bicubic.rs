@@ -37,7 +37,7 @@
 //!   onto one texel weighed as that texel alone at the unit weight, and a NaN or an infinity
 //!   anywhere in a 2D footprint decides the result whatever its weight.
 //!
-//! The weights are Metal's fixed-point table ([`weights`]), the same on both axes and for every
+//! The weights are Metal's fixed-point table (`weights`), the same on both axes and for every
 //! format measured. The 8- and 16-bit normalized formats with channels of one width
 //! (`R8Unorm`, `RG8Unorm`, `RGBA8Unorm`, `BGRA8Unorm`, `A8Unorm`, the 8-bit signed formats, and
 //! the 16-bit unsigned and signed ones but `Depth16Unorm`) sum their codes exactly and round the

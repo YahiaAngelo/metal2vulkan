@@ -1647,8 +1647,8 @@ fn buffer_object_param(abi: &AbiIndex, r: Root) -> Option<u32> {
 
 /// The argument-buffer member a pointer of `fact` addresses exactly: one root, a parameter (or
 /// buffer-table element) of an argument buffer with a layout, at a constant offset that starts one
-/// of the member's elements within the layout ([`member_at`]). A load of a pointer there is the
-/// member's handle (`Walk::seed_loaded`).
+/// of the member's elements within the layout ([`member_at`](AbiIndex::member_at)). A load of a
+/// pointer there is the member's handle (`Walk::seed_loaded`).
 fn exact_member<'e>(
     e: &'e Entry,
     abi: &AbiIndex,

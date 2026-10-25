@@ -1357,7 +1357,7 @@ fn line(f: &mut FunctionBuilder<'_>, k: &K, ends: [Value; 2]) -> BResult<()> {
     })
 }
 
-/// The job of a line from `p` to `q` of length `delta`, not zero ([`line`]).
+/// The job of a line from `p` to `q` of length `delta`, not zero ([`line()`]).
 fn parallelogram(
     f: &mut FunctionBuilder<'_>,
     k: &K,

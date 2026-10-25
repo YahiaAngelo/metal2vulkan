@@ -1857,12 +1857,13 @@ pub(crate) fn unattached_colors_written(
 ///
 /// And a 32-bit float attachment (`R32Float`, `RG32Float`, `RGBA32Float`) of a four-lane `half` or
 /// `float` output of a module **with** fast math, blended under a state whose forms are Metal's
-/// (`extended_range::Blend::float32`, whose [`fitted`](extended_range::Blend::fitted) is the one
-/// sweep that measured the family: the two measured pairs at two or four channels, and the forms
-/// that need no measurement), where the write stores some channel of the format and the factors
-/// are not one and zero, which the device stores as the source anyway. Metal's arithmetic for the
-/// format without fast math is measured in no state, and at an unfitted state the generic blend is
-/// the measured-closer near-equivalent, so neither is named here (`fetch`'s module docs).
+/// (`extended_range::Blend::float32`, whose
+/// [`fitted`](crate::lower::arith::extended_range::Blend::fitted) is the one sweep that measured
+/// the family: the two measured pairs at two or four channels, and the forms that need no
+/// measurement), where the write stores some channel of the format and the factors are not one and
+/// zero, which the device stores as the source anyway. Metal's arithmetic for the format without
+/// fast math is measured in no state, and at an unfitted state the generic blend is the
+/// measured-closer near-equivalent, so neither is named here (`fetch`'s module docs).
 ///
 /// What only the function's body or the device can answer is the lowering's: whether a lane of the
 /// output folds into Metal's blend (`fetch::folds_into_blend`), and whether the attachment's
@@ -2446,7 +2447,7 @@ fn compile_one(
 }
 
 /// [`compile_one`], also returning the plan and what `keep` takes of the finished typed module
-/// before it is serialized ([`compile_bitcode_kept`] keeps a copy).
+/// before it is serialized (`compile_bitcode_kept` keeps a copy).
 fn compile_kept<K>(
     r: &Request<'_>,
     p: &DeviceProfile,

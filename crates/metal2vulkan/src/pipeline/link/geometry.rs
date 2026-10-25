@@ -22,7 +22,8 @@
 //!
 //! A geometry stage receives a primitive's vertices in that order (measured on RADV, NVIDIA, ANV
 //! and lavapipe, every topology), so link adds one between the vertex and fragment stages
-//! ([`module`]) that emits the primitive's vertices in the order it receives them:
+//! ([`module`](GeometryStages::module)) that emits the primitive's vertices in the order it
+//! receives them:
 //!
 //! - one invocation per input primitive, of a topology class: points (`InputPoints`,
 //!   `OutputPoints`), lines (`InputLines`, `OutputLineStrip`) or triangles (`Triangles`,

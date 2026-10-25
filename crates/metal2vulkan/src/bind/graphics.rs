@@ -539,13 +539,12 @@ pub struct DrawCommands {
     /// `None` for every other draw.
     pub tessellation_dispatch: Option<TessellationDispatch>,
     /// An indirect mesh draw on a device with `VK_EXT_mesh_shader`, whose first stage's group
-    /// counts `vkCmdDrawMeshTasksIndirectEXT` requires within the device's limits: the form of
-    /// the arguments pass the consumer records before the draw
-    /// ([`MeshArguments`](crate::bind::MeshArguments), which it makes with the device's
-    /// `minStorageBufferOffsetAlignment`), whose scratch the draw then reads in place of Metal's
-    /// arguments (`draw` keeps Metal's offset; the consumer substitutes the scratch's buffer and
-    /// offset). Its read of Metal's 12 bytes is among `uses`, in the compute stage. `None` for
-    /// every other draw.
+    /// counts `vkCmdDrawMeshTasksIndirectEXT` requires within the device's limits: the form of the
+    /// arguments pass the consumer records before the draw ([`MeshArguments`], which it makes with
+    /// the device's `minStorageBufferOffsetAlignment`), whose scratch the draw then reads in place
+    /// of Metal's arguments (`draw` keeps Metal's offset; the consumer substitutes the scratch's
+    /// buffer and offset). Its read of Metal's 12 bytes is among `uses`, in the compute stage.
+    /// `None` for every other draw.
     ///
     /// The folded object form's (`MeshArgumentsForm::FoldedObject`, a folded object function's
     /// draw) `draw` is `DrawMeshTasksIndirectCount`, both of whose offsets are into the scratch
@@ -555,21 +554,21 @@ pub struct DrawCommands {
     /// needs `SHADER_DEVICE_ADDRESS` usage and a 16-aligned address.
     pub mesh_arguments: Option<MeshArgumentsForm>,
     /// A direct mesh draw of a folded object function's pipeline: the fold of its object grid
-    /// ([`ObjectFold`](crate::bind::ObjectFold)), whose [`bytes`](crate::bind::ObjectFold::bytes)
-    /// the consumer uploads at a 16-aligned device address of a buffer of `SHADER_DEVICE_ADDRESS`
-    /// and `INDIRECT_BUFFER` usage, where the host's write is visible to the draw. The object
-    /// stage's `PushHole::ReplayRegionAddress` takes that address, and a `draw` of
-    /// `DrawMeshTasksIndirect` (its pieces) reads its commands from the upload, its offset into
-    /// it. A fold `past` the device's pieces draws nothing (`draw` launches no threadgroup), and
-    /// the consumer fails the command buffer as for `ExecutionStatus`'s `MESH_GRID_PAST_LIMITS`.
-    /// `None` for every other draw.
+    /// ([`ObjectFold`]), whose [`bytes`](crate::bind::ObjectFold::bytes) the consumer uploads at a
+    /// 16-aligned device address of a buffer of `SHADER_DEVICE_ADDRESS` and `INDIRECT_BUFFER`
+    /// usage, where the host's write is visible to the draw. The object stage's
+    /// `PushHole::ReplayRegionAddress` takes that address, and a `draw` of `DrawMeshTasksIndirect`
+    /// (its pieces) reads its commands from the upload, its offset into it. A fold `past` the
+    /// device's pieces draws nothing (`draw` launches no threadgroup), and the consumer fails the
+    /// command buffer as for `ExecutionStatus`'s `MESH_GRID_PAST_LIMITS`. `None` for every other
+    /// draw.
     pub object_fold: Option<crate::bind::ObjectFold>,
     /// A direct mesh draw whose object grid Metal's GPU discards: more threadgroups than
-    /// [`METAL_OBJECT_GRID_TOTAL`](crate::bind::METAL_OBJECT_GRID_TOTAL), past what Metal runs
-    /// within its watchdog's 5 seconds (`bind::mesh_arguments`). `draw` launches no threadgroup,
-    /// and the consumer fails the command buffer from the draw's encoder on as Metal does: the
-    /// encoder and every one after it run nothing, and the command buffer completes with
-    /// `MTLCommandBufferErrorInternal` (1, "Discarded (victim of GPU error/recovery)").
+    /// [`METAL_OBJECT_GRID_TOTAL`], past what Metal runs within its watchdog's 5 seconds
+    /// (`bind::mesh_arguments`). `draw` launches no threadgroup, and the consumer fails the command
+    /// buffer from the draw's encoder on as Metal does: the encoder and every one after it run
+    /// nothing, and the command buffer completes with `MTLCommandBufferErrorInternal` (1,
+    /// "Discarded (victim of GPU error/recovery)").
     pub discards_command_buffer: bool,
 }
 

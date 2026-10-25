@@ -149,7 +149,7 @@ jobs:
           log="$RUNNER_TEMP/private-doc-links.log"
           status=0
           for row in \
-            metal2vulkan=32 \
+            metal2vulkan=0 \
             metal2vulkan-air=3 \
             metal2vulkan-runtime=73 \
             metal2vulkan-validation=4 \

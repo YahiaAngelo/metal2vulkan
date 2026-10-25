@@ -2,18 +2,19 @@
 //! slot reads, and the code of each value it writes, exact on every device.
 //!
 //! A channel's 10-bit code `c` holds `(c - 384) / 510`: a read answers it correctly rounded
-//! ([`texel_round::ratio_to_f32`] of `|c - 384|` over 1020, doubled), alpha clamped to `[0, 1]`
-//! first, and a `half` result rounds that value with ties away from zero ([`decode`]); a write rounds the exact product of the value with 510 to nearest even
-//! ([`math::round_exact_product_lanes`], the magnitude below 1.5 first) and clamps the code (alpha
-//! to `[384, 894]`), a NaN 0. An `_sRGB` format's color channel goes through Metal's own tables,
-//! symmetric about code 384 ([`declare`]): a read answers `s / 8192` for the step `s` of
-//! `|c - 384|`, signed; a write rounds the magnitude (below 2 first) to `2^-13`, nearest even (an
-//! exact product and `RoundEven`), and the offset is the largest whose first index is at most
-//! that ([`search`]), at most 384 below the zero code. Both tables were read from an Apple M3 Max
-//! and an Apple M4 (byte-identical): every code read, and every threshold between two adjacent
-//! codes found by bisection over the `f32`s, every half, and a dense grid written. The MSL transfer
-//! `((x + 0.055) / 1.055)^2.4` rounded to `2^-13` gives every decode step; it misses 32 of the 639
-//! encode thresholds, which Metal places by its own arithmetic.
+//! ([`texel_round::ratio_to_f32`](super::texel_round::ratio_to_f32) of `|c - 384|` over 1020,
+//! doubled), alpha clamped to `[0, 1]` first, and a `half` result rounds that value with ties away
+//! from zero ([`decode`]); a write rounds the exact product of the value with 510 to nearest even
+//! ([`math::round_exact_product_lanes`](super::math::round_exact_product_lanes), the magnitude
+//! below 1.5 first) and clamps the code (alpha to `[384, 894]`), a NaN 0. An `_sRGB` format's color
+//! channel goes through Metal's own tables, symmetric about code 384 ([`declare`]): a read answers
+//! `s / 8192` for the step `s` of `|c - 384|`, signed; a write rounds the magnitude (below 2 first)
+//! to `2^-13`, nearest even (an exact product and `RoundEven`), and the offset is the largest whose
+//! first index is at most that ([`search`]), at most 384 below the zero code. Both tables were read
+//! from an Apple M3 Max and an Apple M4 (byte-identical): every code read, and every threshold
+//! between two adjacent codes found by bisection over the `f32`s, every half, and a dense grid
+//! written. The MSL transfer `((x + 0.055) / 1.055)^2.4` rounded to `2^-13` gives every decode
+//! step; it misses 32 of the 639 encode thresholds, which Metal places by its own arithmetic.
 
 use crate::lower::arith::legal::{FloatFmt, Form, Held};
 use crate::lower::arith::math::round_exact_product_lanes;

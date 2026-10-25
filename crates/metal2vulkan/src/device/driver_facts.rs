@@ -2,11 +2,10 @@
 //! the driver's identity and release: `VkPhysicalDeviceDriverProperties`'s `driverID`,
 //! `VkPhysicalDeviceProperties`'s `vendorID` where the measurement is of one GPU vendor's, and
 //! `driverVersion`. One table type serves both kinds of fact: the description's deviations, which
-//! translation reads and the compile profile holds
-//! ([`DriverDeviation`](crate::error::DriverDeviation)), and the runtime's driver facts, which no
-//! translation reads ([`DriverFact`], in this table as `MEASURED`): a description names its
-//! driver's through [`DeviceDescription::driver_facts`], which the runtime puts in its device's
-//! properties. None of those is in the compile profile, a cache key or a digest.
+//! translation reads and the compile profile holds ([`DriverDeviation`]), and the runtime's driver
+//! facts, which no translation reads ([`DriverFact`], in this table as `MEASURED`): a description
+//! names its driver's through [`DeviceDescription::driver_facts`], which the runtime puts in its
+//! device's properties. None of those is in the compile profile, a cache key or a digest.
 //!
 //! Each row names a driver and the first and last releases measured with the fact (the
 //! coordinator's ruling of 2026-10-06). For the description's deviations and translation's

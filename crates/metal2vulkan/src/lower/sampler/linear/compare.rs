@@ -9,7 +9,7 @@
 //! `0` elsewhere; a NaN fails every ordered comparison and passes `not_equal`. A float format's
 //! reference and texel are compared as given (NaN, denormals and values outside `[0, 1]` included);
 //! a `Depth16Unorm` texture's as codes, the texel's its code and the reference's the code of its
-//! exact product with 65535 ([`reference`]). The shader compares the values' integer keys
+//! exact product with 65535 ([`reference()`]). The shader compares the values' integer keys
 //! ([`key`]), not the floats: a device's float comparison may flush a denormal to zero, as x86
 //! lavapipe's does (`runtime_lane::depth_compares` with float comparisons: 82 of 3,392
 //! `Depth32Float` comparisons differed from Metal's, such as the least denormal reference passing
@@ -46,7 +46,7 @@ use super::super::bicubic::{scalar, value, Bits, Tys};
 /// (module docs).
 pub(in crate::lower::sampler) const PASS_FORMAT: PixelFormat = PixelFormat::R8Unorm;
 
-/// The census words of a comparison's setup: its reference's code ([`reference`]) and key
+/// The census words of a comparison's setup: its reference's code ([`reference()`]) and key
 /// ([`key`]), the format's test, and their constants.
 pub(in crate::lower::sampler) const REFERENCE_WORDS: u32 = 240;
 
@@ -89,7 +89,7 @@ const DEPTH_CODES: f32 = 65535.0;
 /// bound format compares codes.
 pub(in crate::lower::sampler) struct TapCompare {
     test: Test,
-    /// The key of the reference as compared ([`reference`], [`key`]).
+    /// The key of the reference as compared ([`reference()`], [`key`]).
     reference: SValue,
     /// The reference is not a NaN (a `bool`).
     ordered: SValue,

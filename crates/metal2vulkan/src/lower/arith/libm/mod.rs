@@ -936,7 +936,7 @@ impl<'a> Lib<'a> {
     }
 
     /// Whether the device's instructions are Metal's functions in mode `m` (a unit test's
-    /// [`Lib::instructions`] are, in either).
+    /// `Lib::instructions` are, in either).
     pub fn metal_in(&self, m: Mode) -> bool {
         match self.answers {
             Answers::Metal(x) => x == m,
@@ -1228,12 +1228,12 @@ const F32: Form = Form {
 /// rounded arithmetic, each operation `NoContraction`.
 pub(crate) struct E<'f, 'm> {
     pub fb: &'f mut FunctionBuilder<'m>,
-    /// The device's division and square root moved ([`define_rough`]); `false` in the product.
+    /// The device's division and square root moved (`define_rough`); `false` in the product.
     rough: bool,
     /// The profile's `float` fused multiply-add is `OpFmaKHR`: the trigonometric and the second
     /// stage's routines take a product's exact error as one `OpFmaKHR` ([`E::exact_error`]).
     fma: bool,
-    /// The module's functions [`E::div`] and [`E::sqrt`] call.
+    /// The module's functions [`E::div`] and [`E::rsqrt`] call.
     helpers: Helpers,
 }
 
@@ -1401,7 +1401,7 @@ impl E<'_, '_> {
         self.moved(s, 3)
     }
 
-    /// `v`, or where the emission is [`define_rough`]'s, a normal `v` moved `ulps` units of its
+    /// `v`, or where the emission is `define_rough`'s, a normal `v` moved `ulps` units of its
     /// last place up or down by one of its own bits.
     fn moved(&mut self, v: Value, ulps: u32) -> BResult<Value> {
         if !self.rough {
