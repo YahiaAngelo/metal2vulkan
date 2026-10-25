@@ -60,7 +60,7 @@
 //! # What each cell records, and why the storage mode is read off the object
 //!
 //! - **`made`** — whether the creator answered a texture. Metal's nil and the runtime's typed
-//!   `Nil` are the same fact and both record `false` ([`made_or_nil`]), as
+//!   `Nil` are the same fact and both record `false` (`made_or_nil`), as
 //!   [`Side::makes_texture`] already collapses them for the device's creator. Anything else is our
 //!   own refusal and is recorded as one, so a typed error cannot hide inside a `false`.
 //! - **`resource`** — every `MTLResource` getter of the made texture, **`storageMode` among
@@ -116,7 +116,7 @@
 //!   **except** that the shared creator answers nil first for a format of which Metal makes no
 //!   texture alone. `RGBA16Float_XR` is such a format and was measured nil 8 of 8 at 4 and at 8
 //!   samples from this creator; `RGBA8Unorm` and `R16Uint` are not, so a multisample row of either
-//!   is a shape nobody has measured from this creator and is left out. [`samples_are_measured`]
+//!   is a shape nobody has measured from this creator and is left out. `samples_are_measured`
 //!   holds that, with no device.
 
 use crate::case::{Abort, Answer, Case, Failure, Handle, Input, MetalSource, Side};
@@ -179,7 +179,7 @@ const SIDE: u32 = 8;
 /// not.
 ///
 /// All three from the shared creator alone, and of one format. See the module's safety argument
-/// and [`samples_are_measured`].
+/// and `samples_are_measured`.
 const SAMPLES: [u32; 3] = [1, 4, 8];
 
 /// The site each of a cell's four answers sits at.
