@@ -46,8 +46,8 @@ use super::indirect_executions::RELEASED_STATES;
 use super::resource_ids::DELAYED_DEALLOCATORS as DELAYED;
 use super::{buffer_with, read_buffer, WAIT};
 use crate::air_library::AirLibrary;
-use metal2vulkan::bind::{ReplayFaults, StatusReport};
-use metal2vulkan::metal::{IndirectCommandType, ResourceUsage};
+use metal2vulkan::bind::{ArgumentDescriptor, ReplayFaults, StatusReport};
+use metal2vulkan::metal::{DataType, IndirectCommandType, ResourceUsage};
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, RuntimeFact, StageSource};
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
@@ -1198,7 +1198,7 @@ fn blits_copy_reset_and_optimize_commands_as_they_run() {
             past(3, 2)
         );
         // A buffer of no command types is reset, optimized and copied to another as nothing, as
-        // plain Metal's; a copy beside a buffer of command types was not measured.
+        // plain Metal's.
         let none = || {
             device
                 .new_indirect_command_buffer(
@@ -1213,17 +1213,104 @@ fn blits_copy_reset_and_optimize_commands_as_they_run() {
         blit.optimize_indirect_command_buffer(&none, 0..2).unwrap();
         blit.copy_indirect_command_buffer(&none, 0..2, &other, 0)
             .unwrap();
+        blit.end_encoding().unwrap();
+        complete(&command_buffer);
+        // A buffer of no command types beside one of command types: the copy is taken, in either
+        // direction, and moves nothing, as plain Metal's does. The destination of command types
+        // holds every command, so a copy of the other buffer's records over them would leave it
+        // running nothing; it runs them all.
+        let kept = commands_buffer(device, 2);
+        let out = run(&kept, &|blit| {
+            blit.copy_indirect_command_buffer(&setup.icb, 0..COMMANDS, &kept, 0)
+                .unwrap();
+            blit.copy_indirect_command_buffer(&none, 0..COMMANDS, &kept, 0)
+                .unwrap();
+            blit.copy_indirect_command_buffer(&kept, 0..COMMANDS, &none, 0)
+                .unwrap();
+        });
         assert_eq!(
-            blit.copy_indirect_command_buffer(&none, 0..2, &copied, 0)
+            out,
+            expected(),
+            "a copy beside no command types moved nothing"
+        );
+        // The range is still checked on both sides, each buffer's own size.
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut blit = command_buffer.blit_command_encoder().unwrap();
+        assert_eq!(
+            blit.copy_indirect_command_buffer(&none, 0..COMMANDS + 1, &kept, 0)
                 .err(),
             Some(Error::Invalid(Invalid::new(
                 "copy_indirect_command_buffer",
-                Problem::IndirectCommandBuffer(IndirectCommandBufferProblem::NoCommandTypes),
+                Problem::IndirectCommandBuffer(IndirectCommandBufferProblem::Range {
+                    location: 0,
+                    length: COMMANDS + 1,
+                    size: COMMANDS,
+                }),
             )))
         );
         blit.end_encoding().unwrap();
         complete(&command_buffer);
     });
+}
+
+/// An indirect command buffer of no command types encodes its own resource ID into an argument
+/// buffer, as a buffer of command types does: its command types decide nothing about the word, and
+/// the ID is its place among the device's indirect command buffers, so two buffers encoded in one
+/// process take two IDs whatever their command types (plain Metal on an M3 Max, macOS 27.0.1:
+/// `0100000000000000` then `0200000000000000` in the order they were made, either order, and the
+/// same for two `Draw` buffers; `probes/icb_argument_encode_and_copy_destinations.m`).
+#[test]
+fn a_buffer_of_no_command_types_encodes_its_own_id() {
+    // Not `on_device`: the test encodes and executes nothing, so no host step is announced.
+    on_device_with(
+        |_| {},
+        |device, messages| {
+            let made = |types: IndirectCommandType| {
+                let mut descriptor = IndirectCommandBufferDescriptor::new();
+                descriptor.command_types = types;
+                device
+                    .new_indirect_command_buffer(&descriptor, COMMANDS, ResourceOptions::shared())
+                    .unwrap()
+            };
+            let none = made(IndirectCommandType::empty());
+            let draw = made(IndirectCommandType::DRAW);
+            // The ID is the place, not the descriptor: the buffer of no command types, made first,
+            // holds the lower ID, and neither is 0.
+            assert_eq!(
+                [none.gpu_resource_id(), draw.gpu_resource_id()],
+                [ResourceId(1), ResourceId(2)]
+            );
+            let mut encoder = device
+                .new_argument_encoder_with_arguments(&[
+                    ArgumentDescriptor::new(DataType::IndirectCommandBuffer, 0),
+                    ArgumentDescriptor::new(DataType::IndirectCommandBuffer, 1),
+                ])
+                .unwrap();
+            let arguments = device.new_buffer(64, ResourceOptions::shared()).unwrap();
+            encoder.set_argument_buffer(Some(&arguments), 0).unwrap();
+            let word = |at: usize| {
+                let contents = arguments.contents().unwrap();
+                // SAFETY: the buffer is shared and mapped, 64 bytes long, and nothing writes it now.
+                let bytes = unsafe { std::slice::from_raw_parts(contents.as_ptr().add(at), 8) };
+                u64::from_le_bytes(bytes.try_into().unwrap())
+            };
+            encoder.set_indirect_command_buffer(Some(&none), 0).unwrap();
+            encoder.set_indirect_command_buffer(Some(&draw), 1).unwrap();
+            assert_eq!([word(0), word(8)], [1, 2]);
+            // The range form writes both, and `None` writes 0 at either index.
+            encoder
+                .set_indirect_command_buffers(&[Some(&draw), Some(&none)], 0)
+                .unwrap();
+            assert_eq!([word(0), word(8)], [2, 1]);
+            encoder.set_indirect_command_buffer(None, 0).unwrap();
+            assert_eq!([word(0), word(8)], [0, 1]);
+            let shared = forced(&[(
+                Degradation::SharedInSystemMemory,
+                shared_in_system_memory(device),
+            )]);
+            assert_made_once(messages, &[], &shared);
+        },
+    );
 }
 
 /// How long a host step holds its command buffer, and how late another queue's command buffers

@@ -18,6 +18,23 @@
 //!   records on the GPU as the command buffer runs, so the call marks it written by the GPU
 //!   (`IndirectCommandBuffer::written_by_gpu`): its executions run the records as they stand once
 //!   the work before them completed. An optimize records nothing.
+//! - **A buffer of no command types beside one of command types.** The copy completes and moves
+//!   nothing, as plain Metal's does. Metal's own answer, read through what the destination then
+//!   paints rather than through its status (an M3 Max, macOS 27.0.1, build 26A434, the validation
+//!   layer off, one shape per process, four processes a shape, all four alike, no byte of a 0xEE
+//!   guard at the next 256-aligned placement-heap offset past the vertex buffer touched;
+//!   `probes/icb_argument_encode_and_copy_destinations.m`): a copy of 4 commands from a buffer of
+//!   no command types over a `Draw` buffer whose command 0 held a draw of the whole target
+//!   completed, status 4 and no error, and the destination still painted 0.75 — so nothing moved,
+//!   not even the source's reset records. Both controls ran live beside it: the same copy from a
+//!   fresh `Draw` buffer left -1 (the copy does write), and a copy from a `Draw` buffer that held
+//!   the draw into a reset `Draw` buffer painted 0.75 (the copy does carry records). The other
+//!   direction is beyond any public Metal call: a buffer of no command types has no setter Metal
+//!   survives, no read-back, an execution that paints nothing, and a copy out of it that moves
+//!   nothing, so a copy into it cannot be read — `Draw` -> none -> `Draw` painted -1 where
+//!   `Draw` -> `Draw` -> `Draw` painted 0.75, which the second copy alone accounts for. Recording
+//!   nothing is the one answer that matches every observation there is. Metal places no indirect
+//!   command buffer in a placement heap, so no guard can sit beside a copy's destination.
 //! - **Refused** (`Invalid`, changing nothing): a buffer of another device, and a range past
 //!   either buffer's size, which Metal runs as a corruption no program relies on.
 //! - **What a command holds** (the M4 probe, plain Metal). A copy and a reset hold the
@@ -38,10 +55,12 @@ impl BlitCommandEncoder {
     /// `source_range` of `source` become commands `destination_index..` of `destination` as the
     /// command buffer runs, as on Metal (the module docs). An empty range copies nothing.
     ///
-    /// Refused (`Invalid`): a buffer of another device, a range past either buffer's size
-    /// (`IndirectCommandBufferProblem::Range`), and a buffer of no command types beside one of
-    /// command types (`NoCommandTypes`, unmeasured on Metal); two buffers of no command types
-    /// copy as any others, as plain Metal's do.
+    /// A buffer of no command types beside one of command types copies nothing, as plain Metal's
+    /// does (the module docs); two buffers of no command types copy as any others, as plain
+    /// Metal's do.
+    ///
+    /// Refused (`Invalid`): a buffer of another device, and a range past either buffer's size
+    /// (`IndirectCommandBufferProblem::Range`).
     pub fn copy_indirect_command_buffer(
         &mut self,
         source: &IndirectCommandBuffer,
@@ -62,18 +81,18 @@ impl BlitCommandEncoder {
                 const CALL: &str = "copy_indirect_command_buffer";
                 this.core().check_device(CALL, source.device())?;
                 this.core().check_device(CALL, destination.device())?;
-                // Two buffers of no command types copy; one beside a buffer of command types was
-                // not measured.
-                if source.has_no_command_types() != destination.has_no_command_types() {
-                    source.check_command_types(CALL)?;
-                    destination.check_command_types(CALL)?;
-                }
                 let from = source.command_range(CALL, source_range.clone())?;
                 let count = u64::from(from.end - from.start);
                 let to = destination.command_range(
                     CALL,
                     destination_index..destination_index.saturating_add(count),
                 )?;
+                // A buffer of no command types beside one of command types: the records of one
+                // side are of commands the other's descriptor has no kind for at all, and Metal
+                // moves none of them (the module docs), so the copy records nothing.
+                if source.has_no_command_types() != destination.has_no_command_types() {
+                    return Ok(());
+                }
                 if from.is_empty() {
                     return Ok(());
                 }

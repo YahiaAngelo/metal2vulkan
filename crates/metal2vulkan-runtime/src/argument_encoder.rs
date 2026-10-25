@@ -46,7 +46,21 @@
 //!   pipeline's among them, is written as its resource ID, which is 0 ("Setting a pipeline that
 //!   does not have supportIndirectCommandBuffers = YES is invalid"). An indirect command a kernel
 //!   encodes with that word names no state, as one encoded from `None` does: Metal's GPU faulted
-//!   running one, and the runtime's execution runs nothing for it.
+//!   running one, and the runtime's execution runs nothing for it;
+//! - an indirect command buffer of no command types is written as its resource ID, as a buffer of
+//!   command types is. Its command types decide nothing about the word: the ID is the buffer's
+//!   place among the device's indirect command buffers, so two buffers encoded in one process take
+//!   two IDs whatever their command types, and the first of them takes 1 whichever it is (an M3
+//!   Max, macOS 27.0.1, build 26A434, the validation layer off, one shape per process, four
+//!   processes a shape, all four alike: a buffer of no command types and a `Draw` buffer encoded
+//!   side by side into one argument buffer took `0100000000000000` and `0200000000000000` in the
+//!   order they were made, either order, and so did two `Draw` buffers and two buffers of no
+//!   command types; `probes/icb_argument_encode_and_copy_destinations.m`). A kernel that reads
+//!   such a word reaches the buffer: `command_buffer::size()` answered 4 for a buffer of 4
+//!   commands and no command types, and `render_command(cb, 0).reset()` ran with no fault and no
+//!   error, where the same reset on a `Draw` buffer removed the draw the CPU had set (the same
+//!   probe, four processes a shape). A render pass's execution of such a buffer paints nothing,
+//!   before the kernel and after it.
 //!
 //! Where plain Metal's result is undefined (memory-dependent, a crash, or unmeasured), the call is
 //! refused, as validation refuses it: the list above;
@@ -682,7 +696,6 @@ impl ArgumentEncoder {
             None => Ok(0),
             Some(buffer) => {
                 self.check_device(call, buffer.device())?;
-                buffer.check_command_types(call)?;
                 Ok(buffer.gpu_resource_id().0)
             }
         }
@@ -690,8 +703,8 @@ impl ArgumentEncoder {
 
     /// `setIndirectCommandBuffer:atIndex:`: the buffer's resource ID (`gpu_resource_id`, a small
     /// integer of the buffers' own space, as Metal writes it), or 0 for `None`. A buffer of no
-    /// command types is refused (`Invalid`, `NoCommandTypes`: what a function does with one was not
-    /// measured).
+    /// command types encodes its own ID as any other buffer's, as plain Metal encodes it: its
+    /// command types decide nothing about the word (the module docs).
     pub fn set_indirect_command_buffer(
         &self,
         buffer: Option<&IndirectCommandBuffer>,
