@@ -203,6 +203,8 @@ mod relay_facts;
 mod released_programs;
 mod render;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod render_creation_cost;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod render_sibling_work;
 mod replays;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
