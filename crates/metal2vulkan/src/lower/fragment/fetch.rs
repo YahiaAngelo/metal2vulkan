@@ -337,7 +337,8 @@ pub(crate) fn blends_half_in_shader(p: &DeviceProfile) -> bool {
 }
 
 /// Whether `pf` is a 16-bit float color format, whose blend of a `half` output of a module
-/// without fast math Metal computes in `half` arithmetic.
+/// without fast math Metal computes in `half` arithmetic, and of one with fast math in the fast
+/// forms it folds into the function ([`extended_range::blend::BlendMath`]).
 pub(crate) fn half_float_format(pf: crate::metal::PixelFormat) -> bool {
     use crate::metal::PixelFormat as P;
     matches!(pf, P::R16Float | P::RG16Float | P::RGBA16Float)
@@ -433,12 +434,19 @@ fn generic(
     extended_range::Blend::generic(eq, has_alpha, written)
 }
 
-/// Whether entry `e`, of a module compiled without fast math (`air.compile.fast_math_disable`),
-/// writes color attachment `color` through a first (index 0) output of one to four `half`s and
-/// through no second (index 1) one, whose 16-bit float blend Metal computes in `half` arithmetic
-/// ([`blended_output`]).
+/// Whether entry `e`, of a module that states its math mode (`air.compile.fast_math_disable` or
+/// `air.compile.fast_math_enable`), writes color attachment `color` through a first (index 0)
+/// output of one to four `half`s and through no second (index 1) one, whose 16-bit float blend
+/// Metal computes in the arithmetic of that mode ([`blended_output`]): in `half`, each factor,
+/// product and sum rounded, without fast math, and in the fast forms with it.
+///
+/// A module naming no math mode is out: what Metal's compiler does to the blend there was not
+/// measured. Under fast math the storage form is Metal's only where the fast forms are fitted and
+/// no lane of the output folds into the blend ([`folds_into_blend`]), which the lowering checks
+/// for the pipeline it compiles against; elsewhere the attachment named for the blend alone
+/// stays a color attachment and the device blends it.
 pub(crate) fn half_output(e: &crate::air::Entry, color: u32) -> bool {
-    e.compile.fast_math == Some(false)
+    e.compile.fast_math.is_some()
         && blended_output(e, color)
             .is_some_and(|(arith, _)| arith == extended_range::blend::BlendArith::Half)
 }

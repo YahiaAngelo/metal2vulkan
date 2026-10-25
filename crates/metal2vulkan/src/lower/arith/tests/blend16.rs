@@ -543,3 +543,169 @@ fn a_fast_blend_s_lone_term_takes_metal_s_zero() {
         }
     }
 }
+
+/// The source values `half-output-blends-*` sweeps: `k / 16 - 2` for `k` in 0 to 63, every
+/// sixteenth between -2 and 2, each exact in `half`.
+fn blend_source(index: usize) -> f64 {
+    index as f64 / 16.0 - 2.0
+}
+
+/// The destination codes `half-output-blends-*` draws for a 16-bit float format: xorshift64\*
+/// seeded from the format's Metal value, a multiple of 2^-10 in [0, 1] per channel per pixel,
+/// each exact in `half`. Restated here so this test owns its inputs; the words are the words of
+/// that family's recordings.
+struct BlendRng(u64);
+
+impl BlendRng {
+    fn new(seed: u64) -> Self {
+        let mut state = seed
+            .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            .wrapping_add(0x632b_e59b_d9b4_e019);
+        if state == 0 {
+            state = 1;
+        }
+        let mut generator = Self(state);
+        for _ in 0..8 {
+            generator.next();
+        }
+        generator
+    }
+
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(2_685_821_657_736_338_717)
+    }
+}
+
+/// Metal's rounding in a fast-math `half` output's blend into a 16-bit float attachment at the
+/// states [`Blend::fitted`] holds by measurement (`blend::MEASURED_SIXTEEN`), on the interpreter,
+/// over the very sources and destinations `half-output-blends-r16f`, `-rg16f` and `-rgba16f`
+/// compare against plain Metal.
+///
+/// **The rule, off those sites' recordings:** Metal rounds the **source** product to the
+/// attachment's precision and carries the **destination** product into the sum unrounded,
+/// `h(h(Sf · S) + Df · D)` -- one fused multiply-add on the destination term -- where the device's
+/// own blend is the mirror image, `h(Sf · S + h(Df · D))`. `SourceColor` over `DestinationColor`
+/// is the state that shows it: the source product `S · S` is exact in the attachment, so only the
+/// destination product's rounding is left, and the two orders part by a code.
+///
+/// `DestinationAlpha` over `OneMinusDestinationAlpha` adds the alpha class, which is neither
+/// order: `h(da · h(h(1 + sa) - da))`, the common factor's form ([`plan`]).
+///
+/// 2,560 words: 256 of `R16Float`, 512 of `RG16Float` and 1,024 of `RGBA16Float` at
+/// `SourceColor`/`DestinationColor`, and 768 color words of `RGBA16Float` at
+/// `DestinationAlpha`/`OneMinusDestinationAlpha`, whose 256 alpha words this test holds too.
+#[test]
+fn a_measured_fast_blend_rounds_the_source_product_first() {
+    let f4 = vec(float(32), 4);
+    // The sweep's stride: how far apart two channels of one pixel are, so each source value lands
+    // at every channel position across the pixels.
+    const STRIDE: usize = 7;
+    const SOURCES: usize = 64;
+    const PIXELS: usize = 256;
+    let states = [
+        (F::SourceColor, F::DestinationColor),
+        (F::DestinationAlpha, F::OneMinusDestinationAlpha),
+    ];
+    let formats = [
+        (PixelFormat::R16Float, 1u32, 25u64),
+        (PixelFormat::RG16Float, 2, 65),
+        (PixelFormat::RGBA16Float, 4, 115),
+    ];
+    let mut words = 0usize;
+    for (pf, channels, raw) in formats {
+        // The case's destination codes, one row a pixel, and a missing alpha channel's one, as
+        // Metal's blend and Vulkan's both read it.
+        let mut rng = BlendRng::new(raw);
+        let destinations: Vec<[f64; 4]> = (0..PIXELS)
+            .map(|_| {
+                std::array::from_fn(|c| match c < channels as usize {
+                    true => (rng.next() % 1025) as f64 / 1024.0,
+                    false => 1.0,
+                })
+            })
+            .collect();
+        let cases: Vec<Case> = (0..PIXELS)
+            .map(|pixel| {
+                let s: Vec<u64> = (0..4)
+                    .map(|c| {
+                        let v = blend_source((pixel + STRIDE * c as usize) % SOURCES);
+                        u64::from((v as f32).to_bits())
+                    })
+                    .collect();
+                let d: Vec<u64> = destinations[pixel]
+                    .iter()
+                    .map(|&v| u64::from((v as f32).to_bits()))
+                    .collect();
+                vec![s, d]
+            })
+            .collect();
+        for (fs, fd) in states {
+            let eq = BlendEquation {
+                source_rgb: fs,
+                destination_rgb: fd,
+                rgb_operation: O::Add,
+                source_alpha: fs,
+                destination_alpha: fd,
+                alpha_operation: O::Add,
+            };
+            let what = format!("{pf:?} {fs:?} {fd:?}");
+            let b = Blend::half_float(&eq, pf, ColorWriteMask::ALL, BlendMath::Fast)
+                .unwrap_or_else(|e| panic!("{what}: {e:?}"));
+            assert!(b.fitted(), "{what}: {b:?}");
+            // Metal's value in lane `l` of the blend: the color class in the three color lanes,
+            // and in alpha the attachment's own class, where it holds one.
+            let metal = |s: [f64; 4], d: [f64; 4], l: usize| -> u64 {
+                let alpha = l == 3;
+                let has_alpha = channels == 4;
+                let (sl, dl) = (s[l], d[l]);
+                let (sa, da) = (s[3], d[3]);
+                if alpha && !has_alpha {
+                    // The lane the attachment does not hold keeps the texel's.
+                    return u64::from((dl as f32).to_bits());
+                }
+                let value = match (fs, alpha) {
+                    // The alpha of the destination alpha over its one minus: the common factor's
+                    // form, `h(da · h(h(1 + sa) - da))`.
+                    (F::DestinationAlpha, true) => h(da * h(h(1.0 + sa) - da)),
+                    _ => {
+                        let (ks, kd) = match fs {
+                            F::SourceColor => (sl, dl),
+                            F::DestinationAlpha => (da, h(1.0 - da)),
+                            other => panic!("no factor {other:?} here"),
+                        };
+                        // Every product of two of these `half`s is exact in `f64`: the source's
+                        // rounded to the attachment, the destination's fused into the sum.
+                        h(h(sl * ks) + dl * kd)
+                    }
+                };
+                u64::from((value as f32).to_bits())
+            };
+            for q in HALF_FORMS {
+                check(
+                    &format!("the measured blend's {what}, by {q:?}"),
+                    &[f4, f4],
+                    f4,
+                    &|fb, x| {
+                        fb.module().set_quantize_form(q);
+                        blend_half_float(fb, &b, BlendArith::Half, (x[0], x[1]), None)
+                    },
+                    &cases,
+                    &|c| {
+                        let s: [f64; 4] = std::array::from_fn(|l| f64::from(f32v(c[0][l])));
+                        let d: [f64; 4] = std::array::from_fn(|l| f64::from(f32v(c[1][l])));
+                        Some((0..4).map(|l| metal(s, d, l)).collect())
+                    },
+                    false,
+                );
+            }
+            // The words of the site: one pixel a row, the channels the format holds.
+            words += PIXELS * channels as usize;
+        }
+    }
+    // The states' sites in the three formats: 1,792 a state, the 2,560 of the five sites the
+    // family's recordings measure among them.
+    assert_eq!(words, 3_584, "every word of the measured states' sites");
+}

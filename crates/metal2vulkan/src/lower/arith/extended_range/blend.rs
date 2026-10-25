@@ -270,6 +270,10 @@ pub struct Blend {
     /// product subtracted alone by one minus a source value Metal computes with the factor negated
     /// ([`Blend::half_float`]).
     negates_one_minus: bool,
+    /// A 16-bit float attachment's blend of a state measured word for word against Metal's own
+    /// stored codes ([`MEASURED_SIXTEEN`]), whose forms are Metal's whether or not the sweeps fit
+    /// them in every state ([`Blend::fitted`]).
+    measured: bool,
 }
 
 /// The range Metal clamps a `float4` output's color lanes to before blending into an attachment
@@ -299,6 +303,43 @@ impl BlendMath {
             Some(true) | None => BlendMath::Fast,
         }
     }
+}
+
+/// The blend states a 16-bit float attachment's fast-math blend was measured in word for word
+/// against Metal's own stored codes, color and alpha factors alike, whose forms [`Blend::fitted`]
+/// holds although the state sweeps do not fit a contracted pair or a common factor in every state:
+/// the source and destination factors, under `Add`.
+///
+/// Measured against the committed recordings of plain Metal on an Apple M3 Max (macOS 27.0.1) of
+/// `half-output-blends-r16f`, `-rg16f` and `-rgba16f` ("conformance"): every word of each state's
+/// site in each of the three formats, 1,792 a state, the destinations each case's own generator
+/// draws and the sources its sweep. `half-output-blends-rgba16f`'s `da-1mda` needs the alpha
+/// class's common factor ([`plan`]) to hold at its alpha.
+///
+/// A state is here only where no word of any of the three formats differs, which is what says the
+/// form is Metal's and not one width's coincidence. Two states the sites measure are out:
+/// `SourceAlpha` over `OneMinusSourceAlpha`, whose contracted pair holds at every word of
+/// `-rg16f` and differs at 5 of `-r16f` and 13 of `-rgba16f`; and `SourceAlphaSaturated` over
+/// `OneMinusSourceAlpha`, where Metal rounds the destination's product first at one and at four
+/// channels (every word of `-r16f` and `-rgba16f`) and the source's at two (every word of
+/// `-rg16f`, the other order differing at 47): no form the state decides is Metal's at every
+/// width, so the device blends it and the pipeline announces
+/// `PrecisionNote::HalfOutputFastMathBlend`.
+const MEASURED_SIXTEEN: [(BlendFactor, BlendFactor); 2] = [
+    (BlendFactor::SourceColor, BlendFactor::DestinationColor),
+    (
+        BlendFactor::DestinationAlpha,
+        BlendFactor::OneMinusDestinationAlpha,
+    ),
+];
+
+/// Whether the 16-bit float blend `eq` is one of the measured states ([`MEASURED_SIXTEEN`]): its
+/// color and its alpha factors the one pair, added, as each measured state's are.
+fn measured_sixteen(eq: &BlendEquation) -> bool {
+    let added = eq.rgb_operation == BlendOperation::Add
+        && eq.alpha_operation == BlendOperation::Add
+        && (eq.source_rgb, eq.destination_rgb) == (eq.source_alpha, eq.destination_alpha);
+    added && MEASURED_SIXTEEN.contains(&(eq.source_rgb, eq.destination_rgb))
 }
 
 fn refused(gap: ExtendedRangeBlend) -> Error {
@@ -649,8 +690,13 @@ fn plan(
                     continue;
                 }
                 // An 8-bit unorm attachment's alpha takes no lerp of the destination alpha beside
-                // itself or held by both products.
-                if unorm8 && alpha && za == Atom::Da && (y == Node::Atom(za) || both) {
+                // itself or held by both products, and nor does a 16-bit float one's: Metal's
+                // alpha there is the common factor's form, `h(da · h(h(1 + sa) - da))`
+                // (`half-output-blends-rgba16f`'s `da-1mda` and `dc-1mdc`, whose alpha factors are
+                // both the destination alpha and its one minus: every one of the 512 words of the
+                // two sites, against the committed Metal recordings, where the lerp holds 480).
+                let no_destination_lerp = unorm8 || family == Family::HalfFloat;
+                if no_destination_lerp && alpha && za == Atom::Da && (y == Node::Atom(za) || both) {
                     continue;
                 }
                 // A `float4` output's alpha takes no lerp of a one minus the source alpha the
@@ -1021,6 +1067,7 @@ fn planned_for(
         float,
         math,
         negates_one_minus: false,
+        measured: false,
     })
 }
 
@@ -1148,6 +1195,7 @@ impl Blend {
         )?;
         let b = Blend {
             negates_one_minus: channels > 1 && math == BlendMath::Fast,
+            measured: math == BlendMath::Fast && !b.masked && measured_sixteen(eq),
             ..b
         };
         match b.reads_second() {
@@ -1340,17 +1388,23 @@ impl Blend {
     /// Whether every class the blend stores takes a form the 16-bit float sweeps fit in every state
     /// ([`Blend::half_float`]): the rounded forms without fast math; under fast math no term, one
     /// term, one fused multiply-add, a minimum or maximum, or a blend constant's difference
-    /// ([`constant_difference`]). A fast-math blend of another form (a sum regrouped by a lerp or a
-    /// common factor, or another product rounded beside a fused one) fits most states but not every
-    /// one, so it is a near-equivalent.
+    /// ([`constant_difference`]), and every form of a state measured word for word against Metal's
+    /// stored codes ([`MEASURED_SIXTEEN`]). A fast-math blend of another form (a sum regrouped by a
+    /// lerp or a common factor, or another product rounded beside a fused one) fits most states but
+    /// not every one, so it is a near-equivalent.
     pub fn fitted(&self) -> bool {
         let fits = |a: &Arith| match self.math {
             BlendMath::Rounded => true,
             BlendMath::Fast => {
-                matches!(
-                    a,
-                    Arith::Zero | Arith::Term { .. } | Arith::Fused { .. } | Arith::MinMax { .. }
-                ) || constant_difference(a)
+                self.measured
+                    || matches!(
+                        a,
+                        Arith::Zero
+                            | Arith::Term { .. }
+                            | Arith::Fused { .. }
+                            | Arith::MinMax { .. }
+                    )
+                    || constant_difference(a)
             }
         };
         [&self.color, &self.alpha].into_iter().flatten().all(fits)

@@ -56,9 +56,9 @@ pub struct DevicePolicy {
     /// the products, its two fused multiply-adds, its `x · rsqrt(x)`) or are the device's single
     /// instructions (the default).
     pub rounding_order: RoundingOrderPolicy,
-    /// Whether a `half4` color output of a module without fast math blends into a 16-bit float
-    /// attachment in the device's blend (the default) or in Metal's `half` arithmetic, which the
-    /// function computes in the shader.
+    /// Whether a `half4` color output of a module that states its math mode blends into a 16-bit
+    /// float attachment in the device's blend (the default) or in Metal's own arithmetic, which
+    /// the function computes in the shader.
     pub half_blend: HalfBlendPolicy,
     /// Whether a `half` or `float` read of a 16-bit float texture is the device's decode of the
     /// texel (the default) or the texel's own bits, read through the texture's unsigned-integer
@@ -424,14 +424,23 @@ pub enum RoundingOrderPolicy {
     Exact,
 }
 
-/// How a `half4` color output of a module compiled without fast math
-/// (`air.compile.fast_math_disable`, safe or relaxed math) blends into an `R16Float`, `RG16Float`
-/// or `RGBA16Float` attachment. Metal blends it in `half` arithmetic: the `half` the function
-/// returns, each factor (`1 - x` and the blend color's `half` included), each product and the sum
-/// rounded to `half`, nearest even; a device's own blend adds in its arithmetic and
-/// rounds once. It governs an attachment the function does not read: one the function fetches in
-/// the interlocked storage form takes Metal's blend there whatever this says, no Vulkan blend
-/// applying to a storage write.
+/// How a `half4` color output of a module that states its math mode blends into an `R16Float`,
+/// `RG16Float` or `RGBA16Float` attachment.
+///
+/// Without fast math (`air.compile.fast_math_disable`, safe or relaxed math) Metal blends it in
+/// `half` arithmetic: the `half` the function returns, each factor (`1 - x` and the blend color's
+/// `half` included), each product and the sum rounded to `half`, nearest even. With fast math
+/// (`air.compile.fast_math_enable`) Metal's compiler folds the blend into the function before its
+/// fast-math passes, which fuse and regroup it: the blend is a form the blend state decides only
+/// where that form is measured (`extended_range::blend::Blend::fitted`) and no lane of the output
+/// folds into it (`lower::fragment::fetch`), and Metal rounds the source's product to the
+/// attachment and carries the destination's into the sum unrounded where a pair is contracted,
+/// where a device's own blend is the mirror image. A module naming no math mode is not governed
+/// here: what Metal's compiler does to its blend was not measured.
+///
+/// A device's own blend adds in its arithmetic and rounds once. This governs an attachment the
+/// function does not read: one the function fetches in the interlocked storage form takes Metal's
+/// blend there whatever this says, no Vulkan blend applying to a storage write.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -449,8 +458,9 @@ pub enum HalfBlendPolicy {
     /// pass splits where its draws change the attachment's role. Where that form is not exact
     /// for the pipeline (a device without the interlock, a depth or stencil test the write would
     /// precede, alpha to coverage, multiview, a format the device does not store, a blend of the
-    /// second source), the device blends and the pipeline records the note as under
-    /// [`HalfBlendPolicy::Device`].
+    /// second source, and under fast math a blend state whose form is not measured or an output
+    /// a lane of which folds into the blend), the device blends and the pipeline records the note
+    /// as under [`HalfBlendPolicy::Device`].
     Exact,
 }
 
