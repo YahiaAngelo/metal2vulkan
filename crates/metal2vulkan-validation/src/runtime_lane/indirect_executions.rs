@@ -121,8 +121,8 @@ fn size([x, y, z]: [u32; 3]) -> Size {
 /// Encode `case`'s dispatch as command `index` of `icb` with `pipeline` (none where `icb`
 /// inherits it) over `buffers` (none where it inherits them): what `encode_case` sets on an
 /// encoder, set on the command. A buffer a stage input of a dynamic layout reads is bound at its
-/// stride, as the encoder binds it: what Metal's command reads from a buffer set without one is
-/// unsettled there, and is no dispatch's answer.
+/// stride, as the encoder binds it: Metal's command reads a buffer set without one at stride
+/// 2^32 - 1 there, which is no dispatch's answer.
 fn encode_command(
     icb: &IndirectCommandBuffer,
     index: u64,
@@ -1182,9 +1182,10 @@ fn inheriting_commands_run_the_encoder_s_state() {
 }
 
 /// A command's kernel buffer set without a stride, where the pipeline's stage-in layout of
-/// `MTLBufferLayoutStrideDynamic` reads it, refuses the commit the runtime's own gap
-/// (`IndirectCommandUnstridedBuffer`): plain Metal takes such a command and completes it, and what
-/// the fetch reads past element 0 is unsettled.
+/// `MTLBufferLayoutStrideDynamic` reads it, on a buffer that supports dynamic attribute strides,
+/// refuses the commit the runtime's own gap (`IndirectCommandUnstridedBuffer`): plain Metal takes
+/// such a command and completes it, and its fetch reads the buffer at stride 2^32 - 1, which the
+/// runtime's 32-bit fetch cannot place.
 #[test]
 fn a_command_s_unstrided_stage_in_buffer_is_refused() {
     on_device(|device, _| {

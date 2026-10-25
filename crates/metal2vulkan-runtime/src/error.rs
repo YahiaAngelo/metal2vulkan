@@ -846,14 +846,33 @@ pub enum Problem {
     ///
     /// Basis: delegated(ArgumentEncoderProblem).
     ArgumentEncoder(ArgumentEncoderProblem),
-    /// An indirect dispatch's `bytes` of arguments at `offset` that run past its buffer's
-    /// `length` (Metal's API validation: "(indirectBufferOffset +
-    /// sizeof(MTLDispatchThreadsIndirectArguments))(72) must be <= \[indirectBuffer length\](64)";
-    /// what plain Metal reads there is memory). An offset that is not a multiple of 4 is read at
-    /// the multiple below, as plain Metal reads it, and checked from there.
+    /// An indirect dispatch's `bytes` of arguments at `offset` that run past the bytes the runtime
+    /// holds at Metal's address in its buffer of `length` bytes (`Buffer::copy_reach`: a no-copy
+    /// buffer's host pages to the end of its `VkBuffer`, else the length). An offset that is not a
+    /// multiple of 4 is read at the multiple below, as plain Metal reads it, and checked from
+    /// there. The same for a stage-in region read from a buffer
+    /// (`set_stage_in_region_indirect`), whose arguments Metal reads the same way.
     ///
-    /// Basis: metal-takes (an Apple M3 Max: an indirect dispatch whose 12 bytes of arguments run
-    /// past its buffer of 8 bytes runs and counts right; Metal's API validation alone refuses it).
+    /// Arguments past the buffer's `length` but inside its allocation are **taken**, and run: that
+    /// is where plain Metal reads them, and the runtime reads the same bytes there. Measured on an
+    /// Apple M3 Max under macOS 27.0.1 with the API validation layer off: a no-copy buffer of
+    /// length 8 over a 16 KiB page holding group counts `(7, 1, 1)` ran its
+    /// `dispatchThreadgroupsWithIndirectBuffer:` and the kernel counted 7 threadgroups, so Metal
+    /// read the third `u32` at byte 8, past the length; a 256-byte buffer of `(3, 1, 1)` counted
+    /// 3, so the counts are read from the buffer. Metal's API validation layer reports such a
+    /// range ("(indirectBufferOffset +
+    /// sizeof(MTLDispatchThreadgroupsIndirectArguments))(12) must be <= \[indirectBuffer
+    /// length\](8)") and plain Metal runs the dispatch anyway, as measured; a program running with
+    /// the layer and `MTL_DEBUG_LAYER_ERROR_MODE=assert` ends there instead, so taking the range
+    /// matches plain Metal and not a validated run.
+    ///
+    /// Past the reach the runtime holds none of the bytes Metal reads, and refuses, as a blit's
+    /// read past a buffer's reach is refused.
+    ///
+    /// Basis: metal-takes (an Apple M3 Max under macOS 27.0.1: an indirect dispatch whose 12 bytes
+    /// of arguments run past its buffer of 8 bytes runs and counts right; Metal's API validation
+    /// alone refuses it. Arguments inside the buffer's allocation are taken now, so what the
+    /// refusal still reaches past Metal for is the slice past the bytes the runtime holds there).
     IndirectDispatchRange {
         /// The offset the arguments are read at: the offset given, rounded down to a multiple
         /// of 4.
@@ -1480,24 +1499,32 @@ pub enum RuntimeGap {
         offset: u64,
     },
     /// An executed indirect command's kernel or vertex buffer at `index` set without an attribute
-    /// stride (the plain setter, the stride form at `MTLAttributeStrideStatic`, or a kernel's plain
-    /// `set_kernel_buffer`), where its pipeline state's `[[stage_in]]` or vertex-descriptor layout
-    /// of `MTLBufferLayoutStrideDynamic` reads the stride. Plain Metal takes the command, and its
-    /// API validation layer stops it no more than plain Metal does: the setters, the execution and
-    /// the commit all return and the command buffer completes, nothing faulting (an M3 Max under
-    /// macOS 27.0.1, the layer off, on a buffer of `ConcurrentDispatch` whose command bound its
-    /// stage-in buffer with the plain setter and with `MTLAttributeStrideStatic`).
+    /// stride (the plain setter, or the stride form at `MTLAttributeStrideStatic`), on an indirect
+    /// command buffer whose descriptor supports dynamic attribute strides, where its pipeline
+    /// state's `[[stage_in]]` or vertex-descriptor layout of `MTLBufferLayoutStrideDynamic` reads
+    /// the stride. Plain Metal takes the command, and its API validation layer stops it no more
+    /// than plain Metal does: the setters, the execution and the commit all return and the command
+    /// buffer completes, nothing faulting (an M3 Max under macOS 27.0.1, the layer off, on a buffer
+    /// of `ConcurrentDispatch` whose command bound its stage-in buffer with the plain setter and
+    /// with `MTLAttributeStrideStatic`).
     ///
-    /// What the fetch reads past element 0 is unsettled. One measurement, on an M3 Max and an M4
-    /// with and without the layer, read the buffer at stride 2^32 - 1 with no bounds check, so past
-    /// element 0 whatever memory lies 4 GiB on; another read element 1 at stride 0, but there the
-    /// same command's buffer bound through the *stride* form read stride 0 as well, so that reading
-    /// shows only that its own stride path never took, and settles neither value. The runtime
-    /// refuses rather than pick one: it cannot place a 2^32 - 1 displacement in the 32-bit fetch
+    /// On that device the fetch reads the buffer at a stride of 2^32 - 1: the record's stride word
+    /// is 32 bits, and `MTLAttributeStrideStatic` truncates into it. Measured on an Apple M3 Max
+    /// under macOS 27.0.1 with markers planted at byte 2^32 - 1 and at byte 2^32 of a buffer of
+    /// 4 GiB + 256 bytes: element 1 read the byte 2^32 - 1 marker, never the byte 2^32 one, never
+    /// zero and never element 0's or element 1's own bytes, from a compute command and from a
+    /// render command alike (three runs each with the layer off, one with it on); the stride form
+    /// at `attributeStride:0xFFFFFFFF` read the same, while strides of 4 and 8 read element 1 of
+    /// those strides. Other devices and releases are unmeasured. The runtime refuses rather than
+    /// place a displacement it cannot: 2^32 - 1 does not fit the 32-bit fetch
     /// [`StageInFetchPast4GiB`](Self::StageInFetchPast4GiB) and
-    /// [`VertexFetchPast4GiB`](Self::VertexFetchPast4GiB) name, and it holds no bytes 4 GiB on. The
-    /// encoder's *own* dispatch or draw is measured and exact, and is not this: it reads a buffer
-    /// bound without a stride at stride 0, as plain Metal reads it (`render/vertex_strides.rs`).
+    /// [`VertexFetchPast4GiB`](Self::VertexFetchPast4GiB) name, and it holds no bytes 4 GiB on.
+    ///
+    /// A buffer whose descriptor does *not* support dynamic attribute strides is not this and is
+    /// taken: its records hold no stride word, so Metal's fetch reads stride 0, which the runtime
+    /// gives exactly (the same device, the plain setter reading element 1 at stride 0 in five runs
+    /// of five). Nor is the encoder's *own* dispatch or draw, which reads a buffer bound without a
+    /// stride at stride 0, as plain Metal reads it (`render/vertex_strides.rs`).
     IndirectCommandUnstridedBuffer {
         /// The buffer's index.
         index: u32,

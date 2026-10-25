@@ -1694,4 +1694,16 @@ fn executed_commands_bind_a_dynamic_layouts_buffer_with_a_stride() {
     let mut strided = unstrided.clone();
     strided.command_buffers[0].commands[1].vertex_buffers[1].attribute_stride = Some(4);
     assert_eq!(check(&strided), Ok(()));
+    // Without dynamic attribute stride support a record holds no stride word at all, so Metal's
+    // fetch reads stride 0 and the runtime gives it: the same unstrided command is authorable.
+    let mut plain = unstrided.clone();
+    let CommandDescriptor::Render {
+        support_dynamic_attribute_stride,
+        ..
+    } = &mut plain.command_buffers[0].descriptor
+    else {
+        unreachable!("a render command buffer")
+    };
+    *support_dynamic_attribute_stride = false;
+    assert_eq!(check(&plain), Ok(()));
 }

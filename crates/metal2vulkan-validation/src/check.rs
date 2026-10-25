@@ -824,16 +824,19 @@ fn check_render_replay_templates(
     Ok(())
 }
 
-/// Each executed host command of `case` that draws or dispatches binds every buffer its
-/// pipeline's layout of `MTLBufferLayoutStrideDynamic` reads (the template's dynamic stage or
-/// vertex inputs, at their slots) with the stride form: Metal reads one bound without a stride
-/// there by no settled rule, so the runtime refuses such a command at the commit
-/// (`RuntimeGap::IndirectCommandUnstridedBuffer`). A
+/// Each executed host command of `case` that draws or dispatches, on a command buffer whose
+/// descriptor supports dynamic attribute strides, binds every buffer its pipeline's layout of
+/// `MTLBufferLayoutStrideDynamic` reads (the template's dynamic stage or vertex inputs, at their
+/// slots) with the stride form: Metal's fetch reads one bound without a stride there at stride
+/// 2^32 - 1, which the runtime's 32-bit fetch cannot place, so it refuses such a command at the
+/// commit (`RuntimeGap::IndirectCommandUnstridedBuffer`). Without that support the records hold
+/// no stride word, Metal reads stride 0 and the runtime gives it, so nothing is required. A
 /// command that inherits its buffers, or runs nothing, binds none of its own.
 fn check_replayed_strides(
     case: &AuthoredCase,
     resolved: &BTreeMap<String, CheckedShader<Arc<SourceRow>>>,
 ) -> Result<(), Vec<String>> {
+    use crate::case::indirect_commands::CommandDescriptor;
     use crate::executor_contract::{buffer_slots, stage_inputs};
     let states: BTreeMap<u64, &String> = case
         .pipeline_states
@@ -845,6 +848,21 @@ fn check_replayed_strides(
             continue;
         };
         if resource.inherit_buffers {
+            continue;
+        }
+        // Without dynamic attribute strides a record holds no stride word, so Metal reads stride
+        // 0 and so does the runtime: nothing to require.
+        let dynamic_strides = match resource.descriptor {
+            CommandDescriptor::Compute {
+                support_dynamic_attribute_stride,
+                ..
+            }
+            | CommandDescriptor::Render {
+                support_dynamic_attribute_stride,
+                ..
+            } => support_dynamic_attribute_stride,
+        };
+        if !dynamic_strides {
             continue;
         }
         let [start, end] = resource.execution_range;
@@ -897,8 +915,8 @@ fn check_replayed_strides(
             if let Some(binding) = unstrided {
                 return Err(vec![format!(
                     "host command {} of command buffer ({}, {}) binds buffer index {} without a \
-                     stride, which its pipeline's dynamic layout reads: what Metal reads there is \
-                     unsettled and the runtime refuses the command",
+                     stride, which its pipeline's dynamic layout reads: Metal's fetch reads it at \
+                     stride 2^32 - 1 there and the runtime refuses the command",
                     command.index, resource.buffer_binding, resource.field_offset, binding.index
                 )]);
             }

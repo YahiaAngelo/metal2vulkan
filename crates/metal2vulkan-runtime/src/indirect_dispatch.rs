@@ -9,8 +9,11 @@
 //!   arguments that run past the buffer ("(indirectBufferOffset +
 //!   sizeof(MTLDispatchThreadsIndirectArguments))(72) must be <= \[indirectBuffer length\](64)").
 //!   Plain Metal reads the arguments at the offset rounded down to a multiple of 4, and so does the
-//!   runtime; arguments past the buffer from there are refused as the dispatch is encoded
-//!   ([`arguments_offset`]). The dispatch reads its arguments as it runs,
+//!   runtime, out of the buffer's allocation and not out of its length: arguments past the length
+//!   are taken as far as the bytes the runtime holds at Metal's address (`Buffer::copy_reach`, a
+//!   no-copy buffer's host pages to the end of its `VkBuffer`, else the length), and refused past
+//!   them as the dispatch is encoded ([`arguments_offset`], which carries the measurement).
+//!   The dispatch reads its arguments as it runs,
 //!   after what the encoder's earlier commands wrote. A grid of `threadsPerGrid` runs its edge
 //!   threadgroups at the remainder's size, as `dispatchThreads:` does. A zero axis of the grid or
 //!   of the group counts runs nothing, and so does a threadgroup with a zero axis or more threads
@@ -152,18 +155,33 @@ impl Arguments {
     }
 }
 
-/// The offset Metal reads arguments of `bytes` at, given `offset` of a buffer of `length` bytes:
-/// `offset` rounded down to a multiple of 4, as plain Metal reads them where its API validation
-/// asserts (the module docs). Refused (`IndirectDispatchRange`), as validation refuses it, where
-/// the arguments at that offset run past the buffer: what Metal reads there is memory.
+/// The offset Metal reads arguments of `bytes` at, given `offset` of a buffer of `length` bytes
+/// the runtime holds `reach` of (`Buffer::copy_reach`): `offset` rounded down to a multiple of 4,
+/// as plain Metal reads them where its API validation asserts (the module docs).
+///
+/// Arguments that run past the buffer's `length` are taken as far as the reach, since Metal reads
+/// them out of the buffer's allocation and not out of its length. Measured on an Apple M3 Max
+/// under macOS 27.0.1: `dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:0` on a
+/// no-copy buffer of length 8 over a 16 KiB page holding the group counts `(7, 1, 1)` ran, and its
+/// kernel counted 7 threadgroups, so Metal read all three `u32`s, the third at byte 8 -- past the
+/// length, inside the allocation -- while the same call on a 256-byte buffer of `(3, 1, 1)`
+/// counted 3, so each count is read from the buffer and not from a copy the encoder kept. Metal's
+/// API validation layer reports it ("(indirectBufferOffset +
+/// sizeof(MTLDispatchThreadgroupsIndirectArguments))(12) must be <= \[indirectBuffer length\](8)")
+/// and the dispatch ran all the same, as plain Metal's did; a program running with the layer and
+/// `MTL_DEBUG_LAYER_ERROR_MODE=assert` ends there instead.
+///
+/// Refused (`IndirectDispatchRange`) past the reach, where the runtime holds none of the bytes
+/// Metal reads at that address, as a blit's read past a buffer's reach is refused
+/// (`Buffer::copy_reach`).
 pub(super) fn arguments_offset(
     call: &'static str,
-    length: u64,
+    (length, reach): (u64, u64),
     offset: u64,
     bytes: u64,
 ) -> Result<u64, Error> {
     let offset = offset - offset % 4;
-    if offset.checked_add(bytes).is_none_or(|end| end > length) {
+    if offset.checked_add(bytes).is_none_or(|end| end > reach) {
         return Err(invalid(
             call,
             Problem::IndirectDispatchRange {
@@ -202,8 +220,9 @@ pub(super) fn copy_arguments(
     core.barrier(Barrier::everything());
     core.command(TRANSFER, &uses, |device, command_buffer| {
         // SAFETY: the encoder's command buffer is recording; both buffers are live until it
-        // completes (the encoder holds them), and the region lies in both: `check` held the arguments inside the Metal buffer, and the copy
-        // holds `COPY_BYTES`.
+        // completes (the encoder holds them), and the region lies in both: `arguments_offset`
+        // held the arguments inside the bytes the buffer's `VkBuffer` holds
+        // (`Buffer::copy_reach`), and the copy holds `COPY_BYTES`.
         unsafe { device.cmd_copy_buffer(command_buffer, from, into, &[region]) };
     });
     core.retain(buffer.clone());

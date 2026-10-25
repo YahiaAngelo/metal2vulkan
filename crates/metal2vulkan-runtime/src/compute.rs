@@ -871,8 +871,12 @@ impl ComputeCommandEncoder {
     /// command's dispatch does.
     ///
     /// An offset that is not a multiple of 4 reads at the multiple below, as plain Metal reads
-    /// it (Metal's API validation stops it). Refused, changing nothing (`Invalid`): arguments past
-    /// the buffer's length from there, and a buffer of another device.
+    /// it (Metal's API validation stops it). Arguments past the buffer's length are read out of
+    /// its allocation, as an indirect dispatch's are measured to be
+    /// (`indirect_dispatch::arguments_offset`, which carries the measurement; the region's own
+    /// read is unmeasured, and follows it as the same read of a `u32` at the same kind of
+    /// address). Refused, changing nothing (`Invalid`): arguments past the bytes the runtime
+    /// holds there (`Buffer::copy_reach`), and a buffer of another device.
     pub fn set_stage_in_region_indirect(
         &mut self,
         indirect_buffer: &Buffer,
@@ -885,7 +889,7 @@ impl ComputeCommandEncoder {
                 this.core.check_device(CALL, indirect_buffer.device())?;
                 let offset = indirect_dispatch::arguments_offset(
                     CALL,
-                    indirect_buffer.length(),
+                    (indirect_buffer.length(), indirect_buffer.copy_reach()),
                     indirect_buffer_offset,
                     STAGE_IN_REGION_BYTES,
                 )?;
@@ -1074,8 +1078,12 @@ impl ComputeCommandEncoder {
             return Err(invalid(call, Problem::NoPipelineState));
         };
         self.core.check_device(call, buffer.device())?;
-        let offset =
-            indirect_dispatch::arguments_offset(call, buffer.length(), offset, arguments.bytes())?;
+        let offset = indirect_dispatch::arguments_offset(
+            call,
+            (buffer.length(), buffer.copy_reach()),
+            offset,
+            arguments.bytes(),
+        )?;
         let tables = DispatchTables {
             pipeline: &pipeline,
             table: &self.table,

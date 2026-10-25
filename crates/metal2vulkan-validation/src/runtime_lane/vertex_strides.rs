@@ -12,9 +12,10 @@
 //!   Metal does (an M4; an M3 Max and an M4), where Metal's debug layer stops the draw; a stride
 //!   past 32 bits is refused at the setter.
 //! - An executed indirect render command's vertex buffer set without a stride under a dynamic
-//!   layout refuses the commit the runtime's own gap (`IndirectCommandUnstridedBuffer`): plain
-//!   Metal takes such a command and completes it, and what the fetch reads past vertex 0 is
-//!   unsettled.
+//!   layout, on a command buffer whose descriptor supports dynamic attribute strides, refuses the
+//!   commit the runtime's own gap (`IndirectCommandUnstridedBuffer`): plain Metal takes such a
+//!   command and completes it, and its fetch reads the buffer at stride 2^32 - 1, which the
+//!   runtime's 32-bit fetch cannot place.
 
 use super::{
     buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
@@ -250,9 +251,10 @@ fn executed(
 }
 
 /// An executed indirect render command's vertex buffer set without a stride under a dynamic
-/// layout refuses the commit the runtime's own gap (`IndirectCommandUnstridedBuffer`), where plain
-/// Metal takes the command and what its fetch reads is unsettled; the same command with the stride
-/// form draws as the encoder's draw at that stride.
+/// layout, on a command buffer that supports dynamic attribute strides, refuses the commit the
+/// runtime's own gap (`IndirectCommandUnstridedBuffer`), where plain Metal takes the command and
+/// its fetch reads the buffer at stride 2^32 - 1; the same command with the stride form draws as
+/// the encoder's draw at that stride.
 #[test]
 fn an_executed_command_s_unstrided_vertex_buffer_is_refused() {
     let cache = ScratchCache::new().unwrap();

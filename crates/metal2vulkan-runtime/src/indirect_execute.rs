@@ -41,12 +41,14 @@
 //!   encoder's, as the commit leaves them (`residency.rs`). A kernel buffer's attribute stride past
 //!   32 bits, at an index a stage-in layout of `MTLBufferLayoutStrideDynamic` reads, is refused
 //!   (`Unsupported{KernelStageIn, NotImplemented}`): Metal's answer is not measured. A kernel
-//!   buffer set without a stride there is refused the runtime's own gap
+//!   buffer set without a stride there, on a buffer whose descriptor supports dynamic attribute
+//!   strides, is refused the runtime's own gap
 //!   (`NotImplemented(RuntimeGap::IndirectCommandUnstridedBuffer)`, `unstrided_buffer`): plain
-//!   Metal takes the command and completes it, and what the fetch reads past element 0 is
-//!   unsettled, so the runtime has no exact answer to give (the gap's doc), where an inheriting
-//!   buffer's command reads the encoder's buffer set without one at stride 0, as the encoder's own
-//!   dispatch does. A command with no dispatch, no pipeline state, or a threadgroup
+//!   Metal takes the command and completes it, and its fetch reads the buffer at stride 2^32 - 1,
+//!   which the 32-bit fetch cannot place (the gap's doc). On a buffer without that support the
+//!   records hold no stride word and Metal reads stride 0, which the plan path gives exactly, so
+//!   the command is taken; and an inheriting buffer's command reads the encoder's buffer set
+//!   without one at stride 0, as the encoder's own dispatch does. A command with no dispatch, no pipeline state, or a threadgroup
 //!   that is empty or holds more threads than the state's `max_total_threads_per_threadgroup` runs
 //!   nothing, as Metal's runs nothing, and its neighbours run (ruling a). A
 //!   command whose dispatch the plan path refuses refuses the commit, with that error, or fails the
@@ -375,11 +377,15 @@ impl Execute {
                     Unsupported::not_implemented(Feature::KernelStageIn),
                 )));
             }
-            // A buffer set without a stride that such a layout reads: Metal takes the command,
-            // and what the fetch reads past element 0 is unsettled (`unstrided_buffer`).
-            if let Some(refusal) = unstrided_buffer(bindings.unstrided.iter().copied(), |index| {
-                pipeline.reads_stage_in_stride(index)
-            }) {
+            // A buffer set without a stride that such a layout reads, on a buffer that supports
+            // dynamic attribute strides: Metal takes the command and its fetch reads at stride
+            // 2^32 - 1, which the 32-bit fetch cannot place (`unstrided_buffer`). Without that
+            // support Metal reads stride 0, which the plan path gives exactly.
+            if let Some(refusal) = unstrided_buffer(
+                self.icb.descriptor().support_dynamic_attribute_stride,
+                bindings.unstrided.iter().copied(),
+                |index| pipeline.reads_stage_in_stride(index),
+            ) {
                 return Err(refusal);
             }
             let tables = bindings.tables(self, pipeline, record, &residency, forms)?;
@@ -619,10 +625,20 @@ impl Execute {
 /// Metal takes such a command, so this is the runtime's own gap and not misuse (the gap's doc).
 /// Both encoders' executions decide it so: a kernel buffer's stage-in layout here, a vertex
 /// buffer's vertex-descriptor layout in `render/executions.rs`.
+///
+/// `dynamic_strides` is the indirect command buffer descriptor's
+/// `support_dynamic_attribute_stride`. A buffer without it holds no stride word in its records at
+/// all, so Metal's fetch reads stride 0, which the plan path gives exactly (`bind::dispatch` and
+/// `bind::graphics` read a binding bound without a stride at stride 0): nothing is refused there,
+/// whatever the layouts read.
 pub(crate) fn unstrided_buffer(
+    dynamic_strides: bool,
     unstrided: impl IntoIterator<Item = u32>,
     reads_stride: impl Fn(u32) -> bool,
 ) -> Option<Error> {
+    if !dynamic_strides {
+        return None;
+    }
     unstrided
         .into_iter()
         .filter(|&index| reads_stride(index))

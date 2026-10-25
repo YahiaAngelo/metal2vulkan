@@ -260,11 +260,13 @@
 //!   the same refusal typed (`CommandBuffer::refusal`). The call checks no record but for type 9
 //!   (above): Metal lets a program write the records until it commits. A command's vertex buffer
 //!   set without an attribute stride, where its pipeline state's layout of
-//!   `MTLBufferLayoutStrideDynamic` reads the stride, is the runtime's own gap, as a compute
-//!   encoder's kernel buffer is (`NotImplemented(RuntimeGap::IndirectCommandUnstridedBuffer)`):
-//!   plain Metal takes the command and completes it, and what the fetch reads past vertex 0 is
-//!   unsettled, so the runtime has no exact answer to give (the gap's doc), where the encoder's own
-//!   draw reads such a buffer at stride 0 (`render/vertex_strides.rs`).
+//!   `MTLBufferLayoutStrideDynamic` reads the stride, on a buffer whose descriptor supports
+//!   dynamic attribute strides, is the runtime's own gap, as a compute encoder's kernel buffer is
+//!   (`NotImplemented(RuntimeGap::IndirectCommandUnstridedBuffer)`): plain Metal takes the command
+//!   and completes it, and its fetch reads the buffer at stride 2^32 - 1, which the 32-bit fetch
+//!   cannot place (the gap's doc). On a buffer without that support the records hold no stride
+//!   word and Metal reads stride 0, which the plan path gives exactly, so the command is taken, as
+//!   the encoder's own draw reads such a buffer at stride 0 (`render/vertex_strides.rs`).
 
 use super::bound::Bound;
 use super::mesh::MeshGrid;
@@ -2116,9 +2118,11 @@ impl RenderExecution {
                 encoder.object =
                     table(BufferStage::Object, descriptor.max_object_buffer_bind_count);
                 encoder.mesh = table(BufferStage::Mesh, descriptor.max_mesh_buffer_bind_count);
-                // A vertex buffer set without a stride that a dynamic layout reads: Metal takes
-                // the command, and what the fetch reads past vertex 0 is unsettled
-                // (`unstrided_buffer`).
+                // A vertex buffer set without a stride that a dynamic layout reads, on a buffer
+                // that supports dynamic attribute strides: Metal takes the command and its fetch
+                // reads at stride 2^32 - 1, which the 32-bit fetch cannot place
+                // (`unstrided_buffer`). Without that support Metal reads stride 0, which the plan
+                // path gives exactly.
                 let table = &encoder.vertex;
                 let unstrided = encoder.pipeline.as_ref().and_then(|pipeline| {
                     let bound = table
@@ -2126,7 +2130,11 @@ impl RenderExecution {
                         .keys()
                         .copied()
                         .filter(|index| !table.attribute_strides.contains_key(index));
-                    unstrided_buffer(bound, |index| reads_vertex_stride(pipeline, index))
+                    unstrided_buffer(
+                        descriptor.support_dynamic_attribute_stride,
+                        bound,
+                        |index| reads_vertex_stride(pipeline, index),
+                    )
                 });
                 if let Some(refusal) = unstrided {
                     return Err(refusal);
