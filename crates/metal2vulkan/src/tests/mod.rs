@@ -135,6 +135,7 @@ mod engine_simd_past_n;
 mod engine_simd_products;
 mod engine_skeleton;
 mod engine_snapped;
+mod engine_snapshot_exact;
 mod engine_sparse_unmapped;
 mod engine_spec_bits;
 mod engine_specialized;

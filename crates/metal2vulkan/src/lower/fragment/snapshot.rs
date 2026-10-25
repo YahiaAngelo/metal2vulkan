@@ -98,6 +98,15 @@
 //!
 //! A narrower format's channels the texel lacks are the fetch's constants (0, or 1 in alpha),
 //! whose codes the form holds too, and a swizzled view's lanes are channels or those constants.
+//!
+//! **The view the copy fetches through** is the one the read it stands for would have fetched, and
+//! the one the binder names the form by: the slot's raw view where the slot's reads take the raw
+//! codes (an 8-bit sRGB texel's, `metal::texel_format::srgb_raw_view`), else the slot's own image.
+//! A slot's unsigned-integer alias (a 16-bit float texel's own 16 bits,
+//! `HalfTexelBitsPolicy::Exact`) shares that one `ResourceKind::RawTexture` binding but is no such
+//! view: a read of such a slot fetches the slot's image and reads the alias beside it, which no
+//! read through a snapshot does (`docs/FAST-PATHS.md`: a fetch through a snapshot keeps the
+//! device's decode), so the copy fetches the image there too.
 
 use std::collections::BTreeMap;
 
@@ -236,14 +245,59 @@ pub(super) fn declare(
     Ok(d)
 }
 
-/// The image variable the copy of slot `index` fetches from: the slot's raw view where its reads
-/// take one (an 8-bit sRGB texture's raw codes), else its image.
-fn source(cx: &EmitCx<'_>, index: u32) -> Option<GlobalId> {
+/// Whether the copy of slot `index`, and so each read of it the snapshot stands for, fetches
+/// through the slot's raw view rather than through its image: where the slot's reads take the raw
+/// codes (an 8-bit sRGB texel's, `SlotPlan::raw`), the view the binder names the snapshot's form
+/// by (`bind::plan::slots`'s `snapshot_forms`, `metal::texel_format::srgb_raw_view`).
+///
+/// A slot's unsigned integer alias (a 16-bit float texel's own 16 bits,
+/// `HalfTexelBitsPolicy::Exact`) shares that one `ResourceKind::RawTexture` binding and is not
+/// such a view: a read of such a slot fetches the slot's image and reads the alias beside it
+/// (`texture::emit`'s `half_bits_alias_texel`, which no read through a snapshot takes), and the
+/// binder names the form by the slot's own sampled view. The copy of such a slot fetches its
+/// image, as its reads do.
+pub(crate) fn fetches_raw(cx: &EmitCx<'_>, index: u32) -> bool {
     let texture = &cx.decl.families.texture;
-    match texture.raw.get(&index) {
-        Some(&g) => Some(g),
-        None => texture.images.get(&index).map(|&(g, _)| g),
+    texture.raw.contains_key(&index) && !texture.half_bits.contains_key(&index)
+}
+
+/// The image variable the copy of slot `index` fetches from, with its image type: the slot's raw
+/// view where its reads take one ([`fetches_raw`]), else its image.
+fn source(cx: &EmitCx<'_>, index: u32) -> Option<(GlobalId, TypeId)> {
+    let texture = &cx.decl.families.texture;
+    let &(img, ty) = texture.images.get(&index)?;
+    match fetches_raw(cx, index) {
+        // An 8-bit sRGB slot's raw view is a second binding of the slot's own image type.
+        true => texture.raw.get(&index).map(|&g| (g, ty)),
+        false => Some((img, ty)),
     }
+}
+
+/// Whether `form`'s codes hold every lane an image of sampled type `sampled` returns: a float
+/// lane's every form but an integer one's, an integer lane's [`SnapshotForm::Bits`] or an integer
+/// form of its signedness. The binder names a form of the slot's class (`SnapshotForm::of`), so a
+/// pairing this rejects is an invariant failure.
+fn holds(fb: &mut FunctionBuilder<'_>, form: SnapshotForm, sampled: TypeId) -> BResult<bool> {
+    let integer = matches!(
+        form,
+        SnapshotForm::Uint8 | SnapshotForm::Uint16 | SnapshotForm::Sint8 | SnapshotForm::Sint16
+    );
+    let signed_form = matches!(form, SnapshotForm::Sint8 | SnapshotForm::Sint16);
+    Ok(match fb.module().types().get(sampled)? {
+        SType::Float { width: 32 } => !integer,
+        SType::Int { width: 32, signed } => {
+            form == SnapshotForm::Bits || (integer && *signed == signed_form)
+        }
+        _ => false,
+    })
+}
+
+/// The sampled type of image type `ty`, or `None` where `ty` is no image.
+fn sampled_type(fb: &mut FunctionBuilder<'_>, ty: TypeId) -> BResult<Option<TypeId>> {
+    Ok(match fb.module().types().get(ty)? {
+        SType::Image(i) => Some(i.sampled_type),
+        _ => None,
+    })
 }
 
 /// The entry's block before the body ([module docs](self)), in the function's first block.
@@ -258,9 +312,20 @@ pub(super) fn emit_entry(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>) -> B
     };
     let mut copies: Vec<(GlobalId, GlobalId, SnapshotForm)> = Vec::with_capacity(fp.snapshot.len());
     for (&index, &form) in &fp.snapshot {
-        let (Some(&s), Some(t)) = (decl.images.get(&index), source(cx, index)) else {
+        let (Some(&s), Some((t, ty))) = (decl.images.get(&index), source(cx, index)) else {
             return Err(cx.fail(format!("snapshot slot {index} is not declared")));
         };
+        // The form's codes must hold the lanes the copy's fetch returns: the binder names a form
+        // of the slot's class, so a float code form over an integer source (or the other way) is
+        // an invariant failure, not a value for `encode` to clamp or bitcast its way through.
+        let Some(sampled) = sampled_type(fb, ty)? else {
+            return Err(cx.fail(format!("snapshot slot {index} is copied from no image")));
+        };
+        if !holds(fb, form, sampled)? {
+            return Err(cx.fail(format!(
+                "the copy of snapshot slot {index} fetches lanes its form {form:?} does not hold"
+            )));
+        }
         copies.push((t, s, form));
     }
     let Some(coord) = fp.fetch_coord else {
@@ -514,20 +579,7 @@ pub(crate) fn prepare(
     if image.dim != Dim::D2 || image.arrayed || image.multisampled {
         return Err(cx.fail(format!("snapshot slot {index} is no single 2D image")));
     }
-    // The binder names a form of the slot's class (`SnapshotForm::of`).
-    let integer = matches!(
-        form,
-        SnapshotForm::Uint8 | SnapshotForm::Uint16 | SnapshotForm::Sint8 | SnapshotForm::Sint16
-    );
-    let signed_form = matches!(form, SnapshotForm::Sint8 | SnapshotForm::Sint16);
-    let fits = match fb.module().types().get(image.sampled_type)? {
-        SType::Float { width: 32 } => !integer,
-        SType::Int { width: 32, signed } => {
-            form == SnapshotForm::Bits || (integer && *signed == signed_form)
-        }
-        _ => false,
-    };
-    if !fits {
+    if !holds(fb, form, image.sampled_type)? {
         return Err(cx.fail(format!(
             "snapshot slot {index} returns lanes its form {form:?} does not hold"
         )));
