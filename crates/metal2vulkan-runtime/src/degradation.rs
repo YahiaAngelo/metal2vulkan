@@ -1041,9 +1041,15 @@ degradations! {
         /// a format whose layout is not measured; `texture/heap.rs`): Metal lays the texture out
         /// without its compression metadata, and the runtime's image keeps it.
         OptimizedDepthStencilTexture = "optimized-depth-stencil-texture", Precision,
-            "the texture keeps its GPU-optimized layout: heap_texture_size_and_align answers \
-             Metal's size for the texture with the property on, larger than Metal's with it off, \
-             so a heap sized by Metal's answers holds fewer such textures";
+            "the texture's image keeps the GPU-optimized layout Metal drops with the property \
+             off, so its bytes in the heap are not Metal's layout of its texels (where they lie \
+             instead, and what moving them costs, heap-texture-untiled-layout and \
+             shadowed-texture name for the shapes they cover); heap_texture_size_and_align \
+             answers Metal's own size and alignment for the descriptor wherever the runtime \
+             models them, and the larger of the images' and Metal's for a texture whose images \
+             need more bytes or a coarser alignment that no shadow of the heap's bytes holds it \
+             to (a depth twin among them), where a heap sized by Metal's answers holds fewer \
+             such textures";
         /// A texture of an IOSurface plane of more than one row under 16 bytes a row
         /// (`Buffer::new_texture_with_iosurface_plane`, `linear_plan.rs`): Metal's GPU writes its
         /// rows 16 bytes apart and reads every row past the first as memory-dependent bytes

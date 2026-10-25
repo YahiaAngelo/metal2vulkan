@@ -1763,9 +1763,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   whose driver keeps depth and stencil images GPU-optimized whatever their create info, that no
   shadow of Metal's tiles in the heap's bytes serves (a multisample texture, a depth twin, a format
   whose layout is not measured): Metal lays the texture out without its compression metadata, and
-  the runtime's image keeps it. Cost: the texture keeps its GPU-optimized layout:
-  heap_texture_size_and_align answers Metal's size for the texture with the property on, larger
-  than Metal's with it off, so a heap sized by Metal's answers holds fewer such textures.
+  the runtime's image keeps it. Cost: the texture's image keeps the GPU-optimized layout Metal
+  drops with the property off, so its bytes in the heap are not Metal's layout of its texels (where
+  they lie instead, and what moving them costs, heap-texture-untiled-layout and shadowed-texture
+  name for the shapes they cover); heap_texture_size_and_align answers Metal's own size and
+  alignment for the descriptor wherever the runtime models them, and the larger of the images' and
+  Metal's for a texture whose images need more bytes or a coarser alignment that no shadow of the
+  heap's bytes holds it to (a depth twin among them), where a heap sized by Metal's answers holds
+  fewer such textures.
 - `metal2vulkan-degrade-narrow-surface-rows` (precision). `NarrowSurfaceRows`: A texture of an
   IOSurface plane of more than one row under 16 bytes a row: Metal's GPU writes its rows 16 bytes
   apart and reads every row past the first as memory-dependent bytes (zeros in a fresh process;

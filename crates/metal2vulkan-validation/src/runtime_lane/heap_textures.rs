@@ -1123,11 +1123,11 @@ fn a_heap_depth_texture_without_optimized_contents_answers_metal_s_footprint() {
 /// rows rather than in Metal's tiles, announced `heap-texture-untiled-layout` beside this kind.
 ///
 /// What the heap **answers** is Metal's model for the descriptor as given: 448256 bytes, the same
-/// as the 8-level row's, where the same shape with `allowGPUOptimizedContents` on answers 451200.
-/// So on this shape the kind's declared cost -- that
-/// `heap_texture_size_and_align` answers Metal's size for the texture with the property on, larger
-/// than Metal's with it off -- does not hold, and the three sizes are asserted so that it cannot be
-/// read into the test. Narrowing the kind, or its cost, belongs to the declaration and not here.
+/// as the 8-level row's, where the same shape with `allowGPUOptimizedContents` on answers 451200,
+/// the larger of the two. All three are asserted, so the row holds the kind's cost to what it
+/// says: the answer is Metal's own for the descriptor, not the property-on texture's. What the
+/// heap's bytes lose instead is the layout, which `heap-texture-untiled-layout` and
+/// `shadowed-texture` carry.
 ///
 /// Three controls bind that reason, each the announcing shape with one thing changed: **8 levels**,
 /// 16 moves and the most the shape holds, announces nothing; a one-aspect `Depth32Float` texture of
@@ -1209,7 +1209,7 @@ fn a_heap_two_aspect_texture_of_more_levels_than_the_moves_hold_keeps_its_optimi
             assert_eq!(eight_counts, [0, 0, 0], "8 levels announced");
             assert_eq!(depth_counts, [0, 0, 0], "one aspect of 9 levels announced");
             assert_eq!(with_counts, [0, 0, 0], "the property on announced");
-            // The answer is the property-off model, not the property-on one the cost names.
+            // Metal's model for the descriptor as given, not the property-on texture's.
             assert_eq!((nine.size, nine.align), (448256, 128));
             assert_eq!(eight, nine, "8 levels answered another chain than 9");
             assert_eq!((with.size, with.align), (451200, 128));
