@@ -281,7 +281,8 @@ impl RootTable {
     }
 
     /// The table with `statics` (entry `2 + n` for each `(n, entry)`, every `n < first - 2`) and
-    /// the resident set `resident` (already coalesced, [`resident_set`]) from root `first`.
+    /// the resident set `resident` (already coalesced,
+    /// [`resident_set`](crate::bind::resident::resident_set)) from root `first`.
     pub(crate) fn build(statics: &[(u32, RootEntry)], first: u64, resident: &[RootEntry]) -> Self {
         let count = first as usize + resident.len();
         let mut bytes = vec![0u8; count * ENTRY_BYTES as usize];

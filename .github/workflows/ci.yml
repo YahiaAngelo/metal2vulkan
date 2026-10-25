@@ -132,6 +132,51 @@ jobs:
       - name: Build the new API's consumer reference (warnings denied)
         run: scripts/api-docs
 
+      # A doc comment on a private item, and a link to a private path, are rendered only when
+      # rustdoc documents private items, which the documentation steps above never do: each
+      # renders the public surface alone. Their intra-doc links are therefore checked nowhere else
+      # here, and a broken one has only ever surfaced when someone passed
+      # `--document-private-items` by hand. This
+      # step runs that pass over each crate and holds the crate to the number of diagnostics it
+      # still carries, so a newly broken private link is red here instead. Each number is a
+      # backlog to drive to zero, never a budget: a commit that fixes some lowers its crate's
+      # number in the same commit, and a crate that reaches 0 stays at 0.
+      - name: Private intra-doc links (no new breakage)
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/private-doc-links.log"
+          status=0
+          for row in \
+            metal2vulkan=32 \
+            metal2vulkan-air=3 \
+            metal2vulkan-runtime=73 \
+            metal2vulkan-validation=4 \
+            metal2vulkan-conformance=21 \
+            metal2vulkan-devtools=0
+          do
+            crate=${row%=*}
+            ceiling=${row#*=}
+            cargo doc -p "$crate" --all-features --no-deps --document-private-items \
+              > "$log" 2>&1 || true
+            # Under `-Dwarnings` each diagnostic is an `error: ` line, and the last one is
+            # rustdoc's own "could not document <crate>" summary rather than a diagnostic.
+            lines=$(grep -c '^error: ' "$log" || true)
+            summary=$(grep -c '^error: could not document' "$log" || true)
+            n=$((lines - summary))
+            echo "$crate: $n (ceiling $ceiling)"
+            if [ "$n" -gt "$ceiling" ]; then
+              cat "$log"
+              echo "::error::$crate reports $n private intra-doc link diagnostics, over its ceiling of $ceiling"
+              status=1
+            elif [ "$n" -lt "$ceiling" ]; then
+              echo "::notice::$crate reports $n, under its ceiling of $ceiling: lower it in this file"
+            fi
+          done
+          rm -f "$log"
+          exit "$status"
+
       # The published crates as crates.io takes them: each packages, and its package
       # builds alone against the others' packages, so none reads a file outside its own directory.
       # Validation and the dev-tools crate are not published.

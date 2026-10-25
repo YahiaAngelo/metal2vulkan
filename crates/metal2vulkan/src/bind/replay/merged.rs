@@ -40,7 +40,8 @@
 //!   [`StatusBits::REPLAY_FAULT`](crate::bind::StatusBits) with [`ReplayFaults::VERTICES`] in
 //!   the command buffer's `ExecutionStatus`.
 //! - **The scratch** is the draw replay's ([`DrawReplayLayout::merged`]): the header
-//!   ([`MERGED_HEADER_BYTES`], uploaded with the parameters, [`DrawReplayPreprocess::header`]),
+//!   ([`MERGED_HEADER_BYTES`], uploaded with the parameters,
+//!   [`DrawReplayPreprocess::header`](super::DrawReplayPreprocess::header)),
 //!   then the prefix (a `u64` per command), the block sums (a `u64` per block) and the two draws,
 //!   which the passes write.
 //! - **Recording** (consumer): the preprocess, then each pass in order, each after the previous

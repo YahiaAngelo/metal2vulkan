@@ -555,7 +555,7 @@ pub(super) mod decode {
     pub const XR_SRGB: u32 = 2;
 }
 
-/// An integer field's encode; a half field's (in [`super::record::ENCODE`] too).
+/// An integer field's encode; a half field's (in [`record::ENCODE`] too).
 pub(super) mod encode {
     pub const GRID: u32 = 0;
     pub const SRGB: u32 = 1;
