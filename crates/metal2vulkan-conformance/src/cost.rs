@@ -822,8 +822,9 @@ impl Counts {
     /// The counts `counts` holds, flattened.
     ///
     /// Read out of the derived `Debug`, which is the one complete view of the struct a sibling
-    /// crate has: [`WorkCounts`] has 386 fields of its own plus three nested count structs, and a
-    /// hand-written list of them would be stale the day a runtime change added one. A field whose
+    /// crate has: [`WorkCounts`] carries several hundred fields of its own plus its nested count
+    /// structs, and a hand-written list of them would be stale the day a runtime change added one
+    /// -- as a count written here is, which is why this says no number. A field whose
     /// value is not a count fails here by name rather than being dropped, so a new field of
     /// another shape is a loud failure in this crate's own tests instead of a silent hole in the
     /// gate.
