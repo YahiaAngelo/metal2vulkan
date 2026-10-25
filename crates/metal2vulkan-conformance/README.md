@@ -522,10 +522,21 @@ with the one-minute load average holding at 6.1 and every load rule judging both
 Nearly all the movement the ledger's band pays for is that one pass. The paired rows common to the
 degraded pass and a good one move a median 2.62x, 14.96x at the 90th percentile and 63.9x at worst;
 **the two undegraded passes move a median 1.12x, 1.51x at the 90th percentile and 2.00x at worst
-over all 100 rows.** So the ratio is not inherently unstable, and the gate did not refuse the pass
-that makes it look so: 0.275 against 0.236 us is 1.17x, inside the 1.5x the calibration check
-allows. `known-slow-calls.tsv`'s header carries the rest, including the four live per-call costs
-that went unwritten because that header had said they changed sides when they had not.
+over all 100 rows.** So the ratio is not inherently unstable, and for a while the gate did not
+refuse the pass that makes it look so: 0.275 against 0.236 us is 1.17x, inside the 1.5x the
+calibration check allows. **It refuses it now, on the floor under the measurement rather than on
+the instrument's reading of itself.** The suite makes hundreds of calls that do almost nothing, so a
+leg that is measuring at all resolves some of them under one instrument cost: both undegraded
+passes read a cheapest figure of 41 ns on each leg — one tick of this chip's 24 MHz timebase, 0.17
+instrument costs — while the degraded pass has none of Metal's 2,979 figures under even the resolve
+line and a floor of 5.15 instrument costs. `constant_data_offset`, a getter that does nothing, cost
+41 ns on Metal's leg in both good passes and 3.000 us in that one. Every other quantity the gate
+reads ranks the degraded pass as the best of the three — it ran at the lowest load, its two legs'
+instrument readings agree the most tightly, its eight rounds are the most repeatable, and it sat
+closer to its recorded reference than the good pass beside it, because a pass overwrites that
+reference and so inherits its predecessor's degradation. `known-slow-calls.tsv`'s header carries the
+rest, including the four live per-call costs that went unwritten because that header had said they
+changed sides when they had not.
 
 **And a per-call row now has to carry its per-case figure**, because the two-tables warning above
 is not advisory. Metal compiles the AIR at `library` and we translate it at pipeline creation and
@@ -538,9 +549,10 @@ those five is that its cost is work Metal never does, not work Metal already did
 case. The ledger's header asks that question of every new row.
 
 So the gate judges a per-call row only when the measurement can say something about it. It withholds
-when the **instrument's own cost** disagrees with itself across a leg, across the two legs, or with
-what this chip's recordings carry — bracketed per leg, because a single reading at a leg's start is
-from a freshly-spawned thread and a leg is minutes long. And it withholds a row whose cheaper leg's
+when the **instrument's own cost** disagrees with itself across a leg, across the two legs, with
+what this chip's recordings carry, or with the cheapest figure that leg actually produced —
+bracketed per leg, because a single reading at a leg's start is from a freshly-spawned thread and a
+leg is minutes long. And it withholds a row whose cheaper leg's
 typical call costs under four instrument costs: of the 41 such rows, the ratio moved a median 4.23x
 between the two passes against 1.87x above the line. A withheld row neither adds a ledger row nor
 retires one, which is what protects `replace_region`'s row — a pooled ratio that moved 7.4x to 31.3x

@@ -725,17 +725,20 @@ fn times(
         ours: ours.as_ref().map(|one| one.calibration).unwrap_or_default(),
         reference: recorded_instrument(cases),
     };
+    // The paired table is built before the gate rather than inside it, because the gate reads it
+    // too: a leg whose own cheapest figure sits above its instrument cost did not take those
+    // figures on the CPU the instrument measured itself on (`slow_calls::FLOOR_MAY_REACH`).
+    let rows = match (&metal, &ours) {
+        (Some(metal), Some(ours)) => metal2vulkan_conformance::times::paired(metal, ours),
+        _ => Vec::new(),
+    };
     if let Err(why) =
-        metal2vulkan_conformance::slow_calls::judges(shaders, metal_load, our_load, cpu)
+        metal2vulkan_conformance::slow_calls::judges(shaders, metal_load, our_load, cpu, &rows)
     {
         println!("\n{why}");
-    } else if let (Some(metal), Some(ours)) = (&metal, &ours) {
+    } else if let (Some(_), Some(ours)) = (&metal, &ours) {
         let ledger = metal2vulkan_conformance::slow_calls::ledger()?;
-        let held = metal2vulkan_conformance::slow_calls::held(
-            &metal2vulkan_conformance::times::paired(metal, ours),
-            &ledger,
-            ours.instrument,
-        );
+        let held = metal2vulkan_conformance::slow_calls::held(&rows, &ledger, ours.instrument);
         println!();
         for one in &held {
             println!("{one}");
