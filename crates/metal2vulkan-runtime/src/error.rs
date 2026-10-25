@@ -1312,15 +1312,22 @@ pub enum RuntimeGap {
     /// An executed indirect command's kernel or vertex buffer at `index` set without an attribute
     /// stride (the plain setter, the stride form at `MTLAttributeStrideStatic`, or a kernel's plain
     /// `set_kernel_buffer`), where its pipeline state's `[[stage_in]]` or vertex-descriptor layout
-    /// of `MTLBufferLayoutStrideDynamic` reads the stride. Plain Metal takes it, and its API
-    /// validation layer stops it no more than plain Metal does: it reads such a buffer at stride
-    /// 2^32 - 1, with no bounds check, so past element 0 the fetch reads whatever memory lies 4 GiB
-    /// on (measured on an M3 Max and an M4, with and without the layer) -- where the encoder's own
-    /// dispatch or draw reads a buffer bound without a stride at stride 0, as plain Metal reads it
-    /// (`render/vertex_strides.rs`). The runtime's fetch places its displacement in 32 bits, as
+    /// of `MTLBufferLayoutStrideDynamic` reads the stride. Plain Metal takes the command, and its
+    /// API validation layer stops it no more than plain Metal does: the setters, the execution and
+    /// the commit all return and the command buffer completes, nothing faulting (an M3 Max under
+    /// macOS 27.0.1, the layer off, on a buffer of `ConcurrentDispatch` whose command bound its
+    /// stage-in buffer with the plain setter and with `MTLAttributeStrideStatic`).
+    ///
+    /// What the fetch reads past element 0 is unsettled. One measurement, on an M3 Max and an M4
+    /// with and without the layer, read the buffer at stride 2^32 - 1 with no bounds check, so past
+    /// element 0 whatever memory lies 4 GiB on; another read element 1 at stride 0, but there the
+    /// same command's buffer bound through the *stride* form read stride 0 as well, so that reading
+    /// shows only that its own stride path never took, and settles neither value. The runtime
+    /// refuses rather than pick one: it cannot place a 2^32 - 1 displacement in the 32-bit fetch
     /// [`StageInFetchPast4GiB`](Self::StageInFetchPast4GiB) and
-    /// [`VertexFetchPast4GiB`](Self::VertexFetchPast4GiB) say, and it holds no bytes 4 GiB on, so
-    /// the command is refused.
+    /// [`VertexFetchPast4GiB`](Self::VertexFetchPast4GiB) name, and it holds no bytes 4 GiB on. The
+    /// encoder's *own* dispatch or draw is measured and exact, and is not this: it reads a buffer
+    /// bound without a stride at stride 0, as plain Metal reads it (`render/vertex_strides.rs`).
     IndirectCommandUnstridedBuffer {
         /// The buffer's index.
         index: u32,
@@ -1462,10 +1469,16 @@ pub enum RuntimeGap {
     /// A texture fill given no pattern bytes (`fillTexture:level:slice:region:bytes:length:` of
     /// length 0, [`BlitCommandEncoder::fill_texture`](crate::BlitCommandEncoder::fill_texture)).
     /// Metal's API validation layer stops it ("buffer length for format ... must be at least" a
-    /// unit's bytes); plain Metal takes the fill, the layer off, and reads a unit's bytes from the
-    /// pattern's address all the same -- bytes the call never gave (an Apple M3 Max under macOS
-    /// 27.0.1). The runtime holds no bytes there: a caller's slice of no bytes is all it is given,
-    /// and reading past it is unsound, so there is nothing exact to write and the call is
+    /// unit's bytes); plain Metal takes the fill, the layer off, and writes the region all the
+    /// same, the call returning and the command buffer completing (an Apple M3 Max under macOS
+    /// 27.0.1: a 2D texture over a buffer, one of its own memory, a texture buffer and a 4-sample
+    /// one). What it writes is bytes the call never gave, and which bytes turns on the texture: an
+    /// ordinary texture's texels take a unit read from the pattern's address, byte for byte what a
+    /// pattern of a unit's length writes there, while a texture buffer's region takes the fill's
+    /// leftover bytes instead, Metal's own and not the caller's (the module docs'
+    /// `texture-buffer-fill-leftover`; zeros but for one word in the probe). The runtime holds
+    /// neither: a caller's slice of no bytes is all it is given, reading past it is unsound, and
+    /// Metal's leftovers are not the runtime's, so there is nothing exact to write and the call is
     /// refused.
     EmptyFillPattern,
     /// `Buffer::rebind_bytes_no_copy` of a no-copy buffer with a live texture over its bytes,

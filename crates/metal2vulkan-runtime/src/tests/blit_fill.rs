@@ -295,11 +295,13 @@ fn a_fill_s_log_keeps_the_bytes_its_fill_reads() {
 
 /// A fill's pattern length falls on either side of what misuse is ([`check_pattern`]). No bytes at
 /// all is input plain Metal takes, whatever the texture's type, so it is the runtime's own gap: its
-/// API validation layer stops the call, and plain Metal, the layer off, reads a unit's bytes from
-/// the pattern's address -- bytes the call never gave (an Apple M3 Max under macOS 27.0.1, the
-/// fills' probe round). A texture buffer's pattern of
-/// more than [`TEXTURE_BUFFER_PATTERN_BYTES`] is misuse, in which Metal's own process ends, and no
-/// other texture's fill has an upper bound (our probes `tblf.m` and `tbz.m`, the same M3 Max).
+/// API validation layer stops the call, and plain Metal, the layer off, writes the region from
+/// bytes the call never gave (an Apple M3 Max under macOS 27.0.1, our probe `emptyfill.m`: a 2D
+/// texture over a buffer, one of its own memory, a texture buffer and a 4-sample one all took the
+/// fill and completed, the first two writing the unit under the pattern's pointer and the texture
+/// buffer the fill's leftovers). A texture buffer's pattern of more than
+/// [`TEXTURE_BUFFER_PATTERN_BYTES`] is misuse, in which Metal's own process ends, and no other
+/// texture's fill has an upper bound (our probes `tblf.m` and `tbz.m`, the same M3 Max).
 #[test]
 fn a_fill_s_pattern_length_separates_the_runtime_s_gap_from_misuse() {
     use crate::blit_fill::check_pattern;

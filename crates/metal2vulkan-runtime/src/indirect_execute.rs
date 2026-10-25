@@ -43,10 +43,10 @@
 //!   (`Unsupported{KernelStageIn, NotImplemented}`): Metal's answer is not measured. A kernel
 //!   buffer set without a stride there is refused the runtime's own gap
 //!   (`NotImplemented(RuntimeGap::IndirectCommandUnstridedBuffer)`, `unstrided_buffer`): plain
-//!   Metal takes it and reads the buffer at stride 2^32 - 1 with no bounds check, so past element 0
-//!   its answer is whatever memory lies 4 GiB on, which the runtime holds none of, where an
-//!   inheriting buffer's command reads the encoder's buffer set without one at stride 0, as the
-//!   encoder's own dispatch does. A command with no dispatch, no pipeline state, or a threadgroup
+//!   Metal takes the command and completes it, and what the fetch reads past element 0 is
+//!   unsettled, so the runtime has no exact answer to give (the gap's doc), where an inheriting
+//!   buffer's command reads the encoder's buffer set without one at stride 0, as the encoder's own
+//!   dispatch does. A command with no dispatch, no pipeline state, or a threadgroup
 //!   that is empty or holds more threads than the state's `max_total_threads_per_threadgroup` runs
 //!   nothing, as Metal's runs nothing, and its neighbours run (ruling a). A
 //!   command whose dispatch the plan path refuses refuses the commit, with that error, or fails the
@@ -375,9 +375,8 @@ impl Execute {
                     Unsupported::not_implemented(Feature::KernelStageIn),
                 )));
             }
-            // A buffer set without a stride that such a layout reads: Metal reads it at stride
-            // 2^32 - 1, past element 0 whatever memory lies 4 GiB on, where the runtime holds
-            // nothing (`unstrided_buffer`).
+            // A buffer set without a stride that such a layout reads: Metal takes the command,
+            // and what the fetch reads past element 0 is unsettled (`unstrided_buffer`).
             if let Some(refusal) = unstrided_buffer(bindings.unstrided.iter().copied(), |index| {
                 pipeline.reads_stage_in_stride(index)
             }) {

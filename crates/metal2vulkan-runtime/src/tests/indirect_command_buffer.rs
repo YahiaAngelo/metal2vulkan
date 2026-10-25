@@ -179,11 +179,14 @@ fn an_execution_range_metal_takes_is_the_runtime_s_gap() {
 }
 
 /// An executed indirect command's buffer bound without the attribute stride its pipeline state's
-/// layout of `MTLBufferLayoutStrideDynamic` reads is input plain Metal takes (an M3 Max and an M4,
-/// with and without Metal's API validation layer, which stops it no more), so it
-/// is the runtime's own gap and never misuse ([`unstrided_buffer`], the decision both encoders'
-/// executions make): the lowest index that is both bound without a stride and read by such a layout
-/// is refused, and a command whose layouts read none of them is taken.
+/// layout of `MTLBufferLayoutStrideDynamic` reads is input plain Metal takes: the setters, the
+/// execution and the commit return and the command buffer completes, nothing faulting (an M3 Max
+/// under macOS 27.0.1, the API validation layer off, our probe `unstrided.m`; and an M3 Max and an
+/// M4 before it, with and without the layer). What the fetch reads past element 0 is unsettled, so
+/// the runtime has no exact answer, which makes this its own gap and never misuse
+/// ([`unstrided_buffer`], the decision both encoders' executions make): the lowest index that is
+/// both bound without a stride and read by such a layout is refused, and a command whose layouts
+/// read none of them is taken.
 #[test]
 fn an_unstrided_executed_buffer_is_the_runtime_s_gap_not_misuse() {
     use crate::error::{Error, RuntimeGap};

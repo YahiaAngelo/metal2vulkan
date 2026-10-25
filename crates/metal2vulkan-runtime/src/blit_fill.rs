@@ -116,9 +116,11 @@
 //! NaN, 2.0, -1.0 and denormal too.
 //!
 //! An empty pattern Metal's API validation layer stops; plain Metal takes the fill, the layer off,
-//! and reads a unit's bytes from the pattern's address all the same, which the call does not give,
-//! so the runtime holds nothing to write and refuses it its own gap
-//! (`NotImplemented(RuntimeGap::EmptyFillPattern)`, [`check_pattern`]).
+//! and writes the region all the same, from bytes the call does not give: an ordinary texture's
+//! texels a unit read from the pattern's address, a texture buffer's region the fill's leftover
+//! bytes, Metal's own (the M3 Max, our probe `emptyfill.m`). The runtime holds neither, so it
+//! refuses the fill its own gap (`NotImplemented(RuntimeGap::EmptyFillPattern)`,
+//! [`check_pattern`]).
 //!
 //! **`fillBuffer:range:pattern4:`** ([`BlitCommandEncoder::fill_buffer_pattern4`]; 10 ranges of a
 //! 256-byte buffer) writes the 4-byte pattern from the range's start, restarting it at each
@@ -286,7 +288,7 @@ pub(super) const TEXTURE_BUFFER_PATTERN_BYTES: usize = 32752;
 ///
 /// - **no bytes at all** is input plain Metal takes, so it is the runtime's own gap
 ///   ([`RuntimeGap::EmptyFillPattern`]): Metal's API validation layer stops it, and plain Metal
-///   reads a unit's bytes from the pattern's address, which the runtime holds none of;
+///   writes bytes the call never gave, which the runtime holds none of;
 /// - **more than [`TEXTURE_BUFFER_PATTERN_BYTES`] into a texture buffer** is misuse
 ///   ([`Problem::LongTextureBufferFillPattern`]): Metal's own process ends in the call, whatever
 ///   the region. A fill of any other texture takes a pattern of any length.
@@ -538,7 +540,8 @@ impl BlitCommandEncoder {
     /// ends, whatever the region; another texture's fill takes a pattern of any length and reads 16
     /// bytes of it at most. An empty pattern is the runtime's own gap
     /// (`NotImplemented(RuntimeGap::EmptyFillPattern)`): Metal's API validation layer stops it, and
-    /// plain Metal takes the fill and reads a unit's bytes from past the call's. A multisample
+    /// plain Metal takes the fill and writes bytes the call never gave, a unit read from the
+    /// pattern's address or, for a texture buffer, the fill's leftovers. A multisample
     /// texture's fill is refused, `Unsupported`, where the device cannot run the sample planes'
     /// merge (sample-rate shading, the sample count among its integer color attachments') or the
     /// copy into the texture (`copy_from_texture`'s refusals of copies between multisampled

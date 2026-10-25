@@ -262,9 +262,9 @@
 //!   set without an attribute stride, where its pipeline state's layout of
 //!   `MTLBufferLayoutStrideDynamic` reads the stride, is the runtime's own gap, as a compute
 //!   encoder's kernel buffer is (`NotImplemented(RuntimeGap::IndirectCommandUnstridedBuffer)`):
-//!   plain Metal takes it and reads the buffer at stride 2^32 - 1 with no bounds check, so past
-//!   vertex 0 its answer is whatever memory lies 4 GiB on, which the runtime holds none of, where
-//!   the encoder's own draw reads such a buffer at stride 0 (`render/vertex_strides.rs`).
+//!   plain Metal takes the command and completes it, and what the fetch reads past vertex 0 is
+//!   unsettled, so the runtime has no exact answer to give (the gap's doc), where the encoder's own
+//!   draw reads such a buffer at stride 0 (`render/vertex_strides.rs`).
 
 use super::bound::Bound;
 use super::mesh::MeshGrid;
@@ -2116,9 +2116,9 @@ impl RenderExecution {
                 encoder.object =
                     table(BufferStage::Object, descriptor.max_object_buffer_bind_count);
                 encoder.mesh = table(BufferStage::Mesh, descriptor.max_mesh_buffer_bind_count);
-                // A vertex buffer set without a stride that a dynamic layout reads: Metal reads
-                // it at stride 2^32 - 1, past vertex 0 whatever memory lies 4 GiB on, where the
-                // runtime holds nothing (`unstrided_buffer`).
+                // A vertex buffer set without a stride that a dynamic layout reads: Metal takes
+                // the command, and what the fetch reads past vertex 0 is unsettled
+                // (`unstrided_buffer`).
                 let table = &encoder.vertex;
                 let unstrided = encoder.pipeline.as_ref().and_then(|pipeline| {
                     let bound = table

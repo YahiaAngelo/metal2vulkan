@@ -827,8 +827,8 @@ fn check_render_replay_templates(
 /// Each executed host command of `case` that draws or dispatches binds every buffer its
 /// pipeline's layout of `MTLBufferLayoutStrideDynamic` reads (the template's dynamic stage or
 /// vertex inputs, at their slots) with the stride form: Metal reads one bound without a stride
-/// there at stride 2^32 - 1, past element 0 whatever memory lies 4 GiB on, and the runtime
-/// refuses such a command at the commit (`RuntimeGap::IndirectCommandUnstridedBuffer`). A
+/// there by no settled rule, so the runtime refuses such a command at the commit
+/// (`RuntimeGap::IndirectCommandUnstridedBuffer`). A
 /// command that inherits its buffers, or runs nothing, binds none of its own.
 fn check_replayed_strides(
     case: &AuthoredCase,
@@ -897,8 +897,8 @@ fn check_replayed_strides(
             if let Some(binding) = unstrided {
                 return Err(vec![format!(
                     "host command {} of command buffer ({}, {}) binds buffer index {} without a \
-                     stride, which its pipeline's dynamic layout reads: Metal reads it at stride \
-                     2^32 - 1 and the runtime refuses the command",
+                     stride, which its pipeline's dynamic layout reads: what Metal reads there is \
+                     unsettled and the runtime refuses the command",
                     command.index, resource.buffer_binding, resource.field_offset, binding.index
                 )]);
             }
