@@ -3,10 +3,13 @@
 //! regions back into its buffer; and Metal's `bytesPerRow` rule for a texture over an IOSurface
 //! plane, which no test may build the texture for.
 
-use super::super::buffer_texture::{staged_rows_back, turned_plane, view_usage, ViewUsage};
+use super::super::buffer_texture::{
+    rotated_rows, staged_rows_back, turned_plane, view_usage, ViewUsage,
+};
 use super::super::error::{Error, Invalid, Problem, RuntimeGap};
 use super::super::linear_plan::{
-    BufferFacts, BufferLayout, BufferTexture, BufferTextureCall, BufferTextureProblem,
+    plan_buffer_texture, plane_rows_share_bytes, BufferFacts, BufferLayout, BufferTexture,
+    BufferTextureCall, BufferTextureProblem,
 };
 use super::super::texture_descriptor::TextureLayout;
 use super::super::values::StorageMode;
@@ -122,6 +125,108 @@ fn no_rotated_plane_s_gpu_rows_share_bytes() {
         // A pitch that is a multiple of 16 and covers both rows is taken, its rows a row apart.
         assert_eq!(refusal(rotation, 5, 4, 32), None, "rotation {rotation}");
     }
+}
+
+/// The only rows of a texture over a buffer that share bytes are an IOSurface plane's on Metal's
+/// GPU, whose own rows lie a row apart or further
+/// (`Texels::plane_rows_overlap`, `linear_plan::plane_rows_share_bytes`): no plan makes a texture
+/// whose CPU rows share bytes as well, so a copy that addresses a texture's rows as bytes meets
+/// that one sharing and no other.
+///
+/// The sweep holds `plan_buffer_texture` to it over every call, a plain format and a two-plane
+/// YCbCr one (whose rows of codes are the only ones Metal lets fall below the row), pitches from
+/// well below the row to well past it, and offsets on and off 16; and `turned_plane` with
+/// `rotated_rows` over every rotation, whose one layout serves the GPU and the CPU alike.
+#[test]
+fn no_texture_over_a_buffer_has_cpu_rows_that_share_bytes() {
+    let calls = [
+        BufferTextureCall::Texture,
+        BufferTextureCall::Linear,
+        BufferTextureCall::IoSurfacePlane { planar: false },
+        BufferTextureCall::IoSurfacePlane { planar: true },
+    ];
+    let (mut made, mut sharing) = (0, 0);
+    for call in calls {
+        for (pf, texel_bytes) in [(PixelFormat::BGRA8Unorm, 4), (PixelFormat::YCBCR84221P, 1)] {
+            for width in [1u32, 5, 8, 17] {
+                for height in [1u32, 2, 4, 9] {
+                    for bytes_per_row in (0..=u64::from(width) * texel_bytes + 40).step_by(3) {
+                        for offset in [0u64, 4, 32] {
+                            let texture = BufferTexture {
+                                layout: TextureLayout {
+                                    texture_type: TextureType::Type2D,
+                                    pixel_format: pf,
+                                    extent: [width, height, 1],
+                                    levels: 1,
+                                    layers: 1,
+                                    samples: 1,
+                                },
+                                texel_bytes,
+                                storage: StorageMode::Shared,
+                                offset,
+                                bytes_per_row,
+                                call,
+                                usage: TextureUsage::SHADER_READ,
+                            };
+                            let facts = BufferFacts { length: 1 << 20 };
+                            let Ok(placed) = plan_buffer_texture(&texture, &facts) else {
+                                continue;
+                            };
+                            made += 1;
+                            assert_eq!(
+                                placed.cpu.shared_bytes(),
+                                0,
+                                "{call:?} {pf:?} {width}x{height} at {bytes_per_row}, offset                                  {offset}"
+                            );
+                            assert_eq!(
+                                plane_rows_share_bytes(&placed.gpu, &placed.cpu),
+                                placed.gpu.shared_bytes() > 0,
+                                "{call:?} {pf:?} {width}x{height} at {bytes_per_row}, offset                                  {offset}"
+                            );
+                            sharing += u64::from(placed.gpu.shared_bytes() > 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // The sweep reached both answers: planes whose GPU rows share bytes, and textures with none.
+    assert!(
+        sharing > 0 && made > sharing,
+        "{made} made, {sharing} sharing"
+    );
+    // A rotated plane: one layout for the GPU and the CPU, whose rows share no byte.
+    let (mut turned_ok, mut turned_refused) = (0, 0);
+    for rotation in 1..=4u8 {
+        for width in [4u32, 5, 16, 64] {
+            for height in [4u32, 5, 16, 64] {
+                for bytes_per_row in [16u64, 20, 32, 48, 64, 256, 272] {
+                    let texture = over_a_plane(width, height, bytes_per_row);
+                    let length = bytes_per_row * u64::from(width.max(height)) + 1024;
+                    match turned_plane("t", &texture, rotation, &BufferFacts { length }) {
+                        Ok((_, placed)) => {
+                            turned_ok += 1;
+                            let rows = rotated_rows(&texture);
+                            assert_eq!(
+                                (rows.shared_bytes(), placed.gpu.shared_bytes()),
+                                (0, 0),
+                                "rotation {rotation}, {width}x{height} at {bytes_per_row}"
+                            );
+                            assert!(
+                                !plane_rows_share_bytes(&rows, &rows),
+                                "rotation {rotation}, {width}x{height} at {bytes_per_row}"
+                            );
+                        }
+                        Err(_) => turned_refused += 1,
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        turned_ok > 0 && turned_refused > 0,
+        "{turned_ok} made, {turned_refused} refused"
+    );
 }
 
 /// A `width x height` texture of 4-byte texels over an IOSurface plane whose rows are

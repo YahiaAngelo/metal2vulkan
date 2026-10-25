@@ -868,7 +868,10 @@ else.
   rule holds and which overlap by any amount across any number of rows, and the other formats whose
   rows no row rule bounds (a two-plane extended-range one's, a 4:2:2 one's pairs, a depth or stencil
   plane's elements), which two regions do not express; and a blit that addresses such a plane's rows
-  as bytes (`blit_texture.rs`), whose row copies leave the later row's bytes where two meet, as a
-  rotated texture's Metal blit writes them, not the earlier row's that Metal's blit through such a
-  plane leaves. A rotated plane never reaches any of this: its `bytesPerRow` must be a multiple of
-  16, so its GPU rows lie at the pitch itself.
+  as bytes (`blit_texture.rs`), which would write every shared byte from one fixed row where Metal
+  has no one order: the row Metal leaves there follows the command, the GPU pitch and the row count,
+  one shape of `copyFromTexture:toTexture:` gives three whole-plane outcomes from run to run, and a
+  kernel's winner moves with the threadgroup shape (an Apple M3 Max under macOS 27.0.1, one case a
+  process, `probes/overlapping_plane_row_writes.m`). A rotated plane never reaches any of this: its
+  `bytesPerRow` must be a multiple of 16, so its GPU rows lie at the pitch itself and share no
+  byte.

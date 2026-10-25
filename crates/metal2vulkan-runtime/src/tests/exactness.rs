@@ -39,9 +39,9 @@ fn the_kinds_metal_answers_otherwise_are_named() {
         D::ZeroedIndexFetch,
         D::DontCareStore,
         D::NarrowSurfaceRows,
-        // Two rows of an IOSurface plane writing the bytes they share: Metal's blit leaves the
-        // earlier row's and its kernel the later row's on an M4, others on an M3 Max; the
-        // runtime's earlier row's is its blit's.
+        // Two rows of an IOSurface plane writing the bytes they share: a kernel is the only
+        // writer such a plane takes, and the row its writes leave there moves with the
+        // threadgroup shape; the runtime's earlier row's is one of them.
         D::CollidingSurfaceRowWrites,
         D::RepeatedExecutionStart,
         D::OverlappingTextureCopyAsMemmove,

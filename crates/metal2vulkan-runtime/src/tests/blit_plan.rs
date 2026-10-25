@@ -5,12 +5,13 @@
 
 use super::super::blit_plan::{
     block_order_position, copied_rows, plan_block_order_copy, plan_buffer_copy, plan_levels_copy,
-    plan_region_copy, plan_rows_copy, plan_whole_copy, texel_layout, texel_rows, BufferCopyPlan,
-    BufferLayout, BufferRange, CopyPair, ImageCopyRegion, RowsCopy,
+    plan_region_copy, plan_rows_copy, plan_texels_rows_copy, plan_whole_copy, texel_layout,
+    texel_rows, BufferCopyPlan, BufferLayout, BufferRange, CopyPair, ImageCopyRegion, RowsCopy,
 };
 use super::super::copy_plan::{
-    copy_unit, BlitOption, CopyProblem, CopyRefusal, CopyUnit, TextureRegion,
+    copy_unit, BlitOption, CopyProblem, CopyRefusal, CopyUnit, ImageRegion, TextureRegion,
 };
+use super::super::error::RuntimeGap;
 use super::super::image_plan::{plan_image, ImagePlan};
 use super::super::linear_plan::BufferLayout as TexelsLayout;
 use super::super::pvrtc::{cpu_order_of_rows, cpu_order_position, rows_of_cpu_order};
@@ -993,6 +994,80 @@ fn over_buffer(slices: u64) -> (Texture, TexelsLayout) {
         slices,
     };
     (t, layout)
+}
+
+/// A row copy between two textures over buffers is refused where either side's GPU rows share
+/// bytes, and planned where neither's do.
+///
+/// An IOSurface plane whose `bytesPerRow` rounded down to 16 falls below its row has GPU rows
+/// that share bytes while its own rows lie a row apart. Metal leaves those bytes from whichever
+/// of the two rows its own command wrote last -- an order that follows the command, the GPU pitch
+/// and the row count, and that one shape of `copyFromTexture:toTexture:` does not settle from run
+/// to run (`linear_plan.rs`'s **Rows that overlap**) -- so no order a row copy writes them in is
+/// Metal's, and the copy is refused whichever side the plane is on. Rows a row apart or further
+/// are planned, each side's from its own layout.
+#[test]
+fn a_row_copy_between_two_textures_over_buffers_refuses_either_sides_shared_bytes() {
+    let (t, plain) = over_buffer(1);
+    let unit = unit(&t, BlitOption::None).unwrap();
+    // A 5x4 texture of 4-byte texels over a plane 20 bytes a row: Metal's GPU takes its rows 16
+    // apart, so consecutive rows share 4 bytes, while the plane's own rows lie a row apart.
+    let gpu = TexelsLayout {
+        offset: 0,
+        row_pitch: 16,
+        slice_pitch: 64,
+        row_bytes: 20,
+        rows: 4,
+        slices: 1,
+    };
+    let cpu = TexelsLayout {
+        row_pitch: 20,
+        slice_pitch: 80,
+        ..gpu
+    };
+    assert_eq!((gpu.shared_bytes(), cpu.shared_bytes()), (4, 0));
+    // A second plain layout, so each side's rows are told apart.
+    let other = TexelsLayout {
+        offset: 1024,
+        ..plain
+    };
+    let region = ImageRegion {
+        aspect: ImageAspectFlags::COLOR,
+        level: 0,
+        layer: 0,
+        layers: 1,
+        origin: [0, 0, 0],
+        size: [4, 4, 1],
+    };
+    let copies = [ImageCopyRegion {
+        src: region,
+        dst: region,
+    }];
+    let plan = |from: (&TexelsLayout, &TexelsLayout), to: (&TexelsLayout, &TexelsLayout)| {
+        plan_texels_rows_copy(from, to, &unit, &copies)
+    };
+    let gap = Err(RuntimeGap::OverlappingSurfaceRows);
+    // The plane as the source, as the destination, and on both sides.
+    assert_eq!(plan((&gpu, &cpu), (&plain, &plain)), gap);
+    assert_eq!(plan((&plain, &plain), (&gpu, &cpu)), gap);
+    assert_eq!(plan((&gpu, &cpu), (&gpu, &cpu)), gap);
+    // Two plain textures: a row each, source rows 32 bytes apart from 256 and destination rows
+    // from 1024.
+    let copy = plan((&plain, &plain), (&other, &other)).expect("a plan");
+    assert_eq!(
+        copy.rows,
+        (0..4)
+            .map(|y| BufferRange {
+                src: 256 + y * 32,
+                dst: 1024 + y * 32,
+                size: 16,
+            })
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        (copy.src_span.clone(), copy.dst_span.clone()),
+        (256..352 + 16, 1024..1120 + 16)
+    );
 }
 
 /// A copy into a texture over a buffer moves its texel rows only, never the bytes between them;

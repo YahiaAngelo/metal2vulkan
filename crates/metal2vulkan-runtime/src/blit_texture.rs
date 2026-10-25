@@ -57,8 +57,9 @@
 use super::blit::{reads, reads_by, writes, writes_by, BlitCommandEncoder, TRANSFER};
 use super::blit_plan::{
     copied_rows, plan_block_order_copy, plan_buffer_copy, plan_levels_copy, plan_region_copy,
-    plan_rows_copy, plan_whole_copy, texel_layout, texel_rows, BufferCopyPlan, BufferImageRegion,
-    BufferLayout, BufferRange, CopyPair, ImageCopyRegion, RowsCopy,
+    plan_rows_copy, plan_texels_rows_copy, plan_whole_copy, texel_layout, texel_rows,
+    BufferCopyPlan, BufferImageRegion, BufferLayout, BufferRange, CopyPair, ImageCopyRegion,
+    RowsCopy,
 };
 use super::compressed_blit::{rule_of, rules_of};
 use super::copy_plan::{
@@ -166,7 +167,7 @@ fn check_depth_view(texture: &Texture) -> Result<(), Error> {
 }
 
 /// The aspect a blit between a buffer and the multisampled `texture` with `option` moves: a
-/// depth or stencil format's copy unit's ([`unit`], refused as the single-sample copy refuses
+/// depth or stencil format's copy unit's ([`unit()`], refused as the single-sample copy refuses
 /// it), a colour format's colour.
 fn multisampled_aspect(
     call: &'static str,
@@ -562,10 +563,11 @@ impl BlitCommandEncoder {
                 )?;
                 if let Some(texels) = texture.buffer_texels() {
                     // Rows that share bytes (an IOSurface plane's on Metal's GPU): the row
-                    // copies leave the later row's bytes where two meet, as a rotated texture's
-                    // plain Metal blit writes them (`blit_plan::RowsCopy`), and Metal's blit
-                    // through such a plane leaves the earlier row's
-                    // (`linear_plan.rs`'s **Rows that overlap**).
+                    // copies would write every shared byte from one fixed row, where Metal
+                    // leaves it from whichever row its own command wrote last -- an order that
+                    // follows the command, the GPU pitch and the row count, and that one shape
+                    // does not settle from run to run (`linear_plan.rs`'s **Rows that
+                    // overlap**).
                     if texels.plane_rows_overlap() {
                         return Err(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows));
                     }
@@ -718,10 +720,11 @@ impl BlitCommandEncoder {
                 let region = region(CALL, source_origin, size, source_level, source_slice)?;
                 if let Some(texels) = source_texture.buffer_texels() {
                     // Rows that share bytes (an IOSurface plane's on Metal's GPU): the row
-                    // copies leave the later row's bytes where two meet, as a rotated texture's
-                    // plain Metal blit writes them (`blit_plan::RowsCopy`), and Metal's blit
-                    // through such a plane leaves the earlier row's
-                    // (`linear_plan.rs`'s **Rows that overlap**).
+                    // copies would write every shared byte from one fixed row, where Metal
+                    // leaves it from whichever row its own command wrote last -- an order that
+                    // follows the command, the GPU pitch and the row count, and that one shape
+                    // does not settle from run to run (`linear_plan.rs`'s **Rows that
+                    // overlap**).
                     if texels.plane_rows_overlap() {
                         return Err(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows));
                     }
@@ -1693,22 +1696,22 @@ impl BlitCommandEncoder {
         let copy_problem = |problem| invalid(call, Problem::Copy(problem));
         match (source.buffer_texels(), destination.buffer_texels()) {
             (Some(from), Some(to)) => {
-                let (unit, mut src, mut dst) = (from.unit(), Vec::new(), Vec::new());
-                for copy in copies {
-                    src.extend(texel_rows(&from.layout, &unit, &copy.src));
-                    dst.extend(texel_rows(&to.layout, &unit, &copy.dst));
-                }
-                self.rows_copy(&from.buffer, &to.buffer, &RowsCopy::new(&src, &dst))
+                let unit = from.unit();
+                // Rows that share bytes are refused, on either side
+                // (`plan_texels_rows_copy`): Metal leaves them from whichever row its own
+                // command wrote last, which no one order of a row copy reproduces.
+                let copy =
+                    plan_texels_rows_copy(from.row_layouts(), to.row_layouts(), &unit, copies)
+                        .map_err(Error::NotImplemented)?;
+                self.rows_copy(&from.buffer, &to.buffer, &copy)
             }
             (Some(texels), None) | (None, Some(texels)) => {
-                // Rows that overlap are no layout a buffer-image copy states: an IOSurface
-                // plane's on Metal's GPU, which only its shadow's two regions each way hold
-                // (`linear_plan.rs`'s **Rows that overlap**), or a rotated texture's.
+                // Rows that share bytes are no layout a buffer-image copy states: an IOSurface
+                // plane's on Metal's GPU, which only its shadow's two regions each way hold, and
+                // which Metal leaves from whichever row its own command wrote last
+                // (`linear_plan.rs`'s **Rows that overlap**).
                 if texels.plane_rows_overlap() {
                     return Err(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows));
-                }
-                if texels.rows_overlap() {
-                    return Err(Error::NotImplemented(RuntimeGap::RotatedTexture));
                 }
                 let into_texture = source.over_buffer();
                 let texture = if into_texture { destination } else { source };

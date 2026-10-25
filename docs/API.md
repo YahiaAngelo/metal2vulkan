@@ -424,8 +424,8 @@ Where Metal's rules differ from Vulkan's, the pipeline gives Metal's answer:
   outputs at one attachment are `InvalidDescriptor(DuplicateColorOutput)`.
 - On a device without `independentBlend`, attachments the function does not write copy the blend
   state of those it does; where those differ the pipeline is refused, naming the feature.
-- A packed 16-bit attachment (`A1BGR5Unorm`, `ABGR4Unorm`) of a format the device samples but does
-  not render (the RTX 5080) renders through an `R16_UINT` view of its texture
+- A packed 16-bit attachment (`A1BGR5Unorm`, `ABGR4Unorm`, `BGRA4Unorm`) of a format the device
+  samples but does not render (the RTX 5080) renders through an `R16_UINT` view of its texture
   (`metal::format::WordAttachment`, `LoweringInputs::word_colors`): the fragment function writes
   the word Metal stores and `graphics` gives the attachment that format; a pass clears it to the
   word of Metal's clear. Exact, for a write unblended (or blended one and zero); under a mask of
@@ -437,7 +437,10 @@ Where Metal's rules differ from Vulkan's, the pipeline gives Metal's answer:
   clear's or an earlier blend's result in the pass as a `half`, and under fast math Metal sums a
   few states otherwise; `docs/FAST-PATHS.md`). A blend of the second source, and a blend or
   partial mask on a device without the interlock, is refused as the device lacking the format; a
-  color input or resolve of one, and a blend of an output of fewer lanes, is `NotImplemented`.
+  resolve of one, and a blend of an output of fewer lanes, is `NotImplemented`; a color input of
+  one is read in the interlocked storage form, the word decoded to each channel's code over its
+  maximum code rounded to `half`, nearest even, which is Metal's value (measured on an Apple M3
+  Max under macOS 27.0.1 for a `float4` and a `half4` input, every code of each 4-bit channel).
 - An 8-bit sRGB attachment of one or two channels (`R8Unorm_sRGB`, `RG8Unorm_sRGB`) the device
   does not render (the RTX 5080: it renders neither `R8_SRGB` nor `R8G8_SRGB`, and holds the
   latter in its UNORM twin) renders through an `R8_UINT` or `R16_UINT` view of its texture the
@@ -1814,11 +1817,13 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   texture of an IOSurface plane whose rows share bytes on Metal's GPU: more than one row of over 16
   bytes whose `bytesPerRow` rounded down to 16 is below the row, so consecutive rows share 1 to 15
   bytes, a whole number of texels. Metal's reads see the sharing and so do the runtime's, through a
-  shadow whose two copy regions each way hold it; but where two rows' writes meet Metal's answer is
-  not one value: its blit leaves the earlier row's bytes, and its kernel the later row's on an M4
-  and others on an M3 Max. Cost: where two of the plane's rows write the bytes they share the
-  earlier row's stand, as Metal's blit leaves them, where a kernel of Metal's leaves the later
-  row's on an M4 and others on an M3 Max; reads, CPU access and every other byte are Metal's.
+  shadow whose two copy regions each way hold it; but where two rows' writes meet the shared bytes
+  take whichever of the two rows Metal's command wrote last, and that order is no one order: it
+  follows the command, the GPU pitch and the row count, a kernel's winner moving with the
+  threadgroup shape. A kernel is the only writer such a plane takes, every blit into one being
+  refused. Cost: where two of the plane's rows write the bytes they share the earlier row's stand,
+  one of the rows a kernel of Metal's leaves there, whose winner moves with the threadgroup shape;
+  reads, CPU access and every other byte are Metal's.
 - `metal2vulkan-degrade-absent-argument-read` (precision). `AbsentArgumentRead`: A pipeline state's
   function may read an argument its function constants removed (a texture's read, sample, gather,
   query or atomic, or a sample through a removed sampler; `RuntimeFact::AbsentArgumentRead`), which

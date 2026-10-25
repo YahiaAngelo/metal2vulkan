@@ -14,10 +14,8 @@
 //! not, as Metal; a resolve lands as a store does; the bytes between the plane's rows stay. A
 //! rotated texture of a padded 10-bit or extended-range format that such a pass loads keeps its
 //! codes with the bits they leave unused as Metal's tile store makes them. CPU access and blits
-//! address the plane as the texture's own extent at the plane's rows, turned or not, a quarter
-//! turn's rows overlapping where they are longer than the plane's pitch (a write's later row
-//! keeping the bytes two rows share), refused where they run past the buffer; a fragment's `read()`
-//! sees the stored frame unturned. A view of the texture in another 8-bit RGBA format acts as the
+//! address the plane as the texture's own extent at the plane's rows, turned or not, refused where
+//! those rows run past the buffer; a fragment's `read()` sees the stored frame unturned. A view of the texture in another 8-bit RGBA format acts as the
 //! texture does; other views are refused. The creators refuse what Metal asserts on, and the
 //! shadows a rotated texture is read and rendered through are announced once (`ShadowedTexture`; a
 //! resolve's own notices, which differ by device, are not this lane's).
@@ -809,10 +807,9 @@ fn rows_read(plane: &[u8], (w, h): (u64, u64), bpr: u64) -> Vec<u8> {
 }
 
 /// The uses other than a render pass's, as plain Metal addresses them: CPU access and blits, in and
-/// out, address the plane as the texture's own extent at the plane's rows, turned or not, a quarter
-/// turn's rows overlapping where they are longer than the plane's pitch and a write's later row
-/// keeping the bytes two rows share; refused (`NotImplemented(RotatedTexture)`) where those rows
-/// run past the buffer, and made over a buffer that holds them. A fragment's `read()` sees the
+/// out, address the plane as the texture's own extent at the plane's rows, turned or not; refused
+/// (`NotImplemented(RotatedTexture)`) where those rows run past the buffer, and made over a buffer
+/// that holds them. A fragment's `read()` sees the
 /// stored frame unturned (positions past it, which Metal reads as 0, are printed, not checked), and
 /// a kernel's write of a texel reaches no byte while its write of the plane's bytes lands.
 #[test]

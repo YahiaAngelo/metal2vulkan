@@ -95,18 +95,27 @@
 //!   rules above.
 //! - **Rows that overlap.** A row of more than 16 bytes whose `bytesPerRow` rounded down to 16 is
 //!   below it overlaps the next row on the GPU: a read sees the overlap, and where two rows'
-//!   writes meet, one of them wins, by the order of the writes: the earlier row's in a blit, and
-//!   in a kernel the later row's on the M4 and others on the M3 Max. A plane's pitch covers its
-//!   own row, so the overlap is 1 to 15 bytes, a whole number of texels, and between consecutive
-//!   rows alone (`tests::linear_plan`). No image holds rows that overlap, so such a plane is a
-//!   shadow whose copies reproduce the sharing: two regions a slice each way, one of every row's
-//!   shared head and one of the rest of each row going in, and going back the second of them for
-//!   every row beside the head of row 0 alone, which tile the plane's bytes exactly once and
-//!   leave the earlier row's bytes where two rows meet, the order Metal's blit writes them in
+//!   writes meet the bytes they share take whichever of the two rows Metal's command wrote last.
+//!   That order is no one order (an Apple M3 Max under macOS 27.0.1, one case a process,
+//!   `probes/overlapping_plane_row_writes.m`): it follows the command, the GPU pitch and the row
+//!   count, and how far the rows overlap changes none of it. `copyFromBuffer:toTexture:` and
+//!   `copyFromTexture:toTexture:` at a GPU pitch of 16 keep the earlier row's bytes below every
+//!   even row and the later row's below every odd one, alternating over 2 to 12 rows; at a pitch
+//!   of 32 they keep the earlier row's over 4 rows and the later row's over 3, 5 and 6;
+//!   `copyFromTexture:toTexture:` into 33 bytes a row at a pitch of 32 over 4 rows has no answer
+//!   at all, 23 fresh processes giving three whole-plane outcomes; and a kernel's winner moves
+//!   with the threadgroup shape.
+//!
+//!   A plane's pitch covers its own row, so the overlap is 1 to 15 bytes, a whole number of
+//!   texels, and between consecutive rows alone (`tests::linear_plan`). No image holds rows that
+//!   overlap, so such a plane is a shadow whose copies reproduce the sharing: two regions a slice
+//!   each way, one of every row's shared head and one of the rest of each row going in, and going
+//!   back the second of them for every row beside the head of row 0 alone, which tile the plane's
+//!   bytes exactly once and leave the earlier row's bytes where two rows meet
 //!   (`buffer_texture.rs`, [`plane_copy_regions`](super::buffer_texture::plane_copy_regions)). A
-//!   kernel's two writes there leave the earlier row's bytes too, where Metal's leave the later
-//!   row's on the M4 and others on the M3 Max: one of Metal's own answers, announced
-//!   (`Degradation::CollidingSurfaceRowWrites`).
+//!   kernel is the only writer that reaches such a plane, every blit into one being refused
+//!   below, and the earlier row's bytes are one of the rows a kernel of Metal's leaves there,
+//!   announced (`Degradation::CollidingSurfaceRowWrites`).
 //!
 //!   Still refused ([`BufferRefusal::OverlappingRows`], `NotImplemented`,
 //!   `RuntimeGap::OverlappingSurfaceRows`): a plane a render pass stores into, where what Metal
@@ -114,11 +123,12 @@
 //!   rule bounds (a two-plane YCbCr texture's, which overlap by any amount across any number of
 //!   rows, `ycbcr.rs`; a two-plane extended-range one's, a 4:2:2 one's pairs, a depth or stencil
 //!   plane's elements), which two regions do not express; and a blit that addresses such a
-//!   plane's rows as bytes (`blit_texture.rs`), whose order Metal leaves the shared bytes in
-//!   differs from a rotated texture's, the only overlap its row copies hold
-//!   ([`super::blit_plan::RowsCopy`]). A rotated plane never reaches this at all: its
-//!   `bytesPerRow` must be a multiple of 16 (`buffer_texture::turned_plane`), so its GPU rows lie
-//!   at the pitch itself.
+//!   plane's rows as bytes (`blit_texture.rs`), which writes every shared byte from one fixed row
+//!   where Metal's order is no one order ([`super::blit_plan::RowsCopy`] holds only the one
+//!   overlap that has an order, a buffer's rows whose images meet). A rotated plane never reaches
+//!   any of this: its `bytesPerRow` must be a multiple of 16
+//!   (`buffer_texture::turned_plane`), so its GPU rows lie at the pitch itself and share no byte
+//!   (`tests::buffer_texture::no_rotated_plane_s_gpu_rows_share_bytes`).
 //! - **Two-plane YCbCr codes** (an M3 Max under macOS 27.0.1; `ycbcr.rs`'s **Surfaces**). Metal
 //!   makes a two-plane YCbCr texture over any plane, its codes at the plane's rows however wide
 //!   they are: a 10-bit format over an 8-bit plane, whose rows of codes overlap where
@@ -428,6 +438,21 @@ impl Placed {
 /// apart, so that one region a slice states them and its `bufferRowLength` covers its width. A
 /// plane of one row lies a row apart whatever its pitch: it overlaps nothing, and one region
 /// states it.
+/// Whether Metal's GPU reads and writes two of a texture's rows over bytes they share, because
+/// it takes an IOSurface plane at its pitch rounded down to 16 ([`iosurface_gpu_layout`]) while
+/// the plane's own rows, which the CPU takes, lie a row apart or further (the module's **Rows
+/// that overlap**). `gpu` and `cpu` are one texture's two layouts ([`Placed`]).
+///
+/// Only a plane answers true. A rotated texture's two layouts are one
+/// (`buffer_texture::rotated_rows`) and share no byte at all, its `bytesPerRow` covering its own
+/// row (`buffer_texture::covers_its_row`); and no plan makes a texture whose CPU rows share
+/// bytes, every call but a two-plane YCbCr texture's holding `bytesPerRow` to the row
+/// ([`plan_buffer_texture`]) and that one's GPU rows, which round down to 16 or below the CPU's,
+/// sharing bytes too and so being refused ([`BufferRefusal::OverlappingRows`]).
+pub(super) fn plane_rows_share_bytes(gpu: &BufferLayout, cpu: &BufferLayout) -> bool {
+    gpu.shared_bytes() > 0 && cpu.shared_bytes() == 0
+}
+
 pub(super) fn iosurface_gpu_layout(cpu: &BufferLayout) -> BufferLayout {
     let down = |n: u64| n - n % LINEAR_ALIGNMENT;
     let pitch = down(cpu.row_pitch);

@@ -12,12 +12,14 @@
 //!   whose copies turn the texels (`rotated.rs`), made at the first pass that needs it and kept
 //!   with the texture's texels.
 //! - **CPU access and blits** (`getBytes`, `replaceRegion`, blits in and out) address the plane as
-//!   a 2D texture of the texture's own extent at the plane's offset and rows, turned or not: a
-//!   quarter turn's rows overlap where they are longer than the plane's pitch, and a write's
-//!   later row keeps the bytes two rows share, the same each run. The texture's texels lie there
-//!   (`rotated_rows`); where those rows run past the buffer, whose bytes Metal reads past the
-//!   stored frame, the runtime has no bytes, and those uses are refused
-//!   (`NotImplemented(RotatedTexture)`, [`Texture::check_bytes_reached`]).
+//!   a 2D texture of the texture's own extent at the plane's offset and rows, turned or not. The
+//!   texture's texels lie there (`rotated_rows`), their rows a row apart or further: a rotated
+//!   plane's `bytesPerRow` is a multiple of 16 and covers the texture's own row
+//!   (`buffer_texture::turned_plane`, `covers_its_row`), so no two of them share a byte
+//!   (`tests::buffer_texture::no_rotated_plane_s_gpu_rows_share_bytes`). Where those rows run
+//!   past the buffer, whose bytes Metal reads past the stored frame, the runtime has no bytes,
+//!   and those uses are refused (`NotImplemented(RotatedTexture)`,
+//!   [`Texture::check_bytes_reached`]).
 //! - **Functions** see the stored frame unturned: `get_width()` and `get_height()` answer the
 //!   extent Metal stores the texture as, `read()` at `(x, y)` (in a fragment, a kernel, or a
 //!   `read_write` kernel) gives the plane's texel `(x, y)` of that extent, a position past it

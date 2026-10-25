@@ -76,7 +76,8 @@
 //!   whose GPU rows share 1 to 15 bytes is an image of its texels whose copies are two regions a
 //!   slice each way ([`plane_copy_regions`](super::buffer_texture::plane_copy_regions)): going
 //!   in each shared byte is read for both the rows that hold it, and going back it is
-//!   written once, from the earlier row, as Metal's blit leaves it. The rules above are the same;
+//!   written once, from the earlier row, one of the rows Metal's own writes leave it from (its
+//!   order follows the command, the GPU pitch and the row count). The rules above are the same;
 //!   no copy of such a shadow is cut to a rectangle, and none dispatches, both of which take one
 //!   region.
 //! - **Render passes** (`render/shadows.rs`). A render pass instance is one command: its draws
@@ -377,8 +378,8 @@ pub(super) enum ShadowTarget {
         /// The regions a copy back, and a merge's keep, take out of the image
         /// ([`ShadowCopies::record_out`]): `regions` for every shadow but one over an IOSurface
         /// plane whose rows share bytes, where going in reads each shared byte for both its rows
-        /// and going back writes it once, from the earlier row
-        /// (`buffer_texture::plane_copy_regions`).
+        /// and going back writes it once, from the earlier row, one of the rows Metal's own
+        /// writes leave it from (`buffer_texture::plane_copy_regions`).
         back: Vec<vk::BufferImageCopy>,
         staging: Option<ShadowStaging>,
         /// The bytes of one of its texels in the buffer, by which a copy back of a part of the
@@ -428,7 +429,8 @@ impl ShadowTarget {
     /// image (`into_shadow`) or back out of it: `regions` in and `back` out, which differ only
     /// for an IOSurface plane whose rows share bytes
     /// ([`plane_copy_regions`](super::buffer_texture::plane_copy_regions): going in reads each
-    /// shared byte for both its rows, and going back writes it once, from the earlier row).
+    /// shared byte for both its rows, and going back writes it once, from the earlier row, one of
+    /// the rows Metal's own writes leave it from).
     /// `None` for every other shadow.
     pub(super) fn image_regions(&self, into_shadow: bool) -> Option<&[vk::BufferImageCopy]> {
         let ShadowTarget::Image { regions, back, .. } = self else {

@@ -33,8 +33,9 @@ use super::error::{internal, invalid, nil, vulkan, Error, Problem, RuntimeGap};
 use super::exit_guard;
 use super::key_hash::KeyMap;
 use super::linear_plan::{
-    is_linear, plan_buffer_texture, BufferFacts, BufferLayout, BufferRefusal, BufferTexture,
-    BufferTextureCall, BufferTextureProblem, Placed, LINEAR_ALIGNMENT,
+    is_linear, plan_buffer_texture, plane_rows_share_bytes, BufferFacts, BufferLayout,
+    BufferRefusal, BufferTexture, BufferTextureCall, BufferTextureProblem, Placed,
+    LINEAR_ALIGNMENT,
 };
 use super::resource::{Identity, ResourceKey};
 use super::rotated::{self, Frame, RotatedCopies};
@@ -362,8 +363,10 @@ impl Buffer {
     ///   number of texels, between consecutive rows. A plain plane is made, its shadow's copies
     ///   reproducing the sharing with two regions a slice each way, so that a read sees it as
     ///   Metal's does and the shared bytes keep the earlier row's where two of its rows write
-    ///   them, as Metal's blit leaves them; announced once, as a kernel of Metal's leaves the
-    ///   later row's there on an M4 and others on an M3 Max, announced by
+    ///   them. Which row Metal leaves there is the order its own command wrote the rows in, which
+    ///   follows the command, the GPU pitch and the row count (`linear_plan.rs`'s **Rows that
+    ///   overlap**); a kernel, the only writer such a plane takes here, moves its winner with the
+    ///   threadgroup shape, so the earlier row's bytes are one of its answers. Announced once by
     ///   [`Degradation::CollidingSurfaceRowWrites`](super::Degradation::CollidingSurfaceRowWrites).
     ///
     /// Refused: a surface made with `kIOSurfaceClientDirection`, SPI
@@ -794,10 +797,11 @@ fn covers_its_row(texture: &BufferTexture) -> Result<(), BufferTextureProblem> {
 }
 
 /// The bytes a rotated texture made as `texture` has its CPU access and blits address: its own
-/// extent at the plane's offset and rows, as plain Metal addresses them,
-/// rows that overlap where a quarter turn's are longer than the plane's, and may run past the
-/// stored frame's last row.
-fn rotated_rows(texture: &BufferTexture) -> BufferLayout {
+/// extent at the plane's offset and rows, as plain Metal addresses them, which may run past the
+/// stored frame's last row. One layout for the GPU and the CPU alike, and its rows never share a
+/// byte: [`covers_its_row`] holds the pitch to the texture's own row
+/// (`tests::buffer_texture::no_rotated_plane_s_gpu_rows_share_bytes`).
+pub(super) fn rotated_rows(texture: &BufferTexture) -> BufferLayout {
     let [width, height, _] = texture.layout.extent.map(u64::from);
     BufferLayout {
         offset: texture.offset,
@@ -1180,21 +1184,13 @@ impl Texels {
         self.span().end <= self.buffer.length()
     }
 
-    /// Whether the texels' rows overlap: an IOSurface plane's on Metal's GPU
-    /// ([`plane_rows_overlap`](Self::plane_rows_overlap)), or a rotated texture's whose rows are
-    /// longer than its plane's (`rotated_rows`).
-    pub(super) fn rows_overlap(&self) -> bool {
-        self.layout.rows > 1 && self.layout.row_pitch < self.layout.row_bytes
-    }
-
-    /// Whether the texels' rows overlap because Metal's GPU reads and writes an IOSurface plane
-    /// at its pitch rounded down to 16 (`linear_plan::iosurface_gpu_layout`), the plane's own
-    /// rows lying a row apart, rather than because a quarter turn's rows are longer than the
-    /// plane's (`rotated_rows`, whose CPU rows overlap as its GPU rows do). The shadow's copies
-    /// hold the sharing ([`plane_copy_regions`]); a blit that addresses the rows as bytes does
-    /// not (`blit_texture.rs`).
+    /// Whether Metal's GPU reads and writes two of the texels' rows over bytes they share: an
+    /// IOSurface plane's at its pitch rounded down to 16, the one shape that does
+    /// ([`plane_rows_share_bytes`]). The shadow's copies hold the sharing
+    /// ([`plane_copy_regions`]); a blit that addresses the rows as bytes does not
+    /// (`blit_texture.rs`).
     pub(super) fn plane_rows_overlap(&self) -> bool {
-        self.rows_overlap() && self.cpu.row_pitch >= self.cpu.row_bytes
+        plane_rows_share_bytes(&self.layout, &self.cpu)
     }
 
     /// The texels of a texture of `descriptor` at `placed` in `buffer`, `texel_bytes` each.
@@ -1236,6 +1232,14 @@ impl Texels {
     /// Where the CPU's `replace_region` and `get_bytes` find the texels.
     pub(super) fn cpu_layout(&self) -> BufferLayout {
         self.cpu
+    }
+
+    /// The texels' two layouts, `(gpu, cpu)`: where Metal's GPU finds them and where the CPU does
+    /// (`linear_plan::Placed`), which together say whether its rows share bytes
+    /// ([`plane_rows_share_bytes`]). A row copy of the texels as the buffer's bytes takes both
+    /// (`blit_plan::plan_texels_rows_copy`).
+    pub(super) fn row_layouts(&self) -> (&BufferLayout, &BufferLayout) {
+        (&self.layout, &self.cpu)
     }
 
     /// The alpha plane of a two-plane extended-range texture over a surface's plane 0, where
@@ -1729,9 +1733,10 @@ pub(super) fn staged_rows_back(layout: &BufferLayout, start: u64, at: u64) -> Ve
 /// - going back, the rest of every row, and the head of row 0 alone. Those tile the slice's bytes
 ///   exactly once, so no byte is written by two destination regions
 ///   (`VUID-vkCmdCopyImageToBuffer-pRegions-12485`), and every shared byte takes the earlier
-///   row's tail, the order Metal's blit writes two rows in (`linear_plan.rs`'s **Rows that
-///   overlap**). A kernel's two writes there leave the earlier row's too, where Metal's leave the
-///   later row's on an M4 and others on an M3 Max
+///   row's tail. Metal leaves there whichever row its own command wrote last, an order that
+///   follows the command, the GPU pitch and the row count rather than one rule
+///   (`linear_plan.rs`'s **Rows that overlap**); a kernel, the only writer such a plane takes,
+///   moves its winner with the threadgroup shape, so the earlier row's tail is one of its answers
 ///   ([`Degradation::CollidingSurfaceRowWrites`](super::Degradation::CollidingSurfaceRowWrites)).
 pub(super) fn plane_copy_regions(
     layout: &BufferLayout,

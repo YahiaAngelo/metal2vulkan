@@ -21,8 +21,9 @@ use super::copy_plan::{
     block_bytes, block_extent, check_region, colour_unit, copy_unit, level_extent, shape,
     BlitOption, CopyProblem, CopyRefusal, CopyUnit, ImageRegion, Shape, TextureRegion,
 };
+use super::error::RuntimeGap;
 use super::image_plan::ImagePlan;
-use super::linear_plan::BufferLayout as TexelsLayout;
+use super::linear_plan::{plane_rows_share_bytes, BufferLayout as TexelsLayout};
 use super::pvrtc::is_pvrtc;
 use super::two_planes;
 use super::view_plan::ViewRecord;
@@ -822,10 +823,15 @@ pub(super) struct RowsCopy {
 }
 
 impl RowsCopy {
-    /// Each row of `src` into the same row of `dst` (as many rows, each as long). Where
-    /// destination rows overlap (a rotated texture's, `texture/rotation.rs`), the later row keeps
-    /// the bytes they share, as plain Metal writes them: an earlier row
-    /// copies only the bytes no later row writes ([`later_rows_win`]).
+    /// Each row of `src` into the same row of `dst` (as many rows, each as long). Destination
+    /// rows overlap in one shape alone: a buffer's rows whose images meet, at a `bytesPerImage`
+    /// below the region's rows, which `check_layout` takes as plain Metal does. There the later
+    /// row keeps the bytes they share, as plain Metal writes overlapping images in turn (an M4
+    /// under macOS 27.0.1, the `ctb.race.*` cases; [`plan_placed_copy`] states the same rule for
+    /// a layout off Metal's rules): an earlier row copies only the bytes no later row writes
+    /// ([`later_rows_win`]). A texture's own rows never overlap here -- a plane's shared bytes
+    /// have no one Metal order and are refused (`blit_texture.rs`), and a rotated texture's rows
+    /// share no byte (`buffer_texture::turned_plane`).
     pub(super) fn new(src: &[Range<u64>], dst: &[Range<u64>]) -> RowsCopy {
         debug_assert_eq!(src.len(), dst.len());
         // Each row as `later_rows_win` takes it: by the bytes it writes.
@@ -921,6 +927,38 @@ pub(super) fn texel_rows(
         }
     }
     rows
+}
+
+/// The row copy of `copies` between two textures over buffers, each copy's source rows of
+/// `from`'s texels and its destination rows of `to`'s, in `unit`s of one texel. Each side is its
+/// texture's two layouts, `(gpu, cpu)`: where Metal's GPU finds its texels and where the CPU does
+/// (`linear_plan::Placed`).
+///
+/// `Err(RuntimeGap::OverlappingSurfaceRows)` where either side's GPU rows share bytes (an
+/// IOSurface plane's at a pitch off 16, [`plane_rows_share_bytes`]). The shared bytes take
+/// whichever of the two rows Metal's command wrote last, an order that follows the command, the
+/// GPU pitch and the row count and that one shape of `copyFromTexture:toTexture:` does not settle
+/// from run to run (`linear_plan.rs`'s **Rows that overlap**), so no order a row copy writes them
+/// in is Metal's. A source plane alone would be read, not written, but the destination is refused
+/// either way: the two sides may be one texture, and a copy out of a plane is refused where it
+/// goes in (`blit_texture.rs`).
+pub(super) fn plan_texels_rows_copy(
+    from: (&TexelsLayout, &TexelsLayout),
+    to: (&TexelsLayout, &TexelsLayout),
+    unit: &CopyUnit,
+    copies: &[ImageCopyRegion],
+) -> Result<RowsCopy, RuntimeGap> {
+    for (gpu, cpu) in [from, to] {
+        if plane_rows_share_bytes(gpu, cpu) {
+            return Err(RuntimeGap::OverlappingSurfaceRows);
+        }
+    }
+    let (mut src, mut dst) = (Vec::new(), Vec::new());
+    for copy in copies {
+        src.extend(texel_rows(from.0, unit, &copy.src));
+        dst.extend(texel_rows(to.0, unit, &copy.dst));
+    }
+    Ok(RowsCopy::new(&src, &dst))
 }
 
 /// The layout of slice `layer` (of the image's) of `region` of a texture over a buffer at

@@ -1081,12 +1081,17 @@ degradations! {
         /// over 16 bytes whose `bytesPerRow` rounded down to 16 is below the row, so consecutive
         /// rows share 1 to 15 bytes, a whole number of texels. Metal's reads see the sharing and
         /// so do the runtime's, through a shadow whose two copy regions each way hold it; but
-        /// where two rows' writes meet Metal's answer is not one value: its blit leaves the
-        /// earlier row's bytes, and its kernel the later row's on an M4 and others on an M3 Max.
+        /// where two rows' writes meet the shared bytes take whichever of the two rows Metal's
+        /// command wrote last, and that order is no one order (an Apple M3 Max under macOS
+        /// 27.0.1, one case a process, `probes/overlapping_plane_row_writes.m`): it follows the
+        /// command, the GPU pitch and the row count, a kernel's winner moving with the
+        /// threadgroup shape. A kernel is the only writer such a plane takes here, every blit
+        /// into one being refused (`linear_plan.rs`'s **Rows that overlap**), so the earlier
+        /// row's bytes are one of the rows a kernel of Metal's leaves there.
         CollidingSurfaceRowWrites = "colliding-surface-row-writes", Precision,
             "where two of the plane's rows write the bytes they share the earlier row's stand, \
-             as Metal's blit leaves them, where a kernel of Metal's leaves the later row's on an \
-             M4 and others on an M3 Max; reads, CPU access and every other byte are Metal's";
+             one of the rows a kernel of Metal's leaves there, whose winner moves with the \
+             threadgroup shape; reads, CPU access and every other byte are Metal's";
         /// A pipeline state's function may read an argument its function constants removed (a
         /// texture's read, sample, gather, query or atomic, or a sample through a removed
         /// sampler; `RuntimeFact::AbsentArgumentRead`), which Metal gives no value: its compiler

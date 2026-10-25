@@ -218,8 +218,7 @@ pub struct TextureDescriptor {
     /// degrees, 1 and 4 a quarter turn (its store `height` texels wide and `width` tall, a
     /// pass's texel `(x, y)` at `(height - 1 - y, x)`), 3 the other quarter turn (at
     /// `(y, width - 1 - x)`). Its other uses are plain Metal's: CPU access and blits address
-    /// the plane as a texture of its own extent at the plane's rows (a quarter turn's rows
-    /// overlapping where they are longer than the plane's, a later row's bytes kept), and
+    /// the plane as a texture of its own extent at the plane's rows, and
     /// functions see the stored frame unturned (its extent their `get_width()` and
     /// `get_height()`), their writes dropped. Refused past 4
     /// ([`TextureProblem::Rotation`]) and without `framebuffer_only`
