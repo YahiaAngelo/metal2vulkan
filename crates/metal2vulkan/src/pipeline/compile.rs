@@ -2125,9 +2125,18 @@ pub(crate) fn depth16_stage_form(
 }
 
 /// The attributes the vertex function `spec` fetches in fixed function under `inputs` from
-/// layouts `desc` steps per instance, where taking them so makes it write some varying the same
-/// at every vertex of a primitive (`LoweringInputs::instanced_attributes`); else none, and the
-/// function keeps the key of any step.
+/// layouts `desc` steps per instance or at a constant step, where taking them so makes it write
+/// some varying the same at every vertex of a primitive
+/// (`LoweringInputs::instanced_attributes`); else none, and the function keeps the key of any
+/// step.
+///
+/// A constant step is in that set because it is the stronger statement of the same thing: the
+/// fetch reads the layout's first element for every vertex and every instance, so a varying it
+/// makes is alike at every vertex of a primitive as surely as a per-instance one's is. It needs
+/// saying here only since the step became a fixed-function binding (`metal::vertex::fetch_as`
+/// answers a divisor of 0): a pulled constant-step fetch reads element 0 in the shader, where the
+/// uniformity is already plain, so this listing is what keeps the two fetch paths writing the
+/// same varyings flat.
 fn instanced_attributes(
     spec: &air::Entry,
     inputs: &LowerInputs,
@@ -2150,7 +2159,13 @@ fn instanced_attributes(
             desc.attributes
                 .get(a)
                 .and_then(|attr| desc.layouts.get(&attr.buffer_index))
-                .is_some_and(|l| l.step_function == crate::metal::VertexStepFunction::PerInstance)
+                .is_some_and(|l| {
+                    matches!(
+                        l.step_function,
+                        crate::metal::VertexStepFunction::PerInstance
+                            | crate::metal::VertexStepFunction::Constant
+                    )
+                })
         })
         .map(|(a, _)| *a)
         .collect();

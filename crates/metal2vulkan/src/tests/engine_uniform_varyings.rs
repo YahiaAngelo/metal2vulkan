@@ -247,7 +247,11 @@ fn fixed_function(inputs: &LoweringInputs) -> bool {
 /// it steps per instance or at a constant step), never one of the vertex or of device memory;
 /// the pipeline's key gives the fragment function those it interpolates, and the compile reads
 /// them flat, where its key and the compiled pipeline's agree. A fixed-function attribute
-/// stepped per instance is in the vertex function's key exactly where it makes a varying alike.
+/// stepped per instance or at a constant step is in the vertex function's key exactly where it
+/// makes a varying alike; a pulled one is not, because its element index is already a constant in
+/// the shader. So the key moves with the device: the constant step is a fixed-function binding on
+/// `nvidia-rtx5080-laptop` and `amd-780m-radv` and pulled on `lavapipe` and `moltenvk-m3`, and the
+/// varyings written alike are the same set either way.
 #[test]
 fn a_fragment_reads_flat_what_its_vertex_function_writes_alike_at_every_vertex() {
     let Some(bc) = module() else {
@@ -274,8 +278,9 @@ fn a_fragment_reads_flat_what_its_vertex_function_writes_alike_at_every_vertex()
                 .render_variant_key(&d, &VariantKey::new(), &budget, &StageEntries::new())
                 .unwrap_or_else(|e| panic!("{what}: {e}"));
             let vertex_inputs = k.vertex_inputs.clone().expect("vertex inputs");
-            let instanced =
-                step == VertexStepFunction::PerInstance && fixed_function(&vertex_inputs);
+            // A constant step makes an attribute alike at every vertex as a per-instance step
+            // does, so both are listed where the device fetches them in fixed function.
+            let instanced = stepped && fixed_function(&vertex_inputs);
             assert_eq!(
                 vertex_inputs.instanced_attributes,
                 if instanced {
