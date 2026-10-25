@@ -479,13 +479,21 @@ impl UnitGrid {
     /// is the control that says the measurement works at all. The three move shapes complete with
     /// no error too, leaving `usedSize` where it was.
     ///
-    /// Differs: Metal's `usedSize` over a region of a **slice** past the texture's varies — a tile
-    /// more beside other regions, and an unmap of it can take the count below zero, and the direct
-    /// selector alone took one page for it in the measurement above — where the runtime maps and
-    /// counts none. That difference is the conformance suite's
-    /// `sparse-mapping-a-slice-past-the-textures`, which reads the texels four mapped tiles hold
-    /// either side of such an update as well as the count, because the count cannot say which
-    /// tiles an update reached.
+    /// Differs, in the heap's count alone: Metal **does not bound the slice**, where it bounds the
+    /// level and the origin. A region of a slice past the texture's costs Metal exactly what the
+    /// same region on an in-bounds slice costs — the region clipped to this level's tiles, one
+    /// page each — and that charge is then an ordinary one: idempotent per region, given back on
+    /// an unmap of it, and never taking the count below where it stood. The runtime maps and
+    /// counts none, so its `usedSize` is lower by those tiles. Measured through **both** mapping
+    /// selectors on this M3 Max (the direct one above, and the indirect one over nineteen
+    /// configurations in `metal2vulkan-conformance/probes/sparse_indirect_usedsize.m`), which
+    /// read alike: one page for one such tile, sixteen for a region of 8 by 8 on a level holding
+    /// 4 by 4, one per out-of-bounds slice named, and nothing at all for a level or an origin
+    /// past the bounds. `tests::sparse` holds the readings row by row.
+    ///
+    /// The count is not the whole of that difference, and cannot be: it cannot say which tiles an
+    /// update reached. The conformance suite's `sparse-mapping-a-slice-past-the-textures` reads
+    /// the texels four mapped tiles hold either side of such an update as well as the count.
     pub(crate) fn clipped_region(&self, level: u64, slice: u64, region: &Region) -> Vec<MetalUnit> {
         let Some(clipped) = self.clipped_size(level, slice, region) else {
             return Vec::new();

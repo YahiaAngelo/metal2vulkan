@@ -197,9 +197,19 @@ impl ResourceStateCommandEncoder {
     /// validation would stop map as plain Metal maps them (the M3 Max under macOS 27.0.1): a
     /// region past its level's tiles maps the tiles inside them; one whose origin is past them,
     /// of no size on an axis, or of a level or slice past the texture's, maps nothing; and the
-    /// regions the count names past the buffer map nothing. Differs: Metal's `usedSize` over a
-    /// region of a slice past the texture's varies (a tile more beside other regions, none
-    /// alone, and an unmap of it can take the count below zero); the runtime counts none.
+    /// regions the count names past the buffer map nothing.
+    ///
+    /// Differs, in the heap's count alone: plain Metal **bounds the level and the origin and does
+    /// not bound the slice**, charging a region of a slice past the texture's exactly what the
+    /// same region on an in-bounds slice costs — the region clipped to the level's tiles, one
+    /// page each — where the runtime maps and counts none, so its `usedSize` is lower by those
+    /// tiles. Metal's charge is an ordinary one in every other way: idempotent per region, given
+    /// back on an unmap of it, and never taking the count below where it stood
+    /// (`metal2vulkan-conformance/probes/sparse_indirect_usedsize.m`, the M3 Max under macOS
+    /// 27.0.1, plain Metal, one shape per process, each reading twice, with the in-bounds region
+    /// through the same selector as its control). A level past the texture's levels and an origin
+    /// past the level's tiles are bounded and cost nothing, which is what makes the slice the one
+    /// unbounded axis. `tests::sparse` holds the readings row by row.
     ///
     /// A texture that is not sparse records nothing, the buffer unread, as plain Metal maps
     /// nothing in it (as [`update_texture_mapping`](Self::update_texture_mapping)'s). Through a

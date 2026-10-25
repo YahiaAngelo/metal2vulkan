@@ -992,3 +992,133 @@ fn texel_boxes_intersect_and_split() {
         ]
     );
 }
+
+/// **The slice is the one axis plain Metal does not bound in a mapping update, and what that
+/// costs the heap's count** — against Metal's own `usedSize` readings for the very same argument
+/// lists.
+///
+/// `encoder.rs` and `clipped_region` had carried three claims about the INDIRECT selector's count
+/// for a region whose slice is past the texture's — a tile more beside other regions, none alone,
+/// and an unmap of it taking the count below zero — and no probe in the tree ran the indirect
+/// selector at all. **All three are false.** The readings are
+/// `metal2vulkan-conformance/probes/sparse_indirect_usedsize.m` on an Apple M3 Max (the name read
+/// back off the device) under macOS 27.0.1, plain Metal with the layer off, one shape per process,
+/// `usedSize` read twice at each step and every shape run twice, over a 2-slice 256 by 256
+/// nine-level `R32Float` texture whose level 0 holds 4 by 4 of Metal's 16-KiB tiles.
+///
+/// Metal's rule is the plain one: it bounds the level and the origin and **does not bound the
+/// slice**, charging a region of a slice past the texture's exactly what the same region on an
+/// in-bounds slice costs — the region clipped to the level's tiles — and that charge then behaves
+/// like any mapping, idempotent and given back on an unmap. The runtime instead maps and counts
+/// nothing there, so its count is **lower by those tiles**, and that is the difference this test
+/// pins: `metal` below is what Metal read, `ours` what the runtime answers, and a row where they
+/// part names the gap rather than hiding it.
+///
+/// Each row is a probe shape. The in-bounds rows are the controls: their counts **must** move, or
+/// no row here is a measurement of anything.
+#[test]
+fn a_slice_past_the_textures_is_the_one_axis_metal_does_not_bound() {
+    // The probe's texture, as a 2-slice array, so slice 2 is past its own slices.
+    let array = grid([256, 256, 1], 9, 2, 3, false);
+    assert_eq!(array.layers, 2, "the probe's texture holds two slices");
+    assert_eq!(array.first_mipmap_in_tail, 3, "the tail of a 256 by 256");
+    let one = |x: u64, y: u64| Region::new_2d(x, y, 1, 1);
+
+    // The tiles one indirect argument list states, in `indirect::resolve`'s own order: each
+    // region clipped, all of them one update. Every unit of a tiled level is one tile of the
+    // heap's count, so the list's length is the pages the runtime counts for it.
+    let ours = |regions: &[(u64, u64, Region)]| {
+        regions
+            .iter()
+            .flat_map(|(level, slice, region)| array.clipped_region(*level, *slice, region))
+            .count()
+    };
+
+    // shape, the argument list, Metal's pages for it, ours.
+    let rows: &[(&str, &[(u64, u64, Region)], usize, usize)] = &[
+        // The controls, through the indirect selector: one in-bounds tile is one page, two are
+        // two, so the reading follows the list rather than being fixed by construction.
+        ("indirect-control", &[(0, 0, one(0, 0))], 1, 1),
+        (
+            "indirect-two-inbounds",
+            &[(0, 0, one(0, 0)), (0, 0, one(1, 0))],
+            2,
+            2,
+        ),
+        // 1. ALONE. Metal charges one page for the out-of-bounds slice; the direct selector read
+        //    the same one page for it (`direct-slice-alone`, which is the committed reading off
+        //    `sparse_mapping_past_the_bounds.m`). So "none alone" is false, for either selector.
+        ("indirect-slice-alone", &[(0, 2, one(0, 0))], 1, 0),
+        // 2. BESIDE ANOTHER REGION. Two pages, where the in-bounds region alone is one: the
+        //    out-of-bounds region added exactly the one page it adds alone, never a tile more.
+        (
+            "indirect-slice-beside",
+            &[(0, 0, one(0, 0)), (0, 2, one(0, 0))],
+            2,
+            1,
+        ),
+        // And with four pages already mapped it went 4 -> 5, again exactly one, so the charge is
+        // the same in every configuration rather than varying with what else is mapped.
+        ("indirect-slice-after-four", &[(0, 2, one(0, 0))], 1, 0),
+        // The charge follows the REGION, clipped to the level: 8 by 8 tiles on a level holding
+        // 4 by 4 cost 16 pages on the out-of-bounds slice, as they do on an in-bounds one.
+        (
+            "indirect-slice-big-region",
+            &[(0, 2, Region::new_2d(0, 0, 8, 8))],
+            16,
+            0,
+        ),
+        // One page per out-of-bounds region, not one per update: slices 2 and 3 cost two.
+        (
+            "indirect-two-oob-slices",
+            &[(0, 2, one(0, 0)), (0, 3, one(0, 0))],
+            2,
+            0,
+        ),
+        // The level and the origin ARE bounded, and cost nothing — which is what makes the slice
+        // the one unbounded axis rather than a general "Metal does not check".
+        ("indirect-level-alone", &[(9, 0, one(0, 0))], 0, 0),
+        ("indirect-origin-alone", &[(0, 0, one(4, 4))], 0, 0),
+    ];
+    for (shape, regions, metal, mine) in rows {
+        assert_eq!(ours(regions), *mine, "what the runtime counts for {shape}");
+        // Where the runtime parts from Metal it is only ever by counting LESS, and only for a
+        // region whose slice is past the texture's: a row that counted more would be a bug the
+        // other way, and is not a thing any reading showed.
+        assert!(
+            *mine <= *metal,
+            "{shape}: the runtime counts {mine} pages where Metal counted {metal}"
+        );
+        let out_of_bounds = regions.iter().any(|(_, slice, _)| *slice >= 2);
+        assert_eq!(
+            *mine == *metal,
+            !out_of_bounds,
+            "{shape}: only a slice past the texture's may part from Metal's count"
+        );
+    }
+
+    // 3. AN UNMAP OF IT, in every configuration measured. Metal's charge is reversible and
+    //    floors: an unmap of the out-of-bounds region takes off what that region holds and
+    //    nothing more, so the count never passed below where it started.
+    //    `indirect-unmap-slice-alone` 0 -> 0; `-after-one` 1 -> 1; `-after-four` 4 -> 4 (the
+    //    configuration another reading had already found did not lower the count);
+    //    `indirect-map-then-unmap-slice` 0 -> 1 -> 0, the page given back exactly;
+    //    `indirect-slice-unmap-twice` 0 -> 1 -> 0 -> 0, a second unmap taking nothing more;
+    //    `indirect-slice-twice` 0 -> 1 -> 1, the charge idempotent per region.
+    //    So "below zero" is false. The runtime cannot go below zero either, and for a stronger
+    //    reason than a measurement: the clip names no unit for such a region at all, and
+    //    `SparseHeap::give` saturates besides.
+    assert_eq!(
+        ours(&[(0, 2, one(0, 0))]),
+        0,
+        "an unmap of slice 2 of 2 names no unit, whatever the count stands at"
+    );
+
+    // A slice past a 1-slice texture's own, which is the shape the suite's non-array sparse
+    // cases use, clips the same way.
+    let plain = grid([256, 256, 1], 9, 1, 3, false);
+    assert!(
+        plain.clipped_region(0, 1, &one(0, 0)).is_empty(),
+        "slice 1 of 1"
+    );
+}
