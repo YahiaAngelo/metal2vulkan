@@ -16,7 +16,7 @@ mod textures;
 pub(crate) mod types;
 mod vertex;
 use embedded::{
-    body_uses_texture_intrinsic, detect_embedded_arguments, detect_embedded_textures,
+    detect_embedded_arguments, detect_embedded_textures, entry_uses_texture_intrinsic,
     unsurfaced_embedded_resources, ArgumentBuffers,
 };
 pub use embedded::{ArgumentBufferResourceKind, EmbeddedArgument, EmbeddedTexture};

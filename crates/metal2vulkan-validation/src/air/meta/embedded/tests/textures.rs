@@ -13,6 +13,39 @@ fn embedded_texture_use_gate_includes_sampling_and_gathering() {
     ));
 }
 
+/// The gate is the reflected entry's, not the module's: an argument buffer's texture member is
+/// declared by every entry that takes the buffer, so the entry whose own reachable code samples is
+/// the one that surfaces it. A module declaring one entry answers for that entry, and a text with
+/// no projection answers as the module's calls do.
+#[test]
+fn the_texture_use_gate_reads_only_what_the_entry_reaches() {
+    let two_entries = r#"define void @samples() {
+  %v = tail call <4 x float> @air.sample_texture_2d.v4f32()
+  ret void
+}
+define void @plain() {
+  ret void
+}
+declare <4 x float> @air.sample_texture_2d.v4f32()
+!air.kernel = !{!0, !3}
+!0 = !{ptr @samples, !1, !2}
+!1 = !{}
+!2 = !{}
+!3 = !{ptr @plain, !1, !2}
+"#;
+    assert!(entry_uses_texture_intrinsic(two_entries, Some("samples")));
+    assert!(!entry_uses_texture_intrinsic(two_entries, Some("plain")));
+    // No entry named: the module's calls, as the gate read them before.
+    assert!(entry_uses_texture_intrinsic(two_entries, None));
+    // A module the slicer cannot project answers as the module's calls do.
+    assert!(entry_uses_texture_intrinsic(two_entries, Some("absent")));
+    // A module with no texture intrinsic at all never pays for a projection.
+    assert!(!entry_uses_texture_intrinsic(
+        "define void @k() {\n  ret void\n}\n",
+        Some("k")
+    ));
+}
+
 #[test]
 fn embedded_texture_detection_includes_read_and_write_fields() {
     let mut nodes = HashMap::new();

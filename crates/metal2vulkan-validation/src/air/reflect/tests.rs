@@ -205,3 +205,97 @@ declare <4 x half> @air.load.implicit_imageblock.v4f16(i32, <2 x i16>, i32, i16)
         .collect();
     assert_eq!(planes, [(1, 0, 203), (1, 2, 205)]);
 }
+
+/// A module of several entries sharing one argument buffer: the buffer's layout declares its
+/// embedded texture member for every entry that takes it, so the member is in each entry's
+/// `argument_buffer_fields`, but only the entry whose own reachable code loads the handle and
+/// samples it binds a descriptor for it. The entry that reads another member alone binds none, and
+/// each entry's interface is its projection's.
+#[test]
+fn another_entrys_sample_binds_no_embedded_texture_for_this_one() {
+    let ll = r#"%struct.bundle = type <{ %"struct.metal::texture2d", ptr addrspace(1) }>
+%"struct.metal::texture2d" = type { ptr addrspace(1) }
+
+define void @samples(ptr addrspace(2) %bundle) {
+  %handle = getelementptr inbounds %struct.bundle, ptr addrspace(2) %bundle, i64 0, i32 0, i32 0
+  %texture = load ptr addrspace(1), ptr addrspace(2) %handle, align 8
+  %texel = tail call <4 x float> @air.sample_texture_2d.v4f32(ptr addrspace(1) %texture, <2 x float> zeroinitializer)
+  ret void
+}
+define void @writes(ptr addrspace(2) %bundle) {
+  %slot = getelementptr inbounds %struct.bundle, ptr addrspace(2) %bundle, i64 0, i32 1
+  %out = load ptr addrspace(1), ptr addrspace(2) %slot, align 8
+  store <4 x float> zeroinitializer, ptr addrspace(1) %out, align 16
+  ret void
+}
+declare <4 x float> @air.sample_texture_2d.v4f32(ptr addrspace(1), <2 x float>)
+!air.kernel = !{!0, !7}
+!0 = !{ptr @samples, !1, !2}
+!1 = !{}
+!2 = !{!3}
+!3 = !{i32 0, !"air.indirect_buffer", !"air.buffer_size", i32 16, !"air.location_index", i32 0, i32 1, !"air.read", !"air.struct_type_info", !4, !"air.arg_type_size", i32 16, !"air.arg_type_align_size", i32 8, !"air.arg_type_name", !"bundle", !"air.arg_name", !"bundle"}
+!4 = !{i32 0, i32 8, i32 0, !"texture2d<float, sample>", !"tex", !"air.indirect_argument", !5, i32 8, i32 8, i32 0, !"float4", !"out", !"air.indirect_argument", !6}
+!5 = !{i32 0, !"air.texture", !"air.location_index", i32 0, i32 1, !"air.sample", !"air.arg_type_name", !"texture2d<float, sample>", !"air.arg_name", !"tex"}
+!6 = !{i32 1, !"air.buffer", !"air.location_index", i32 1, i32 1, !"air.read_write", !"air.arg_type_size", i32 16, !"air.arg_type_align_size", i32 16, !"air.arg_type_name", !"float4", !"air.arg_name", !"out"}
+!7 = !{ptr @writes, !1, !2}
+"#;
+    let samples = inspect(ll, Stage::Kernel, "samples", &[]).unwrap();
+    let writes = inspect(ll, Stage::Kernel, "writes", &[]).unwrap();
+    // The ABI declares the texture member to both entries.
+    for interface in [&samples, &writes] {
+        assert_eq!(
+            interface
+                .argument_buffer_fields
+                .iter()
+                .map(|field| (field.argument_index, field.resource_kind))
+                .collect::<Vec<_>>(),
+            [
+                (0, Some(ArgumentBufferResourceKind::Texture)),
+                (1, Some(ArgumentBufferResourceKind::Buffer)),
+            ],
+            "{interface:?}"
+        );
+    }
+    // Only the entry that reaches a texture intrinsic binds a descriptor for it.
+    let embedded_textures = |interface: &ShaderInterface| {
+        interface
+            .bindings
+            .iter()
+            .filter(|binding| binding.kind == ResourceKind::EmbeddedArgBufferTexture)
+            .map(|binding| (binding.metal_index, binding.descriptor, binding.access))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        embedded_textures(&samples),
+        [(
+            0,
+            Some(DescriptorLocation {
+                set: 0,
+                binding: 32,
+                count: 1
+            }),
+            Some(ResourceAccess::Sampled)
+        )],
+        "{samples:?}"
+    );
+    assert_eq!(embedded_textures(&writes), [], "{writes:?}");
+    // Each entry's own buffer member binds either way: a buffer member comes from the layout
+    // alone, with no use gate of its own.
+    for interface in [&samples, &writes] {
+        assert!(
+            interface
+                .bindings
+                .iter()
+                .any(|binding| binding.kind == ResourceKind::EmbeddedArgBufferBuffer),
+            "{interface:?}"
+        );
+    }
+    for entry in ["samples", "writes"] {
+        let projected = crate::air::entry_projection(ll, entry).unwrap();
+        assert_eq!(
+            inspect(ll, Stage::Kernel, entry, &[]),
+            inspect(&projected, Stage::Kernel, entry, &[]),
+            "{entry}"
+        );
+    }
+}

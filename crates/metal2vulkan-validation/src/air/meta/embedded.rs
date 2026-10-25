@@ -35,8 +35,9 @@ impl ArgumentBuffers {
 }
 
 /// A texture that lives inside an `air.indirect_buffer` argument buffer, marked
-/// `air.indirect_argument` → `air.texture` in the buffer's `air.struct_type_info`, and used by the
-/// shader body through an AIR texture intrinsic.
+/// `air.indirect_argument` → `air.texture` in the buffer's `air.struct_type_info`, and used
+/// through an AIR texture intrinsic by the code the reflected entry reaches: another entry of the
+/// module declares the same member of the same buffer and surfaces none of it.
 ///
 /// The translator materializes a synthetic UniformConstant sampled image for it and the validation
 /// harness binds the SAME deterministically-seeded texture on both the Apple-oracle side (encoded
@@ -98,10 +99,32 @@ fn embedded_synthetic_texture_index(texture_locations: &[u32]) -> u32 {
     texture_locations.iter().copied().max().map_or(0, |m| m + 1)
 }
 
-/// True iff the shader body calls an AIR texture intrinsic. These are stable AIR intrinsic
+/// Whether the code `entry` reaches calls an AIR texture intrinsic, the gate on surfacing the
+/// embedded argument-buffer textures of that entry's interface.
+///
+/// It reads the text the entry reaches (its projection), never the module's. An argument buffer's
+/// layout belongs to its struct type, so every entry taking that buffer declares the same texture
+/// member, while the image that binds one is materialized only where the entry's own body loads
+/// the handle and hands it to a texture intrinsic -- `lower` walks one entry's function. Reading
+/// the whole module's text therefore charges one entry's sample to another that never loads the
+/// handle, and surfaces a descriptor the module translated for that entry does not declare.
+/// Where the text has no projection, the module's calls, as before.
+pub(super) fn entry_uses_texture_intrinsic(ll: &str, entry: Option<&str>) -> bool {
+    if !body_uses_texture_intrinsic(ll) {
+        return false;
+    }
+    let Some(entry) = entry else { return true };
+    match crate::air::entry_projection(ll, entry) {
+        Ok(reached) => body_uses_texture_intrinsic(&reached),
+        Err(_) => true,
+    }
+}
+
+/// True iff `ll` calls an AIR texture intrinsic. These are stable AIR intrinsic
 /// symbols, not shader identifiers. A declaration line is only emitted when the body actually calls it,
-/// so its presence in the `.ll` text is a sound structural signal.
-pub(super) fn body_uses_texture_intrinsic(ll: &str) -> bool {
+/// so its presence in the `.ll` text is a sound structural signal. The reader is
+/// [`entry_uses_texture_intrinsic`], which scopes `ll` to one entry first.
+fn body_uses_texture_intrinsic(ll: &str) -> bool {
     ll.contains("@air.sample_")
         || ll.contains("@air.gather_")
         || ll.contains("@air.read_texture")

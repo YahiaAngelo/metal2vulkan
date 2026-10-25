@@ -801,7 +801,7 @@ fn parse_air_fragment_meta_with_nodes(
         texture_type_names,
         declared_descriptor_counts,
         color_input_type_names,
-        embedded_textures: if body_uses_texture_intrinsic(ll) {
+        embedded_textures: if entry_uses_texture_intrinsic(ll, entry) {
             detect_embedded_textures(nodes, &argument_buffers, &top_level_texture_locations)
         } else {
             Vec::new()

@@ -455,12 +455,12 @@ fn parse_air_kernel_meta_with_nodes(
         };
         roles.push((idx, role));
     }
-    // Detect argument-buffer-embedded textures that the body uses through AIR texture
-    // intrinsics. Gated purely on AIR structure/semantics — the `air.indirect_argument` →
+    // Detect argument-buffer-embedded textures that the code this entry reaches uses through AIR
+    // texture intrinsics. Gated purely on AIR structure/semantics — the `air.indirect_argument` →
     // `air.texture` marker chain plus stable AIR intrinsic families — so it cannot key on any shader
-    // name. The body must actually use a texture intrinsic for us to surface it.
+    // name. A texture intrinsic this entry reaches is what surfaces it; another entry's is not.
     let argument_buffers = ArgumentBuffers::new(indirect_buffer_struct_refs);
-    let embedded_textures = if body_uses_texture_intrinsic(ll) {
+    let embedded_textures = if entry_uses_texture_intrinsic(ll, entry) {
         detect_embedded_textures(nodes, &argument_buffers, &top_level_texture_locations)
     } else {
         vec![]
