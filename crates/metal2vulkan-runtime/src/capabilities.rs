@@ -77,6 +77,25 @@ pub struct DeviceProperties {
     /// `VkPhysicalDeviceIDProperties::deviceUUID`, which `registryID` is folded from
     /// (`Device::registry_id`).
     pub device_uuid: [u8; 16],
+    /// The device's PCI bus address, as its driver reports it:
+    /// `VkPhysicalDevicePCIBusInfoPropertiesEXT`'s `pciDomain`, `pciBus`, `pciDevice` and
+    /// `pciFunction`, in that order, read where the physical device lists
+    /// `VK_EXT_pci_bus_info`. No Metal counterpart: Metal names no bus, and macOS has no such
+    /// Vulkan extension, so a MoltenVK device answers `None`. A consumer that must drive another
+    /// API (a video decoder, a compute runtime) on the same GPU this device draws on addresses it
+    /// by this. `None` where the physical device does not list the extension, which is the only
+    /// thing the answer then says: the device still has a bus address, and the runtime does not
+    /// know it.
+    pub pci_bus: Option<(u32, u32, u32, u32)>,
+    /// The device's DRM render node, as its driver reports it:
+    /// `VkPhysicalDeviceDrmPropertiesEXT`'s `renderMajor` and `renderMinor`, in that order, read
+    /// where the physical device lists `VK_EXT_physical_device_drm`. No Metal counterpart: DRM is
+    /// Linux's, and macOS has no such Vulkan extension, so a MoltenVK device answers `None`. A
+    /// consumer that must open the same GPU through another Linux interface (VA-API, V4L2) opens
+    /// this node. `None` where the physical device does not list the extension, and `None` where
+    /// it lists it and reports the device has no render node (`hasRender` false), whose major and
+    /// minor numbers say nothing; never a pair of zeroes standing for either.
+    pub drm_render: Option<(i64, i64)>,
     /// The Vulkan version the device runs at: the lower of the instance's and the device's.
     pub api_version: ApiVersion,
     /// `maxBufferLength`: the longest buffer a shader can bind whole, the compile layer's answer:
@@ -167,6 +186,10 @@ pub(crate) struct DeviceIdentity {
     pub device_id: u32,
     /// `VkPhysicalDeviceIDProperties::deviceUUID`.
     pub device_uuid: [u8; 16],
+    /// The device's PCI bus address ([`DeviceProperties::pci_bus`]).
+    pub pci_bus: Option<(u32, u32, u32, u32)>,
+    /// The device's DRM render node ([`DeviceProperties::drm_render`]).
+    pub drm_render: Option<(i64, i64)>,
     /// The lower of the instance's and the device's Vulkan version.
     pub api_version: ApiVersion,
     /// `VkPhysicalDeviceLimits::maxViewports`.
@@ -202,6 +225,8 @@ impl DeviceProperties {
             vendor_id: identity.vendor_id,
             device_id: identity.device_id,
             device_uuid: identity.device_uuid,
+            pci_bus: identity.pci_bus,
+            drm_render: identity.drm_render,
             api_version: identity.api_version,
             max_buffer_length: metal.max_buffer_length,
             max_threads_per_threadgroup: Size::new(width, height, depth),

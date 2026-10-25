@@ -74,6 +74,8 @@ fn identity(stem: &str) -> DeviceIdentity {
         vendor_id: 0x1002,
         device_id: 0x15bf,
         device_uuid: [7; 16],
+        pci_bus: None,
+        drm_render: None,
         api_version: ApiVersion::V1_3,
         max_viewports: 16,
         gpu_core_count: None,

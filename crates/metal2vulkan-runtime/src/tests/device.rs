@@ -16,6 +16,125 @@ fn the_registry_id_folds_the_uuid_and_is_never_zero() {
     assert_eq!(registry_id(&uuid), 0x8000_0000_0000_0022);
 }
 
+use crate::capabilities::DeviceIdentity;
+use crate::device::properties::{bus_addresses_of, PhysicalDeviceIdentity};
+use crate::DeviceKind;
+use metal2vulkan::vk::SampleCountFlags;
+
+/// The identity `device::properties::query` reads of a physical device whose driver reported
+/// `pci_bus` and `drm_render`, with every other field a fixed value this file does not read.
+fn identity(
+    pci_bus: Option<(u32, u32, u32, u32)>,
+    drm_render: Option<(i64, i64)>,
+) -> DeviceIdentity {
+    DeviceIdentity {
+        name: "test device".to_owned(),
+        kind: DeviceKind::Discrete,
+        vendor_id: 0x1002,
+        device_id: 0x15bf,
+        device_uuid: [7; 16],
+        pci_bus,
+        drm_render,
+        api_version: ApiVersion::V1_3,
+        max_viewports: 16,
+        gpu_core_count: None,
+        sampled_sample_counts: SampleCountFlags::empty(),
+    }
+}
+
+#[test]
+fn a_reported_pci_address_and_render_node_are_read_as_the_driver_filled_them() {
+    // Every field of both structures distinct, so a field read in place of another fails: a PCI
+    // function that is no domain, and a minor that is no major.
+    let bus = vk::PhysicalDevicePCIBusInfoPropertiesEXT::default()
+        .pci_domain(0x1_0000)
+        .pci_bus(0x41)
+        .pci_device(0x02)
+        .pci_function(0x03);
+    let nodes = vk::PhysicalDeviceDrmPropertiesEXT::default()
+        .has_primary(true)
+        .has_render(true)
+        .primary_major(226)
+        .primary_minor(0)
+        .render_major(226)
+        .render_minor(128);
+    assert_eq!(
+        bus_addresses_of(Some(&bus), Some(&nodes)),
+        (Some((0x1_0000, 0x41, 0x02, 0x03)), Some((226, 128))),
+        "the domain, bus, device and function, and the render node's major and minor"
+    );
+    // The widths and signedness are the structures' own: a domain Vulkan's `uint32_t` holds and a
+    // major and minor its `int64_t` holds, negative, pass through unchanged.
+    let wide = vk::PhysicalDevicePCIBusInfoPropertiesEXT::default()
+        .pci_domain(u32::MAX)
+        .pci_bus(u32::MAX)
+        .pci_device(u32::MAX)
+        .pci_function(u32::MAX);
+    let signed = vk::PhysicalDeviceDrmPropertiesEXT::default()
+        .has_render(true)
+        .render_major(i64::MIN)
+        .render_minor(i64::MAX);
+    assert_eq!(
+        bus_addresses_of(Some(&wide), Some(&signed)),
+        (
+            Some((u32::MAX, u32::MAX, u32::MAX, u32::MAX)),
+            Some((i64::MIN, i64::MAX))
+        )
+    );
+}
+
+#[test]
+fn an_unlisted_extension_and_a_device_with_no_render_node_answer_none() {
+    let nodes = vk::PhysicalDeviceDrmPropertiesEXT::default()
+        .has_render(true)
+        .render_major(226)
+        .render_minor(128);
+    // An extension the physical device does not list: no structure, so no answer. Both unlisted
+    // is MoltenVK, which lists neither.
+    assert_eq!(bus_addresses_of(None, None), (None, None));
+    assert_eq!(
+        bus_addresses_of(None, Some(&nodes)),
+        (None, Some((226, 128)))
+    );
+    let bus = vk::PhysicalDevicePCIBusInfoPropertiesEXT::default().pci_bus(0x41);
+    assert_eq!(
+        bus_addresses_of(Some(&bus), None),
+        (Some((0, 0x41, 0, 0)), None)
+    );
+    // A driver that lists the extension and reports the device has no render node: `None`, not
+    // the major and minor it left, whatever they are.
+    let primary_only = vk::PhysicalDeviceDrmPropertiesEXT::default()
+        .has_primary(true)
+        .has_render(false)
+        .primary_major(226)
+        .primary_minor(0)
+        .render_major(226)
+        .render_minor(128);
+    assert_eq!(bus_addresses_of(None, Some(&primary_only)), (None, None));
+    let zeroed = vk::PhysicalDeviceDrmPropertiesEXT::default();
+    assert_eq!(bus_addresses_of(None, Some(&zeroed)), (None, None));
+}
+
+#[test]
+fn a_physical_device_s_identity_carries_the_bus_address_the_device_answers() {
+    let read = identity(Some((0x1_0000, 0x41, 0x02, 0x03)), Some((226, 128)));
+    let answered = PhysicalDeviceIdentity::of(&read);
+    assert_eq!(answered.pci_bus, read.pci_bus);
+    assert_eq!(answered.drm_render, read.drm_render);
+    assert_eq!(answered.device_uuid, read.device_uuid);
+    assert_eq!(answered.registry_id, registry_id(&read.device_uuid));
+    assert_eq!(answered.name, read.name);
+    assert_eq!(answered.kind, read.kind);
+    assert_eq!(answered.vendor_id, read.vendor_id);
+    assert_eq!(answered.device_id, read.device_id);
+    assert_eq!(answered.api_version, read.api_version);
+    // A device of a physical device that lists neither extension answers `None` for both, and
+    // the identity read of it does too (every MoltenVK device, this host's among them).
+    let neither = PhysicalDeviceIdentity::of(&identity(None, None));
+    assert_eq!(neither.pci_bus, None);
+    assert_eq!(neither.drm_render, None);
+}
+
 use crate::device::create::{
     default_loaders, dma_buf_image_names, dma_buf_names, drops_layers, enable_set, host_image_copy,
     instance_version, layer_settings, layers_dropped, linear_color_attachment, open_loader,

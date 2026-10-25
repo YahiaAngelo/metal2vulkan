@@ -248,7 +248,8 @@ pub use degradation::{MisplacedNotice, NoticePlace};
 pub use depth_stencil::DepthStencilState;
 pub use device::{
     DebugMessage, Device, DeviceHandles, DeviceKind, DeviceOptions, LayerSetting,
-    LayerSettingValue, MessageKind, MessageSeverity, MessageSink, RawDevice,
+    LayerSettingValue, MessageKind, MessageSeverity, MessageSink, PhysicalDeviceIdentity,
+    RawDevice,
 };
 #[cfg(unix)]
 pub use dma_buf::{DmaBufChunk, DmaBufRequest, DmaBufSource};

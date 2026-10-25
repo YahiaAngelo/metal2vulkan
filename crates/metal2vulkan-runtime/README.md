@@ -147,7 +147,13 @@ While a handle lives, equal options give the same device for a physical device, 
 `MTLDevice` per GPU. Nothing is read from the environment but the platform's default cache
 directory. `Device::registry_ids_with` lists each qualifying physical device's `registryID`,
 preferred first, without making any device, and `Device::with_registry_id` makes only the device
-of one ID (runtime extensions).
+of one ID (runtime extensions). `Device::system_default_identity_with` reads the identity of the
+physical device `Device::system_default_with` makes its device of, with no device made: its name,
+kind, IDs, `deviceUUID`, `registryID`, Vulkan version, and its PCI bus address and DRM render node
+where the physical device lists `VK_EXT_pci_bus_info` and `VK_EXT_physical_device_drm`, which a
+consumer addresses the same GPU through another API by. The same two are
+`DeviceProperties::pci_bus` and `DeviceProperties::drm_render` on a device that exists; both are
+`None` on macOS, where MoltenVK lists neither extension.
 
 **Adopted from the consumer.** `unsafe Device::from_raw(RawDevice, DevicePolicy)` works on an
 instance and device the consumer made and keeps. `RawDevice` takes the `vkGetInstanceProcAddr`,

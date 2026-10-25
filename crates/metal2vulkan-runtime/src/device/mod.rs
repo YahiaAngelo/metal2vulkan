@@ -36,7 +36,7 @@ pub use create::{
     MessageSink,
 };
 pub use handles::DeviceHandles;
-pub use properties::DeviceKind;
+pub use properties::{DeviceKind, PhysicalDeviceIdentity};
 
 use super::address::AddressSpace;
 use super::attachmentless::KeptPasses;

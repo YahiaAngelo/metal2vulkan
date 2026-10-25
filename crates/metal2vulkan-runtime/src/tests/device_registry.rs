@@ -1,7 +1,9 @@
 //! Devices by registry ID (`Device::registry_ids_with`, `Device::with_registry_id`): the IDs are
 //! listed with no device made, the device of an ID is the one the other creators make of its
 //! physical device (the same device while it lives), and an ID no physical device has is
-//! `NoDevice`.
+//! `NoDevice`. The identity of the physical device the default device is made of
+//! (`Device::system_default_identity_with`) is read with no device made too, and is the one that
+//! device answers.
 //!
 //! A device test: compiled only under the validation crate's GPU safety cfgs (`m2v_gpu`,
 //! `m2v_cpu_icd`), on the kind of device the cfg selects. Nothing runs on the GPU.
@@ -58,4 +60,44 @@ fn a_device_opens_by_its_registry_id_and_the_ids_make_none() {
         Device::with_registry_id(0, &options),
         Err(Error::NoDevice)
     ));
+}
+
+#[test]
+fn the_default_device_s_identity_is_read_with_no_device_made_and_is_the_device_s_own() {
+    let options = options();
+    let identity = Device::system_default_identity_with(&options).unwrap();
+    assert_eq!(
+        live_devices_with(&options),
+        0,
+        "reading the identity made a device"
+    );
+    let device = Device::system_default_with(&options).unwrap();
+    let properties = device.properties();
+    // The same physical device: its UUID and the registry ID folded from it.
+    assert_eq!(identity.device_uuid, properties.device_uuid);
+    assert_eq!(identity.registry_id, device.registry_id());
+    // And the same answers for every property the identity carries.
+    assert_eq!(identity.name, properties.name);
+    assert_eq!(identity.kind, properties.kind);
+    assert_eq!(identity.vendor_id, properties.vendor_id);
+    assert_eq!(identity.device_id, properties.device_id);
+    assert_eq!(identity.api_version, properties.api_version);
+    assert_eq!(identity.pci_bus, properties.pci_bus);
+    assert_eq!(identity.drm_render, properties.drm_render);
+    // The identity is the first of the physical devices the creators prefer, which is the one
+    // `with_registry_id` opens by its own first listed ID.
+    let ids = Device::registry_ids_with(&options).unwrap();
+    assert_eq!(identity.registry_id, ids[0]);
+    // A PCI bus address and a DRM render node are read only where the physical device lists
+    // their extension, and a render node only where the driver reports the device has one, so
+    // either may be `None`; where one is answered it is the same before and after the device
+    // exists, which the equalities above hold. MoltenVK lists neither extension, so on macOS
+    // both are `None` here.
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            (properties.pci_bus, properties.drm_render),
+            (None, None),
+            "MoltenVK lists VK_EXT_pci_bus_info and VK_EXT_physical_device_drm for no device"
+        );
+    }
 }

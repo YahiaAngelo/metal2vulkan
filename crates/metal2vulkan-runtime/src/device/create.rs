@@ -31,7 +31,7 @@
 
 use super::instance_requirements::instance_requirements_met;
 use super::keeper::keep_drivers_loaded;
-use super::properties::DeviceKind;
+use super::properties::{DeviceKind, PhysicalDeviceIdentity};
 use super::{device_error, lock, Device, DeviceShared, InstanceShared, Parts};
 use crate::degradation::{Degradation, DegradeNotice};
 use crate::enables::{host_image_copy_names, listed_reported, listed_structures, Enables};
@@ -1660,6 +1660,48 @@ impl Device {
             }
         }
         Err(refusal.unwrap_or(Error::NoDevice))
+    }
+
+    /// The identity of the physical device [`Device::system_default_with`] makes its device of
+    /// with `options`, read without making any device: the same selection, in the same order (the
+    /// preferred qualifying kind, then enumeration order), over the same physical devices, by the
+    /// same calls (`ranked`, `identified`, `properties::query`), so the two cannot name
+    /// different physical devices. A runtime extension, no Metal call (Metal's program holds an
+    /// `MTLDevice` to ask it anything).
+    ///
+    /// What is read is the physical device's own identity, which the device made of it answers:
+    /// `properties::query`'s property reads of the physical device, and no `vkCreateDevice`, no
+    /// compile device and no queue. The instance is the one of the devices of equal options while
+    /// one lives (as [`Device::system_default_with`] takes it), else one made for the call, which
+    /// goes with it.
+    ///
+    /// The physical device named is the one [`Device::system_default_with`] tries first. Where
+    /// that call then refuses it as it makes its device (unsupported, or without a graphics and
+    /// compute queue) it falls to the next, and makes a device of another physical device than
+    /// the one named here, as [`Device::registry_ids_with`] lists such a physical device all the
+    /// same.
+    ///
+    /// [`Error::NoDevice`] where `options` admit no physical device at Vulkan 1.2 or later, of
+    /// which the runtime makes no device: that call answers `NoDevice` too where they admit none
+    /// at all, and the refusal of the physical device it tried where they admit one the runtime
+    /// cannot make a device of.
+    pub fn system_default_identity_with(
+        options: &DeviceOptions,
+    ) -> Result<PhysicalDeviceIdentity, Error> {
+        let mut made = lock(&MADE);
+        let (_, instance) = group(&mut made, options)?;
+        let ranked = ranked(&instance, options)?;
+        let identity = (identified(&instance, ranked).into_iter().next()).map(|(_, physical)| {
+            // SAFETY: `physical` was enumerated from the instance, created at Vulkan 1.2 or
+            // later, and `identified` kept only physical devices at Vulkan 1.2 or later.
+            let (identity, _) =
+                unsafe { super::properties::query(&instance.raw, physical, instance.api_version) };
+            PhysicalDeviceIdentity::of(&identity)
+        });
+        drop(made);
+        // The instance made for the call goes here, outside the lock.
+        drop(instance);
+        identity.ok_or(Error::NoDevice)
     }
 
     /// The registry IDs ([`Device::registry_id`], `registryID`) of the physical devices

@@ -1,9 +1,14 @@
 //! What a device reports about itself: the Vulkan facts `query` reads of the physical device, from
 //! which `Device::assemble` builds the [`DeviceProperties`](crate::DeviceProperties) Metal's device
 //! queries answer from (`capabilities.rs`).
+//!
+//! The same read answers [`PhysicalDeviceIdentity`] of a physical device no device was made of
+//! ([`Device::system_default_identity_with`](crate::Device::system_default_identity_with)), so the
+//! identity a consumer reads before making a device is the one the device then answers.
 
 use crate::capabilities::DeviceIdentity;
 use ash::vk;
+use metal2vulkan::vk::ApiVersion;
 
 /// The kind of physical device, from `VkPhysicalDeviceType`.
 #[non_exhaustive]
@@ -66,6 +71,67 @@ pub(crate) fn registry_id(uuid: &[u8; 16]) -> u64 {
     }
 }
 
+/// A physical device's identity, read without making a device
+/// ([`Device::system_default_identity_with`](crate::Device::system_default_identity_with)).
+///
+/// No Metal counterpart: Metal's program holds an `MTLDevice` and asks it, so every one of these
+/// is a property of a device that exists. The runtime answers them of the physical device alone,
+/// so a consumer can tell which GPU it is about to get before paying for it. Every field is the
+/// one the device made of that physical device answers.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PhysicalDeviceIdentity {
+    /// `name`: `VkPhysicalDeviceProperties::deviceName`
+    /// ([`DeviceProperties::name`](crate::DeviceProperties::name)).
+    pub name: String,
+    /// The kind of physical device (`VkPhysicalDeviceProperties::deviceType`), which the order
+    /// [`Device::system_default_with`](crate::Device::system_default_with) prefers physical
+    /// devices in is taken from. No Metal counterpart
+    /// ([`DeviceProperties::kind`](crate::DeviceProperties::kind)).
+    pub kind: DeviceKind,
+    /// `VkPhysicalDeviceProperties::vendorID`
+    /// ([`DeviceProperties::vendor_id`](crate::DeviceProperties::vendor_id)).
+    pub vendor_id: u32,
+    /// `VkPhysicalDeviceProperties::deviceID`
+    /// ([`DeviceProperties::device_id`](crate::DeviceProperties::device_id)).
+    pub device_id: u32,
+    /// `VkPhysicalDeviceIDProperties::deviceUUID`
+    /// ([`DeviceProperties::device_uuid`](crate::DeviceProperties::device_uuid)).
+    pub device_uuid: [u8; 16],
+    /// `registryID`: the ID [`Device::registry_id`](crate::Device::registry_id) of the device of
+    /// this physical device answers, and [`Device::with_registry_id`](crate::Device::with_registry_id)
+    /// opens it by.
+    pub registry_id: u64,
+    /// The Vulkan version the device of this physical device runs at: the lower of the instance's
+    /// and the physical device's. No Metal counterpart
+    /// ([`DeviceProperties::api_version`](crate::DeviceProperties::api_version)).
+    pub api_version: ApiVersion,
+    /// The physical device's PCI bus address
+    /// ([`DeviceProperties::pci_bus`](crate::DeviceProperties::pci_bus)).
+    pub pci_bus: Option<(u32, u32, u32, u32)>,
+    /// The physical device's DRM render node
+    /// ([`DeviceProperties::drm_render`](crate::DeviceProperties::drm_render)).
+    pub drm_render: Option<(i64, i64)>,
+}
+
+impl PhysicalDeviceIdentity {
+    /// The identity in `identity`, which [`query`] read of a physical device: the fields the
+    /// device made of it answers, from the one read.
+    pub(crate) fn of(identity: &DeviceIdentity) -> PhysicalDeviceIdentity {
+        PhysicalDeviceIdentity {
+            name: identity.name.clone(),
+            kind: identity.kind,
+            vendor_id: identity.vendor_id,
+            device_id: identity.device_id,
+            device_uuid: identity.device_uuid,
+            registry_id: registry_id(&identity.device_uuid),
+            api_version: identity.api_version,
+            pci_bus: identity.pci_bus,
+            drm_render: identity.drm_render,
+        }
+    }
+}
+
 /// The identity of `physical`, and its largest memory allocation
 /// (`VkPhysicalDeviceVulkan11Properties::maxMemoryAllocationSize`), which the sub-allocator
 /// reads.
@@ -84,6 +150,8 @@ pub(super) unsafe fn query(
     // SAFETY: the caller's contract; `VkPhysicalDeviceVulkan11Properties` is core in 1.2.
     unsafe { instance.get_physical_device_properties2(physical, &mut properties) };
     let core = properties.properties;
+    // SAFETY: the caller's contract.
+    let (pci_bus, drm_render) = unsafe { bus_addresses(instance, physical) };
     let identity = DeviceIdentity {
         name: core
             .device_name_as_c_str()
@@ -93,6 +161,8 @@ pub(super) unsafe fn query(
         vendor_id: core.vendor_id,
         device_id: core.device_id,
         device_uuid: v11.device_uuid,
+        pci_bus,
+        drm_render,
         api_version: metal2vulkan::vk::ApiVersion::from_packed(core.api_version)
             .min(instance_api_version),
         max_viewports: core.limits.max_viewports,
@@ -105,6 +175,70 @@ pub(super) unsafe fn query(
         ),
     };
     (identity, v11.max_memory_allocation_size)
+}
+
+/// The PCI bus address and the DRM render node of `physical`
+/// ([`DeviceProperties::pci_bus`](crate::DeviceProperties::pci_bus),
+/// [`DeviceProperties::drm_render`](crate::DeviceProperties::drm_render)): each read through its
+/// own extension, and only where the driver lists it (a query of properties enables nothing);
+/// `None` where it lists none, and `None` for both where the extensions cannot be listed at all.
+///
+/// # Safety
+///
+/// As [`query`]'s.
+unsafe fn bus_addresses(
+    instance: &ash::Instance,
+    physical: vk::PhysicalDevice,
+) -> (Option<(u32, u32, u32, u32)>, Option<(i64, i64)>) {
+    // SAFETY: the caller's contract.
+    let listed = unsafe { instance.enumerate_device_extension_properties(physical) };
+    let Ok(listed) = listed else {
+        return (None, None);
+    };
+    let has = |name: &std::ffi::CStr| {
+        listed
+            .iter()
+            .any(|extension| extension.extension_name_as_c_str() == Ok(name))
+    };
+    let pci = has(ash::ext::pci_bus_info::NAME);
+    let drm = has(ash::ext::physical_device_drm::NAME);
+    if !(pci || drm) {
+        return (None, None);
+    }
+    let mut bus = vk::PhysicalDevicePCIBusInfoPropertiesEXT::default();
+    let mut nodes = vk::PhysicalDeviceDrmPropertiesEXT::default();
+    let mut properties = vk::PhysicalDeviceProperties2::default();
+    if pci {
+        properties = properties.push_next(&mut bus);
+    }
+    if drm {
+        properties = properties.push_next(&mut nodes);
+    }
+    // SAFETY: the caller's contract; each structure chained is of an extension the device lists.
+    unsafe { instance.get_physical_device_properties2(physical, &mut properties) };
+    bus_addresses_of(pci.then_some(&bus), drm.then_some(&nodes))
+}
+
+/// The PCI bus address in `bus` and the DRM render node in `nodes`, the structures the driver
+/// filled for the extensions it lists ([`bus_addresses`]): `None` for one the driver does not
+/// list, and `None` for the render node of a driver that reports the device has none
+/// (`hasRender` false), whose `renderMajor` and `renderMinor` say nothing.
+pub(crate) fn bus_addresses_of(
+    bus: Option<&vk::PhysicalDevicePCIBusInfoPropertiesEXT>,
+    nodes: Option<&vk::PhysicalDeviceDrmPropertiesEXT>,
+) -> (Option<(u32, u32, u32, u32)>, Option<(i64, i64)>) {
+    let pci = bus.map(|bus| {
+        (
+            bus.pci_domain,
+            bus.pci_bus,
+            bus.pci_device,
+            bus.pci_function,
+        )
+    });
+    let render = nodes
+        .filter(|nodes| nodes.has_render == vk::TRUE)
+        .map(|nodes| (nodes.render_major, nodes.render_minor));
+    (pci, render)
 }
 
 /// `gpuCoreCount` of `physical` as its driver reports it
