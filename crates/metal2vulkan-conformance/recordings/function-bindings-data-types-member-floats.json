@@ -14602,12 +14602,12 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "creation_pipelines_made": 1,
-        "dedicated_memory_blocks_live": 2,
+        "dedicated_memory_blocks_live": 1,
         "device_memory_allocated": 201326976,
-        "object_churn.vk_image_bindings": 2,
-        "object_churn.vk_image_views_made": 2,
-        "object_churn.vk_images_made": 2,
-        "object_churn.vk_memory_allocations": 2,
+        "object_churn.vk_image_bindings": 1,
+        "object_churn.vk_image_views_made": 1,
+        "object_churn.vk_images_made": 1,
+        "object_churn.vk_memory_allocations": 1,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
         "scheduler_sleep_slices": 1,
@@ -14621,6 +14621,10 @@
       "ceilings": {
         "addressable_buffers_made": 2,
         "pooled_memory_blocks_made": 3
+      },
+      "per_state": {
+        "pipelines": 2,
+        "states": 1
       }
     }
   ],

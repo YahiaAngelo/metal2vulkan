@@ -266,6 +266,10 @@
       "bounds": {
         "scheduler_sleep_slices": 1,
         "scheduler_sleeps": 1
+      },
+      "per_state": {
+        "pipelines": 0,
+        "states": 2
       }
     }
   ],

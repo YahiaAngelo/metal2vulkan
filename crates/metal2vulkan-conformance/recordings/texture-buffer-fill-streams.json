@@ -1082,6 +1082,7 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "bare_starts": 26,
+        "batches_submitted_by_waiters": 26,
         "batches_with_none_pending": 26,
         "command_barriers": 2,
         "command_buffers_begun": 26,
@@ -1094,7 +1095,7 @@
         "commands_replayed.cmd_pipeline_barrier": 28,
         "commands_replayed.end_command_buffer": 26,
         "commits_handed_off": 26,
-        "completed_waits": 30,
+        "completed_waits": 29,
         "completed_where_seen": 26,
         "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 26,
@@ -1104,13 +1105,14 @@
         "object_churn.buffers_parked": 64,
         "object_churn.buffers_recycled": 25,
         "object_churn.textures_texels": 26,
-        "object_churn.vk_buffer_bindings": 39,
+        "object_churn.vk_buffer_bindings": 40,
         "object_churn.vk_buffers_destroyed": 4,
-        "object_churn.vk_buffers_made": 39,
+        "object_churn.vk_buffers_made": 40,
         "pooled_memory_blocks_made": 3,
         "queue_submissions": 26,
         "scheduled_where_submitted": 26,
         "scheduler_passes": 26,
+        "scheduler_passes_by_waiters": 26,
         "scheduler_sleeps": 26,
         "scheduler_wakes_commit": 26,
         "slot_returns": 26,
@@ -1120,6 +1122,7 @@
         "wakes_spared": 156
       },
       "moving": {
+        "batches_submitted_by_waiters": 23,
         "commands_replayed.begin_command_buffer": 21
       },
       "composed": {

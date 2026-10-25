@@ -3052,15 +3052,13 @@
       "runs": 8,
       "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
-      "degraded": [
-        "metal2vulkan-degrade-split-dispatch"
-      ],
       "bounds": {
         "addressable_buffers_made": 2,
         "arena_pools_made": 2,
         "argument_objects_retained": 135,
         "argument_tables_retained": 35,
         "bare_starts": 35,
+        "batches_submitted_by_waiters": 35,
         "batches_with_none_pending": 35,
         "bound_notices_made": 1,
         "command_buffers_begun": 54,
@@ -3086,12 +3084,13 @@
         "device_memory_allocated": 268435584,
         "dispatch_pipelines_pooled": 11,
         "encoder_command_buffers_begun": 47,
+        "encoder_primaries_begun_ahead": 2,
         "finales_folded": 35,
         "host_texel_copies": 5,
         "images_started_on_the_host": 5,
-        "new_buffer_bytes_cleared": 91008,
-        "object_churn.buffers_parked": 37,
-        "object_churn.buffers_recycled": 37,
+        "new_buffer_bytes_cleared": 213888,
+        "object_churn.buffers_parked": 67,
+        "object_churn.buffers_recycled": 67,
         "object_churn.images_own_memory": 5,
         "object_churn.textures_image": 5,
         "object_churn.vk_image_bindings": 5,
@@ -3100,9 +3099,11 @@
         "object_churn.vk_images_made": 5,
         "pipeline_layouts_made": 2,
         "pooled_memory_blocks_made": 4,
+        "primaries_begun_ahead": 2,
         "queue_submissions": 35,
         "scheduled_where_submitted": 35,
         "scheduler_passes": 35,
+        "scheduler_passes_by_waiters": 35,
         "scheduler_sleeps": 35,
         "scheduler_wakes_commit": 35,
         "shader_modules_made": 6,
@@ -3110,9 +3111,13 @@
         "spare_command_pools_taken": 70,
         "submit_infos": 41,
         "variant_pipelines_made": 17,
-        "variants_taken_back": 6,
+        "variants_taken_back": 11,
         "wakes_completion_waiters": 35,
         "wakes_spared": 210
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 20,
+        "commands_replayed.begin_command_buffer": 33
       },
       "composed": {
         "command_buffers_begun": 54,
@@ -3142,6 +3147,10 @@
         "pooled_memory_blocks_made": 4,
         "shader_modules_made": 6,
         "variant_pipelines_made": 17
+      },
+      "per_state": {
+        "pipelines": 0,
+        "states": 6
       }
     }
   ],

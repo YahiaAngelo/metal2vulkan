@@ -1026,6 +1026,7 @@
         "argument_samplers_taken": 4,
         "argument_tables_retained": 16,
         "bare_starts": 1,
+        "batches_submitted_by_waiters": 1,
         "batches_with_none_pending": 1,
         "bound_notices_made": 4,
         "command_buffers_begun": 112,
@@ -1077,6 +1078,7 @@
         "render_passes_made": 1,
         "scheduled_where_submitted": 1,
         "scheduler_passes": 1,
+        "scheduler_passes_by_waiters": 1,
         "scheduler_sleeps": 1,
         "scheduler_wakes_commit": 1,
         "shader_modules_made": 6,
@@ -1117,6 +1119,10 @@
         "pooled_memory_blocks_made": 3,
         "shader_modules_made": 6,
         "variant_pipelines_made": 4
+      },
+      "per_state": {
+        "pipelines": 0,
+        "states": 4
       }
     }
   ],

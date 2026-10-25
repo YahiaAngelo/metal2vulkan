@@ -6073,6 +6073,7 @@
         "argument_objects_retained": 360,
         "argument_tables_retained": 60,
         "bare_starts": 60,
+        "batches_submitted_by_waiters": 59,
         "batches_with_none_pending": 60,
         "bound_notices_made": 1,
         "command_buffers_begun": 64,
@@ -6121,19 +6122,21 @@
         "queue_submissions": 60,
         "sampler_sets_made": 1,
         "scheduled_where_submitted": 60,
-        "scheduler_passes": 62,
+        "scheduler_passes": 63,
+        "scheduler_passes_by_waiters": 60,
         "scheduler_sleeps": 61,
         "scheduler_wakes_commit": 60,
-        "scheduler_wakes_host": 1,
+        "scheduler_wakes_host": 2,
         "shader_modules_made": 1,
         "slot_returns": 60,
         "spare_command_pools_taken": 120,
         "submit_infos": 61,
         "variant_pipelines_made": 2,
         "wakes_completion_waiters": 60,
-        "wakes_spared": 360
+        "wakes_spared": 361
       },
       "moving": {
+        "batches_submitted_by_waiters": 55,
         "commands_replayed.begin_command_buffer": 54
       },
       "composed": {
@@ -6143,6 +6146,10 @@
         "command_buffers_submitted": 64,
         "device_memory_allocated": 268435840,
         "pooled_memory_blocks_made": 4
+      },
+      "per_state": {
+        "pipelines": 3,
+        "states": 1
       }
     }
   ],

@@ -50,7 +50,6 @@ use crate::transcript::{
     Aspect, ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value,
 };
 use metal2vulkan::metal::PixelFormat;
-use metal2vulkan_runtime::Degradation;
 
 /// The fixture the three kernels live in.
 const FIXTURE: &str = "hsw_storage_writes";
@@ -301,14 +300,17 @@ impl Case for HalfStorageWrites {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // A **notice declaration**, not a tolerance: it loosens no stored code. The sweep's grid is
-        // 1,024 by 65 threads at 32 by 32 a threadgroup, so 65 is not a whole number of
-        // threadgroups and the runtime runs the dispatch as more than one Vulkan dispatch and says
-        // so. It is a performance note -- it states nothing about a value -- and it is chosen from
-        // the case's own shape, the grid an exhaustive sweep of 65,536 codes needs, never from the
-        // device. Metal announces nothing, so without the declaration every row of the family
-        // would read `divergent` on its notice site alone and the codes, which are the question,
-        // would be unreadable beside it.
+        // The sweep's grid is 1,024 by 65 threads at 32 by 32 a threadgroup, so 65 is not a whole
+        // number of threadgroups. That used to make the runtime run the dispatch as more than one
+        // Vulkan dispatch and announce `metal2vulkan-degrade-split-dispatch`, and the family
+        // declared the code for it. It does not any more: a ragged `dispatchThreads:` on a kernel
+        // that cannot observe its threadgroup partition runs as Metal's single dispatch, and
+        // `Degradation::SplitDispatch` fires on more than one region. Measured on this M3 Max, 8
+        // runs of the whole 1,103-case set: every row of this family announced no notice at all,
+        // where the recordings taken before that landing hold the code in their cost record's
+        // `degraded` set. So the declaration is gone, and a split here reads as an undeclared
+        // notice at once.
+        //
         // Every row reads its answer back through a `Shared` buffer, so on a device without
         // unified memory the runtime announces `shared-in-system-memory`
         // (`crate::replay::shared_memory_notice` holds the whole reason). It declares the
@@ -320,10 +322,7 @@ impl Case for HalfStorageWrites {
         // nothing else (replay-nvidia.log). On MoltenVK, where
         // the chip's GPU shares the CPU's memory, it cannot fire at all, which is why no
         // recording of this suite declares it.
-        vec![
-            crate::replay::shared_memory_notice(),
-            crate::replay::notice_allowance(Degradation::SplitDispatch.code()),
-        ]
+        vec![crate::replay::shared_memory_notice()]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

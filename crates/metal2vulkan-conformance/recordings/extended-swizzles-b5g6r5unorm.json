@@ -3052,15 +3052,13 @@
       "runs": 8,
       "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
-      "degraded": [
-        "metal2vulkan-degrade-split-dispatch"
-      ],
       "bounds": {
         "addressable_buffers_made": 2,
         "arena_pools_made": 2,
         "argument_objects_retained": 135,
         "argument_tables_retained": 35,
         "bare_starts": 35,
+        "batches_submitted_by_waiters": 29,
         "batches_with_none_pending": 35,
         "bound_notices_made": 1,
         "command_buffers_begun": 54,
@@ -3071,7 +3069,7 @@
         "command_buffers_begun_segments": 6,
         "command_buffers_deferred": 47,
         "command_buffers_replayed": 18,
-        "command_buffers_replayed_inline": 31,
+        "command_buffers_replayed_inline": 30,
         "command_buffers_submitted": 54,
         "commands_replayed.begin_command_buffer": 47,
         "commands_replayed.cmd_bind_descriptor_sets": 35,
@@ -3085,15 +3083,15 @@
         "completed_where_seen": 35,
         "creation_pipelines_made": 6,
         "device_memory_allocated": 268435584,
-        "dispatch_pipelines_pooled": 11,
+        "dispatch_pipelines_pooled": 6,
         "encoder_command_buffers_begun": 47,
         "finales_apart": 6,
         "finales_folded": 29,
         "host_texel_copies": 5,
         "images_started_on_the_host": 5,
-        "new_buffer_bytes_cleared": 91008,
-        "object_churn.buffers_parked": 37,
-        "object_churn.buffers_recycled": 37,
+        "new_buffer_bytes_cleared": 213888,
+        "object_churn.buffers_parked": 67,
+        "object_churn.buffers_recycled": 67,
         "object_churn.images_own_memory": 5,
         "object_churn.textures_image": 5,
         "object_churn.vk_image_bindings": 5,
@@ -3101,22 +3099,26 @@
         "object_churn.vk_images_destroyed": 5,
         "object_churn.vk_images_made": 5,
         "pipeline_layouts_made": 2,
-        "pipeline_layouts_shared": 2,
+        "pipeline_layouts_shared": 6,
         "pooled_memory_blocks_made": 4,
         "queue_submissions": 35,
         "scheduled_where_submitted": 35,
-        "scheduler_passes": 52,
-        "scheduler_sleeps": 46,
+        "scheduler_passes": 50,
+        "scheduler_passes_by_waiters": 35,
+        "scheduler_sleeps": 43,
         "scheduler_wakes_commit": 35,
-        "scheduler_wakes_host": 11,
-        "shader_modules_made": 6,
+        "scheduler_wakes_host": 12,
+        "shader_modules_made": 7,
         "slot_returns": 35,
         "spare_command_pools_taken": 70,
         "submit_infos": 41,
         "variant_pipelines_made": 17,
         "variants_taken_back": 4,
         "wakes_completion_waiters": 35,
-        "wakes_spared": 210
+        "wakes_spared": 211
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 26
       },
       "composed": {
         "command_buffers_begun": 54,
@@ -3140,6 +3142,10 @@
         "pooled_memory_blocks_made": 4,
         "shader_modules_made": 6,
         "variant_pipelines_made": 17
+      },
+      "per_state": {
+        "pipelines": 10,
+        "states": 6
       }
     }
   ],

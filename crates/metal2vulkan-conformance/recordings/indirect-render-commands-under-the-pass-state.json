@@ -597,6 +597,7 @@
         "command_buffers_begun_secondaries": 6,
         "command_buffers_begun_segments": 2,
         "command_buffers_deferred": 14,
+        "command_buffers_replayed": 14,
         "command_buffers_replayed_inline": 14,
         "command_buffers_submitted": 12,
         "commands_replayed.begin_command_buffer": 14,
@@ -642,6 +643,7 @@
         "finales_apart": 1,
         "graphics_pipelines_looked_up": 1,
         "indirect_records_read": 4,
+        "linked_use_questions_asked": 3,
         "live_tables_uploaded": 1,
         "memory_blocks_live": 1,
         "new_buffer_bytes_cleared": 5248,
@@ -663,19 +665,24 @@
         "render_passes_begun_instances": 2,
         "render_passes_made": 2,
         "scheduled_where_submitted": 1,
-        "scheduler_passes": 1,
-        "scheduler_sleeps": 1,
+        "scheduler_passes": 2,
+        "scheduler_passes_by_waiters": 1,
+        "scheduler_sleep_slices": 1,
+        "scheduler_sleeps": 2,
         "scheduler_wakes_commit": 1,
+        "scheduler_wakes_host": 1,
         "set_zero_sets_found": 1,
         "set_zero_sets_reused": 2,
         "shader_modules_made": 2,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
+        "stage_entries_shared": 5,
+        "stage_entries_specialized": 2,
         "stage_tables_read": 16,
         "submit_infos": 2,
         "variant_pipelines_made": 1,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 6
+        "wakes_spared": 7
       },
       "composed": {
         "device_memory_allocated": 201326592
@@ -684,6 +691,10 @@
         "addressable_buffers_made": 2,
         "arena_pools_made": 1,
         "pooled_memory_blocks_made": 3
+      },
+      "per_state": {
+        "pipelines": 2,
+        "states": 1
       }
     }
   ],

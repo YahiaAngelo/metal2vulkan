@@ -204,9 +204,11 @@ pub const PER_STATE: &str = "pipelines_per_pipeline_state";
 ///
 /// The ratio separates the two. A case that grows a state grows both halves and reads the same
 /// ratio; a change that makes more pipelines per state raises it. Measured on this M3 Max over all
-/// 1,103 cases, 8 runs of the whole selection at a one-minute load of 5.35, in the 539 cases that
-/// create a state and carry a cost record: 1,560 states, 2,634 `VkPipeline`s, **1.69 each**, of
-/// which 1,259 were made at a state's creation and 470 of those were taken by no command.
+/// 1,103 cases, 8 runs of the whole selection, in the 639 cases that create a state and carry a
+/// cost record: 1,755 states, 2,665 `VkPipeline`s, **1.519 each**, the worst row
+/// `swizzled-storage-rgba8unorm` at 11.25. The committed bounds' own census of the creation-time
+/// prediction, over the 585 records that make one at all, is 1,439 made and 815 taken by a command
+/// (`the_creation_prediction`, beside this module).
 ///
 /// # Why it needs no timing window
 ///
@@ -2024,6 +2026,210 @@ mod the_contrast {
             without.len(),
             without.join("\n  ")
         );
+    }
+}
+
+/// The ratio's own census, held over the **committed recordings** rather than over a run.
+///
+/// [`PipelinesPerState`] is the one bound a reader has to look at rather than diff, and for most of
+/// this suite's life it was a field no record held: the records were written by a binary that
+/// predated it, `per_state` is `skip_serializing_if = "Option::is_none"`, and a record without one
+/// gates no ratio. **0 of 1,103 recordings carried it, the gate was green, and it held nothing** —
+/// which is the shape a gate rots into and the shape nothing in the tree could see. These three
+/// numbers are what makes it visible, and they need no device: every figure is read off the
+/// committed files, so they hold in CI and on a loaded host.
+///
+/// The ratio is written only by a whole-set `cost --runs 8 --write`, because [`judge`] refuses any
+/// selection but the whole set and a lone run's ratio is looser than the gate will ever read.
+#[cfg(test)]
+mod the_ratio {
+    /// The fewest cost records that must carry a ratio.
+    ///
+    /// A floor, measured: 639 of the 1,103 recordings hold one (8 runs of the whole set on an Apple
+    /// M3 Max). The other 464 carry none for a reason the record itself states — 453 cases create
+    /// no Metal pipeline state, so the ratio has no denominator, and 11 hold a recorded refusal
+    /// instead ([`super::CostRecord::unmeasurable`]).
+    ///
+    /// It falls when a `--write` pass drops the field, which is exactly how it came to be zero.
+    const CARRY_A_RATIO: usize = 639;
+
+    /// The most `VkPipeline`s the committed ratios may hold per Metal pipeline state over the whole
+    /// suite, as its two counts: 2,665 over 1,755, 1.519 each.
+    ///
+    /// The per-case bound is tighter than this everywhere, so this is not a second gate on the same
+    /// thing. It is the one number that sees a **re-bless**: a pass that raises many cases' ratios
+    /// by a little leaves every per-case bound satisfied by its own new reading, and only the total
+    /// says the suite now makes more pipelines for the same work.
+    const PIPELINES: u64 = 2_665;
+    /// The states [`PIPELINES`] was measured over.
+    const STATES: u64 = 1_755;
+
+    /// The most records that may make a creation pipeline and carry **no** ratio.
+    ///
+    /// Two, and the reason is not that they were missed. `binary-archive-adders` and
+    /// `binary-archive-serializing` move `creation_pipelines_made` from inside
+    /// `addComputePipelineFunctionsWithDescriptor:` and the archive's step replay, where **Metal
+    /// creates no pipeline state at all** — so the denominator is honestly zero and the suite's own
+    /// door ([`crate::states::making_a_state`]) is right not to count one. Their numerator is
+    /// therefore bounded by `creation_pipelines_made` alone and by no ratio, which is the open
+    /// shape here: a `VkPipeline` we make for no Metal pipeline state is the worst row this project
+    /// has and the ratio cannot express it.
+    ///
+    /// A ceiling and not permission: a third row means either another call of ours makes pipelines
+    /// outside a state creation, or a case that does create a state lost its ratio.
+    const NO_DENOMINATOR: usize = 2;
+
+    /// One recording's ratio, or its absence.
+    struct Row {
+        case: String,
+        venue: String,
+        pipelines: u64,
+        states: u64,
+    }
+
+    /// Every committed cost record that holds bounds, with the ratio it carries.
+    fn census() -> (Vec<Row>, Vec<Row>) {
+        let mut held = Vec::new();
+        let mut without = Vec::new();
+        for case in crate::cases::all() {
+            let Ok(recording) = crate::recording::read(case.name()) else {
+                continue;
+            };
+            for record in &recording.costs {
+                if record.unmeasurable.is_some() {
+                    continue;
+                }
+                match record.per_state {
+                    Some(ratio) => held.push(Row {
+                        case: case.name().to_owned(),
+                        venue: record.venue.clone(),
+                        pipelines: ratio.pipelines,
+                        states: ratio.states,
+                    }),
+                    // Only a record that made a creation pipeline is owed one: every other case
+                    // either creates no state or made nothing to divide.
+                    None => {
+                        let made = record
+                            .bounds
+                            .get("creation_pipelines_made")
+                            .copied()
+                            .unwrap_or(0);
+                        if made > 0 {
+                            without.push(Row {
+                                case: case.name().to_owned(),
+                                venue: record.venue.clone(),
+                                pipelines: made,
+                                states: 0,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        (held, without)
+    }
+
+    /// **The ratio is a bound the recordings carry**, and this is the number that says how many.
+    #[test]
+    fn the_recordings_carry_the_ratio_they_are_gated_by() {
+        let (held, _) = census();
+        let pipelines: u64 = held.iter().map(|row| row.pipelines).sum();
+        let states: u64 = held.iter().map(|row| row.states).sum();
+        println!(
+            "{} cost record(s) carry a pipelines-per-state ratio: {pipelines} pipeline(s) over \
+             {states} state(s)",
+            held.len()
+        );
+        assert!(
+            held.len() >= CARRY_A_RATIO,
+            "{} cost record(s) carry a ratio, where {CARRY_A_RATIO} did. A record without one \
+             gates no ratio at all, and that is how this field came to be absent from every one of \
+             the 1,103 recordings while the gate read green. Re-measure the shape the gate runs in: \
+             `conformance cost --runs 8 --write`",
+            held.len()
+        );
+        // A record may not carry a ratio over no state: the quotient would have no denominator and
+        // `allows` answers `u64::MAX`, which is a bound that holds nothing.
+        let empty: Vec<&str> = held
+            .iter()
+            .filter(|row| row.states == 0)
+            .map(|row| row.case.as_str())
+            .collect();
+        assert!(
+            empty.is_empty(),
+            "{} record(s) carry a ratio over no state, which bounds nothing: {empty:?}",
+            empty.len()
+        );
+    }
+
+    /// **The suite-wide ratio must not rise**, which is the one reading a per-case re-bless cannot
+    /// hide.
+    #[test]
+    fn the_suite_makes_no_more_pipelines_per_state_than_it_does_today() {
+        let (held, _) = census();
+        let pipelines: u64 = held.iter().map(|row| row.pipelines).sum();
+        let states: u64 = held.iter().map(|row| row.states).sum();
+        // Cross-multiplied, never two floats: pipelines/states > PIPELINES/STATES.
+        let over =
+            u128::from(pipelines) * u128::from(STATES) > u128::from(PIPELINES) * u128::from(states);
+        if over {
+            let mut worst: Vec<&Row> = held.iter().filter(|row| row.states > 0).collect();
+            worst.sort_by(|one, two| {
+                (two.pipelines * one.states).cmp(&(one.pipelines * two.states))
+            });
+            let named: Vec<String> = worst
+                .iter()
+                .take(12)
+                .map(|row| {
+                    format!(
+                        "{} on {}: {} pipeline(s) over {} state(s)",
+                        row.case, row.venue, row.pipelines, row.states
+                    )
+                })
+                .collect();
+            panic!(
+                "the committed ratios now hold {pipelines} pipeline(s) over {states} state(s), \
+                 where the ceiling is {PIPELINES} over {STATES}. Every per-case bound can be \
+                 satisfied by its own re-blessed reading while this rises, which is the whole \
+                 reason it is counted. Either make fewer pipelines per state, or raise the ceiling \
+                 in the same commit as the whole-set measurement that justifies it. The worst \
+                 rows:\n  {}",
+                named.join("\n  ")
+            );
+        }
+        println!("{pipelines} pipeline(s) over {states} state(s) against the ceiling {PIPELINES} over {STATES}");
+    }
+
+    /// **A record that makes a `VkPipeline` for no Metal pipeline state is bounded by no ratio**,
+    /// and this counts them rather than letting the class grow unseen.
+    #[test]
+    fn no_more_records_make_pipelines_outside_a_state_creation() {
+        let (_, without) = census();
+        println!(
+            "{} cost record(s) make a creation pipeline and carry no ratio",
+            without.len()
+        );
+        if without.len() > NO_DENOMINATOR {
+            let named: Vec<String> = without
+                .iter()
+                .map(|row| {
+                    format!(
+                        "{} on {}: {} made at a creation, no state",
+                        row.case, row.venue, row.pipelines
+                    )
+                })
+                .collect();
+            panic!(
+                "{} cost record(s) make a creation pipeline while the case created no Metal \
+                 pipeline state, where {NO_DENOMINATOR} did. Such a record has no denominator, so \
+                 the ratio gates it at nothing and only `creation_pipelines_made` holds it. Either \
+                 the new row makes pipelines outside a state creation -- which is a cost with no \
+                 ratio to express it -- or a case that does create a state lost its ratio to a \
+                 `--write` pass:\n  {}",
+                without.len(),
+                named.join("\n  ")
+            );
+        }
     }
 }
 

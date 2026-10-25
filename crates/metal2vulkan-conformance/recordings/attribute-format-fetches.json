@@ -8856,8 +8856,8 @@
         "command_buffers_begun_encoders": 29,
         "command_buffers_begun_segments": 29,
         "command_buffers_deferred": 87,
-        "command_buffers_replayed": 87,
-        "command_buffers_replayed_inline": 7,
+        "command_buffers_replayed": 86,
+        "command_buffers_replayed_inline": 12,
         "command_buffers_submitted": 116,
         "commands_replayed.begin_command_buffer": 87,
         "commands_replayed.cmd_bind_descriptor_sets": 29,
@@ -8883,17 +8883,18 @@
         "pooled_memory_blocks_made": 3,
         "queue_submissions": 29,
         "scheduled_where_submitted": 29,
-        "scheduler_passes": 87,
-        "scheduler_sleeps": 58,
+        "scheduler_passes": 100,
+        "scheduler_passes_by_waiters": 29,
+        "scheduler_sleeps": 65,
         "scheduler_wakes_commit": 29,
-        "scheduler_wakes_host": 29,
+        "scheduler_wakes_host": 53,
         "shader_modules_made": 29,
         "slot_returns": 29,
         "spare_command_pools_taken": 58,
         "submit_infos": 58,
         "variant_pipelines_made": 29,
         "wakes_completion_waiters": 29,
-        "wakes_spared": 174
+        "wakes_spared": 176
       },
       "composed": {
         "device_memory_allocated": 201326592
@@ -8902,6 +8903,10 @@
         "addressable_buffers_made": 2,
         "arena_pools_made": 1,
         "pooled_memory_blocks_made": 3
+      },
+      "per_state": {
+        "pipelines": 29,
+        "states": 29
       }
     }
   ],

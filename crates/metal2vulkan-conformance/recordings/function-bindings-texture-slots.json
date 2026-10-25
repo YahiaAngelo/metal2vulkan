@@ -775,6 +775,10 @@
       "ceilings": {
         "addressable_buffers_made": 2,
         "pooled_memory_blocks_made": 3
+      },
+      "per_state": {
+        "pipelines": 2,
+        "states": 1
       }
     }
   ],

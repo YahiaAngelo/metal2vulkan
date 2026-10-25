@@ -667,6 +667,10 @@
         "addressable_buffers_made": 2,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3
+      },
+      "per_state": {
+        "pipelines": 2,
+        "states": 1
       }
     }
   ],

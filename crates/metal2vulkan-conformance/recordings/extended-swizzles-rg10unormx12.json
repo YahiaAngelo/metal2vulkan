@@ -3052,9 +3052,6 @@
       "runs": 8,
       "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
-      "degraded": [
-        "metal2vulkan-degrade-split-dispatch"
-      ],
       "bounds": {
         "addressable_buffers_made": 2,
         "arena_pools_made": 1,
@@ -3069,8 +3066,8 @@
         "command_buffers_begun_encoders": 35,
         "command_buffers_begun_segments": 35,
         "command_buffers_deferred": 105,
-        "command_buffers_replayed": 105,
-        "command_buffers_replayed_inline": 12,
+        "command_buffers_replayed": 104,
+        "command_buffers_replayed_inline": 33,
         "command_buffers_submitted": 141,
         "commands_replayed.begin_command_buffer": 105,
         "commands_replayed.cmd_bind_descriptor_sets": 35,
@@ -3084,15 +3081,15 @@
         "completed_where_seen": 35,
         "creation_pipelines_made": 6,
         "device_memory_allocated": 268435584,
-        "dispatch_pipelines_pooled": 65,
+        "dispatch_pipelines_pooled": 35,
         "encoder_command_buffers_begun": 105,
         "finales_apart": 35,
         "host_texel_copies": 5,
         "images_started_on_the_host": 5,
-        "new_buffer_bytes_cleared": 91008,
+        "new_buffer_bytes_cleared": 213888,
         "object_churn.buffers_evicted": 5,
-        "object_churn.buffers_parked": 37,
-        "object_churn.buffers_recycled": 37,
+        "object_churn.buffers_parked": 67,
+        "object_churn.buffers_recycled": 67,
         "object_churn.images_own_memory": 5,
         "object_churn.textures_image": 5,
         "object_churn.vk_buffers_destroyed": 5,
@@ -3105,10 +3102,11 @@
         "pooled_memory_blocks_made": 4,
         "queue_submissions": 35,
         "scheduled_where_submitted": 35,
-        "scheduler_passes": 135,
-        "scheduler_sleeps": 100,
+        "scheduler_passes": 122,
+        "scheduler_passes_by_waiters": 35,
+        "scheduler_sleeps": 80,
         "scheduler_wakes_commit": 35,
-        "scheduler_wakes_host": 65,
+        "scheduler_wakes_host": 68,
         "shader_modules_made": 18,
         "slot_returns": 35,
         "spare_command_pools_taken": 70,
@@ -3140,6 +3138,10 @@
         "pooled_memory_blocks_made": 4,
         "shader_modules_made": 18,
         "variant_pipelines_made": 71
+      },
+      "per_state": {
+        "pipelines": 39,
+        "states": 6
       }
     }
   ],

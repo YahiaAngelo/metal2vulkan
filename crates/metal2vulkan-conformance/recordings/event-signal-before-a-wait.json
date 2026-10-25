@@ -178,6 +178,7 @@
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
         "submit_infos": 2,
+        "timeline_waits": 1,
         "wakes_completion_waiters": 2,
         "wakes_event_waiters": 1,
         "wakes_spared": 10

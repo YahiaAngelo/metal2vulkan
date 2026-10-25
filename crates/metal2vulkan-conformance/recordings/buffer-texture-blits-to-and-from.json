@@ -347,6 +347,7 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "bare_starts": 4,
+        "batches_submitted_by_waiters": 4,
         "batches_with_none_pending": 4,
         "command_buffers_begun": 8,
         "command_buffers_begun_batch_work": 4,
@@ -384,6 +385,7 @@
         "queue_submissions": 4,
         "scheduled_where_submitted": 4,
         "scheduler_passes": 4,
+        "scheduler_passes_by_waiters": 4,
         "scheduler_sleeps": 4,
         "scheduler_wakes_commit": 4,
         "shadowed_textures": 4,

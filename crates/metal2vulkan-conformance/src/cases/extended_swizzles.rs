@@ -359,17 +359,22 @@ impl Case for ExtendedSwizzles {
         MetalSource::Run
     }
 
-    /// One notice, and it is the dispatch's shape rather than any format's arithmetic.
+    /// One declaration, and it is the venue's memory model rather than any format's arithmetic.
     ///
-    /// Each op reads every lane of its sweep in one dispatch, in groups of at most 64 threads,
-    /// and no lane count here is a whole number of such groups. Our side runs the interior and
-    /// the partial edge as dispatches of their own and announces
-    /// `metal2vulkan-degrade-split-dispatch` for it. Metal announces nothing, which is a
-    /// difference at the notices site and nowhere else.
+    /// Each op reads every lane of its sweep in one dispatch, in groups of at most 64 threads, and
+    /// no lane count here is a whole number of such groups. That shape used to make our side run
+    /// the interior and the partial edge as dispatches of their own, announcing
+    /// `metal2vulkan-degrade-split-dispatch`, and the family declared the code for it. It does not
+    /// any more: a ragged `dispatchThreads:` on a kernel that cannot observe its threadgroup
+    /// partition runs as Metal's single dispatch, and `Degradation::SplitDispatch` fires on more
+    /// than one region. Measured on this M3 Max, 8 runs of the whole 1,103-case set: every row of
+    /// this family announced no notice at all, where the recordings taken before that landing hold
+    /// `metal2vulkan-degrade-split-dispatch` in their cost record's `degraded` set. So the
+    /// declaration is gone, and a split here reads as an undeclared notice at once.
     ///
-    /// The loosening reaches `case/notices/*` alone. Every texel this family records is still
-    /// compared bit for bit, which is the point of the family: a swizzle moves channels and an
-    /// extended-range or packed format decides what a channel's bits are, and neither is a
+    /// The loosening that is left reaches `case/notices/*` alone. Every texel this family records
+    /// is still compared bit for bit, which is the point of the family: a swizzle moves channels
+    /// and an extended-range or packed format decides what a channel's bits are, and neither is a
     /// tolerance. `every_recorded_swizzle_is_the_unswizzled_texture_swizzled` and
     /// `every_recorded_packed_read_is_metals_rule` hold those words to Metal's own answers.
     fn allowances(&self) -> Vec<crate::allowance::Allowance> {
@@ -384,12 +389,7 @@ impl Case for ExtendedSwizzles {
         // nothing else (replay-nvidia.log). On MoltenVK, where
         // the chip's GPU shares the CPU's memory, it cannot fire at all, which is why no
         // recording of this suite declares it.
-        vec![
-            crate::replay::shared_memory_notice(),
-            crate::replay::notice_allowance(
-                metal2vulkan_runtime::Degradation::SplitDispatch.code(),
-            ),
-        ]
+        vec![crate::replay::shared_memory_notice()]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

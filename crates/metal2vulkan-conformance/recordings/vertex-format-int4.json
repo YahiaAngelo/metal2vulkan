@@ -378,6 +378,7 @@
         "argument_samplers_taken": 4,
         "argument_tables_retained": 4,
         "bare_starts": 1,
+        "batches_submitted_by_waiters": 1,
         "batches_with_none_pending": 1,
         "command_buffers_begun": 11,
         "command_buffers_begun_batch_barriers": 3,
@@ -416,6 +417,7 @@
         "encoder_command_buffers_begun": 8,
         "finales_folded": 1,
         "graphics_pipelines_looked_up": 4,
+        "linked_use_questions_asked": 12,
         "new_buffer_bytes_cleared": 2304,
         "object_churn.buffers_evicted": 2,
         "object_churn.buffers_parked": 2,
@@ -433,11 +435,14 @@
         "sampler_sets_destroyed": 1,
         "scheduled_where_submitted": 1,
         "scheduler_passes": 1,
+        "scheduler_passes_by_waiters": 1,
         "scheduler_sleeps": 1,
         "scheduler_wakes_commit": 1,
         "shader_modules_made": 4,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
+        "stage_entries_shared": 10,
+        "stage_entries_specialized": 2,
         "stage_tables_read": 16,
         "submit_infos": 1,
         "variant_pipelines_made": 4,
@@ -453,6 +458,10 @@
         "addressable_buffers_made": 2,
         "arena_pools_made": 1,
         "pooled_memory_blocks_made": 3
+      },
+      "per_state": {
+        "pipelines": 8,
+        "states": 4
       }
     }
   ],

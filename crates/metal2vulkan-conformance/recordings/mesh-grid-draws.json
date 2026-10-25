@@ -1261,6 +1261,7 @@
         "arena_pools_made": 2,
         "argument_samplers_taken": 1,
         "bare_starts": 7,
+        "batches_submitted_by_waiters": 3,
         "batches_with_none_pending": 7,
         "bound_notices_made": 5,
         "command_buffers_begun": 32,
@@ -1270,7 +1271,8 @@
         "command_buffers_begun_secondaries": 12,
         "command_buffers_begun_segments": 4,
         "command_buffers_deferred": 28,
-        "command_buffers_replayed_inline": 28,
+        "command_buffers_replayed": 24,
+        "command_buffers_replayed_inline": 16,
         "command_buffers_submitted": 20,
         "commands_replayed.begin_command_buffer": 28,
         "commands_replayed.cmd_begin_render_pass": 7,
@@ -1317,15 +1319,16 @@
         "images_started_on_the_host": 14,
         "indirect_draws_recorded": 1,
         "inline_passes": 1,
+        "linked_use_questions_asked": 2,
         "live_tables_uploaded": 1,
         "new_buffer_bytes_cleared": 24704,
-        "object_churn.buffers_evicted": 1,
+        "object_churn.buffers_evicted": 4,
         "object_churn.buffers_parked": 8,
         "object_churn.buffers_recycled": 7,
         "object_churn.images_own_memory": 14,
         "object_churn.textures_image": 14,
         "object_churn.vk_buffer_bindings": 2,
-        "object_churn.vk_buffers_destroyed": 2,
+        "object_churn.vk_buffers_destroyed": 5,
         "object_churn.vk_buffers_made": 2,
         "object_churn.vk_image_bindings": 14,
         "object_churn.vk_image_views_made": 14,
@@ -1344,17 +1347,25 @@
         "render_passes_begun_instances": 6,
         "render_passes_made": 2,
         "scheduled_where_submitted": 7,
-        "scheduler_passes": 7,
-        "scheduler_sleeps": 7,
+        "scheduler_passes": 11,
+        "scheduler_passes_by_waiters": 7,
+        "scheduler_sleeps": 10,
         "scheduler_wakes_commit": 7,
+        "scheduler_wakes_host": 4,
         "shader_modules_made": 3,
         "slot_returns": 7,
         "spare_command_pools_taken": 14,
+        "stage_entries_shared": 1,
+        "stage_entries_specialized": 2,
         "stage_tables_read": 24,
         "submit_infos": 11,
         "variant_pipelines_made": 9,
         "wakes_completion_waiters": 7,
-        "wakes_spared": 42
+        "wakes_handler_threads": 1,
+        "wakes_spared": 44
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 2
       },
       "composed": {
         "addressable_buffers_made": 2,
@@ -1362,6 +1373,10 @@
         "argument_samplers_taken": 1,
         "device_memory_allocated": 1342177280,
         "pooled_memory_blocks_made": 4
+      },
+      "per_state": {
+        "pipelines": 9,
+        "states": 1
       }
     }
   ],

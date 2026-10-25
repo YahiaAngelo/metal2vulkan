@@ -3689,6 +3689,7 @@
         "argument_samplers_taken": 4,
         "argument_tables_retained": 14,
         "bare_starts": 1,
+        "batches_submitted_by_waiters": 1,
         "batches_with_none_pending": 1,
         "command_buffers_begun": 99,
         "command_buffers_begun_batch_barriers": 42,
@@ -3737,6 +3738,7 @@
         "finales_folded": 1,
         "graphics_pipelines_looked_up": 14,
         "inline_passes": 14,
+        "linked_use_questions_asked": 8,
         "new_buffer_bytes_cleared": 24592,
         "object_churn.buffers_evicted": 21,
         "object_churn.buffers_parked": 31,
@@ -3762,6 +3764,7 @@
         "render_passes_made": 15,
         "scheduled_where_submitted": 1,
         "scheduler_passes": 1,
+        "scheduler_passes_by_waiters": 1,
         "scheduler_sleep_slices": 2,
         "scheduler_sleeps": 3,
         "scheduler_wakes_commit": 1,
@@ -3770,6 +3773,8 @@
         "shader_modules_shared": 5,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
+        "stage_entries_shared": 22,
+        "stage_entries_specialized": 3,
         "stage_tables_read": 56,
         "submit_infos": 1,
         "variant_pipelines_made": 4,
@@ -3811,6 +3816,10 @@
         "addressable_buffers_made": 2,
         "arena_pools_made": 1,
         "pooled_memory_blocks_made": 3
+      },
+      "per_state": {
+        "pipelines": 8,
+        "states": 14
       }
     }
   ],

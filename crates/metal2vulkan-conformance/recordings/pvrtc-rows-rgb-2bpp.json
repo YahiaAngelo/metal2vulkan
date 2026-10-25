@@ -662,6 +662,7 @@
         "addressable_buffers_made": 2,
         "arena_pools_made": 5,
         "bare_starts": 10,
+        "batches_submitted_by_waiters": 10,
         "batches_with_none_pending": 10,
         "block_decode_passes": 22,
         "command_barriers": 36,
@@ -702,10 +703,13 @@
         "object_churn.vk_images_destroyed": 12,
         "object_churn.vk_images_made": 12,
         "owned_descriptor_pools": 22,
+        "owned_kernel_spirv_bytes": 15676,
+        "owned_kernels_made": 1,
         "pooled_memory_blocks_made": 3,
         "queue_submissions": 10,
         "scheduled_where_submitted": 10,
         "scheduler_passes": 10,
+        "scheduler_passes_by_waiters": 10,
         "scheduler_sleeps": 10,
         "scheduler_wakes_commit": 10,
         "slot_returns": 10,
@@ -713,6 +717,9 @@
         "submit_infos": 10,
         "wakes_completion_waiters": 10,
         "wakes_spared": 60
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 8
       },
       "composed": {
         "device_memory_allocated": 201326592

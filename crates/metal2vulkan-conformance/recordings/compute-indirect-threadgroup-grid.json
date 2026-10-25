@@ -327,7 +327,6 @@
         "command_buffers_begun_segments": 1,
         "command_buffers_deferred": 3,
         "command_buffers_replayed": 3,
-        "command_buffers_replayed_inline": 1,
         "command_buffers_submitted": 4,
         "commands_replayed.begin_command_buffer": 3,
         "commands_replayed.cmd_bind_descriptor_sets": 1,
@@ -352,14 +351,17 @@
         "object_churn.vk_buffer_bindings": 2,
         "object_churn.vk_buffers_destroyed": 2,
         "object_churn.vk_buffers_made": 2,
+        "owned_kernel_spirv_bytes": 5604,
+        "owned_kernels_made": 1,
         "pipeline_layouts_made": 2,
         "pooled_memory_blocks_made": 3,
         "queue_submissions": 1,
         "scheduled_where_submitted": 1,
-        "scheduler_passes": 3,
+        "scheduler_passes": 4,
+        "scheduler_passes_by_waiters": 1,
         "scheduler_sleeps": 2,
         "scheduler_wakes_commit": 1,
-        "scheduler_wakes_host": 1,
+        "scheduler_wakes_host": 2,
         "shader_modules_made": 2,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
@@ -380,6 +382,10 @@
         "pooled_memory_blocks_made": 3,
         "shader_modules_made": 2,
         "variant_pipelines_made": 2
+      },
+      "per_state": {
+        "pipelines": 1,
+        "states": 1
       }
     }
   ],

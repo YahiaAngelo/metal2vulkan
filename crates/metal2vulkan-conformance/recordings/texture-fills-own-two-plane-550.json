@@ -129,6 +129,7 @@
         "addressable_buffers_made": 2,
         "arena_pools_made": 5,
         "bare_starts": 13,
+        "batches_submitted_by_waiters": 13,
         "batches_with_none_pending": 13,
         "command_barriers": 26,
         "command_buffers_begun": 26,
@@ -172,6 +173,7 @@
         "queue_submissions": 13,
         "scheduled_where_submitted": 13,
         "scheduler_passes": 13,
+        "scheduler_passes_by_waiters": 13,
         "scheduler_sleeps": 13,
         "scheduler_wakes_commit": 13,
         "slot_returns": 13,
@@ -179,6 +181,9 @@
         "submit_infos": 13,
         "wakes_completion_waiters": 13,
         "wakes_spared": 78
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 12
       },
       "composed": {
         "addressable_buffers_made": 2,

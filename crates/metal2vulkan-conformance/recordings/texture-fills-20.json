@@ -128,6 +128,7 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "bare_starts": 20,
+        "batches_submitted_by_waiters": 20,
         "batches_with_none_pending": 20,
         "command_barriers": 40,
         "command_buffers_begun": 40,
@@ -166,6 +167,7 @@
         "queue_submissions": 20,
         "scheduled_where_submitted": 20,
         "scheduler_passes": 20,
+        "scheduler_passes_by_waiters": 20,
         "scheduler_sleeps": 20,
         "scheduler_wakes_commit": 20,
         "slot_returns": 20,
@@ -173,6 +175,9 @@
         "submit_infos": 20,
         "wakes_completion_waiters": 20,
         "wakes_spared": 120
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 9
       },
       "composed": {
         "addressable_buffers_made": 2,

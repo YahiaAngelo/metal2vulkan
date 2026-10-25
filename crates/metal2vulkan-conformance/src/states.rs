@@ -14,9 +14,9 @@
 //! One number: the denominator of `pipelines made per Metal pipeline state`
 //! ([`crate::cost::PipelinesPerState`]). That ratio is the largest cost this project has against
 //! Metal and the only form of it a gate can hold, because it is a count and so judgeable on a
-//! loaded host. Measured on this M3 Max over all 1,103 cases, in the cases that create a state and
-//! carry a cost record: 1.69 `VkPipeline`s per Metal pipeline state, 37% of the ones made at a
-//! state's creation taken by no command at all.
+//! loaded host. Measured on this M3 Max over all 1,103 cases, in the 639 that create a state and
+//! carry a cost record: 1.519 `VkPipeline`s per Metal pipeline state, and 624 of the 1,439 made at
+//! a state's creation taken by no command at all.
 //!
 //! # The one door, and what keeps it the only one
 //!

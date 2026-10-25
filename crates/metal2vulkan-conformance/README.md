@@ -364,8 +364,8 @@ degraded otherwise.
 
 **The one bound that is a ratio, and why it had to be one.** Our largest unfixed cost against Metal
 is that we make more `VkPipeline`s per Metal pipeline state than we need: measured over all 1,103
-cases, 1.69 each, with 37% of the ones made at a state's creation taken by no command. Nothing held
-it. `variant_pipelines_made` is gated from above and `creation_pipelines_drawn` from below, and both
+cases, 1.519 each in the 639 that create a state, with 624 of the 1,439 made at a state's creation
+taken by no command. Nothing held it. `variant_pipelines_made` is gated from above and `creation_pipelines_drawn` from below, and both
 pass a change that makes one more pipeline per state while the case grows a state, because the
 absolute counts rise for two reasons at once. So `cost::PipelinesPerState` is a bound on the
 quotient, kept as its two counts and judged by cross-multiplication: a case that grows a state reads
@@ -402,11 +402,13 @@ pipeline count was held by nothing on the cases that most needed it. They now re
 taken, 45 / 45 and 32 / 32, and `integer-vertex-attributes` reads 64 / 64 / 64 where its blessed
 ceiling had been 64 / 0 / 128.
 
-**What is still owed is one run.** No recording carries a `per_state` ratio bound yet, because the
-records were written by a binary predating the field, so the ratio is measured and printed per case
-and gates nothing until a whole-set `cost --runs 8 --write` writes it. A bound measured over a
-selection would not do: `judge` refuses any selection but the whole set, which is the shape the gate
-runs in.
+**Every case that creates a Metal pipeline state carries the ratio.** 639 of the 1,103 recordings
+hold a `per_state` bound, measured on this M3 Max over 8 runs of the whole set: 2,665 `VkPipeline`s
+over 1,755 states, 1.519 each, the worst row `swizzled-storage-rgba8unorm` at 11.25. The other 464
+hold none, and for a reason the record states: 453 cases create no pipeline state, so there is no
+denominator, and 11 carry a recorded refusal instead. A bound measured over a selection would not
+do: `judge` refuses any selection but the whole set, which is the shape the gate runs in, so the
+bound is written from a whole-set `cost --runs 8 --write` and nothing smaller.
 
 `cost`'s own per-case wall-clock figure stays **advisory**: it is printed so a reader can see where
 the counts are large, and it is neither recorded nor gated. Timing against Metal is the times half,

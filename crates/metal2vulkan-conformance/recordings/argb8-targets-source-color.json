@@ -497,6 +497,7 @@
         "argument_samplers_taken": 2,
         "argument_tables_retained": 2,
         "bare_starts": 2,
+        "batches_submitted_by_waiters": 2,
         "batches_with_none_pending": 2,
         "command_buffers_begun": 6,
         "command_buffers_begun_batch_barriers": 2,
@@ -546,6 +547,7 @@
         "host_texel_copies": 2,
         "images_started_on_the_host": 2,
         "inline_passes": 2,
+        "linked_use_questions_asked": 4,
         "new_buffer_bytes_cleared": 196624,
         "object_churn.buffers_parked": 4,
         "object_churn.buffers_recycled": 4,
@@ -564,12 +566,14 @@
         "render_passes_made": 2,
         "scheduled_where_submitted": 2,
         "scheduler_passes": 2,
+        "scheduler_passes_by_waiters": 2,
         "scheduler_sleeps": 2,
         "scheduler_wakes_commit": 2,
         "shader_modules_made": 3,
         "shader_modules_shared": 4,
         "slot_returns": 2,
         "spare_command_pools_taken": 4,
+        "stage_entries_shared": 10,
         "stage_tables_read": 8,
         "submit_infos": 2,
         "variant_pipelines_made": 2,
@@ -613,6 +617,10 @@
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 4,
         "shader_modules_made": 3
+      },
+      "per_state": {
+        "pipelines": 4,
+        "states": 2
       }
     }
   ],

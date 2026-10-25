@@ -166,10 +166,13 @@ const FILL: u8 = 0xab;
 /// The threads a group of an axis family's dispatch: 125 lanes are 25 groups of five.
 ///
 /// Nothing a sampler does depends on the group size, and each family's is a **divisor of its lane
-/// count** for one reason: a dispatch whose last group is short is one the runtime splits in two,
-/// which announces `metal2vulkan-degrade-split-dispatch` — a notice about the dispatch and not
-/// about the sampler. Dividing exactly leaves every case here declaring no notice at all, so a
-/// notice from any row reads as divergent at once.
+/// count** for one reason: a grid that is a whole number of threadgroups is one dispatch on every
+/// device, whatever the runtime can do with a ragged one. A ragged grid takes Metal's single
+/// dispatch where the kernel cannot observe its threadgroup partition and the exact split — a
+/// `VkPipeline` and a barrier per region, announcing `metal2vulkan-degrade-split-dispatch` —
+/// otherwise, and that is a notice about the dispatch rather than about the sampler. Dividing
+/// exactly leaves every case here declaring no notice at all, so a notice from any row reads as
+/// divergent at once.
 const AXIS_GROUP: u32 = 5;
 
 /// The threads a group of the mip-filter family's dispatch: 16 lanes are four groups of four.

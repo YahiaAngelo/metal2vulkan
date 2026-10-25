@@ -694,6 +694,10 @@
         "device_memory_allocated": 201326848,
         "pooled_memory_blocks_made": 3,
         "render_passes_made": 1
+      },
+      "per_state": {
+        "pipelines": 2,
+        "states": 1
       }
     }
   ],

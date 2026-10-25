@@ -5259,7 +5259,8 @@
         "command_buffers_begun_secondaries": 882,
         "command_buffers_begun_segments": 294,
         "command_buffers_deferred": 2058,
-        "command_buffers_replayed_inline": 1008,
+        "command_buffers_replayed": 1268,
+        "command_buffers_replayed_inline": 1108,
         "command_buffers_submitted": 1765,
         "commands_replayed.begin_command_buffer": 2058,
         "commands_replayed.cmd_begin_render_pass": 294,
@@ -5301,6 +5302,7 @@
         "finales_apart": 1,
         "graphics_pipelines_looked_up": 294,
         "inline_passes": 262,
+        "linked_use_questions_asked": 2,
         "live_tables_uploaded": 1,
         "new_buffer_bytes_cleared": 87616,
         "object_churn.buffers_evicted": 4,
@@ -5326,14 +5328,18 @@
         "render_passes_begun_instances": 294,
         "render_passes_made": 2,
         "scheduled_where_submitted": 1,
-        "scheduler_passes": 1,
+        "scheduler_passes": 2,
+        "scheduler_passes_by_waiters": 1,
         "scheduler_sleeps": 1,
         "scheduler_wakes_commit": 1,
+        "scheduler_wakes_host": 1,
         "set_zero_sets_found": 292,
         "shader_modules_made": 3,
         "shader_modules_shared": 1,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
+        "stage_entries_shared": 5,
+        "stage_entries_specialized": 2,
         "stage_tables_read": 1176,
         "submit_infos": 2,
         "variant_pipelines_made": 2,
@@ -5380,6 +5386,10 @@
         "render_passes_begun_inline": 250,
         "render_passes_begun_instances": 59,
         "render_passes_made": 2
+      },
+      "per_state": {
+        "pipelines": 3,
+        "states": 1
       }
     }
   ],

@@ -454,6 +454,8 @@
         "pipeline_layouts_made": 1,
         "pipeline_layouts_shared": 16,
         "pooled_memory_blocks_made": 3,
+        "scheduler_sleep_slices": 2,
+        "scheduler_sleeps": 2,
         "shader_modules_made": 16
       },
       "composed": {
@@ -463,6 +465,10 @@
         "addressable_buffers_made": 2,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3
+      },
+      "per_state": {
+        "pipelines": 0,
+        "states": 16
       }
     }
   ],

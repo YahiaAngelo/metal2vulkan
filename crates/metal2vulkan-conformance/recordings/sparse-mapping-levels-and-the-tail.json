@@ -456,6 +456,7 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "bare_starts": 8,
+        "batches_submitted_by_waiters": 8,
         "batches_with_none_pending": 8,
         "command_buffers_begun": 17,
         "command_buffers_begun_batch_barriers": 8,
@@ -478,6 +479,7 @@
         "queue_submissions": 8,
         "scheduled_where_submitted": 8,
         "scheduler_passes": 8,
+        "scheduler_passes_by_waiters": 8,
         "scheduler_sleeps": 8,
         "scheduler_wakes_commit": 8,
         "slot_returns": 8,
@@ -485,6 +487,9 @@
         "submit_infos": 16,
         "wakes_completion_waiters": 8,
         "wakes_spared": 48
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 7
       },
       "composed": {
         "device_memory_allocated": 201326592

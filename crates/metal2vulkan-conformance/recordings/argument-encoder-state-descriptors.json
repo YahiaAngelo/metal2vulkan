@@ -489,6 +489,10 @@
         "pooled_memory_blocks_made": 4,
         "shader_modules_made": 1,
         "variant_pipelines_made": 1
+      },
+      "per_state": {
+        "pipelines": 0,
+        "states": 1
       }
     }
   ],

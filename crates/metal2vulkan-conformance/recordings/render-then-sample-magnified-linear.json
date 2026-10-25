@@ -491,6 +491,7 @@
         "argument_samplers_taken": 2,
         "argument_tables_retained": 2,
         "bare_starts": 1,
+        "batches_submitted_by_waiters": 1,
         "batches_with_none_pending": 1,
         "bind_views_worked_out": 1,
         "bound_notices_made": 1,
@@ -558,6 +559,7 @@
         "render_passes_made": 2,
         "scheduled_where_submitted": 1,
         "scheduler_passes": 1,
+        "scheduler_passes_by_waiters": 1,
         "scheduler_sleeps": 1,
         "scheduler_wakes_commit": 1,
         "set_zero_sets_reused": 4,
@@ -571,6 +573,9 @@
         "variants_taken_back": 2,
         "wakes_completion_waiters": 1,
         "wakes_spared": 6
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 0
       },
       "composed": {
         "command_buffers_deferred": 0,
@@ -613,6 +618,10 @@
         "pooled_memory_blocks_made": 3,
         "shader_modules_made": 4,
         "variant_pipelines_made": 2
+      },
+      "per_state": {
+        "pipelines": 0,
+        "states": 2
       }
     }
   ],

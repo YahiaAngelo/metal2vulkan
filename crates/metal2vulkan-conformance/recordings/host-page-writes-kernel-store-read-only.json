@@ -379,6 +379,7 @@
         "argument_objects_retained": 2,
         "argument_tables_retained": 1,
         "bare_starts": 2,
+        "batches_submitted_by_waiters": 1,
         "batches_with_none_pending": 2,
         "command_buffers_begun": 7,
         "command_buffers_begun_batch_barriers": 2,
@@ -387,7 +388,7 @@
         "command_buffers_begun_segments": 1,
         "command_buffers_deferred": 5,
         "command_buffers_replayed": 4,
-        "command_buffers_replayed_inline": 2,
+        "command_buffers_replayed_inline": 1,
         "command_buffers_submitted": 7,
         "commands_replayed.begin_command_buffer": 5,
         "commands_replayed.cmd_bind_descriptor_sets": 1,
@@ -425,10 +426,11 @@
         "replay_log_bytes": 320,
         "replay_logs_kept": 3,
         "scheduled_where_submitted": 2,
-        "scheduler_passes": 4,
+        "scheduler_passes": 5,
+        "scheduler_passes_by_waiters": 2,
         "scheduler_sleeps": 3,
         "scheduler_wakes_commit": 2,
-        "scheduler_wakes_host": 1,
+        "scheduler_wakes_host": 2,
         "shader_modules_made": 1,
         "slot_returns": 2,
         "spare_command_pools_taken": 4,
@@ -436,7 +438,7 @@
         "variant_pipelines_made": 2,
         "variants_taken_back": 1,
         "wakes_completion_waiters": 2,
-        "wakes_spared": 12
+        "wakes_spared": 13
       },
       "composed": {
         "device_memory_allocated": 201326592
@@ -449,6 +451,10 @@
         "pooled_memory_blocks_made": 3,
         "shader_modules_made": 1,
         "variant_pipelines_made": 2
+      },
+      "per_state": {
+        "pipelines": 1,
+        "states": 1
       }
     }
   ],

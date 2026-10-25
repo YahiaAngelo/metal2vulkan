@@ -196,8 +196,8 @@ fn a_dispatch_waits_for_no_making_and_its_queue_completes_in_order() {
     );
     assert_eq!(
         device.work_counts().dispatch_pipelines_pooled,
-        pooled + 2,
-        "the interior's and the edge's makings wait in the pool"
+        pooled + 1,
+        "the flat plan's one making waits in the pool"
     );
     let after = fill(&device, &a);
     let order = Arc::new(Mutex::new(Vec::new()));

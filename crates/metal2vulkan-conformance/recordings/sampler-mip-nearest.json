@@ -1043,6 +1043,7 @@
         "argument_objects_retained": 32,
         "argument_tables_retained": 8,
         "bare_starts": 8,
+        "batches_submitted_by_waiters": 8,
         "batches_with_none_pending": 8,
         "bound_notices_made": 1,
         "command_buffers_begun": 12,
@@ -1073,12 +1074,12 @@
         "host_texel_copies": 3,
         "images_started_on_the_host": 1,
         "new_buffer_bytes_cleared": 4224,
-        "object_churn.buffers_evicted": 3,
+        "object_churn.buffers_evicted": 4,
         "object_churn.buffers_parked": 9,
         "object_churn.buffers_recycled": 9,
         "object_churn.images_own_memory": 1,
         "object_churn.textures_image": 1,
-        "object_churn.vk_buffers_destroyed": 3,
+        "object_churn.vk_buffers_destroyed": 4,
         "object_churn.vk_image_bindings": 1,
         "object_churn.vk_image_views_made": 1,
         "object_churn.vk_images_destroyed": 1,
@@ -1089,6 +1090,7 @@
         "sampler_sets_made": 1,
         "scheduled_where_submitted": 8,
         "scheduler_passes": 8,
+        "scheduler_passes_by_waiters": 8,
         "scheduler_sleeps": 8,
         "scheduler_wakes_commit": 8,
         "shader_modules_made": 1,
@@ -1099,6 +1101,9 @@
         "variants_taken_back": 1,
         "wakes_completion_waiters": 8,
         "wakes_spared": 48
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 7
       },
       "composed": {
         "command_buffers_begun": 12,
@@ -1129,6 +1134,10 @@
         "pooled_memory_blocks_made": 4,
         "shader_modules_made": 1,
         "variant_pipelines_made": 2
+      },
+      "per_state": {
+        "pipelines": 0,
+        "states": 1
       }
     }
   ],

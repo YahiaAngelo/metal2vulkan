@@ -787,17 +787,18 @@
         "pooled_memory_blocks_made": 3,
         "queue_submissions": 5,
         "scheduled_where_submitted": 5,
-        "scheduler_passes": 15,
-        "scheduler_sleeps": 10,
+        "scheduler_passes": 17,
+        "scheduler_passes_by_waiters": 5,
+        "scheduler_sleeps": 12,
         "scheduler_wakes_commit": 5,
-        "scheduler_wakes_host": 5,
+        "scheduler_wakes_host": 10,
         "shader_modules_made": 1,
         "slot_returns": 5,
         "spare_command_pools_taken": 10,
         "submit_infos": 10,
         "variant_pipelines_made": 6,
         "wakes_completion_waiters": 5,
-        "wakes_spared": 30
+        "wakes_spared": 31
       },
       "composed": {
         "command_buffers_begun": 21,
@@ -815,6 +816,10 @@
       "ceilings": {
         "addressable_buffers_made": 1,
         "pooled_memory_blocks_made": 3
+      },
+      "per_state": {
+        "pipelines": 7,
+        "states": 1
       }
     }
   ],

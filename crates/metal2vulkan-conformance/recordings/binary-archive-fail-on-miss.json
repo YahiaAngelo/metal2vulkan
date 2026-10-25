@@ -522,6 +522,7 @@
         "creation_pipelines_made": 4,
         "device_memory_allocated": 201326848,
         "driver_diagnostics_withheld": 2,
+        "linked_use_questions_asked": 2,
         "pipeline_layouts_made": 3,
         "pipeline_layouts_shared": 1,
         "pooled_memory_blocks_made": 3,
@@ -531,6 +532,7 @@
         "scheduler_sleeps": 1,
         "shader_modules_made": 4,
         "shader_modules_shared": 2,
+        "stage_entries_shared": 5,
         "variant_pipelines_made": 4,
         "variants_taken_back": 13
       },
@@ -546,6 +548,10 @@
         "pooled_memory_blocks_made": 3,
         "shader_modules_made": 4,
         "variant_pipelines_made": 4
+      },
+      "per_state": {
+        "pipelines": 4,
+        "states": 19
       }
     }
   ],

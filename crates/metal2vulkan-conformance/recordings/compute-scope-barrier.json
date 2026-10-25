@@ -452,16 +452,17 @@
         "queue_submissions": 1,
         "scheduled_where_submitted": 1,
         "scheduler_passes": 4,
+        "scheduler_passes_by_waiters": 1,
         "scheduler_sleeps": 3,
         "scheduler_wakes_commit": 1,
-        "scheduler_wakes_host": 2,
+        "scheduler_wakes_host": 3,
         "shader_modules_made": 1,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
         "submit_infos": 2,
         "variant_pipelines_made": 3,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 6
+        "wakes_spared": 7
       },
       "composed": {
         "device_memory_allocated": 201326592
@@ -470,6 +471,10 @@
         "addressable_buffers_made": 2,
         "arena_pools_made": 1,
         "pooled_memory_blocks_made": 3
+      },
+      "per_state": {
+        "pipelines": 4,
+        "states": 1
       }
     }
   ],

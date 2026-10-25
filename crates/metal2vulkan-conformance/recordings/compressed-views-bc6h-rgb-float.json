@@ -982,13 +982,14 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "bare_starts": 30,
+        "batches_submitted_by_waiters": 30,
         "batches_with_none_pending": 30,
-        "command_buffers_begun": 45,
-        "command_buffers_begun_batch_work": 15,
+        "command_buffers_begun": 40,
+        "command_buffers_begun_batch_work": 10,
         "command_buffers_begun_encoders": 30,
         "command_buffers_deferred": 30,
         "command_buffers_replayed_inline": 30,
-        "command_buffers_submitted": 45,
+        "command_buffers_submitted": 40,
         "commands_replayed.begin_command_buffer": 30,
         "commands_replayed.cmd_copy_buffer_to_image": 11,
         "commands_replayed.cmd_copy_image_to_buffer": 136,
@@ -1014,6 +1015,7 @@
         "queue_submissions": 30,
         "scheduled_where_submitted": 30,
         "scheduler_passes": 30,
+        "scheduler_passes_by_waiters": 30,
         "scheduler_sleeps": 30,
         "scheduler_wakes_commit": 30,
         "slot_returns": 30,
@@ -1021,6 +1023,9 @@
         "submit_infos": 30,
         "wakes_completion_waiters": 30,
         "wakes_spared": 180
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 10
       },
       "composed": {
         "device_memory_allocated": 201326592,
