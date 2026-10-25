@@ -35,7 +35,7 @@ use super::degrade_notices::{assert_made_once, made_once, on_device as on_device
 use super::host_memory::{gpu_read, host_page, no_copy, not_importable, on_device, recording};
 use super::host_memory::{Mapping, Seen};
 use super::no_copy_heaps::{no_copy_heap, shared, HEAP};
-use super::predication::kernel;
+use super::predication::{kernel, EQUAL, NOT_EQUAL};
 use super::rebinds::{rebind, rebind_heap};
 use super::resource_ids::DELAYED_DEALLOCATORS;
 use super::shared_kinds;
@@ -670,15 +670,20 @@ fn an_encoder_with_a_call_refused_at_its_encoding_is_encoded_again_with_it_refus
     });
 }
 
-/// What a rebind cannot encode again keeps the gap: a compute encoder of a command buffer that
-/// used command predication whose unit held another encoder keeps no log (`replay.rs`), so its
-/// dispatch counting into the member, before the unit's next encoder's empty If block, keeps its
-/// first recording, which named the old pages: its submission runs nothing, the command buffer
-/// fails `EncodedUseRebound`, announced once, the notice naming why, and its signal fires. The blit
-/// encoder before it, which copies the member, is encoded again, and its own submission copies the
-/// new pages, as Metal's does.
+/// A unit of command predication a rebind encodes again: an encoder of one keeps its log, its
+/// Ifs, Elses and Ends among its calls, where its unit laid no loop and left no work out and, of
+/// its unit's predication, nothing reached in over its open and nothing of its own reaches out
+/// over its end (`Predication::alone`). A plain compute encoder that dispatches `prd_mark` into
+/// the member's word 0, and next in its unit a predicated one whose failing If holds a dispatch
+/// into its word 1, both naming the member rebound after the commit: the plain encoder laid no
+/// step of the unit, and the predicated one laid the unit's first step and the unit ended with
+/// it, so both are encoded again, their dispatches reach the new pages, the held dispatch runs
+/// nothing and the command buffer completes with no error, its signal fired. Both once failed
+/// `EncodedUseRebound` for sharing one unit. The blit encoder before them, its own submission
+/// (`checks::metal_submissions`: consecutive compute encoders share one), copies the new pages
+/// too.
 #[test]
-fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
+fn a_unit_s_plain_encoder_before_its_predicated_one_is_encoded_again() {
     on_device_noticed(|device, messages| {
         let queue = device.new_command_queue().unwrap();
         let Some((member, _)) = member_over(device, A) else {
@@ -689,6 +694,7 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
         let mark = kernel(device, "prd_mark", false);
         let event = device.new_shared_event().unwrap();
         let done = device.new_shared_event().unwrap();
+        let one = Size::new(1, 1, 1);
         let command_buffer = queue.command_buffer().unwrap();
         command_buffer
             .encode_wait_for_event(EventRef::from(&event), 1)
@@ -697,16 +703,120 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
         blit.copy_from_buffer_to_buffer(&member, 0, &copied, 0, 16)
             .unwrap();
         blit.end_encoding().unwrap();
+        // The unit's first encoder, which lays no step of it: its dispatch runs ungated.
         let mut compute = command_buffer.compute_command_encoder().unwrap();
         compute.set_compute_pipeline_state(&mark).unwrap();
         compute.set_bytes(&0u32.to_le_bytes(), 0).unwrap();
         compute.set_buffer(Some(&member), 0, 1).unwrap();
-        let one = Size::new(1, 1, 1);
         compute.dispatch_threads(one, one).unwrap();
         compute.end_encoding().unwrap();
+        // The unit's last encoder, which lays its every step: `0 != 0` fails, so its block runs
+        // nothing.
         let mut compute = command_buffer.compute_command_encoder().unwrap();
-        compute.encode_start_if(Some(&word), 0, 0, 0).unwrap();
+        compute.set_compute_pipeline_state(&mark).unwrap();
+        compute.set_bytes(&1u32.to_le_bytes(), 0).unwrap();
+        compute.set_buffer(Some(&member), 0, 1).unwrap();
+        compute
+            .encode_start_if(Some(&word), 0, NOT_EQUAL, 0)
+            .unwrap();
+        compute.dispatch_threads(one, one).unwrap();
         assert!(compute.encode_end_if().unwrap());
+        compute.end_encoding().unwrap();
+        command_buffer
+            .encode_signal_event(EventRef::from(&done), 1)
+            .unwrap();
+        command_buffer.commit().unwrap();
+        let before = device.work_counts();
+        drop(rebind_to(&member, B));
+        event.set_signaled_value(1);
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.error(), None);
+        assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+        let mut marked = node(B);
+        marked[..4].copy_from_slice(&1u32.to_le_bytes());
+        assert_eq!(
+            read_buffer(&member, 0, 16).unwrap(),
+            marked,
+            "the ungated dispatch ran over the new pages, and the held one ran nothing"
+        );
+        assert_eq!(
+            read_buffer(&copied, 0, 16).unwrap(),
+            node(B),
+            "the blit's copy of the new pages"
+        );
+        assert_eq!(done.signaled_value(), 1, "its signal");
+        let notices = assert_made_once(messages, &[], &shared_kinds(device));
+        assert!(!notices.contains_key(&Degradation::EncodedUseRebound));
+        let after = device.work_counts();
+        // The blit encoder and the unit's two, each naming the member.
+        assert_eq!(after.encoders_reencoded, before.encoders_reencoded + 3);
+        assert_eq!(after.reencodes_refused, before.reencodes_refused);
+        eprintln!(
+            "REBIND-REACH {}: a unit's plain encoder before its predicated one, both encoded \
+             again",
+            device.name()
+        );
+    });
+}
+
+/// What a rebind cannot encode again keeps the gap: a unit of command predication whose first
+/// step lies in an earlier encoder than its last keeps no log from that encoder on
+/// (`Predication::alone`). The commands of the unit's later encoders run from gates the step
+/// before them writes, which lie in that encoder's recording; an encoding again lays steps and
+/// gates of its own, leaving those written by nothing -- a gate holds the group counts only
+/// where its step writes them -- so such a command would run nothing where Metal runs it.
+/// Encoding a run of a unit's encoders again together, which that shape needs, is not done.
+///
+/// The unit's first encoder dispatches `prd_mark` into the member rebound after the commit and
+/// then opens and closes an If, so the member is named by a dispatch before the unit's first
+/// record, which runs ungated; next in its unit a plain encoder dispatches into a buffer of its
+/// own, from a gate that first encoder's step writes. The first encoder laid the unit's first
+/// step and the unit went on past it, so it keeps no log and keeps its first recording, which
+/// named the old pages: its submission (the unit's two encoders) runs nothing, the member keeps
+/// the new pages' node, the command buffer fails `EncodedUseRebound`, announced once, the notice
+/// naming the encoder and why, and its signal fires. The blit encoder before it, which copies
+/// the member, is encoded again, and its own submission
+/// (`checks::metal_submissions`: consecutive compute encoders share one) copies the new pages.
+#[test]
+fn a_unit_s_encoder_that_laid_its_first_step_fails_encoded_use_rebound() {
+    on_device_noticed(|device, messages| {
+        let queue = device.new_command_queue().unwrap();
+        let Some((member, _)) = member_over(device, A) else {
+            return;
+        };
+        let copied = buffer_with(device, &[0x5a; 16]).unwrap();
+        let word = buffer_with(device, &[0; 4]).unwrap();
+        // The later encoder's own log, over no host pages: its gated dispatch names nothing the
+        // rebind moves.
+        let log = buffer_with(device, &[0; 16]).unwrap();
+        let mark = kernel(device, "prd_mark", false);
+        let event = device.new_shared_event().unwrap();
+        let done = device.new_shared_event().unwrap();
+        let one = Size::new(1, 1, 1);
+        let command_buffer = queue.command_buffer().unwrap();
+        command_buffer
+            .encode_wait_for_event(EventRef::from(&event), 1)
+            .unwrap();
+        let mut blit = command_buffer.blit_command_encoder().unwrap();
+        blit.copy_from_buffer_to_buffer(&member, 0, &copied, 0, 16)
+            .unwrap();
+        blit.end_encoding().unwrap();
+        // The unit's first encoder: its dispatch comes before the unit's first record, so it
+        // runs ungated, and its empty If lays that first step.
+        let mut compute = command_buffer.compute_command_encoder().unwrap();
+        compute.set_compute_pipeline_state(&mark).unwrap();
+        compute.set_bytes(&0u32.to_le_bytes(), 0).unwrap();
+        compute.set_buffer(Some(&member), 0, 1).unwrap();
+        compute.dispatch_threads(one, one).unwrap();
+        compute.encode_start_if(Some(&word), 0, EQUAL, 0).unwrap();
+        assert!(compute.encode_end_if().unwrap());
+        compute.end_encoding().unwrap();
+        // Next in the unit, after that step: its dispatch runs from a gate the step writes.
+        let mut compute = command_buffer.compute_command_encoder().unwrap();
+        compute.set_compute_pipeline_state(&mark).unwrap();
+        compute.set_bytes(&0u32.to_le_bytes(), 0).unwrap();
+        compute.set_buffer(Some(&log), 0, 1).unwrap();
+        compute.dispatch_threads(one, one).unwrap();
         compute.end_encoding().unwrap();
         command_buffer
             .encode_signal_event(EventRef::from(&done), 1)
@@ -729,7 +839,12 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
         assert_eq!(
             read_buffer(&member, 0, 16).unwrap(),
             node(B),
-            "the dispatch ran nothing"
+            "the unit's dispatches ran nothing"
+        );
+        assert_eq!(
+            read_buffer(&log, 0, 16).unwrap(),
+            vec![0; 16],
+            "the gated dispatch of the unit's later encoder ran nothing"
         );
         assert_eq!(done.signaled_value(), 1, "its signal");
         let notices = made_once(messages, &REBOUND_USES, &shared_kinds(device));
@@ -740,8 +855,9 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
             .find(|notice| notice.degradation == Degradation::EncodedUseRebound)
             .map(|notice| notice.reason.clone());
         let found = "(found in its compute encoder 1: a command of its own named it, not encoded \
-                     again as its unit of command predication held other encoders, a loop or \
-                     work left out";
+                     again as its unit of command predication laid a step before it opened, or \
+                     one of its own that the unit's later encoders read, or a loop, or left work \
+                     out";
         assert!(
             reason
                 .as_deref()

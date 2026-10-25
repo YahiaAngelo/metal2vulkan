@@ -18,9 +18,10 @@ pub(crate) enum Unlogged {
     Segments,
     /// The command buffer's failure fails it, or a fault of its own, as it commits.
     Fails,
-    /// A compute encoder of a command buffer that used command predication whose unit held other
-    /// encoders, a loop or work left out (`Predication::alone`): a command encoded again after
-    /// the commit would run outside its block.
+    /// A compute encoder of a command buffer that used command predication whose unit laid a
+    /// step before it opened, or one of its own that the unit's later encoders read, or a loop,
+    /// or left work out (`Predication::alone`): a command encoded again after the commit would
+    /// run outside its block, or leave a command of the unit's reading a gate nothing writes.
     Predicated,
 }
 
@@ -71,7 +72,8 @@ impl fmt::Display for Unlogged {
             Unlogged::Segments => "it left work for later an encoding again does not record",
             Unlogged::Fails => "its command buffer fails it as it commits",
             Unlogged::Predicated => {
-                "its unit of command predication held other encoders, a loop or work left out"
+                "its unit of command predication laid a step before it opened, or one of its \
+                 own that the unit's later encoders read, or a loop, or left work out"
             }
         })
     }

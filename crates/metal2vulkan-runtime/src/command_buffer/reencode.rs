@@ -39,8 +39,9 @@
 //!   commands, `gpu_execute::Rerecord`, or as a route outgrew it, `DeferredPass::outgrown`)
 //!   keeps that step's recording.
 //! - **What cannot be encoded again stays as before.** An encoder whose log is gone (a compute
-//!   encoder of a command buffer that used command predication whose unit held other encoders, a
-//!   loop or work left out; one failed at the commit) or whose second
+//!   encoder of a command buffer that used command predication whose unit laid a step before it
+//!   opened, or one of its own that the unit's later encoders read, or a loop, or left work out;
+//!   one failed at the commit) or whose second
 //!   encoding is refused or records otherwise (`EncoderCore::finish_replay`), its work among
 //!   them where it no longer runs on the GPU alone, keeps its first recording, which the first
 //!   submission finds rebound: `CommandBufferError::EncodedUseRebound`, as before. So does work
@@ -128,8 +129,9 @@ impl CommandBufferShared {
         // The encoders encoded again, whose segments the encoding again recorded.
         let mut spliced = Vec::new();
         for (at, replay) in moved {
-            // A compute encoder of a command buffer that used command predication, its unit
-            // alone, encodes again in its unit begun anew (`Predication::replaying`).
+            // A compute encoder of a command buffer that used command predication, which
+            // encodes again exactly, does so in its unit begun anew
+            // (`Predication::replaying`).
             let residency = {
                 let mut state = lock(&self.state);
                 state.replaying_predication = match state.predicated {
@@ -447,8 +449,9 @@ impl State {
 
     /// As it commits: the logs of encoders no rebind encodes again go, for the caller to let go
     /// of without this lock: where an encoder used command predication, those of the compute
-    /// encoders that shared their unit, or laid a loop or left work out (`Predication::alone`: a
-    /// command of theirs encoded again after the commit would run outside its block); and those of
+    /// encoders their unit of predication reaches past, or that laid a loop or left work out
+    /// (`Predication::alone`: a command of theirs encoded again after the commit would run
+    /// outside its block, or leave a command of their unit's reading a gate nothing writes); and those of
     /// encoders the commit's failure fails (they run nothing). The keys of buffers over host pages
     /// the encoders whose logs stay named, and the work its commit recorded on the GPU alone,
     /// sorted, each once, and the identities of the rasterization-rate maps its encoders' passes

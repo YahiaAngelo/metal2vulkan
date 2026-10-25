@@ -1418,8 +1418,9 @@ degradations! {
         /// resolved buffer) that was rebound (`rebind_bytes_no_copy`) after the command was
         /// encoded and before the command buffer was first submitted
         /// (`CommandBufferError::EncodedUseRebound`, `command_buffer/first_submission.rs`), in an
-        /// encoder the rebind could not encode again (a command predication's compute encoder
-        /// that shares its unit of predication with other encoders, holds a loop or leaves work
+        /// encoder the rebind could not encode again (a compute encoder its unit of command
+        /// predication reaches past: one whose unit laid a step before it opened, or one of its
+        /// own that the unit's later encoders read, or whose unit holds a loop or leaves work
         /// out; a render pass a host step records, or whose end captured its draws' tile reach; work
         /// recorded on the GPU alone that no longer runs there; a call that answers otherwise than
         /// at its encoding; `replay.rs`). Its reason names where the first such submission found

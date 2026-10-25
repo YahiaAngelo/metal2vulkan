@@ -105,14 +105,14 @@ const LOG_WORDS: usize = 128;
 
 /// Metal's comparison code `==` (0 `==`, 1 `!=`, 2 `>`, 3 `>=`, 4 `<`, 5 `<=`, and `==` for any
 /// other code).
-const EQUAL: u64 = 0;
+pub(super) const EQUAL: u64 = 0;
 
 /// An offset past the end of a stream's condition words: Metal reads no word there for an
 /// `encodeEndDoWhile:...` that closes no live DoWhile.
 pub(crate) const PAST: u64 = 0x3f00;
 
 /// Metal's comparison codes `!=` and `<`.
-const NOT_EQUAL: u64 = 1;
+pub(super) const NOT_EQUAL: u64 = 1;
 const LESS: u64 = 4;
 
 /// The state of kernel `name` on `device`, made for indirect command buffers where `indirect`.

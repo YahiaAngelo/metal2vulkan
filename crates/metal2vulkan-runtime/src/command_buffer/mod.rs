@@ -728,11 +728,12 @@ pub(super) struct State {
     storage_form: Option<Arc<Riding>>,
     /// Its units of command predication (`predication.rs`).
     pub(super) predication: Predication,
-    /// The predication of an encoder a rebind encodes again now, which was its unit alone
+    /// The predication of an encoder a rebind encodes again now, which encodes again exactly
     /// (`Predication::replaying`, `reencode.rs`): its records and dispatches step and gate there.
     pub(super) replaying_predication: Option<Predication>,
     /// An encoder of it used command predication: its commit lets go of the logs of its compute
-    /// encoders that shared their unit, or laid a loop or left work out (`State::keep_replays`).
+    /// encoders their unit of predication reaches past, or that laid a loop or left work out
+    /// (`State::keep_replays`).
     pub(super) predicated: bool,
     /// The device's trail mark as it completed (`trails.rs`): its waiters return once no trail
     /// numbered below is open. 0 before, which waits for none.

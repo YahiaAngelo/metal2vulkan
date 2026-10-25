@@ -25,11 +25,13 @@
 //!   the encoding again records at once on the GPU alone, as its commit did, or refuses where it
 //!   no longer runs there (`EncoderCore::finish_replay`); and it fails nothing as it commits. A
 //!   compute encoder of a command buffer that used command predication keeps its log, its Ifs,
-//!   Elses and Ends among its calls, where it was its unit of predication alone and laid no loop
-//!   and left no work out (`Predication::alone`): encoded again, it steps and gates in its unit
-//!   begun anew, as it did (`Predication::replaying`). Any other compute encoder of such a
-//!   command buffer keeps none (a command of it encoded again after the commit would run outside
-//!   its block): it fails `CommandBufferError::EncodedUseRebound` at a rebind as before, as does
+//!   Elses and Ends among its calls, where its unit laid no loop and left no work out and, of its
+//!   unit's predication, nothing reached in over its open and nothing of its own reaches out over
+//!   its end (`Predication::alone`): encoded again, it steps and gates in its unit begun anew, as
+//!   it did (`Predication::replaying`). Any other compute encoder of such a command buffer keeps
+//!   none (a command of it encoded again after the commit would run outside its block, or leave a
+//!   command of its unit's reading a gate nothing writes): it fails
+//!   `CommandBufferError::EncodedUseRebound` at a rebind as before, as does
 //!   any other encoder (a resource state or acceleration structure encoder's), which logs
 //!   nothing. (Changed:) a
 //!   render encoder logs as these do, with its pass's descriptor (`render/replay.rs`).

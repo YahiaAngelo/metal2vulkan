@@ -133,13 +133,18 @@
 //!   run again records it again where it lies, as its first run did. A dispatch inside a laying
 //!   whose pipelines are being made waits for them, so the laying is not split for it.
 //! - **Encoded again at a rebind** (`command_buffer/reencode.rs`), as Metal resolves what a
-//!   command names as it submits the command buffer: a compute encoder that was its unit alone,
-//!   laid no loop and left no work out logs its Ifs, Elses and Ends among its calls
-//!   (`replay.rs`), and is encoded again in its unit begun anew as it opened
-//!   ([`Predication::replaying`]: the next record's index and the run of compute encoders as
-//!   they were), over a counter, steps, gates and a check word of its own; the first encoding's
-//!   go unsubmitted with its recording. Any other compute encoder of a command buffer that used
-//!   predication keeps no log, and a loop's record ends the log.
+//!   command names as it submits the command buffer: a compute encoder whose unit laid no loop
+//!   and left no work out, and of whose unit's predication nothing reached in over its open and
+//!   nothing of its own reaches out over its end ([`Predication::alone`]), logs its Ifs, Elses
+//!   and Ends among its calls (`replay.rs`), and is encoded again in its unit begun anew as it
+//!   opened ([`Predication::replaying`]: the next record's index and the run of compute encoders
+//!   as they were), over a counter, steps, gates and a check word of its own; the first
+//!   encoding's go unsubmitted with its recording. So an encoder of a unit that recorded no
+//!   predication at all, every encoder of a unit before the one that laid its first step, and
+//!   that one where its unit ended with it. Any other compute encoder of a command buffer that
+//!   used predication keeps no log — the commands of a unit's encoders after its first step run
+//!   from gates that step's encoder's recording writes, which an encoding again replaces — and a
+//!   loop's record ends the log.
 
 use super::buffer::Buffer;
 use super::command_buffer::rerun::{LoopCheck, Piece};
@@ -198,8 +203,9 @@ pub(super) struct Predication {
     left_out: Option<usize>,
     /// What each compute encoder found as it opened, in order ([`Opened`]).
     opened: Vec<Opened>,
-    /// The places among the command buffer's ended encoders of the compute encoders whose unit
-    /// they were alone, which laid no loop and left nothing out: a rebind may encode one again
+    /// The places among the command buffer's ended encoders of the compute encoders that encode
+    /// again, in their unit begun anew, exactly what they first encoded
+    /// ([`alone`](Self::alone)): a rebind may encode one again
     /// ([`replaying`](Self::replaying)).
     alone: Vec<usize>,
 }
@@ -479,6 +485,11 @@ struct Unit {
     looped: bool,
     /// An unbalanced record left out what its encoders recorded before it.
     left: bool,
+    /// The places among the command buffer's ended encoders of its compute encoders that opened
+    /// with no step of its laid ([`Unit::fresh`]), in order: its first encoder's, and each
+    /// later one's until one laid a step, so a prefix of its encoders
+    /// ([`alone`](Predication::alone)).
+    opened_fresh: Vec<usize>,
 }
 
 /// The range of a unit an unbalanced record drops (the module docs): from the anchor to the next
@@ -562,7 +573,36 @@ impl Unit {
             carried: Vec::new(),
             looped: false,
             left: false,
+            opened_fresh: vec![place],
         }
+    }
+
+    /// Whether no step of its has been laid: its skip counter is made with its first step
+    /// ([`Predication::step_holding`]), and every other field a record leaves — its open blocks,
+    /// its kill, its run, its droppable range's anchor and held steps, its check word and its
+    /// carried loop bodies — is set only through one, which the assertion below holds it to. Its
+    /// range's `work` alone is not: a dispatch Metal emitted sets it, and it is read only where
+    /// an unbalanced record with no anchor sets [`left`](Unit::left), which
+    /// [`alone`](Predication::alone) excludes ([`unbalanced`](Predication::unbalanced) sets the
+    /// two together, and [`resume`](Predication::resume) asserts it).
+    fn fresh(&self) -> bool {
+        let fresh = self.counter.is_none();
+        // What `alone` rests on: a unit with no step laid carries nothing a unit begun anew
+        // would not hold, so an encoder that opened on one encodes again exactly.
+        debug_assert!(
+            !fresh
+                || (self.stack.is_empty()
+                    && !self.dead
+                    && self.run.is_none()
+                    && self.range.anchor.is_none()
+                    && self.range.since.is_empty()
+                    && !self.range.dropping
+                    && self.check.is_none()
+                    && self.carried.is_empty()
+                    && !self.looped),
+            "a unit of predication with no step laid carries predication state"
+        );
+        fresh
     }
 
     /// Kill the outermost open block (the module docs), once.
@@ -632,6 +672,9 @@ impl Predication {
                 && unit.events == events
                 && unit.dispatch_type == dispatch_type
             {
+                if unit.fresh() {
+                    unit.opened_fresh.push(place);
+                }
                 unit.place = place;
                 return std::mem::take(&mut unit.carried);
             }
@@ -649,13 +692,28 @@ impl Predication {
     }
 
     /// The current unit ends: one with a live block open keeps its check word for the completion,
-    /// with the index of the record that opened its outermost open block.
+    /// with the index of the record that opened its outermost open block. Its encoders that a
+    /// rebind may encode again alone are noted ([`alone`](Self::alone)).
     fn end_unit(&mut self) {
         // A loop open where its unit ends is closed by no End: its laying is checked by none.
         self.laying = None;
         if let Some(unit) = self.unit.take() {
-            if unit.first == unit.place && !unit.looped && !unit.left {
-                self.alone.push(unit.first);
+            if !unit.looped && !unit.left {
+                // Each encoder that opened with no step of the unit laid and laid none itself:
+                // the unit was never gated while it was open, so no command of its reads a gate
+                // and it leaves no step for a later encoder of the unit to read. Those are
+                // every one of `opened_fresh` but its last where the unit laid a step, and every
+                // one where it laid none.
+                let stepped = !unit.fresh();
+                // Where the unit laid a step, the last of `opened_fresh` is the encoder that
+                // laid its first: that one gates the commands of the unit's later encoders, so
+                // it encodes again alone only where the unit ended with it.
+                let first_step_at = unit.opened_fresh.len().saturating_sub(1);
+                for (at, &place) in unit.opened_fresh.iter().enumerate() {
+                    if !stepped || at < first_step_at || place == unit.place {
+                        self.alone.push(place);
+                    }
+                }
             }
             if let (true, Some(check), Some(outermost)) =
                 (unit.live_open(), unit.check, unit.stack.first())
@@ -685,15 +743,37 @@ impl Predication {
         self.records += 1;
     }
 
-    /// Whether the compute encoder at `place` among the command buffer's ended encoders was its
-    /// unit alone, laying no loop and leaving nothing out, as its commit found: a rebind may
-    /// encode it again (`command_buffer/reencode.rs`).
+    /// Whether the compute encoder at `place` among the command buffer's ended encoders encodes
+    /// again, in its unit begun anew ([`replaying`](Self::replaying)), exactly what it first
+    /// encoded, as its commit found: a rebind may encode it again
+    /// (`command_buffer/reencode.rs`). It does where its unit laid no loop and left no work out
+    /// and, of the unit's predication, nothing reached in over its open and nothing of its own
+    /// reaches out over its end:
+    ///
+    /// - **Nothing reached in**: no step of the unit was laid before it opened ([`Unit::fresh`]),
+    ///   so a unit begun anew holds what the unit held then — its counter, open blocks, kill,
+    ///   run, droppable range, check word and carried loop bodies all come of a step.
+    /// - **Nothing reaches out**: the unit laid no step while the encoder was open, so it was
+    ///   never gated (`Unit::gated`) and left the unit as it found it; or the encoder laid the
+    ///   unit's first step and the unit ended with it, so its steps, gates and check word are
+    ///   read by its own commands alone.
+    ///
+    /// So every encoder of a unit that recorded no predication at all, every encoder before the
+    /// one that laid its unit's first step, and that one where its unit ended with it. A unit
+    /// whose first step lies in an earlier encoder than its last keeps none of the encoders from
+    /// that step on: the commands of the unit's later encoders run from gates the step before
+    /// them writes, which lie in that encoder's recording, and an encoding again lays steps and
+    /// gates of its own, leaving those written by nothing. A gate holds the dispatch's group
+    /// counts where the step writes them and nothing where it does not
+    /// (`PredicationStep::GATE_OUT_OFFSET`, which only a step fills), so such a command would
+    /// run nothing where Metal runs it. Encoding a run of a unit's encoders again together,
+    /// which that shape needs, is not done.
     pub(super) fn alone(&self, place: usize) -> bool {
         self.alone.contains(&place)
     }
 
-    /// The predication the compute encoder at `place` encodes again with, where it was its unit
-    /// alone ([`alone`](Self::alone)): its unit begun anew as it opened, the next record's index
+    /// The predication the compute encoder at `place` encodes again with, where it encodes again
+    /// exactly ([`alone`](Self::alone)): its unit begun anew as it opened, the next record's index
     /// and the run of compute encoders as they were then. Its records and dispatches then step
     /// and gate as the first encoding's did, over a counter, steps and gates of their own; the
     /// first encoding's go with its recording, never submitted.
@@ -864,6 +944,11 @@ impl Predication {
         if !unit.stack.is_empty() || !unit.range.dropping {
             return Ok((None, false));
         }
+        // The work this reads is the encoder's own, or a later encoder's of the unit: where no
+        // anchor reset the range, the unbalanced record that set `dropping` already set `left`
+        // for any work Metal emitted before it, which `alone` excludes. So an encoder `alone`
+        // answers for reads only work its own encoding laid down.
+        debug_assert!(unit.range.anchor.is_some() || unit.left || !unit.range.work);
         let dead = !unit.range.work;
         let record = self.step(uploads, device, (None, None), |counter| {
             PredicationStep::new(counter, PredicationOp::Resume)

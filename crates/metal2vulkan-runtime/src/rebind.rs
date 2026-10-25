@@ -23,7 +23,8 @@
 //!   that names the buffer took the pages as it was encoded (`Taken`), so the rebind encodes its
 //!   compute, blit and render encoders that named the buffer again, in the rebind's call, before
 //!   their group's submission (`replay.rs`, `command_buffer/reencode.rs`); an encoder it cannot
-//!   encode again (a compute encoder that shared its unit of command predication, among others) fails
+//!   encode again (a compute encoder its unit of command predication reaches past, among others)
+//!   fails
 //!   `CommandBufferError::EncodedUseRebound` there, as all did before. Commands encoded after
 //!   the rebind use the new pages. A rebind while a command buffer that is not yet committed has
 //!   encoded a use of the buffer or heap (one of its resources included), or has an encoder open

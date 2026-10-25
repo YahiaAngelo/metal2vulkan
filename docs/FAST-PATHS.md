@@ -398,8 +398,9 @@ driver's. Each is open work.
   their deallocator waits (announced), until the command buffer completes. Its commands that
   named the buffer are encoded again over the new pages, as Metal runs them, and fail with code 8
   where it is detached by then, as Metal's; those of an encoder that cannot be encoded again (a
-  compute encoder whose unit of command predication held other encoders, a loop or work left out;
-  work on the GPU alone) fail `EncodedUseRebound` (announced).
+  compute encoder its unit of command predication reaches past, which is one whose unit laid a
+  step before it opened or one of its own that the unit's later encoders read, and one whose unit
+  laid a loop or left work out; work on the GPU alone) fail `EncodedUseRebound` (announced).
 - **A runtime sampler's nearest sample of an 8-bit sRGB texture under native sampling.** On a
   device that samples the format, the sample keeps the device's sRGB decode (announced as
   `SrgbTexelDecode`), where the table's exact decode of the one texel it reads would cost little:
