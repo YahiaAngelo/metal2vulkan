@@ -1012,6 +1012,150 @@ fn iosurface_planes_lie_where_metal_puts_them() {
     layer_reported_nothing_at_all(&messages);
 }
 
+/// The kind [`an_iosurface_plane_whose_gpu_rows_share_bytes_is_announced`] takes: a texture of an
+/// IOSurface plane whose GPU rows share bytes, which the runtime holds leaving the earlier row's
+/// bytes where two rows write them.
+pub(super) const COLLIDING_ROWS: [Degradation; 1] = [Degradation::CollidingSurfaceRowWrites];
+
+/// A plane of a planar surface whose GPU rows share bytes is made, and the device announces
+/// [`COLLIDING_ROWS`] once for it: a 5x4 `RGBA8Unorm` plane at 20 bytes a row, whose pitch covers
+/// its own 20-byte row while Metal's GPU reads and writes its rows at the pitch rounded down to
+/// 16, so consecutive rows share 4 bytes, one texel. That is the rule
+/// `linear_plan::plane_rows_share_bytes` states, the GPU layout sharing bytes where the CPU's
+/// shares none. The runtime holds the plane as a shadow whose copies reproduce the sharing,
+/// leaving the earlier row's bytes where two rows meet, which is one of the rows a kernel of
+/// Metal's leaves there.
+///
+/// What Metal leaves of the bytes two rows share has no one rule: the shared bytes take whichever
+/// row Metal's own command wrote last, and that order follows the command, the GPU pitch and the
+/// row count (the kind's own declaration, over a 423-process measurement). So this holds the
+/// announcement, which is what says the runtime chose one of Metal's answers, and not the shared
+/// bytes themselves.
+///
+/// Both controls, which a plane merely named would pass: the same plane with render target usage
+/// is refused (`NotImplemented(OverlappingSurfaceRows)`), what Metal's pass leaves of the shared
+/// bytes being unmeasured, and announces nothing; and the same plane at 32 bytes a row, whose GPU
+/// rows lie 32 apart and share nothing, is made announcing no kind of its own. Each runs over an
+/// ordinary buffer standing for the surface and a no-copy one, and the second plane announces
+/// nothing, a device announcing each kind once. The texture's reads
+/// here are the CPU's own rows: every blit of such a plane is refused, the shadow's two copy
+/// regions each way being the only form that holds the sharing, so a kernel is the only writer
+/// the plane takes.
+#[test]
+fn an_iosurface_plane_whose_gpu_rows_share_bytes_is_announced() {
+    let messages = Messages::default();
+    let cache = ScratchCache::new().unwrap();
+    {
+        let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
+        eprintln!("device {}", device.name());
+        // What the device announced as it was made.
+        messages.take_notices();
+        let (w, h) = (5u64, 4u64);
+        let row = 4 * w;
+        let read = TextureUsage::SHADER_READ.union(TextureUsage::SHADER_WRITE);
+        for kind in [Kind::Ordinary, Kind::NoCopy] {
+            let Some(mut held) = Held::new(&device, kind) else {
+                eprintln!("{}: no {kind:?} buffer", device.name());
+                continue;
+            };
+            // The first control: 32 bytes a row, where the GPU's rows lie 32 apart, a row of 20
+            // bytes each, and share nothing.
+            let apart = surface_plane(&held, [w, h], 32, read)
+                .unwrap_or_else(|e| panic!("{kind:?} at 32 bytes a row: {e}"));
+            let first = forced(&[
+                (
+                    Degradation::ShadowedTexture,
+                    linear_rows_differ(
+                        &device,
+                        PixelFormat::RGBA8Unorm,
+                        [w as u32, h as u32],
+                        4,
+                        32,
+                    ),
+                ),
+                (
+                    Degradation::SharedInSystemMemory,
+                    shared_in_system_memory(&device),
+                ),
+            ]);
+            assert_made_once(&messages, &[], &first);
+            // The second control: with render target usage the plane is refused, so nothing is
+            // made and nothing announced.
+            assert_eq!(
+                surface_plane(&held, [w, h], 20, read.union(TextureUsage::RENDER_TARGET)).err(),
+                Some(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows)),
+                "{kind:?}: a render target over rows that share bytes"
+            );
+            assert_made_once(&messages, &[], &forced(&[]));
+            // The plane itself: 20 bytes of texels a row, the GPU's rows 16 apart.
+            let shared = surface_plane(&held, [w, h], 20, read)
+                .unwrap_or_else(|e| panic!("{kind:?} at 20 bytes a row: {e}"));
+            // The CPU reads and writes the plane's own rows, which lie a row apart here.
+            let n = (row * h) as usize;
+            let region = Region::new_2d(0, 0, w, h);
+            let mut back = vec![0u8; n];
+            shared.get_bytes(&mut back, row, 0, region, 0, 0).unwrap();
+            assert_eq!(back, held.model[..n], "{kind:?}: get_bytes");
+            let written: Vec<u8> = (0..n).map(|i| 0x80u8.wrapping_add(i as u8)).collect();
+            shared
+                .replace_region(region, 0, 0, &written, row, 0)
+                .unwrap();
+            held.write(0, &written);
+            held.check(&format!("{kind:?}: replace_region"));
+            // A blit addresses the GPU's rows as bytes, which no row copy holds.
+            let out = buffer_with(&device, &vec![0xee; n]).unwrap();
+            let mut gap = None;
+            blit(&device, |e| {
+                gap = e
+                    .copy_from_texture_to_buffer(
+                        &shared,
+                        0,
+                        0,
+                        origin([0, 0]),
+                        size([w, h]),
+                        &out,
+                        0,
+                        row,
+                        row * h,
+                        BlitOption::None,
+                    )
+                    .err();
+            });
+            assert_eq!(
+                gap,
+                Some(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows)),
+                "{kind:?}: a blit of rows that share bytes"
+            );
+            // The plane of the first buffer kind announces [`COLLIDING_ROWS`]; the second's
+            // announces nothing, a device announcing each kind once. Both are the set a step
+            // announces on its first occurrence, which holds exactly that. No image holds rows
+            // that share bytes, so such a plane is a shadow whatever the device.
+            let made = forced(&[
+                (COLLIDING_ROWS[0], true),
+                (Degradation::ShadowedTexture, true),
+            ]);
+            assert_made_once(&messages, &[], &made);
+            drop((apart, shared));
+        }
+    }
+    layer_reported_nothing_at_all(&messages);
+}
+
+/// A texture of a `w` x `h` `RGBA8Unorm` plane of a planar surface at offset 0 of `held`'s buffer,
+/// `bpr` bytes a row, of `usage` and the buffer's own resource options.
+fn surface_plane(
+    held: &Held,
+    [w, h]: [u64; 2],
+    bpr: u64,
+    usage: TextureUsage,
+) -> Result<Texture, Error> {
+    let mut d = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, w, h, false);
+    d.usage = usage;
+    d.resource_options = held.buffer.resource_options();
+    held.buffer
+        .new_texture_with_iosurface_plane(&d, IoSurfacePlane::new(0, bpr, true))
+}
+
 /// A depth or stencil texture over a plane of a surface with planes, which Metal makes and
 /// samples or reads and draws (an M4 under macOS 27.0.1, TTG2's format scout: `Depth16Unorm`,
 /// `Depth32Float`, `Depth32Float_Stencil8`, `Stencil8`, `X32_Stencil8`, each for reading and for
