@@ -637,7 +637,7 @@ fn command_buffers_end_at_fences_only_where_the_driver_reads_them_later() {
     on_device(|device, _| {
         let queue = device.new_command_queue().unwrap();
         let buffer = device.new_buffer(4096, ResourceOptions::default()).unwrap();
-        let relayed = relay_marks(device, &queue) > 0;
+        let relayed = relay_marks(device) > 0;
         let before = device.work_counts();
         for _ in 0..4 {
             finish(&queue.command_buffer().unwrap());
