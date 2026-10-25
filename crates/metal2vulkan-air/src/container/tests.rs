@@ -879,11 +879,14 @@ fn bit_flips_never_panic() {
     assert!(failed > 0);
 }
 
-/// Parses the local `regen-air-fixtures` outputs (`.air`, gitignored) when present, and, where
-/// `xcrun metallib` exists, links them into a real metallib and parses that too. Skips visibly
-/// otherwise; CPU only.
+/// Parses the committed Apple AIR bitcode of `engine/` and, where `xcrun metallib` exists, links
+/// it into a real metallib and parses that too (the metallib half skips visibly elsewhere; CPU
+/// only). Every `.air` the directory holds joins that link, so one left there beside the committed
+/// set fails this: `xcrun metallib` resolves each shared `air.*` symbol to one definition for the
+/// whole link, and which deployment target it comes from depends on the whole input set.
+/// `scripts/regen-air-fixtures` writes none, and `git status` names one that is there.
 #[test]
-fn regen_air_fixture_outputs_when_present() {
+fn committed_air_fixtures_parse_and_link() {
     let dir = metal2vulkan_devtools::engine_dir();
     let mut airs: Vec<_> = std::fs::read_dir(&dir)
         .map(|d| {
@@ -893,14 +896,7 @@ fn regen_air_fixture_outputs_when_present() {
         })
         .unwrap_or_default();
     airs.sort();
-    if airs.is_empty() {
-        eprintln!(
-            "SKIPPED regen_air_fixture_outputs_when_present: no .air in {} (run \
-             scripts/regen-air-fixtures/regen-air-fixtures.sh on macOS)",
-            dir.display()
-        );
-        return;
-    }
+    assert!(!airs.is_empty(), "{} commits .air bitcode", dir.display());
     // A fixture may hold several kernels; the metallib has one function per entry point.
     let mut entries = 0;
     for air in &airs {

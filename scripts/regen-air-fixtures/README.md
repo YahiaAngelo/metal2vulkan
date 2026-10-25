@@ -8,7 +8,7 @@ translator's fixture sweeps do not read.
 
 | Output | Produced by | Committed |
 |---|---|---|
-| `<name>.air` | `xcrun metal -c` (Apple AIR bitcode, typed pointers) | no (`*.air` is gitignored; see "Committed `.air`" below) |
+| `<name>.air` | `xcrun metal -c` (Apple AIR bitcode, typed pointers) | only where the directory already holds one; see "The `.air` companion" below |
 | `<name>.ll` | `llvm-dis` of `<name>.air` (opaque-pointer review text) | yes |
 | `<name>.air.ll` | `xcrun metal -S -emit-llvm` (typed-pointer text) | yes |
 | `TOOLCHAIN` | `xcrun metal --version`, SDK version, LLVM pin, `llvm-dis`/`llvm-as` versions, and each fixture compiled by another Metal toolchain | yes |
@@ -113,6 +113,15 @@ PATH="$PATH:$(brew --prefix llvm@21)/bin" scripts/regen-air-fixtures/regen-air-f
 Moving the pin to a newer major is a regeneration like any other toolchain change, and is only
 sound once every gate's `llvm-as` is at least that major.
 
-**Committed `.air`.** Only MSL, `.ll`, `.air.ll`, and `TOOLCHAIN` are committed; `.air` stays
-local. Committing the Apple-compiled `.air` binaries would need a narrow `.gitignore` exception
-and a change to `AGENTS.md` ("What not to commit").
+**The `.air` companion.** A run refreshes a `<name>.air` the fixture directory already holds and
+writes none where there is none. `engine/` holds seven and `reflection/` one, which tests read as
+Apple AIR bitcode and a run keeps in step with their text; for every other fixture the `.air` is
+an intermediate of the run and stays in its scratch directory.
+
+Putting one beside them is a decision, not a side effect of a run. `xcrun metallib` resolves each
+shared `air.*` symbol to one definition for the whole link, and which deployment target that
+definition comes from depends on the whole input set, so one more module can make a symbol that
+linked before fail with `Cannot link symbol '<air.*>': Used in deployment target <a> but defined
+in deployment target <b>`. `metal2vulkan-air`'s `container::tests::committed_air_fixtures_parse_and_link`
+links every `.air` the directory holds, so a stray one fails it; `.gitignore` un-ignores this
+tree's `*.air`, so `git status` names it, and deleting it is the fix.

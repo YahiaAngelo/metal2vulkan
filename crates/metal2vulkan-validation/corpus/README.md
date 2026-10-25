@@ -194,8 +194,10 @@ indexed under that entry's row.
 `.ll` review companion (`llvm-dis`), an `.air.ll` typed-pointer text that `xcrun metal-as`
 reassembles into the same module (checked on every run), and `TOOLCHAIN`, which records the
 compiler and SDK versions and the pinned LLVM (21, the oldest the gates use) whose `llvm-dis`
-writes each `.ll` and whose `llvm-as` must accept it. The compiled `.air` stays local (`*.air` is
-gitignored). Tests that need typed-pointer bitcode assemble it from the committed `.air.ll` with `xcrun metal-as` on
+writes each `.ll` and whose `llvm-as` must accept it. A run writes the compiled `.air` only where
+the directory already holds one: a handful of fixtures commit theirs for tests to read as bitcode,
+and every other fixture's stays in the run's scratch directory. Tests that need typed-pointer
+bitcode assemble it from the committed `.air.ll` with `xcrun metal-as` on
 macOS and skip with a visible message elsewhere; the opaque-pointer path is covered by
 `llvm-as` of the committed `.ll`.
 

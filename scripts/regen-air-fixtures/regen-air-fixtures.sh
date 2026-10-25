@@ -4,7 +4,8 @@
 # (`--dir`) (CPU only; never touches a GPU).
 #
 # For every <name>.metal it writes, next to the source:
-#   <name>.air     Apple AIR bitcode from `xcrun metal` (gitignored until the user decides)
+#   <name>.air     Apple AIR bitcode from `xcrun metal`, written only where the directory
+#                  already holds one (see "The .air companion" below)
 #   <name>.ll      review companion: `llvm-dis` of <name>.air (opaque-pointer text)
 #   <name>.air.ll  typed-pointer text from `xcrun metal -S -emit-llvm`; `xcrun metal-as`
 #                  reassembles it into the same module, so macOS tests get typed-pointer
@@ -19,6 +20,18 @@
 # `// air-rename: <declared> <intrinsic>` renames a function the source declares and never defines
 # to an `llvm.*` or `air.*` intrinsic MSL cannot spell (such as `llvm.agx3.yield`) in the typed
 # text; <name>.air is then metal-as of the renamed typed text, and <name>.ll its disassembly.
+#
+# The .air companion: a run refreshes a <name>.air the fixture directory already holds, and
+# writes none where there is none. The committed outputs are <name>.ll, <name>.air.ll and
+# TOOLCHAIN; a handful of fixtures also commit the Apple-compiled <name>.air that tests read as
+# bitcode, and those stay in step with their text. For every other fixture the .air is an
+# intermediate and stays in the scratch directory, which the run removes. An .air beside the
+# committed ones is not a harmless leftover: `xcrun metallib` resolves each shared `air.*` symbol
+# to one definition for the whole link, and which deployment target that definition comes from
+# depends on the whole input set, so one more module can make a symbol that linked before fail
+# with `Cannot link symbol '<air.*>': Used in deployment target <a> but defined in deployment
+# target <b>`. An .air an older run left behind is untracked (.gitignore un-ignores this tree's
+# *.air), so `git status` names it; delete it.
 #
 # Sources are compiled from stdin so no absolute path reaches the output. Every fixture compiled is
 # checked: metal-as of <name>.air.ll must disassemble to exactly <name>.ll, and llvm-as of the
@@ -276,7 +289,10 @@ compile_fixture() {
   fi
   { header "$name" "typed pointers; xcrun metal-as reassembles it"; cat "$work/$name.typed.ll"; } \
     >"$out/$name.air.ll"
-  cp "$work/$name.air" "$out/$name.air"
+  # Only a fixture the directory already holds an .air for keeps one (see "The .air companion").
+  if [[ -f "$dir/$name.air" ]]; then
+    cp "$work/$name.air" "$out/$name.air"
+  fi
 }
 
 # The Metal toolchain of this host, as TOOLCHAIN records one: `metal: <version line>;

@@ -155,8 +155,8 @@ class RegenAirFixturesTests(unittest.TestCase):
         result = self.run_script([self.newer, self.pinned])
         self.assertEqual(result.returncode, 0, result.stderr)
         files = self.committed()
-        self.assertEqual(sorted(files), ["TOOLCHAIN", "kernel.air", "kernel.air.ll", "kernel.ll",
-                                         "legacy.air", "legacy.air.ll", "legacy.ll"])
+        self.assertEqual(sorted(files), ["TOOLCHAIN", "kernel.air.ll", "kernel.ll",
+                                         "legacy.air.ll", "legacy.ll"])
         self.assertEqual(files["kernel.ll"].splitlines()[1], f"; llvm-dis {PIN}")
         self.assertEqual(files["TOOLCHAIN"].splitlines()[1:], [
             "metal: Fake metal version 1.0",
@@ -203,6 +203,8 @@ class RegenAirFixturesTests(unittest.TestCase):
             "// air-rename: _Z4stubt llvm.agx3.yield\n"
             "declare void @_Z4stubt(i16)\n"
             "call void @_Z4stubt(i16 0)\n")
+        # The fixture commits its .air, so the run refreshes one rather than writing none.
+        (self.fixtures / "agx.air").write_text("; stale\n")
         result = self.run_script([self.pinned])
         self.assertEqual(result.returncode, 0, result.stderr)
         files = self.committed()
@@ -414,6 +416,28 @@ class RegenAirFixturesTests(unittest.TestCase):
         self.assertEqual(self.run_script([self.pinned], *self.COLLATING, env=NEW_METAL).returncode, 0)
         self.assertEqual(committed.read_text(), text)
 
+    def test_the_air_is_written_only_where_the_directory_holds_one(self):
+        # <name>.air is an intermediate except for the fixtures that commit one for tests to read
+        # as bitcode, which a run keeps in step with their text. A run must add no other: the
+        # committed .air files are linked together by `xcrun metallib`, which resolves each shared
+        # `air.*` symbol to one definition for the whole link, so one more module can make a
+        # symbol that linked before fail over the deployment targets in the set.
+        (self.fixtures / "kernel.air").write_text("; stale\n")
+        self.assertEqual(self.run_script([self.pinned]).returncode, 0)
+        files = self.committed()
+        self.assertEqual(sorted(files), ["TOOLCHAIN", "kernel.air", "kernel.air.ll", "kernel.ll",
+                                         "legacy.air.ll", "legacy.ll"])
+        self.assertNotIn("; stale", files["kernel.air"])
+        self.assertEqual(self.run_script([self.pinned], "--check").returncode, 0)
+        # A run naming fixtures follows the same rule.
+        (self.fixtures / "kernel.air").unlink()
+        (self.fixtures / "legacy.air").write_text("; stale\n")
+        self.assertEqual(self.run_script([self.pinned], "kernel", "legacy").returncode, 0)
+        self.assertEqual(sorted(self.committed()),
+                         ["TOOLCHAIN", "kernel.air.ll", "kernel.ll",
+                          "legacy.air", "legacy.air.ll", "legacy.ll"])
+        self.assertNotIn("; stale", (self.fixtures / "legacy.air").read_text())
+
     def test_another_directory_regenerates_alone(self):
         other = self.root / "crates/metal2vulkan-validation/fixtures/public/reflection"
         other.mkdir(parents=True)
@@ -423,7 +447,7 @@ class RegenAirFixturesTests(unittest.TestCase):
         self.assertTrue(result.stdout.startswith(
             "regenerated 1 fixtures in crates/metal2vulkan-validation/fixtures/public/reflection"), result.stdout)
         self.assertEqual(sorted(p.name for p in other.iterdir()),
-                         ["TOOLCHAIN", "probe.air", "probe.air.ll", "probe.ll", "probe.metal"])
+                         ["TOOLCHAIN", "probe.air.ll", "probe.ll", "probe.metal"])
         self.assertEqual(sorted(p.name for p in self.fixtures.iterdir()),
                          ["kernel.metal", "legacy.metal"])
         self.assertEqual(self.run_script([self.pinned], "--dir", "Reflection").returncode, 2)
@@ -523,6 +547,19 @@ class RegenAirFixturesTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("no fixture absent", result.stderr)
         self.assertEqual(self.committed(), before)
+
+    def test_the_committed_toolchains_fixture_lines_are_in_byte_order(self):
+        # The order write_toolchain writes and --check demands. The two tests above hold the
+        # script to it against fake tools; this one holds the committed files to it, on any host
+        # and with no Metal toolchain or LLVM install, so a file written by a host whose script
+        # followed its own collation is a failure here and not a diff in the next packet.
+        directories = sorted((REPO / "crates/metal2vulkan-validation/fixtures/public").glob("*/TOOLCHAIN"))
+        self.assertTrue(directories, "the fixture directories record their toolchains")
+        for toolchain in directories:
+            with self.subTest(toolchain=toolchain.parent.name):
+                lines = [line for line in toolchain.read_text().splitlines()
+                         if line.startswith("fixture ")]
+                self.assertEqual(lines, sorted(lines))
 
     def test_committed_toolchain_records_the_pin(self):
         lines = (REPO / "crates/metal2vulkan-validation/fixtures/public/engine/TOOLCHAIN").read_text().splitlines()
