@@ -675,10 +675,11 @@ fn source_region(
 }
 
 /// `copyFromTexture:sourceSlice:sourceLevel:toTexture:destinationSlice:destinationLevel:
-/// sliceCount:levelCount:`, and `copyFromTexture:toTexture:` (`whole`: every level and slice of
-/// two textures of one shape). Between a compressed and an uncompressed format (`check_formats`)
-/// the runtime's gap (`NotImplemented(Format)`): which level's blocks Metal copies into which
-/// level's texels is not measured.
+/// sliceCount:levelCount:`, and `copyFromTexture:toTexture:` ([`plan_whole_copy`]: every level
+/// and slice two textures share). Each level pair copies the copy units both levels hold, from
+/// their origins. Between a compressed and an uncompressed format (`check_formats`) the runtime's
+/// gap (`NotImplemented(Format)`): which level's blocks Metal copies into which level's texels is
+/// not measured.
 pub(super) fn plan_levels_copy(
     pair: &CopyPair<'_>,
     src_slice: u32,
@@ -711,47 +712,73 @@ pub(super) fn plan_levels_copy(
             level_extent(src, src_level + i),
             level_extent(dst, dst_level + i),
         );
-        // Levels of different sizes copy the region common to both from their origins, as
-        // plain Metal copies them (its validation stops them). Compressed ones are not measured:
-        // their common region may end inside a block of one level.
-        let blocks = src_unit.extent != [1, 1] || dst_unit.extent != [1, 1];
-        if from != to && blocks {
-            return Err(CopyProblem::Size.into());
-        }
-        let size = [0, 1, 2].map(|axis| from[axis].min(to[axis]));
+        // Levels of different sizes copy the copy units both levels hold, from their origins,
+        // whole: the lesser count of units on each axis, and the rest of the larger level kept,
+        // as plain Metal copies them. Of a compressed format that is the lesser count of blocks,
+        // the block that passes the smaller level's edge included (an Apple M3 Max under macOS
+        // 27.0.1, our probe: BC1, BC3, BC4, BC7, `EAC_RGBA8`, `ETC2_RGB8` and ASTC 6 x 5, each
+        // into a level of fewer blocks, of more, and of fewer on one axis and more on the other,
+        // and out of a level that ends inside a block, every one block for block). Vulkan bounds
+        // a copy by the level's texels, so where the last unit passes the smaller level's edge
+        // the two sides differ in size and cover the same units, which `blit_texture.rs` copies
+        // through a buffer.
+        let block = [src_unit.extent[0], src_unit.extent[1], 1];
+        let units = [0, 1, 2].map(|axis| {
+            from[axis]
+                .div_ceil(block[axis])
+                .min(to[axis].div_ceil(block[axis]))
+        });
+        let whole = |extent: [u32; 3]| {
+            [0, 1, 2].map(|axis| units[axis].saturating_mul(block[axis]).min(extent[axis]))
+        };
+        let (src_size, dst_size) = (whole(from), whole(to));
         if slices == 0 {
             continue;
         }
-        let at = |record: &ViewRecord, unit: &CopyUnit, level: u32, slice: u32| ImageRegion {
-            aspect: unit.aspect,
-            level: record.base_level + level,
-            layer: record.base_layer + slice,
-            layers: slices,
-            origin: [0, 0, 0],
-            size,
+        let at = |record: &ViewRecord, unit: &CopyUnit, level: u32, slice: u32, size: [u32; 3]| {
+            ImageRegion {
+                aspect: unit.aspect,
+                level: record.base_level + level,
+                layer: record.base_layer + slice,
+                layers: slices,
+                origin: [0, 0, 0],
+                size,
+            }
         };
         out.push(ImageCopyRegion {
-            src: at(src, &src_unit, src_level + i, src_slice),
-            dst: at(dst, &dst_unit, dst_level + i, dst_slice),
+            src: at(src, &src_unit, src_level + i, src_slice, src_size),
+            dst: at(dst, &dst_unit, dst_level + i, dst_slice, dst_size),
         });
     }
     Ok(out)
 }
 
-/// `copyFromTexture:toTexture:`: the levels the two textures share, paired by size
+/// `copyFromTexture:toTexture:`: the levels the two textures share, paired by extent
 /// ([`aligned_levels`]), and the slices they share, as plain Metal copies them (an M4 under macOS
 /// 27.0.1): an 8x8 texture of 4 levels into a 4x4 one of 3 copies its levels 1 to 3, a 2D texture
-/// into a 2D array its one slice. Two textures with no levels of one size are refused (`Size`):
-/// plain Metal aborts.
+/// into a 2D array its one slice. The paired levels may lie past the textures' own, since Metal
+/// pairs them by the textures' extents shifted and not by their level counts, and then each side
+/// copies the levels it has from its paired one: none, where that side's paired level is the one
+/// past its last (an Apple M3 Max under macOS 27.0.1, our probe `wh-bc1-16-to-8`,
+/// `wh-plain-16-to-8` and `wh-bc1-16-to-32`: a 16 by 16 texture of one level into an 8 by 8 one
+/// of one, and into a 32 by 32 one of one, each complete with no error and the destination's own
+/// bytes kept).
+///
+/// Refused (`Size`): two textures whose extents pair at no level, where plain Metal aborts, and a
+/// paired level past the end of its texture's own levels, where plain Metal reads or writes a
+/// level the texture does not hold.
 pub(super) fn plan_whole_copy(pair: &CopyPair<'_>) -> Result<Vec<ImageCopyRegion>, CopyRefusal> {
     let (src, dst) = (pair.src, pair.dst);
     let (src_level, dst_level) = aligned_levels(src, dst).ok_or(CopyProblem::Size)?;
+    if src_level > src.level_count || dst_level > dst.level_count {
+        return Err(CopyProblem::Size.into());
+    }
     let levels = (src.level_count - src_level).min(dst.level_count - dst_level);
     let slices = src.layer_count.min(dst.layer_count);
     plan_levels_copy(pair, 0, src_level, 0, dst_level, slices, levels)
 }
 
-/// The first levels a whole copy pairs: both first levels where they are one size, else the
+/// The first levels a whole copy pairs: both first levels where they are one extent, else the
 /// source's level `k` and the destination's first, or the source's first and the destination's
 /// level `k`, at the least `k` where every axis of the two extents is equal. Plain Metal pairs
 /// them so (`sz_whole_8l4_to_4l3` pairs the source's level 1 with the destination's 0,
@@ -759,12 +786,18 @@ pub(super) fn plan_whole_copy(pair: &CopyPair<'_>) -> Result<Vec<ImageCopyRegion
 /// `sz_whole_5l3_to_2l2` its level 1 with 0), and aborts where the extents meet at no level
 /// (`sz_whole_8_to_3`, `sz_whole_8x4_to_4x8`, `sz_whole_8x4_to_4x4`). `None` there, and where
 /// both directions would pair (unmeasured).
+///
+/// The shifts a pair may take are the extent's own, which the texture's level count does not
+/// bound: Metal shifts the texture's width, height and depth and asks that one of the two shifts
+/// be none (`MTLPickLargestMip`'s postcondition, which its abort names), so a 16 by 16 texture of
+/// one level pairs its level 1 with an 8 by 8 destination's level 0 and copies no level at all
+/// (our probe's `wh-bc1-16-to-8`). An extent is 1 on every axis by the 31st shift, so the search
+/// ends there.
 fn aligned_levels(src: &ViewRecord, dst: &ViewRecord) -> Option<(u32, u32)> {
     if level_extent(src, 0) == level_extent(dst, 0) {
         return Some((0, 0));
     }
-    let first =
-        |of: &ViewRecord, to: [u32; 3]| (1..of.level_count).find(|&k| level_extent(of, k) == to);
+    let first = |of: &ViewRecord, to: [u32; 3]| (1..32).find(|&k| level_extent(of, k) == to);
     match (
         first(src, level_extent(dst, 0)),
         first(dst, level_extent(src, 0)),

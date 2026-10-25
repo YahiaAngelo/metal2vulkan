@@ -632,10 +632,13 @@ fn level_and_slice_copies_pair_levels_of_one_size() {
     );
 }
 
-/// Plain Metal's copies between textures of different sizes (an M4 under macOS 27.0.1): levels of
-/// different sizes copy their common region; a whole copy pairs levels by size from the first pair
-/// of one size and copies the levels and slices both textures have, and aborts where no level pair
-/// is of one size.
+/// Plain Metal's copies between textures of different sizes (an M4 under macOS 27.0.1, and an
+/// Apple M3 Max under macOS 27.0.1 for the compressed and the shifted-pair shapes): levels of
+/// different sizes copy the copy units both hold, a compressed pair's blocks included, each side
+/// ending at its own level's edge; a whole copy pairs levels by extent from the first pair of one
+/// extent, shifting the textures' own extents past their level counts, and copies the levels and
+/// slices both textures have, none where the pair is one past a texture's last level, and aborts
+/// where the extents pair at no level.
 #[test]
 fn copies_between_textures_of_different_sizes_follow_metal() {
     use TextureType as T;
@@ -651,7 +654,25 @@ fn copies_between_textures_of_different_sizes_follow_metal() {
         })
     };
     let d2 = |w: u64, h: u64, levels: u64| made(T::Type2D, [w, h, 1], levels, 1);
-    // (source level, destination level, layers, size) of each region.
+    // (source level, destination level, layers, size) of each region, where the two sides are
+    // one size; `sided` keeps both where a compressed pair's sides end at different edges.
+    let sided = |copied: Result<Vec<ImageCopyRegion>, CopyRefusal>| {
+        copied.map(|regions| {
+            regions
+                .iter()
+                .map(|r| {
+                    assert_eq!((r.src.layer, r.dst.layer), (0, 0));
+                    (
+                        r.src.level,
+                        r.dst.level,
+                        r.src.layers,
+                        r.src.size,
+                        r.dst.size,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+    };
     let regions = |copied: Result<Vec<ImageCopyRegion>, CopyRefusal>| {
         copied.map(|regions| {
             regions
@@ -763,11 +784,131 @@ fn copies_between_textures_of_different_sizes_follow_metal() {
         whole(&d2(4, 4, 1), &array(4, 1, 2)),
         Ok(vec![(0, 0, 1, [4, 4, 1])])
     );
-    // Compressed levels of different sizes are not measured.
-    let bc1 = |side: u64| tex(PixelFormat::BC1RGBA, T::Type2D, [side, side, 1]);
+    // `wh-plain-16-to-8`, `wh-bc1-16-to-8`, `wh-bc1-16-to-32`, `wh-bc1-16l2-to-4l1`: a pair one
+    // past a texture's last level copies nothing, as plain Metal copies it.
+    for (name, a, b) in [
+        ("16l1 into 8l1", d2(16, 16, 1), d2(8, 8, 1)),
+        ("16l1 into 32l1", d2(16, 16, 1), d2(32, 32, 1)),
+        ("16l2 into 4l1", d2(16, 16, 2), d2(4, 4, 1)),
+    ] {
+        assert_eq!(whole(&a, &b), Ok(Vec::new()), "{name}");
+    }
+    // `wh-bc1-16l3-to-4l1`, `wh-plain-16l5-to-1l1`: a pair past the first level, which the
+    // source's own level count does reach.
     assert_eq!(
-        regions(plan_levels_copy(&pair(&bc1(8), &bc1(4)), 0, 0, 0, 0, 1, 1)),
-        size
+        whole(&d2(16, 16, 3), &d2(4, 4, 1)),
+        Ok(vec![(2, 0, 1, [4, 4, 1])])
+    );
+    assert_eq!(
+        whole(&d2(16, 16, 5), &d2(1, 1, 1)),
+        Ok(vec![(4, 0, 1, [1, 1, 1])])
+    );
+    // `wh-plain-16-to-4`, `wh-bc1-16-to-4`, `wh-bc1-32-to-4`, `wh-plain-32-to-8`,
+    // `wh-plain-4-to-16`, `wh-bc1-4-to-16`: a pair past the end of one texture's own levels,
+    // where plain Metal reads or writes a level that texture does not hold.
+    assert_eq!(whole(&d2(16, 16, 1), &d2(4, 4, 1)), size);
+    assert_eq!(whole(&d2(32, 32, 1), &d2(4, 4, 1)), size);
+    assert_eq!(whole(&d2(32, 32, 1), &d2(8, 8, 1)), size);
+    assert_eq!(whole(&d2(4, 4, 1), &d2(16, 16, 1)), size);
+    // Compressed levels of different sizes copy the blocks both levels hold, block for block,
+    // from their origins: the lesser block count on each axis, each side ending at its own
+    // level's edge where that block passes it (an Apple M3 Max under macOS 27.0.1, our probe
+    // `lv-bc1-*`, `lv-bc3-16-to-8`, `lv-bc4-16-to-8`, `lv-bc7-16-to-8`, `lv-eac-16-to-8`,
+    // `lv-etc2-16-to-8` and `lv-astc65-*`).
+    let bc1 = |w: u64, h: u64, levels: u64| {
+        texture(TextureDescriptor {
+            texture_type: T::Type2D,
+            pixel_format: PixelFormat::BC1RGBA,
+            width: w,
+            height: h,
+            mipmap_level_count: levels,
+            ..TextureDescriptor::default()
+        })
+    };
+    let square = |side: u64| bc1(side, side, 1);
+    // `lv-bc1-16-to-8`, `_to-12`, `_to-4`, `_to-20`: block counts that divide the extent.
+    for (dst, size) in [
+        (8, [8, 8, 1]),
+        (12, [12, 12, 1]),
+        (4, [4, 4, 1]),
+        (20, [16, 16, 1]),
+    ] {
+        assert_eq!(
+            sided(plan_levels_copy(
+                &pair(&square(16), &square(dst)),
+                0,
+                0,
+                0,
+                0,
+                1,
+                1
+            )),
+            Ok(vec![(0, 0, 1, size, size)]),
+            "BC1 16 into {dst}"
+        );
+    }
+    // `lv-bc1-16-to-6`, `lv-bc1-18-to-6`: two blocks each way, the destination's second ending
+    // inside itself, so the two sides differ in size and cover the same blocks.
+    for src in [16, 18] {
+        assert_eq!(
+            sided(plan_levels_copy(
+                &pair(&square(src), &square(6)),
+                0,
+                0,
+                0,
+                0,
+                1,
+                1
+            )),
+            Ok(vec![(0, 0, 1, [8, 8, 1], [6, 6, 1])]),
+            "BC1 {src} into 6"
+        );
+    }
+    // `lv-bc1-16x8-to-8x16`: the lesser block count on each axis on its own.
+    assert_eq!(
+        sided(plan_levels_copy(
+            &pair(&bc1(16, 8, 1), &bc1(8, 16, 1)),
+            0,
+            0,
+            0,
+            0,
+            1,
+            1
+        )),
+        Ok(vec![(0, 0, 1, [8, 8, 1], [8, 8, 1])])
+    );
+    // `lv-bc1-32l2-to-16l2-level1`, `_levels2`: a level other than 0, and two at once.
+    assert_eq!(
+        sided(plan_levels_copy(
+            &pair(&bc1(32, 32, 2), &bc1(16, 16, 2)),
+            0,
+            1,
+            0,
+            1,
+            1,
+            1
+        )),
+        Ok(vec![(1, 1, 1, [8, 8, 1], [8, 8, 1])])
+    );
+    assert_eq!(
+        sided(plan_levels_copy(
+            &pair(&bc1(32, 32, 2), &bc1(16, 16, 2)),
+            0,
+            0,
+            0,
+            0,
+            1,
+            2
+        )),
+        Ok(vec![
+            (0, 0, 1, [16, 16, 1], [16, 16, 1]),
+            (1, 1, 1, [8, 8, 1], [8, 8, 1])
+        ])
+    );
+    // `wh-bc1-16l2-to-8l1`: a whole copy of compressed textures pairs levels as any other does.
+    assert_eq!(
+        sided(plan_whole_copy(&pair(&bc1(16, 16, 2), &bc1(8, 8, 1)))),
+        Ok(vec![(1, 0, 1, [8, 8, 1], [8, 8, 1])])
     );
 }
 

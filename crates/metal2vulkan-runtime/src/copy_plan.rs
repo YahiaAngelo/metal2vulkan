@@ -41,7 +41,10 @@
 //!   1 for stencil), and Metal copies its bytes to and from colour formats of that unit and
 //!   between stencil formats (probes on an M3 Max and an M4: every value, NaN payloads, denormals
 //!   and depth outside `[0, 1]` included); a combined depth/stencil format copies only into its own
-//!   format, both aspects. A copy of levels and slices needs equal sizes at each pair of levels.
+//!   format, both aspects. A copy of levels and slices copies at each pair of levels the copy
+//!   units both levels hold, from their origins, whole: of a compressed format the blocks both
+//!   hold, the block that passes the smaller level's edge included (an Apple M3 Max under macOS
+//!   27.0.1, our probe, over BC1, BC3, BC4, BC7, `EAC_RGBA8`, `ETC2_RGB8` and ASTC 6 x 5).
 //! - **CPU access:** `replaceRegion` and `getBytes` refuse a private texture and a combined
 //!   depth/stencil format (a depth-only or stencil-only format is copied), and take the buffer
 //!   layout rules above without an offset. Plain Metal copies a combined format's depth, as a
@@ -135,26 +138,40 @@ pub enum CopyProblem {
     /// defined answer).
     Format,
     /// Two textures of different sample counts. Plain Metal copies the bytes of the GPU's own
-    /// sample layout: no defined answer. A 4-sample source whose samples hold 0.25, 0.25, 0.75 and
-    /// 0.75 copies into a 2-sample destination as texel 0's two samples and texel 1's two, and into
-    /// a single-sampled one as sample 0's plane alone (an Apple M3 Max under macOS 27.0.1).
+    /// sample layout, which is the device's and not the API's: no answer a Vulkan device can be
+    /// held to. Of a source whose every (texel, sample) holds a value naming it, a copy out of a
+    /// 1- or 2-sample texture lands each source value at the destination byte of the same offset
+    /// in the GPU's Morton-twiddled layout, sample `s` of texel `(x, y)` at
+    /// `unit * (samples * morton(x, y) + s)`, and out of a 4-sample texture it lands bytes that
+    /// decode to no source value at all, the GPU's own compressed 4-sample form (an Apple M3 Max
+    /// under macOS 27.0.1, our probe `copy_sample_counts_and_block_sizes.m`: 1 to 2, 1 to 4, 2 to
+    /// 1 and 2 to 4 each match that layout exactly, 4 to 1 and 4 to 2 match nothing, and the
+    /// matched copies beside them reproduce every sample; 12 processes of each read alike, and the
+    /// destination's storage mode and heap placement change nothing). The same device makes no
+    /// 8-sample texture at all, so no copy of one exists there to measure.
     ///
     /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal completes the copy with no
-    /// error rather than refusing it, spreading the source's samples by the GPU's own layout, where
-    /// the matched 4-sample copy beside it reproduces every sample: no defined answer, so the
-    /// refusal reaches past Metal).
+    /// error rather than refusing it, so the refusal reaches past Metal; what it stores is its own
+    /// texel twiddling and sample compression, which neither Metal nor Vulkan defines, so the
+    /// runtime has no exact answer to put in its place).
     SampleCount,
-    /// A copy of whole textures with no levels of one size, where plain Metal aborts; or a copy
-    /// between compressed levels of different sizes, which plain Metal copies. (Other levels of
-    /// different sizes copy their common region, and whole textures the levels and slices they
-    /// share, paired by size, as plain Metal copies them.)
+    /// A copy of whole textures whose extents pair at no level, where plain Metal aborts, or
+    /// whose paired level lies past the end of one texture's own levels, where plain Metal reads
+    /// or writes a level that texture does not hold. (Levels of different sizes copy the copy
+    /// units both hold, compressed or not, and whole textures the levels and slices they share,
+    /// paired by extent, as plain Metal copies them: `blit_plan.rs`.)
     ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: `copyFromTexture:` of level 0 of a BC1
-    /// 16 by 16 texture into level 0 of a BC1 8 by 8 one, through the level-counted selector,
-    /// completes with no error and writes the source's blocks over the destination's own, so that
-    /// half of the refusal reaches past Metal; the whole-texture copy of an 8 by 8 texture of 4
-    /// levels into a 3 by 3 one of 2 does end the process, SIGABRT, on `MTLPickLargestMip`'s
-    /// "Postcondition does not hold", where the 4 by 4 destination beside it copies).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1, our probe
+    /// `copy_sample_counts_and_block_sizes.m`, 12 processes of every shape alike. The first shape
+    /// is Metal's own refusal: `wh-plain-8x8-to-8x4`, `wh-plain-8l4-to-3l2` and
+    /// `wh-astc65-18x15-to-12x10` each end the process, SIGABRT, on `MTLPickLargestMip`'s
+    /// `Postcondition does not hold`, where every pairing shape beside them completes. The second
+    /// reaches past Metal: `wh-bc1-16-to-4`, `wh-bc1-32-to-4`, `wh-plain-16-to-4` and
+    /// `wh-plain-32-to-8`, each a source of one level paired at its level 2 or 3, all four
+    /// complete with no error and write the destination's level 0 from the source's level 0, a
+    /// level the pairing did not name, which is Metal's own answer for an out-of-range level
+    /// offset and not one the runtime can put in its place; the mirrored `wh-bc1-4-to-16` and
+    /// `wh-plain-4-to-16` write nothing at all).
     Size,
 }
 

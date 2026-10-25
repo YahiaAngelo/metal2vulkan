@@ -6598,7 +6598,10 @@ fn every_case_carries_a_cost_recording() {
     /// `cost --write`. A cost record needs the whole set measured
     /// in both shapes -- a case's counts depend on what ran before it in the same process -- so a
     /// selection cannot pay it and the next whole-set run empties these seven lines again.
-    const AFTER_THE_LAST_RUN: [&str; 13] = [
+    ///
+    /// `texture-round-trip-44` is `BGRA4Unorm`'s row of `cases::textures`, authored the day its
+    /// texels became Metal's own bytes, and later than the last whole-set `cost --write` too.
+    const AFTER_THE_LAST_RUN: [&str; 14] = [
         "device-read-write-tiers",
         "rate-map-degenerate-form-sweep",
         "rate-map-zero-width-layers-subscript",
@@ -6612,6 +6615,7 @@ fn every_case_carries_a_cost_recording() {
         "shared-creator-extended-range-samples",
         "shared-creator-padded-format-storage",
         "sparse-mapping-a-slice-past-the-textures",
+        "texture-round-trip-44",
     ];
 
     /// Cases a whole-set run did not cover although they were committed before it ran.

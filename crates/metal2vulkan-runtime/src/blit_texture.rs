@@ -1168,15 +1168,16 @@ impl BlitCommandEncoder {
 
     /// `copyFromTexture:sourceSlice:sourceLevel:toTexture:destinationSlice:destinationLevel:
     /// sliceCount:levelCount:`: `slice_count` slices of `level_count` levels, whole, each level
-    /// into a destination level. Levels of different sizes copy the region common to both from
-    /// their origins, the rest of the larger one kept, as plain Metal copies them (an M4 under
-    /// macOS 27.0.1; its validation stops them).
+    /// into a destination level. Levels of different sizes copy the copy units both levels hold,
+    /// from their origins, the rest of the larger one kept, as plain Metal copies them (an M4
+    /// under macOS 27.0.1, and an Apple M3 Max under macOS 27.0.1 for the compressed formats; its
+    /// validation stops them): of a compressed format the blocks both levels hold, the block that
+    /// passes the smaller level's edge included.
     ///
     /// Refused as [`copy_from_texture_to_texture`](Self::copy_from_texture_to_texture) is, and
-    /// for levels or slices past either texture and compressed levels of different sizes
-    /// (`Invalid`, unmeasured), and between a compressed and an uncompressed format
-    /// (`NotImplemented(Format)`: which levels Metal pairs is not measured). A count of 0 copies
-    /// nothing, wherever its slices or levels lie, as plain Metal does.
+    /// for levels or slices past either texture (`Invalid`), and between a compressed and an
+    /// uncompressed format (`NotImplemented(Format)`: which levels Metal pairs is not measured).
+    /// A count of 0 copies nothing, wherever its slices or levels lie, as plain Metal does.
     pub fn copy_texture_slices(
         &mut self,
         source_texture: &Texture,
@@ -1227,12 +1228,19 @@ impl BlitCommandEncoder {
     }
 
     /// `copyFromTexture:toTexture:`: every level and slice two textures share, as plain Metal
-    /// copies them: the levels paired by size from the first pair of one size (the source's first
-    /// and the destination's, or one's first and the other's first level of the other's first
-    /// size), and the slices both have; a 2D texture into a 2D array copies its one slice.
+    /// copies them: the levels paired by extent from the first pair of one extent (the source's
+    /// first and the destination's, or one's first and the other's first level of the other's
+    /// first extent), and the slices both have; a 2D texture into a 2D array copies its one
+    /// slice.
     ///
-    /// Refused as [`copy_texture_slices`](Self::copy_texture_slices) is, and for textures with
-    /// no levels of one size (`Invalid`: plain Metal aborts).
+    /// The pairing shifts the textures' own extents, which their level counts do not bound, so
+    /// two textures of one level each whose extents pair only at a shift copy no level at all, as
+    /// plain Metal copies them.
+    ///
+    /// Refused as [`copy_texture_slices`](Self::copy_texture_slices) is, and for textures whose
+    /// extents pair at no level (`Invalid`: plain Metal aborts) or whose paired level lies past
+    /// one texture's own levels (`Invalid`: plain Metal reads or writes a level it does not
+    /// hold).
     pub fn copy_texture(
         &mut self,
         source_texture: &Texture,

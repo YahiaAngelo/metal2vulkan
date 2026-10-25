@@ -68,7 +68,7 @@ pub const BEFORE: u8 = 0xee;
 /// were both here — the ordinal in the row and the enumerator in a comment beside it — which is
 /// the second spelling `crate::texture`'s raw `format` field exists to avoid, and a comment is
 /// not something the compiler or `scripts/conformance-coverage/` can hold to the row.
-const FORMATS: [(PixelFormat, u32, &str); 75] = [
+const FORMATS: [(PixelFormat, u32, &str); 76] = [
     (PixelFormat::A8Unorm, 1, "texture-round-trip-1"),
     (PixelFormat::R8Unorm, 1, "texture-round-trip-10"),
     (PixelFormat::R8UnormSRGB, 1, "texture-round-trip-11"),
@@ -89,6 +89,7 @@ const FORMATS: [(PixelFormat, u32, &str); 75] = [
     (PixelFormat::A1BGR5Unorm, 2, "texture-round-trip-41"),
     (PixelFormat::ABGR4Unorm, 2, "texture-round-trip-42"),
     (PixelFormat::BGR5A1Unorm, 2, "texture-round-trip-43"),
+    (PixelFormat::BGRA4Unorm, 2, "texture-round-trip-44"),
     (PixelFormat::R32Uint, 4, "texture-round-trip-53"),
     (PixelFormat::R32Sint, 4, "texture-round-trip-54"),
     (PixelFormat::R32Float, 4, "texture-round-trip-55"),
