@@ -43,14 +43,36 @@ pub(super) fn texel_bytes(pf: PixelFormat) -> Option<usize> {
 }
 
 /// Whether Metal makes no texture of `pf` from a descriptor alone, answering nil to the device's
-/// and a heap's calls (`TextureProblem::NoTextureOfFormat`), where measured on an Apple M4 under
-/// macOS 27.0.1: the two-plane YCbCr formats (each of the 69), made only over an IOSurface's
-/// planes, and `RGBA16Float_XR`, `AnyDepth` and `AnyStencil`.
+/// and a heap's calls (`TextureProblem::NoTextureOfFormat`), in the storage modes those callers
+/// ask: `Shared` for the device's textures here, `Private` and the heap's own for
+/// `heap_textures`. Measured on an Apple M4 under macOS 27.0.1: the two-plane YCbCr formats
+/// (each of the 69), made only over an IOSurface's planes, and `RGBA16Float_XR`, `AnyDepth` and
+/// `AnyStencil`.
+///
+/// `R10Unorm_PACKED` and `RG10Unorm_PACKED` are here on a measurement of their own, re-read on an
+/// Apple M3 Max under macOS 27.0.1 (26A434) with one cell per fresh process, four processes a
+/// cell, and the storage mode varied rather than left to a default, because a storage mode's nil
+/// and a format's nil look identical at the call: `newTextureWithDescriptor:` for a 2D 8x8
+/// texture answered nil for both formats in `Private`, `Shared` and `Managed` storage, 4 of 4 in
+/// each of `ShaderRead`, `ShaderRead | ShaderWrite`, `ShaderRead | RenderTarget` and
+/// `RenderTarget` usage, while `RGBA8Unorm` and `R10Unorm_X6` beside them in the same mode and
+/// usage were made 4 of 4 — so neither the mode nor the usage refused the cell, and neither does
+/// "padded 10-bit" stand in for these two. Their heap size query answers 0 bytes
+/// (`metal::format::Footprint::NoTexture`), which is a separate path and not what settles this.
+///
+/// `Memoryless` storage is the one mode where that same measurement made a texture of both, 4 of
+/// 4 at all four usages. No caller of this helper asks it (a heap holds no memoryless texture,
+/// and the device's textures here are `Shared`), so the helper does not answer for it; the
+/// runtime's nil there is a separate, open question.
 pub(super) fn no_texture_alone(pf: PixelFormat) -> bool {
     metal2vulkan::metal::format::ycbcr_format(pf).is_some()
         || matches!(
             pf,
-            PixelFormat::RGBA16FloatXR | PixelFormat::AnyDepth | PixelFormat::AnyStencil
+            PixelFormat::RGBA16FloatXR
+                | PixelFormat::AnyDepth
+                | PixelFormat::AnyStencil
+                | PixelFormat::R10UnormPACKED
+                | PixelFormat::RG10UnormPACKED
         )
 }
 
