@@ -30,13 +30,16 @@
 //!   the turn and the program's thread took up to 13 to 55 ms at a light burst's 99th percentile
 //!   of the queue storm (`runtime_lane::queue_storms`), over Metal's one wake from its completion;
 //!   counted (`WorkCounts::completed_where_seen`).
-//! - **A command buffer finishes at its fence, where it has one.** Where the driver still reads
-//!   a command buffer's objects after the value (MoltenVK 1.4.1), the batch that ends it also
-//!   signals a fence ([`fences`](super::fences)), which the driver signals after those reads: the
-//!   turn posts the transition, after which what the command buffer used is released, only once
-//!   the fence is signaled too, and then resets the fence and gives it back. A wait for fences
-//!   holds up the other queues' batches by as long. Elsewhere Vulkan's value is enough, and the
-//!   batch has no fence.
+//! - **A command buffer finishes at its fence, where it has one.** Where the driver still reads a
+//!   command buffer's query pools after the value (MoltenVK), the batch that ends it also signals
+//!   a fence ([`fences`](super::fences)), which the driver signals after those reads: the turn
+//!   posts the transition, after which what the command buffer used is released, only once the
+//!   fence is signaled too, and then resets the fence and gives it back. A wait for fences holds
+//!   up the other queues' batches by as long. Elsewhere Vulkan's value is enough, and the batch
+//!   has no fence. On MoltenVK every command buffer takes one, not only the ones whose query pools
+//!   that driver reads late: a relayed queue's failure attribution needs one for every batch, and
+//!   the host sees the fence sooner than the value there anyway (`fences.rs`, which holds the
+//!   argument, the reading of MoltenVK's completed handlers and the measurement).
 //! - **One waiter per `VkQueue`, each waiting for one object** (replacing the wait for any of the
 //!   timelines). Each `VkQueue`'s waiter thread waits for its queue's first pending batch past the
 //!   value it saw reached: for the batch's fence where it has one, else for its queue's timeline to

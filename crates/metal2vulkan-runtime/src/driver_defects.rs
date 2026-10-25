@@ -174,12 +174,28 @@ pub(super) struct Affected {
 ///   load of a released `MVKQueryPool`'s vtable;
 ///   `runtime_lane::visibility::command_buffers_released_at_completion_leave_nothing_read_later`
 ///   passed 0 of 8 runs on an M4). MoltenVK signals a fence from the last of those handlers. Read
-///   in 1.4.1's source and measured on 1.4.1 (driverVersion 10401): known broken through 1.4.1.
-///   Nothing is refused: a command buffer's last batch signals a fence there too, and the
-///   command buffer finishes once both are signaled (`command_buffer/fences.rs`). Every other
-///   driver ends a command buffer at its value alone: Vulkan makes the value enough, and their
-///   fences are signaled with it, so a fence there only added a `vkCreateFence` to the commit
-///   path, which NVIDIA's 615.71.09 held for up to 1.9 s while other processes' work ran.
+///   in 1.4.1's source and measured on 1.4.1 (driverVersion 10401); read again in 1.4.2's, where
+///   it is unchanged: known broken through 1.4.2.
+///
+///   **It covers the query pools of a command buffer that recorded a query command, and nothing
+///   else.** Every `addCompletedHandler:` of 1.4.2's source was read, and `finishQueries` is the
+///   only handler that reads a Vulkan object of the command buffer: the temporary-buffer handlers
+///   reach the `VkCommandPool`'s encoding pool, which the runtime never destroys or releases
+///   before the device is torn down; `MVKImagePlane::pullFromDeviceOnCompletion` reads a `VkImage`
+///   but is registered only for an image memory barrier naming `HOST_READ` or `MEMORY_READ` into
+///   `GENERAL`, which the runtime never makes (`image_barrier.rs`); and the rest read MoltenVK's
+///   own objects or ones it retains for the handler. The handler is registered only where the
+///   encoder collected an activated query (`MVKCommandEncoder::addActivatedQueries`).
+///
+///   Nothing is refused: a command buffer's last batch signals a fence there too, and the command
+///   buffer finishes once both are signaled (`command_buffer/fences.rs`). Every command buffer
+///   does, not only the ones the narrower scope above can reach: a MoltenVK device the runtime
+///   creates relays its queues' failures, which needs a fence for every batch (`device/relay.rs`),
+///   and the host sees the fence sooner than the value there anyway (measured on an M3 Max at
+///   1.4.2, `fences.rs`). Every other driver ends a command buffer at its value alone: Vulkan
+///   makes the value enough, and their fences are signaled with it, so a fence there only added a
+///   `vkCreateFence` to the commit path, which NVIDIA's 615.71.09 held for up to 1.9 s while other
+///   processes' work ran.
 ///
 /// `WaitForAnyObjectLosesASignal`:
 /// - MoltenVK (`MOLTENVK`): a host wait for any of several objects to be signaled, which the

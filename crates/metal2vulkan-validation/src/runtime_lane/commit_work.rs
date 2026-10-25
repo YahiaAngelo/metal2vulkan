@@ -20,12 +20,16 @@
 //!   queue outside a batch is there (`device/relay.rs`).
 //!   Before, it was a `vkQueueSubmit` of its own, a second kernel submission listing every buffer
 //!   object of the device on ANV over i915.
-//! - **Fences.** Command buffers that each end in one submission complete at their fences where
-//!   the driver reads their objects after their values (MoltenVK): the queues' waiters wait
-//!   for no timeline value; before, they waited for one each, which MoltenVK wakes through a shared
-//!   event's listener. Elsewhere they end at their values, and the device makes no fence for
-//!   them; before, each commit could make one, which NVIDIA's driver held for up to 1.9 s while
-//!   other processes' work ran.
+//! - **Fences.** Command buffers that each end in one submission complete at their fences on a
+//!   device whose queues' failures are relayed, which takes one for every batch (MoltenVK,
+//!   `device/relay.rs`): the queues' waiters wait for no timeline value; before, they waited for
+//!   one each, which MoltenVK wakes through a shared event's listener. Elsewhere they end at their
+//!   values, and the device makes no fence for them; before, each commit could make one, which
+//!   NVIDIA's driver held for up to 1.9 s while other processes' work ran. On a device the runtime
+//!   adopts, which relays none, every command buffer still ends at a fence where the driver reads
+//!   a command buffer's query pools after its value, which only the ones that record a query
+//!   command can suffer: the fence is the faster wait there all the same
+//!   (`command_buffer/fences.rs`).
 //! - **The live buffers.** A buffer made or released between commits costs the next resident set
 //!   no ask of a listed buffer and no new buffer to upload it to; before, each asked every
 //!   listed buffer for its pages again and uploaded the set to a new buffer.
@@ -621,16 +625,19 @@ fn chained_batches(batch_order: BatchOrderPolicy) {
     );
 }
 
-/// Command buffers that each end in one submission, empty or of a blit, complete at their
-/// fences where the driver reads a command buffer's objects after its value
-/// (`RuntimeDriverDefect::ReadsCommandBuffersAfterTheirSignal`): the queues' waiters wait for
-/// no timeline value. Elsewhere they end at their values alone: the device makes no fence for
-/// any of them, from its creation on, and the queues' waiters wait for their values.
+/// Command buffers that each end in one submission, empty or of a blit, complete at their fences
+/// on a device whose queues' failures are relayed (`device/relay.rs`), which takes one for every
+/// batch, and on one whose driver reads a command buffer's query pools after its value
+/// (`RuntimeDriverDefect::ReadsCommandBuffersAfterTheirSignal`), which takes one for every
+/// command buffer's last batch: the queues' waiters wait for no timeline value. Elsewhere they
+/// end at their values alone: the device makes no fence for any of them, from its creation on, and
+/// the queues' waiters wait for their values.
 #[test]
 fn command_buffers_end_at_fences_only_where_the_driver_reads_them_later() {
     on_device(|device, _| {
         let queue = device.new_command_queue().unwrap();
         let buffer = device.new_buffer(4096, ResourceOptions::default()).unwrap();
+        let relayed = relay_marks(device, &queue) > 0;
         let before = device.work_counts();
         for _ in 0..4 {
             finish(&queue.command_buffer().unwrap());
@@ -640,17 +647,28 @@ fn command_buffers_end_at_fences_only_where_the_driver_reads_them_later() {
         let late_reads = (device.properties().driver_defects)
             .contains(&RuntimeDriverDefect::ReadsCommandBuffersAfterTheirSignal);
         eprintln!(
-            "COMMAND-BUFFER-ENDS {}: reads after the value {late_reads}, {} fences made, {} \
-             timeline waits for 8 command buffers",
+            "COMMAND-BUFFER-ENDS {}: reads after the value {late_reads}, failures relayed \
+             {relayed}, {} fences made, {} fence waits and {} timeline waits for 8 command \
+             buffers that record no query",
             device.name(),
             after.fences_made,
+            after.fence_waits - before.fence_waits,
             after.timeline_waits - before.timeline_waits
         );
-        if late_reads {
-            assert_eq!(after.timeline_waits, before.timeline_waits);
+        // `fences::ends_at_fence` of the queue these command buffers were committed to.
+        if relayed || late_reads {
+            assert!(after.fence_waits > before.fence_waits, "fence waits");
+            assert_eq!(
+                after.timeline_waits, before.timeline_waits,
+                "timeline waits"
+            );
         } else {
-            assert_eq!(after.fences_made, 0);
-            assert!(after.timeline_waits > before.timeline_waits);
+            assert_eq!(after.fence_waits, before.fence_waits, "fence waits");
+            assert!(
+                after.timeline_waits > before.timeline_waits,
+                "timeline waits"
+            );
+            assert_eq!(after.fences_made, 0, "fences made");
         }
     });
 }
