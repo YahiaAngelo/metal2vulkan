@@ -233,10 +233,26 @@ impl PendingDispatch {
 
     /// Its segment of `command_buffer`, recorded once its pipelines are made: its barrier, then
     /// its commands.
+    ///
+    /// Nothing is recorded where a buffer over host pages one of its encoder's commands named
+    /// lies elsewhere now than the command took it (`CommandBuffer::encoder_rebound`): a rebind
+    /// since the commit that no encoding again reached, so the submission holding the dispatch
+    /// runs nothing and the command buffer fails `CommandBufferError::EncodedUseRebound`
+    /// (`command_buffer/first_submission.rs`). What it would record resolved as it was encoded,
+    /// its set 0 among it, and the rebind freed the `VkBuffer` those descriptors name: a
+    /// descriptor a command names must be valid as it is recorded, where its binding is not
+    /// `UPDATE_AFTER_BIND` (the Vulkan specification, Descriptor Set Binding: such contents
+    /// "may be consumed ... during host execution of the command, or during shader execution of
+    /// the resulting draws and dispatches, or any time in between"), and a driver that reads one
+    /// as it encodes reads freed memory. Its pipelines are made all the same, so a making that
+    /// failed fails the command buffer as it does where the dispatch records.
     pub(super) fn record(&self, command_buffer: &CommandBuffer) -> Result<RecordedSegment, Error> {
         let pipelines = self.made(command_buffer)?;
         if let Some(creation) = &self.creation {
             creation.get_or_init(|| pipelines.iter().map(|made| made.created_in).collect());
+        }
+        if command_buffer.encoder_rebound(self.encoder) {
+            return Ok(EncoderCore::unrecorded_segment());
         }
         let (barrier, recording, made) = (self.barrier, &self.recording, &pipelines);
         let record = |raw: &Vk, cb: vk::CommandBuffer| {

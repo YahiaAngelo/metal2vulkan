@@ -141,6 +141,12 @@ Edit the source, then regenerate:
 | `crates/metal2vulkan/src/spv.rs`, `crates/metal2vulkan/src/spirv_binary/table.rs` | `scripts/regen-spirv-grammar/regen-spirv-grammar.sh` | Khronos SPIRV-Headers' grammar JSON, and `items.txt` beside the script |
 | `crates/metal2vulkan-validation/profiles/*.json` | `scripts/regen-device-profiles/` | gpuinfo reports and local captures |
 
+`crates/metal2vulkan/tests/api_signatures.tsv` is written the same way: the signature-level public
+surface of the three published crates, by `python3 scripts/api-signatures/signatures.py --bless`
+(`--check` to verify, `--selftest` for the derivation's own tests), from those crates' sources
+alone. `crates/metal2vulkan/tests/api_signatures.rs` says what it pins, what it cannot see, and
+what blessing it asserts; a removed or changed line is a breaking change of a published crate.
+
 Three docs are checked by tests: `docs/FAST-PATHS.md` must name every `DevicePolicy` accuracy
 choice and the notes it records (`tests::fast_paths`); `docs/API.md` must list every degrade code
 with its category and quote `examples/api_preview.rs` verbatim in its `rust` blocks; and

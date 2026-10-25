@@ -2209,6 +2209,28 @@ impl EncoderCore {
 }
 
 impl EncoderCore {
+    /// A segment that records nothing and takes no `VkCommandBuffer`, for work of an encoder
+    /// whose submission runs nothing: dead as one whose command named a detached buffer is
+    /// ([`skips`](Self::skips), `Taken::die`), so the submission never places it
+    /// (`State::place`) and no part of it reaches a `VkQueue`
+    /// (`State::runs_nothing_unrunnable`). Its caller has read that the encoder's submission
+    /// fails (`CommandBuffer::encoder_rebound`), which no later judging unreads: pages a
+    /// command took are compared by identity, and a buffer never lies in the pages it left.
+    pub(super) fn unrecorded_segment() -> RecordedSegment {
+        let mut taken = Taken::default();
+        taken.die();
+        RecordedSegment {
+            raws: Vec::new(),
+            summary: EncoderUses::new(false).finish(),
+            retained: Retained::default(),
+            executions: Vec::new(),
+            keys: BTreeSet::new(),
+            taken,
+            resident_misses: 0,
+            faults: ReplayFaults::default(),
+        }
+    }
+
     /// A segment of `command_buffer` that `record` records alone into a new `VkCommandBuffer` of
     /// its pool, retaining `retained`: no barrier around it and nothing tracked, its encoder
     /// having tracked its commands where it left them ([`command_later`](Self::command_later)),

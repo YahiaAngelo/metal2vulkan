@@ -23,8 +23,12 @@
 //! breaking change whatever the attribute, or an enum every consumer must interpret completely, so
 //! a new variant is a compile error there.
 //!
-//! Method signatures are not pinned here; `compiled_functions_round_trip_through_the_public_api`
-//! and `compiled_render_stages_round_trip_through_the_public_api` drive the main consumer flow
+//! Method signatures are not pinned here, and neither are fields, variants or the other two
+//! published crates: `api_signatures` pins all of those, record by record, against
+//! `tests/api_signatures.tsv`. A change this table cannot see — a method's parameters or return
+//! type, a method or a variant removed, anything in `metal2vulkan-runtime` — fails there.
+//! `compiled_functions_round_trip_through_the_public_api` and
+//! `compiled_render_stages_round_trip_through_the_public_api` drive the main consumer flow
 //! (compile, cache, link, plan, instantiate) through the public paths.
 //!
 //! The consumer reference (`scripts/api-docs`) renders exactly this table:

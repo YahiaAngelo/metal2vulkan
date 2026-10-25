@@ -1860,6 +1860,26 @@ impl CommandBuffer {
         lock(&self.0.state)
     }
 
+    /// Whether a buffer over host pages a command of its ended encoder at `encoder` named lies
+    /// elsewhere now than the command took it (`Rebinds::rebound_now`): a rebind since its commit
+    /// that no encoding again reached. The submission holding that encoder runs nothing and the
+    /// command buffer fails `CommandBufferError::EncodedUseRebound` (`first_submission.rs`), so
+    /// work of the encoder a host step records resolved as it was encoded records nothing
+    /// (`pending_dispatch.rs`): the descriptors it would record name a `VkBuffer` the rebind
+    /// freed. Read without the state's lock held, as the lock each submission reads it under is
+    /// taken inside this one.
+    pub(super) fn encoder_rebound(&self, encoder: usize) -> bool {
+        let rebinds = &self.0.device.shared().rebinds;
+        if !rebinds.any() {
+            return false;
+        }
+        let state = self.state();
+        let Some(record) = state.ended.get(encoder) else {
+            return false;
+        };
+        rebinds.rebound_now(&record.taken)
+    }
+
     /// This command buffer as the device's commits that wait hold it ([`Waiting`]).
     pub(crate) fn waiting(self) -> Arc<dyn Waiting> {
         self.0

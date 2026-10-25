@@ -391,6 +391,14 @@ impl Rebinds {
             .is_some_and(|entry| entry.submitted > 0)
     }
 
+    /// Whether a buffer a command of `taken` named lies elsewhere now than the command took it,
+    /// not detached ([`Submitting::rebound`]), taking nothing: what a command buffer's submission
+    /// of such a command finds, read before the submission by work of its that records later
+    /// (`pending_dispatch.rs`). One load while the device has no buffer over host pages.
+    pub(super) fn rebound_now(&self, taken: &Taken) -> bool {
+        self.any() && self.submitting().rebound(taken)
+    }
+
     /// The buffers over host pages as a command buffer's batch is submitted, locked: what its
     /// commands took is judged and held at once (`Submitting`), so no detach falls between.
     pub(super) fn submitting(&self) -> Submitting<'_> {
