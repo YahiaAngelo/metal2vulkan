@@ -297,9 +297,8 @@ impl CorpusStore {
     }
 
     /// Write bucket `index`: `cases`, and its observation shards less the rows of
-    /// `cascaded_case_id`. Every shard is written in its key order
-    /// ([`sort_shard`]), including rows a tool left out of order, and every row it keeps as it
-    /// was read ([`Stored`]).
+    /// `cascaded_case_id`. Every shard is written in its key order ([`sort_stored`]), including
+    /// rows a tool left out of order, and every row it keeps as it was read ([`Stored`]).
     fn rewrite_aligned(
         &self,
         index: usize,
@@ -952,9 +951,9 @@ fn shard_paths(directory: &Path) -> Result<Vec<PathBuf>, String> {
 
 /// A row of an aligned shard: the AIR whose hash places it in its shard, and the key its shard is
 /// ordered by. Every writer of case and observation shards sorts a shard it writes by
-/// [`ShardRow::order_key`] through [`sort_shard`]. The key names one slot (a case's name within its
-/// AIR, or a Metal or candidate experiment slot within a backend's directory), so a shard's keys
-/// strictly increase.
+/// [`ShardRow::order_key`] through [`sort_stored`]. The key names one slot (a case's name within
+/// its AIR, or a Metal or candidate experiment slot within a backend's directory), so a shard's
+/// keys strictly increase.
 pub(crate) trait ShardRow: DeserializeOwned {
     fn air_sha256(&self) -> &str;
     fn order_key(&self) -> (&str, &str);
@@ -1002,7 +1001,7 @@ impl ShardRow for CandidateObservation {
     }
 }
 
-/// [`sort_shard`] over stored rows.
+/// Sort stored `rows` into the key order a shard is written in ([`ShardRow::order_key`]).
 fn sort_stored<T: ShardRow>(rows: &mut [Stored<T>]) {
     rows.sort_by(|left, right| left.row.order_key().cmp(&right.row.order_key()));
 }

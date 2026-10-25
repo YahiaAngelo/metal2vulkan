@@ -1163,11 +1163,11 @@ fn packed(version: ApiVersion) -> u32 {
     vk::make_api_version(0, version.major, version.minor, 0)
 }
 
-/// Create a Vulkan instance at `api_version` from [`with_instance_create_info`]'s create info:
-/// the only instance creation in this crate. It runs only inside [`VulkanContext::new`] (the
-/// context's instance and its two probes, [`native_description`] and [`presented_extensions`]),
-/// which runs only after [`with_layered_context`] has checked the hang tripwire, and inside
-/// [`capture_formats`], after its own check.
+/// Create a Vulkan instance at `api_version` from [`with_instance_create_info`]'s create info: the
+/// only instance creation in this crate. It runs only inside [`VulkanContext::new`] (the context's
+/// instance and its two probes, [`native_description`] and [`presented_extensions`]), which runs
+/// only after [`with_slot`] has checked the hang tripwire, and inside [`capture_formats`], after
+/// its own check.
 fn create_instance(
     entry: &Entry,
     api_version: u32,

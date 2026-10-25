@@ -706,9 +706,12 @@ fn a_mapping_update_past_the_bounds_clips_as_plain_metal_does() {
 /// 4 by 4 of Metal's 16-KiB tiles, every tile of the source filled with a word naming itself
 /// (`metal2vulkan-conformance/probes/sparse_move_past_the_bounds.m`).
 ///
-/// Each assertion below names its probe shape and what Metal read for it. The first is the
-/// control: an entirely in-bounds move whose reading **must** change, or none of the rest is a
-/// measurement of anything.
+/// Each assertion below names its probe shape and what Metal read for it. A destination tile
+/// **took** a source tile where the probe read that source tile's word as the destination tile's
+/// own **first texel**: the tile is mixed rather than that word throughout, and the probe reads no
+/// share of it (its `differing>=` count is guarded on the outer loop, so it is a floor). The first
+/// assertion is the control: an entirely in-bounds move whose reading **must** change, or none of
+/// the rest is a measurement of anything.
 #[test]
 fn a_move_is_metals_run_of_destination_tiles() {
     let source_grid = grid([256, 256, 1], 9, 1, 3, false);
@@ -721,15 +724,15 @@ fn a_move_is_metals_run_of_destination_tiles() {
     let four_wide = Size::new(4, 1, 1);
     let four = Size::new(4, 4, 1);
     let two = Size::new(2, 2, 1);
-    // `control`: one tile at (0, 0) onto (3, 3). Metal read B(3, 3) holding A(0, 0)'s word and
-    // A(0, 0) reading zero, every other tile of both textures as it was.
+    // `control`: one tile at (0, 0) onto (3, 3). B(3, 3) took A(0, 0), read off B(3, 3)'s own
+    // first texel, with A(0, 0) reading zero and every other tile of both textures as it was.
     assert_eq!(
         source_grid.move_pairs(at(0, 0, 0, 0), Size::new(1, 1, 1), &other, at(0, 0, 3, 3)),
         vec![(tile(0, 0, [0, 0]), tile(0, 0, [3, 3]))]
     );
-    // `dest-2d`: 2 by 2 tiles at (0, 0) onto (1, 1), both sides inside the level. Metal read
-    // B(1,1), B(2,1), B(1,2), B(2,2) holding A(0,0), A(1,0), A(0,1), A(1,1) -- the tile's own
-    // offset within the region, which is what an ordinary move looks like.
+    // `dest-2d`: 2 by 2 tiles at (0, 0) onto (1, 1), both sides inside the level. B(1,1), B(2,1),
+    // B(1,2), B(2,2) took A(0,0), A(1,0), A(0,1), A(1,1), each off the destination tile's own first
+    // texel -- the tile's own offset within the region, which is what an ordinary move looks like.
     assert_eq!(
         source_grid.move_pairs(at(0, 0, 0, 0), two, &other, at(0, 0, 1, 1)),
         vec![
@@ -741,8 +744,8 @@ fn a_move_is_metals_run_of_destination_tiles() {
     );
     // `region-open`: the SOURCE overhangs -- 4 by 1 tiles at (2, 0) of a level holding 4 by 4 --
     // onto (0, 0). Metal moved the two tiles inside and nothing anywhere for the two outside:
-    // B(0,0) and B(1,0) held A(2,0) and A(3,0), B(2,0) and B(3,0) read zero, and A's other rows
-    // were untouched, so nothing wrapped.
+    // B(0,0) and B(1,0) took A(2,0) and A(3,0), each read off the destination tile's own first
+    // texel, B(2,0) and B(3,0) read zero, and A's other rows were untouched, so nothing wrapped.
     assert_eq!(
         source_grid.move_pairs(at(0, 0, 2, 0), four_wide, &other, at(0, 0, 0, 0)),
         vec![
@@ -751,9 +754,10 @@ fn a_move_is_metals_run_of_destination_tiles() {
         ]
     );
     // `region-dest`: the DESTINATION overhangs -- 4 by 1 tiles at (0, 0) onto (2, 0), two tiles
-    // past the row. Metal moved ALL FOUR: B(2,0), B(3,0), B(2,1), B(3,1) held A(0,0), A(1,0),
-    // A(2,0), A(3,0), and A's whole row 0 read zero. The destination's width is clipped to the two
-    // tiles right of the origin and its height is not, so the run takes the next row.
+    // past the row. Metal moved ALL FOUR: B(2,0), B(3,0), B(2,1), B(3,1) took A(0,0), A(1,0),
+    // A(2,0), A(3,0), each read off the destination tile's own first texel, and A's whole row 0
+    // read zero. The destination's width is clipped to the two tiles right of the origin and its
+    // height is not, so the run takes the next row.
     assert_eq!(
         source_grid.move_pairs(at(0, 0, 0, 0), four_wide, &other, at(0, 0, 2, 0)),
         vec![
@@ -776,8 +780,9 @@ fn a_move_is_metals_run_of_destination_tiles() {
     );
     // `src-clip-2d`: both sides overhang, and the reading that says the run's row is the width the
     // move STATES rather than the clipped source's. 4 by 4 tiles at (2, 2) clip to 2 by 2, onto
-    // (1, 1) where three tiles lie to the right: Metal read B(1,1), B(2,1), B(3,1), B(1,2) holding
-    // A(2,2), A(3,2), A(2,3), A(3,3). A row of the clipped two would have put the third at (1, 2).
+    // (1, 1) where three tiles lie to the right: B(1,1), B(2,1), B(3,1), B(1,2) took A(2,2),
+    // A(3,2), A(2,3), A(3,3), each read off the destination tile's own first texel. A row of the
+    // clipped two would have put the third at (1, 2).
     assert_eq!(
         source_grid.move_pairs(at(0, 0, 2, 2), four, &other, at(0, 0, 1, 1)),
         vec![

@@ -144,7 +144,7 @@ const RELEASED: &str = "what a release got round to destroying, which runs on wh
 /// doc claimed alongside them — `command_buffers_begun` and `command_buffers_submitted` — move
 /// **both** ways: alone above their in-set reading in 104 cases and below it in 6, because
 /// `xr-clears-bgr10xr` and its siblings begin a command buffer in 64 segments inside the set and in
-/// 1 alone. A count like that is bounded from neither shape, which is why [`CaseCost::composed`]
+/// 1 alone. A count like that is bounded from neither shape, which is why [`CostRecord::composed`]
 /// reports it instead of either shape gating it.
 const FOUND: &str = "an object found already made rather than made, which depends on what every \
      case before it in the same process made. Its `_made` partner stays gated, and loses nothing: \
