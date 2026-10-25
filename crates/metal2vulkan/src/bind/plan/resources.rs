@@ -1229,7 +1229,19 @@ impl ResourcePlanner<'_> {
                 let reads_srgb_raw = !storage
                     && (t.access.read || t.access.sample)
                     && self.swizzles_decoded_srgb(slot, pixel_format, swizzle);
-                let shader_swizzle = (accessed || reads_extended || reads_packed || reads_srgb_raw)
+                // A 16-bit float texel the function reads as its own 16 bits from the slot's
+                // unsigned integer alias view (`RuntimeFact::HalfBitsTexture`) holds a code there,
+                // which a `One` in the view's component mapping fills with the code 1, the `half`
+                // 2 ^ -24, where plain Metal reads the value 1: the function swizzles the widened
+                // texel instead, under the same variant, and the slot's two views take none.
+                let reads_half_bits = !storage
+                    && (t.access.read || t.access.sample)
+                    && self.swizzles_half_bits(slot, pixel_format, swizzle);
+                let shader_swizzle = (accessed
+                    || reads_extended
+                    || reads_packed
+                    || reads_srgb_raw
+                    || reads_half_bits)
                     && !swizzle.is_default();
                 if shader_swizzle {
                     self.variant.swizzled_storage.insert(slot);
@@ -1350,6 +1362,32 @@ impl ResourcePlanner<'_> {
         let crosses =
             color(swizzle.alpha) || [swizzle.red, swizzle.green, swizzle.blue].contains(&S::Alpha);
         crosses && self.has_fact(RuntimeFact::SrgbTexture { slot }) && srgb_raw_on(pf, self.profile)
+    }
+
+    /// Whether slot `slot`'s function applies the bound texture's `swizzle` itself where the slot
+    /// reads a 16-bit float texel of `pf` as its own 16 bits from its unsigned integer alias view
+    /// (`RuntimeFact::HalfBitsTexture`, a format with such a view) and the swizzle reads a channel
+    /// the format has as 1: the alias view holds codes, where a `One` in its component mapping
+    /// fills the channel with the code 1, the `half` 2 ^ -24, and plain Metal reads the value 1.
+    /// The function then swizzles the widened texel, every access of the slot alike, under
+    /// `VariantKey::swizzled_storage`, and the slot's own view and its alias view take no swizzle.
+    /// A swizzle that only moves channels reads the same either way (the alias moves a whole
+    /// 16-bit code), as does one with a `Zero` (the code 0 is the `half` 0) and one that reads as
+    /// no swizzle does (`metal::texel_format::reads_unswizzled`: a `One` on a channel the format
+    /// lacks, which the read's constant lanes already answer), and keeps the views'. A bound
+    /// format without such a view binds the alias's neutral, whose arm the read never takes, so
+    /// its own view carries the swizzle.
+    fn swizzles_half_bits(
+        &self,
+        slot: SlotRef,
+        pf: PixelFormat,
+        swizzle: TextureSwizzleChannels,
+    ) -> bool {
+        use crate::metal::TextureSwizzle as S;
+        [swizzle.red, swizzle.green, swizzle.blue, swizzle.alpha].contains(&S::One)
+            && !crate::metal::texel_format::reads_unswizzled(pf, swizzle)
+            && half_bits_read_view(pf, self.profile).is_some()
+            && self.has_fact(RuntimeFact::HalfBitsTexture { slot })
     }
 
     /// Whether the device decodes the texels of `pf` itself, though Metal decodes them from raw

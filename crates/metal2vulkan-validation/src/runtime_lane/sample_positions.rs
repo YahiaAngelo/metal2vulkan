@@ -344,8 +344,12 @@ fn fewer_positions_than_samples_put_the_rest_at_the_corner() {
     quiet(lane, &messages);
 }
 
-/// What Metal's validation stops, refused typed: positions outside `[0, 1)`, of one sample, of a
-/// count the device takes none at or more than the pass's samples. The option
+/// What Metal's validation stops, refused typed: positions outside `[0, 1)`, of a count Metal
+/// takes no custom positions at (one, and any count that is not a power of two above one), and of
+/// more positions than the pass's samples. Each is the caller's own number: the count is held to
+/// Metal's rule alone, never to the device's `sampleLocationSampleCounts`, which the runtime asks
+/// at the pass's sample count instead (the runtime's `sample_positions.rs`), so eight positions in
+/// a four-sample pass are more than its samples on every device. The option
 /// `CustomSamplePositions` of a color or depth attachment, taken in every form, as plain Metal
 /// takes it: under `Store` and `StoreAndMultisampleResolve`, and where Metal's validation stops it,
 /// under `DontCare` or `MultisampleResolve` (the descriptor's, and a late one), on the descriptor
@@ -389,13 +393,9 @@ fn sample_positions_and_their_option_are_refused_as_metal_refuses_them() {
             "pos_count_8_on_4x",
             4,
             at(0.25, 0.5, 8),
-            if lane.located(8) {
-                RenderPassProblem::SamplePositionsSamples {
-                    positions: 8,
-                    samples: 4,
-                }
-            } else {
-                RenderPassProblem::SamplePositionCount { count: 8 }
+            RenderPassProblem::SamplePositionsSamples {
+                positions: 8,
+                samples: 4,
             },
         ),
     ] {

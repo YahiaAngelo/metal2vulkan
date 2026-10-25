@@ -8,6 +8,7 @@
 //! `resolves.rs` holds every unorm, sRGB and float resolve). Each refusal is one Metal's validation
 //! stopped, refused typed before anything records; each use Metal took is taken.
 
+use super::degrade_notices::{assert_once, on_device};
 use super::resolves::{
     color_pass, lane, near, quiet, repeat, Channels, Lane, Shape, FULL, MSAA, ONE, SAMPLES, SIZE,
     WHITE,
@@ -17,9 +18,9 @@ use metal2vulkan::device::{VkExtension, VkFeature};
 use metal2vulkan::error::{Capability, Needs};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
-    Attachment, BlitOption, CpuCacheMode, Error, HazardTrackingMode, Invalid, LoadAction, Origin,
-    Problem, Region, RenderCommandEncoder, RenderPassDescriptor, RenderPassProblem,
-    ResourceOptions, Size, StorageMode, StoreAction, Texture, TextureDescriptor,
+    Attachment, BlitOption, CpuCacheMode, Degradation, Error, HazardTrackingMode, Invalid,
+    LoadAction, Origin, Problem, Region, RenderCommandEncoder, RenderPassDescriptor,
+    RenderPassProblem, ResourceOptions, Size, StorageMode, StoreAction, Texture, TextureDescriptor,
 };
 use std::cell::RefCell;
 
@@ -154,6 +155,56 @@ struct Attached {
     array_length: u64,
     levels: u64,
     at: (u64, u64, u64),
+}
+
+/// The kind a memoryless texture buffer takes
+/// ([`a_memoryless_texture_buffer_is_announced_and_its_uses_refused`]).
+pub(super) const MEMORYLESS_TEXEL_BUFFERS: [Degradation; 1] =
+    [Degradation::MemorylessTextureBuffer];
+
+/// A memoryless texture buffer, of which plain Metal makes a texture (an Apple M3 Max under macOS
+/// 27.0.1: a 64-texel `RGBA8Unorm` texture buffer of `ShaderRead` usage answers `storageMode` 3 and
+/// its other getters its descriptor's): the runtime lays it over a `Private` buffer of its row of
+/// texels, since no Vulkan buffer takes memory lazily, and announces `memoryless-texture-buffer`
+/// once, nothing more. The texture answers its descriptor's memoryless mode, as Metal's does, and
+/// its CPU access and its views are refused `StorageMode`, as Metal's validation stops every use of
+/// a memoryless texture but as a render pass's attachment, which no texture buffer is.
+#[test]
+fn a_memoryless_texture_buffer_is_announced_and_its_uses_refused() {
+    on_device(|device, messages| {
+        let width = 64;
+        let descriptor = TextureDescriptor::texture_buffer(
+            PixelFormat::RGBA8Unorm,
+            width,
+            memoryless_options(),
+            TextureUsage::SHADER_READ,
+        );
+        let texture = device.new_texture(&descriptor).unwrap();
+        assert_once(&messages.take_notices(), &MEMORYLESS_TEXEL_BUFFERS);
+        assert_eq!(texture.texture_type(), TextureType::TextureBuffer);
+        assert_eq!(texture.storage_mode(), StorageMode::Memoryless);
+        assert_eq!((texture.width(), texture.height()), (width, 1));
+        let storage = |call| Err(Error::Invalid(Invalid::new(call, Problem::StorageMode)));
+        let region = Region::new_2d(0, 0, width, 1);
+        let row = width * 4;
+        let mut bytes = vec![0; row as usize];
+        assert_eq!(
+            texture.get_bytes(&mut bytes, row, 0, region, 0, 0),
+            storage("get_bytes")
+        );
+        assert_eq!(
+            texture.replace_region(region, 0, 0, &bytes, row, 0),
+            storage("replace_region")
+        );
+        assert_eq!(
+            texture.new_texture_view(PixelFormat::RGBA8Uint).map(|_| ()),
+            storage("new_texture_view")
+        );
+        assert!(
+            messages.take_notices().is_empty(),
+            "announced past the making"
+        );
+    });
 }
 
 /// A memoryless texture of `t` is made and attached beside a stored color, as plain Metal makes

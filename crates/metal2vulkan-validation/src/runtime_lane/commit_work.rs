@@ -88,15 +88,19 @@ fn finish(command_buffer: &CommandBuffer) {
     assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
 }
 
-/// The submissions of no work the runtime adds after a use of `queue` outside a batch, read from
-/// a use that submits nothing: one where it relays the driver's failures, a mark with a fence of
-/// its own under the queue's lock (MoltenVK, `device/relay.rs`), and none elsewhere. An internal
-/// submission is such a use.
-pub(super) fn relay_marks(device: &Device, queue: &CommandQueue) -> u64 {
-    let before = device.work_counts().queue_submissions;
-    // SAFETY: the handle is not kept, and nothing is called or waited for under the lock.
-    unsafe { queue.with_vk_queue(|_, _| ()) };
-    device.work_counts().queue_submissions - before
+/// The submissions of no work the runtime adds after a use of `device`'s queue outside a batch of
+/// its own, an internal submission among them: one where it relays the driver's failures, a mark
+/// with a fence of its own under the queue's lock (`device/relay.rs`), and none elsewhere. The
+/// relay is the runtime's own branch on `DriverFact::QueueFailuresReportedByMessenger`, which on
+/// a device the lane made is enough for it (the runtime's `relay_facts` test holds the two equal
+/// there), so the fact is read rather than measured: the only use of a queue a program can make
+/// that submits nothing of its own, `CommandQueue::with_vk_queue`, also takes the freed-memory
+/// parking's mark (`freed_memory.rs`), which no use of the runtime's own takes, and so counts one
+/// too many here.
+pub(super) fn relay_marks(device: &Device) -> u64 {
+    let relays =
+        (device.properties().driver_facts).contains(&DriverFact::QueueFailuresReportedByMessenger);
+    u64::from(relays)
 }
 
 /// A command buffer of a blit that fills `buffer`.
@@ -204,7 +208,7 @@ fn a_new_texture_s_first_work_rides_in_the_next_submission() {
     on_device(|device, _| {
         let queue = device.new_command_queue().unwrap();
         finish(&queue.command_buffer().unwrap());
-        let marks = relay_marks(device, &queue);
+        let marks = relay_marks(device);
         let texture = || {
             let mut descriptor =
                 TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 64, 64, false);

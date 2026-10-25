@@ -1392,7 +1392,7 @@ fn a_new_heap_texture_s_staged_copy_lands_in_its_first_move_s_submission() {
         let d = descriptor(ResourceOptions::shared());
         let size = device.heap_texture_size_and_align(&d).unwrap().size;
         let region = Region::new_2d(0, 0, SIDE, SIDE);
-        let marks = relay_marks(device, &queue);
+        let marks = relay_marks(device);
         for (salt, by_get_bytes) in [(10, false), (11, true)] {
             let options = ResourceOptions::shared();
             let heap = (device.new_heap(&HeapDescriptor::new(HeapType::Placement, size, options)))

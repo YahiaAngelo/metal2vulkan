@@ -1033,18 +1033,20 @@ const DEPTH_STENCIL_ROUTES: [Degradation; 3] = [
 /// keeps its layout optimized.
 pub(super) const OPTIMIZED: [Degradation; 1] = [Degradation::OptimizedDepthStencilTexture];
 
-/// A 4-sample depth texture without GPU-optimized contents, sized and made in a placement heap,
+/// A depth texture without GPU-optimized contents, sized and made in a `Private` placement heap,
 /// where the driver keeps depth and stencil images GPU-optimized
-/// (`DriverFact::DepthStencilImagesStayGpuOptimized`: MoltenVK on Apple's GPUs): a `Depth32Float`
-/// one is a shadow of its samples in Metal's tiles there, at Metal's answer (65536 bytes for 64x64,
-/// where it answers 66048 with them), announcing nothing, as a single-sample one is (16384, where
-/// it answers 16512 with them); a `Depth16Unorm` one, whose samples the device's draws there do not
-/// move, announces `optimized-depth-stencil-texture` once, its answer then Metal's with the
-/// property on. Elsewhere nothing announces it. Made on the device first, none announces it there:
-/// nothing shows a device's own texture's layout; nor do a color texture without the property, and
-/// a depth texture with it.
+/// (`DriverFact::DepthStencilImagesStayGpuOptimized`: MoltenVK on Apple's GPUs), answers Metal's
+/// own number for the descriptor as given: a 4-sample `Depth32Float` one 65536 bytes for 64x64,
+/// where Metal answers 66048 with the property on, a single-sample one 16384 where it answers
+/// 16512, and a 4-sample `Depth16Unorm` one 32768 where it answers 33280. None of them announces
+/// `optimized-depth-stencil-texture`, which is the mark of the other route: the notice is
+/// announced for a heap depth texture that is no shadow of its texels or samples in Metal's tiles
+/// there (`heap_tiled.rs`), whose answer is then the optimized image's instead of Metal's, so an
+/// empty count says every texture here is such a shadow. Made on the device first, none announces
+/// it there either: nothing shows a device's own texture's layout; nor do a color texture without
+/// the property, and a depth texture with it.
 #[test]
-fn a_multisample_depth_texture_without_optimized_contents_is_announced_where_it_stays_optimized() {
+fn a_heap_depth_texture_without_optimized_contents_answers_metal_s_footprint() {
     let messages = Messages::default();
     let cache = ScratchCache::new().unwrap();
     let optimized = {
@@ -1097,13 +1099,17 @@ fn a_multisample_depth_texture_without_optimized_contents_is_announced_where_it_
         if optimized {
             assert_eq!((without.size, without.align), (65536, 128));
             assert_eq!((single.size, single.align), (16384, 128));
-            assert_eq!(short_with, short);
+            assert_eq!((short.size, short.align), (32768, 128));
+            assert_eq!((short_with.size, short_with.align), (33280, 128));
         }
         optimized
     };
     let notices = counts(&messages.take_notices());
     let announced = notices.get(&OPTIMIZED[0]).copied().unwrap_or(0);
-    assert_eq!(announced, usize::from(optimized));
+    assert_eq!(
+        announced, 0,
+        "a heap depth texture that is a shadow of Metal's tiles announced (fact {optimized})"
+    );
     layer_reported_nothing_at_all(&messages);
 }
 

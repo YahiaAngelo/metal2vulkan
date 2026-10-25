@@ -21,7 +21,8 @@
 //!   sending a mode where no constexpr sampler addresses is refused, typed, naming the map;
 //! - a texture whose alpha reads 1 samples and gathers, inside and at every border, as the
 //!   consumer's present form, the same texels through a `(R, G, B, One)` swizzle, and its writes
-//!   and render target keep the alpha written.
+//!   and render target keep the alpha written. Its reads answer alpha 1 for every one of the
+//!   65,536 `half` codes its alpha can hold, each of which stays the texture's own code.
 //!
 //! The kernels are owned fixtures' (`rrp_mirror_clamp`'s `rrp_mc_sample` and `rrp_mc_gather`:
 //! five results a lane, with the texel offsets 0, -3, 2, -7 and 5 on `s`; `a2_clamp_to_zero`;
@@ -878,6 +879,88 @@ fn a_texture_whose_alpha_reads_one_samples_as_the_swizzled_view() {
         );
         assert!(checked > 0);
         assert!(wrong.is_empty(), "{} cases differ", wrong.len());
+    });
+}
+
+/// The textures [`every_alpha_code_of_a_texture_whose_alpha_reads_one_reads_one`] reads in one
+/// round: one dispatch each in one command buffer, so the 65,536 codes take 256 of them.
+const CODES_AT_ONCE: usize = 256;
+
+/// The bytes a round's read of one texture writes into the out buffer.
+const CODE_STRIDE: usize = 256;
+
+/// Every one of the 65,536 `half` codes an `RGBA16Float` texture's alpha can hold reads 1 through
+/// a texture whose alpha reads 1, and stays the texture's own code: the code is written into texel
+/// `(0, 0)` by `replace_region`, read back by `get_bytes`, and read by `rrp_sw_read_f` through the
+/// slot the swizzle reaches ([`CODES_AT_ONCE`] textures a round, one pipeline). The slot reads a
+/// 16-bit float texel's own bits from its unsigned integer alias view under the exact policy, in
+/// which the swizzle's `One` is the code 1 (the `half` 2 ^ -24) and not the value 1: the read
+/// answered that for every code before the function applied the swizzle itself.
+#[test]
+fn every_alpha_code_of_a_texture_whose_alpha_reads_one_reads_one() {
+    on_device(|device, _| {
+        let textures: Vec<Texture> = (0..CODES_AT_ONCE)
+            .map(|_| {
+                texture(device, TextureUsage::SHADER_READ, |d| {
+                    d.alpha_reads_one = true
+                })
+            })
+            .collect();
+        let state = state(device, "rrp_swizzled_storage.ll", "rrp_sw_read_f");
+        let bytes = vec![0xab; CODES_AT_ONCE * CODE_STRIDE];
+        let out = buffer_with(device, &bytes).unwrap();
+        let queue = device.new_command_queue().unwrap();
+        // The colour lanes, which the same swizzle takes from themselves, beside the alpha code.
+        let colour = [1.5, 2.5, 0.5].map(half);
+        let mut checked = 0u32;
+        for round in 0..(0x1_0000 / CODES_AT_ONCE) {
+            let code = |i: usize| (round * CODES_AT_ONCE + i) as u16;
+            for (i, texture) in textures.iter().enumerate() {
+                let mut texel = [0u8; 8];
+                let lanes = [colour[0], colour[1], colour[2], code(i)];
+                for (lane, bits) in texel.chunks_mut(2).zip(lanes) {
+                    lane.copy_from_slice(&bits.to_le_bytes());
+                }
+                texture
+                    .replace_region(Region::new_2d(0, 0, 1, 1), 0, 0, &texel, 8, 0)
+                    .unwrap();
+                assert_eq!(first_texel(texture), lanes, "code {:#06x}: stored", code(i));
+            }
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            encoder.set_compute_pipeline_state(&state).unwrap();
+            for (i, texture) in textures.iter().enumerate() {
+                encoder.set_texture(Some(texture), 0).unwrap();
+                encoder
+                    .set_buffer(Some(&out), (i * CODE_STRIDE) as u64, 0)
+                    .unwrap();
+                encoder
+                    .dispatch_threads(Size::new(1, 1, 1), Size::new(1, 1, 1))
+                    .unwrap();
+            }
+            encoder.end_encoding().unwrap();
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+            assert_eq!(command_buffer.error(), None);
+            let read = read_buffer(&out, 0, (CODES_AT_ONCE * CODE_STRIDE) as u64).unwrap();
+            for i in 0..CODES_AT_ONCE {
+                let at = i * CODE_STRIDE;
+                let lanes = [0, 4, 8, 12].map(|k| {
+                    let word = [
+                        read[at + k],
+                        read[at + k + 1],
+                        read[at + k + 2],
+                        read[at + k + 3],
+                    ];
+                    f32::from_le_bytes(word)
+                });
+                assert_eq!(lanes, [1.5, 2.5, 0.5, 1.0], "code {:#06x}: read", code(i));
+                checked += 1;
+            }
+        }
+        println!("ALPHA-CODES {}: {checked} codes read 1", device.name());
+        assert_eq!(checked, 0x1_0000);
     });
 }
 

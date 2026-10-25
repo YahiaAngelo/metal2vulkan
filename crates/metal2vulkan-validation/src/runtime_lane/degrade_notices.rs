@@ -191,6 +191,7 @@ use super::indirect_executions::{NIL_OFFSETS, RELEASED_STATES};
 use super::indirect_host_steps::HOST_STEPS;
 use super::kept_buffer_bytes::KEPT_BYTES;
 use super::linear_attachments::{CHOSEN_COPIES, LINEAR_COPIES};
+use super::memoryless::MEMORYLESS_TEXEL_BUFFERS;
 use super::mesh_draws::EMULATED_MESH;
 use super::mipmaps_exact::{M3_MIPMAPS, TIE_MIPMAPS};
 use super::no_copy_heaps::HEAP;
@@ -584,6 +585,7 @@ fn every_kind_has_a_site_a_lane_test_takes() {
         &WORD_PAST_BUFFER,
         &XR_RESOLVE,
         &YCBCR_PASSES,
+        &MEMORYLESS_TEXEL_BUFFERS,
     ];
     for kind in lists.into_iter().flatten().copied().chain(stage_kinds) {
         assert!(listed.insert(kind), "{kind:?} is listed twice");
