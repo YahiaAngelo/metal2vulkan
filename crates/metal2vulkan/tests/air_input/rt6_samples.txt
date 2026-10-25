@@ -462,7 +462,7 @@ bb0:
   %i0 = shufflevector <2 x i32> %a3, <3 x i32> poison, <0, 1>
   %i1 = extractelement %a3, i64 2
   %i2 = tail call ptr addrspace(2) @f36 [air Sampler(GetReadSampler)]()
-  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
+  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
   %i4 = extractvalue <4 x i32> %i3, 0
   %i5 = extractelement %a3, i64 1
   %i6 = getelementptr inbounds %t46, %a2, i64 0, i32 0
@@ -486,7 +486,7 @@ bb0:
   %i0 = shufflevector <2 x i32> %a3, <3 x i32> poison, <0, 1>
   %i1 = extractelement %a3, i64 2
   %i2 = tail call ptr addrspace(2) @f36 [air Sampler(GetReadSampler)]()
-  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
+  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
   %i4 = extractvalue <4 x i32> %i3, 0
   %i5 = extractelement %a3, i64 1
   %i6 = getelementptr inbounds %t46, %a2, i64 0, i32 0
@@ -516,7 +516,7 @@ bb0:
   %i0 = shufflevector <2 x i32> %a3, <3 x i32> poison, <0, 1>
   %i1 = extractelement %a3, i64 2
   %i2 = tail call ptr addrspace(2) @f36 [air Sampler(GetReadSampler)]()
-  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
+  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
   %i4 = extractvalue <4 x i32> %i3, 0
   %i5 = extractelement %a3, i64 1
   %i6 = getelementptr inbounds %t46, %a2, i64 0, i32 0
@@ -556,7 +556,7 @@ bb0:
   %i0 = shufflevector <2 x i32> %a3, <3 x i32> poison, <0, 1>
   %i1 = extractelement %a3, i64 2
   %i2 = tail call ptr addrspace(2) @f36 [air Sampler(GetReadSampler)]()
-  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
+  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
   %i4 = extractvalue <4 x i32> %i3, 0
   %i5 = and <4 x i32> %i4, <4 x i32> c77
   %i6 = extractelement %i5, i64 0
@@ -590,7 +590,7 @@ bb0:
   %i0 = shufflevector <2 x i32> %a3, <3 x i32> poison, <0, 1>
   %i1 = extractelement %a3, i64 2
   %i2 = tail call ptr addrspace(2) @f36 [air Sampler(GetReadSampler)]()
-  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
+  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
   %i4 = extractvalue <4 x i32> %i3, 0
   %i5 = and <4 x i32> %i4, <4 x i32> c80
   %i6 = extractelement %i5, i64 0
@@ -618,7 +618,7 @@ bb0:
   %i0 = shufflevector <2 x i32> %a3, <3 x i32> poison, <0, 1>
   %i1 = extractelement %a3, i64 2
   %i2 = tail call ptr addrspace(2) @f36 [air Sampler(GetReadSampler)]()
-  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
+  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
   %i4 = extractvalue <4 x i32> %i3, 0
   %i5 = and <4 x i32> %i4, <4 x i32> c81
   %i6 = extractelement %a3, i64 1
@@ -655,7 +655,7 @@ bb0:
   %i0 = shufflevector <2 x i32> %a3, <3 x i32> poison, <0, 1>
   %i1 = extractelement %a3, i64 2
   %i2 = tail call ptr addrspace(2) @f36 [air Sampler(GetReadSampler)]()
-  %i3 = tail call %t41 @f38 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a0, %i2, i32 1, %i0, %i1, i32 1) arg0( Ref nocapture )
+  %i3 = tail call %t41 @f38 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i2, i32 1, %i0, %i1, i32 1) arg0( Ref nocapture )
   %i4 = extractvalue float %i3, 0
   %i5 = extractelement %a3, i64 1
   %i6 = getelementptr inbounds %t46, %a2, i64 0, i32 0
@@ -679,7 +679,7 @@ bb0:
   %i0 = shufflevector <2 x i32> %a3, <3 x i32> poison, <0, 1>
   %i1 = extractelement %a3, i64 2
   %i2 = tail call ptr addrspace(2) @f36 [air Sampler(GetReadSampler)]()
-  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
+  %i3 = tail call %t38 @f37 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i2, %i0, %i1, i32 1) arg0( Ref nocapture )
   %i4 = extractvalue <4 x i32> %i3, 0
   %i5 = extractelement %i4, i64 0
   %i6 = extractelement %a3, i64 1

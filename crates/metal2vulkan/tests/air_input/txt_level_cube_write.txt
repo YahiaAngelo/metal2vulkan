@@ -22,7 +22,7 @@ bb0:
   %i8 = insertelement %i7, %i5, i64 2
   %i9 = shufflevector <2 x i32> %a2, <3 x i32> poison, <0, 1>
   %i10 = load i32, %a1, align 4
-  tail call void @f2 [air Texture(Texture { op: Write, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Write) })](%a0, %i9, %i4, %i8, %i10, i32 2) arg0( nocapture )
+  tail call void @f2 [air Texture(Texture { op: Write, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%a0, %i9, %i4, %i8, %i10, i32 2) arg0( nocapture )
   ret void
 }
 

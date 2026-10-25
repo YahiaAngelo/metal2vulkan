@@ -75,13 +75,21 @@ pub(super) fn module(
         let g = m
             .global(fc.global)
             .ok_or_else(|| site.err(AbiError::BadValue, key))?;
-        // The host supplies the value, so the initializer is `undef`.
+        // The host supplies the value, so the initializer is `undef` and the object is written
+        // from outside the module before execution starts. Apple's emitter also places the
+        // object in `air.fc_initializer` from AIR 2.2 on, and in no section in AIR 2.1, so the
+        // section is not part of the test: the `!air.function_constants` record is what names
+        // the global, and these are the properties the binding needs of it.
         let undef = g
             .init
             .and_then(|c| m.consts().get(c))
             .is_some_and(|c| c.value == Const::Undef);
-        let is_initializer =
-            g.section == Some(Section::FcInitializer) && g.externally_initialized && undef;
+        let placed = matches!(g.section, Some(Section::FcInitializer) | None);
+        let is_initializer = placed
+            && g.constant
+            && g.space == AddrSpace::Constant
+            && g.externally_initialized
+            && undef;
         if !is_initializer {
             return Err(site.err(AbiError::BadValue, key));
         }

@@ -27,13 +27,13 @@ bb0:
   %i7 = bitcast %a1 to ptr addrspace(0)
   %i8 = getelementptr inbounds %t20, %i7, i64 0, %i6, i32 0
   %i9 = load ptr addrspace(1), %i8, align 8
-  %i10 = tail call %t12 @f2 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%i9, ptr addrspace(2) @g0, <2 x float> c21, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i10 = tail call %t12 @f2 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%i9, ptr addrspace(2) @g0, <2 x float> c21, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i11 = extractvalue <4 x float> %i10, 0
   %i12 = zext %i5 to i64
   %i13 = bitcast %a2 to ptr addrspace(0)
   %i14 = getelementptr inbounds %t20, %i13, i64 0, %i12, i32 0
   %i15 = load ptr addrspace(1), %i14, align 8
-  %i16 = tail call %t12 @f2 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%i15, ptr addrspace(2) @g0, <2 x float> c21, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i16 = tail call %t12 @f2 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%i15, ptr addrspace(2) @g0, <2 x float> c21, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i17 = extractvalue <4 x float> %i16, 0
   %i18 = fadd reassoc nnan ninf nsz arcp contract afn <4 x float> %i17, %i11
   ret %i18

@@ -22,7 +22,7 @@ bb0:
   %i5 = getelementptr inbounds %t18, %i2, i64 0, %i1, i32 0
   %i6 = load ptr addrspace(1), %i5, align 8
   %i7 = tail call ptr addrspace(2) @f1 [air Sampler(GetReadSampler)]()
-  %i8 = tail call %t11 @f2 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%i6, %i7, %i4, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
+  %i8 = tail call %t11 @f2 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%i6, %i7, %i4, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
   %i9 = extractvalue <4 x float> %i8, 0
   %i10 = zext %a2 to i64
   %i11 = getelementptr inbounds <4 x float>, %a1, %i10

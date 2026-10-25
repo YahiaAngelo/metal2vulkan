@@ -6,8 +6,11 @@
 //! the binder specializes (`SpecKey::OutOfBoundsAlpha`). A read whose fourth lane nothing observes
 //! needs no such constant: its out-of-bounds texel is zero in every lane anything reads.
 //!
-//! A read returns `{<4 x T>, i8}`. Its texel is taken by `extractvalue 0`, and the whole result
-//! or the texel may be copied first by a `phi`, a `select` (its two values), or a `freeze`, as
+//! A read returns `{<4 x T>, i8}` where its declaration states a residency status
+//! (`intrinsics::Texture::status`, which AIR 2.2 added), and its texel is taken by
+//! `extractvalue 0`; an AIR 2.1 declaration returns the texel itself, so the call *is* the texel
+//! and there is no extraction to follow. Either way the whole result or the texel may be copied
+//! first by a `phi`, a `select` (its two values), or a `freeze`, as
 //! [`super::status`] follows them; an `insertelement` into a texel at a constant lane below 3
 //! carries the texel's alpha on, and one at lane 3 replaces it (`float4(t.read(c).xyz, 1)`). A
 //! value carrying a read's texel observes its alpha when it has a use other than such a copy or
@@ -33,16 +36,26 @@ enum Carried {
     Texel,
 }
 
-/// Whether `kind` is a texture read with a four-lane texel.
-fn four_lane_read(kind: &InstKind) -> bool {
+/// What a texture read with a four-lane texel yields: its whole `{<4 x T>, i8}` result where the
+/// declaration states a residency status, the texel itself where it states none (AIR 2.1).
+/// `None` for anything that is not such a read.
+fn four_lane_read(kind: &InstKind) -> Option<Carried> {
     let InstKind::Call(c) = kind else {
-        return false;
+        return None;
     };
-    matches!(
-        &c.callee,
-        Callee::Air { op: AirIntrinsic::Texture(t), .. }
-            if t.op == TexOp::Read && t.texel.is_some_and(|x| x.ty.lanes == 4)
-    )
+    let Callee::Air {
+        op: AirIntrinsic::Texture(t),
+        ..
+    } = &c.callee
+    else {
+        return None;
+    };
+    let four_lane = t.op == TexOp::Read && t.texel.is_some_and(|x| x.ty.lanes == 4);
+    let carried = match t.status {
+        true => Carried::Result,
+        false => Carried::Texel,
+    };
+    four_lane.then_some(carried)
 }
 
 /// The operands a copy passes through whole: a `phi`'s incoming values, a `select`'s two
@@ -62,16 +75,14 @@ pub(super) fn observed(cx: &SelectCx<'_>, body: &Body) -> BTreeSet<InstId> {
     let users = Users::of(body);
     // The carriers, from the reads through `extractvalue 0` and copies, each with the carriers
     // it was derived from.
-    let reads: Vec<InstId> = body
+    let reads: Vec<(InstId, Carried)> = body
         .insts
         .iter()
-        .filter(|(_, i)| four_lane_read(&i.kind))
-        .map(|(at, _)| at)
+        .filter_map(|(at, i)| four_lane_read(&i.kind).map(|c| (at, c)))
         .collect();
-    let mut carried: BTreeMap<InstId, Carried> =
-        reads.iter().map(|r| (*r, Carried::Result)).collect();
+    let mut carried: BTreeMap<InstId, Carried> = reads.iter().copied().collect();
     let mut sources: BTreeMap<InstId, Vec<InstId>> = BTreeMap::new();
-    let mut work = reads.clone();
+    let mut work: Vec<InstId> = reads.iter().map(|&(at, _)| at).collect();
     while let Some(c) = work.pop() {
         let kind = carried.get(&c).copied().unwrap_or(Carried::Texel);
         for &u in users.get(c) {
@@ -158,5 +169,9 @@ pub(super) fn observed(cx: &SelectCx<'_>, body: &Body) -> BTreeSet<InstId> {
             }
         }
     }
-    reads.into_iter().filter(|r| seen.contains(r)).collect()
+    reads
+        .into_iter()
+        .map(|(at, _)| at)
+        .filter(|r| seen.contains(r))
+        .collect()
 }

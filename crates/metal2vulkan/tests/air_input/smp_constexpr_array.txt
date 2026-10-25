@@ -28,7 +28,7 @@ bb0:
   %i8 = bitcast %a1 to ptr addrspace(0)
   %i9 = getelementptr inbounds %t22, %i8, i64 0, %i7, i32 0
   %i10 = load ptr addrspace(1), %i9, align 8
-  %i11 = tail call %t14 @f2 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%i10, ptr addrspace(2) @g0, <2 x float> c22, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i11 = tail call %t14 @f2 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%i10, ptr addrspace(2) @g0, <2 x float> c22, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i12 = extractvalue <4 x half> %i11, 0
   ret %i12
 }

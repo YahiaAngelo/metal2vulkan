@@ -180,6 +180,11 @@ fn expect_abi(r: Result<AirAbi, Error>, want: AbiError) {
 
 #[test]
 fn key_spellings_round_trip_and_are_unique() {
+    // `Key::parse` and `Key::name` are matches, not scans of the table: this is what holds the
+    // three in step. Every entry of the table must parse to its key and every key must name its
+    // entry, so a key added to the table without its `parse` arm fails here, and one added to the
+    // enum without its spelling is a compile error in `name`'s exhaustive match. `parse` also
+    // debug-asserts that `name` is its inverse, so a mistyped arm fails wherever it is reached.
     let mut seen = std::collections::HashSet::new();
     for (name, k) in Key::all() {
         assert!(seen.insert(name), "{name} listed twice");
@@ -734,6 +739,56 @@ fn vertex_and_fragment_interfaces_decode() {
             raster_order_group: None
         }
     );
+}
+
+/// AIR 2.1 restates the MSL member's interpolation qualifier on `air.vertex_output` as well as on
+/// the fragment input that receives it, and restates it partly (a `[[centroid_perspective]]`
+/// output carries `air.centroid` alone). AIR 2.2 and later write the same module without the
+/// keys, so a vertex output decodes with or without them, and to the same role either way.
+#[test]
+fn a_vertex_output_accepts_the_interpolation_keys_air_2_1_states_on_it() {
+    let vertex_output = |keys: &[&'static str]| {
+        let mut b = ModuleBuilder::new();
+        let f32t = b.float();
+        let v4 = b.vector(f32t, 4);
+        let v2 = b.vector(f32t, 2);
+        let i32t = b.int(32);
+        let ret = b.struct_ty(&[v4, v2]);
+        let vs = entry_fn(&mut b, "vs", ret, &[i32t]);
+        let pos = node(&mut b, &[S("air.position")]);
+        let mut ops = vec![S("air.vertex_output"), S("generated(2uvDv2_f)")];
+        ops.extend(keys.iter().map(|&k| S(k)));
+        ops.extend([S("air.arg_type_name"), S("float2")]);
+        let uv = node(&mut b, &ops);
+        let outs = node(&mut b, &[N(pos), N(uv)]);
+        let vid = node(&mut b, &[I(0), S("air.vertex_id")]);
+        let ins = node(&mut b, &[N(vid)]);
+        let e = node(&mut b, &[F(vs), N(outs), N(ins)]);
+        b.named_md("air.vertex", &[e]);
+        let m = b.finish().unwrap();
+        decode(&m, &PointeeTable::default(), &mut meter())
+    };
+    let key = UserKey(b"generated(2uvDv2_f)".as_slice().into());
+    // Each spelling Apple's AIR 2.1 emitter writes on a vertex output: the complete pairs, the
+    // partial `air.centroid` of a `[[centroid_perspective]]` member, and `air.flat`; and the
+    // AIR 2.2 and later form, which writes none.
+    for keys in [
+        &[][..],
+        &["air.center", "air.perspective"],
+        &["air.center", "air.no_perspective"],
+        &["air.centroid"],
+        &["air.centroid", "air.no_perspective"],
+        &["air.sample", "air.perspective"],
+        &["air.sample", "air.no_perspective"],
+        &["air.flat"],
+    ] {
+        let abi = vertex_output(keys).unwrap_or_else(|e| panic!("{keys:?}: {e:?}"));
+        let out = &abi.entries[0].outputs[1];
+        assert_eq!(out.role, OutputRole::VertexOutput(key.clone()), "{keys:?}");
+    }
+    // A key this role does not define is still refused there (`air.invariant` is the position
+    // output's).
+    expect_abi(vertex_output(&["air.invariant"]), AbiError::UnknownKey);
 }
 
 /// A fragment function reading `uint` input `mask` with the sample-mask keys `keys`, declaring
@@ -2045,15 +2100,29 @@ fn fc_global_with(
     section: Option<Section>,
     init: Option<ConstId>,
 ) -> GlobalId {
+    fc_global_as(b, name, section, init, AddrSpace::Constant, true, true)
+}
+
+/// A function-constant initializer global with each property the check reads under the caller's
+/// control: its section, initializer, address space, `constant`, and `externally_initialized`.
+fn fc_global_as(
+    b: &mut ModuleBuilder,
+    name: &str,
+    section: Option<Section>,
+    init: Option<ConstId>,
+    space: AddrSpace,
+    constant: bool,
+    externally_initialized: bool,
+) -> GlobalId {
     let i16t = b.int(16);
     let name = b.sym(name);
     b.global(Global {
         name,
         value_ty: i16t,
-        space: AddrSpace::Constant,
-        constant: false,
+        space,
+        constant,
         init,
-        externally_initialized: true,
+        externally_initialized,
         visibility: Default::default(),
         unnamed_addr: Default::default(),
         linkage: Linkage::External,
@@ -2092,15 +2161,47 @@ fn function_constants_decode_and_are_checked() {
         }),
         AbiError::BadValue,
     );
-    // Not an initializer global.
+    // AIR 2.1 places the initializer global in no section (`air.fc_initializer` arrived with
+    // AIR 2.2), and the record is what names it, so the section is not part of the test.
+    let abi = module_with(|b| {
+        let g = fc_global(b, "fc0", None);
+        let a = node(b, &[G(g), S("short"), S("K"), I(0)]);
+        b.named_md("air.function_constants", &[a]);
+    })
+    .unwrap();
+    assert_eq!(abi.function_constants.len(), 1);
+    assert_eq!(abi.function_constants[0].index, 0);
+    // A global in another section is not one.
     expect_abi(
         module_with(|b| {
-            let g = fc_global(b, "fc0", None);
+            let g = fc_global(b, "fc0", Some(Section::StaticInit));
             let a = node(b, &[G(g), S("short"), S("K"), I(0)]);
             b.named_md("air.function_constants", &[a]);
         }),
         AbiError::BadValue,
     );
+    // Not an initializer global: one the host does not write, one that is not `constant` (which
+    // the reading analysis takes for granted), and one outside the constant address space. Each
+    // is refused in the section AIR 2.2 writes and in the AIR 2.1 shape with none.
+    for section in [Some(Section::FcInitializer), None] {
+        let cases: [(AddrSpace, bool, bool); 3] = [
+            (AddrSpace::Constant, true, false),
+            (AddrSpace::Constant, false, true),
+            (AddrSpace::Device, true, true),
+        ];
+        for (space, constant, external) in cases {
+            expect_abi(
+                module_with(|b| {
+                    let i16t = b.int(16);
+                    let undef = b.constant(i16t, Const::Undef);
+                    let g = fc_global_as(b, "fc0", section, Some(undef), space, constant, external);
+                    let a = node(b, &[G(g), S("short"), S("K"), I(0)]);
+                    b.named_md("air.function_constants", &[a]);
+                }),
+                AbiError::BadValue,
+            );
+        }
+    }
     // An initializer global whose initializer is not `undef`: a value, or none (a declaration).
     for init in [Some(Const::Int(7)), Some(Const::Null), None] {
         expect_abi(

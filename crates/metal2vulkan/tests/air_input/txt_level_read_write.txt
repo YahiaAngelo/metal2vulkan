@@ -15,11 +15,11 @@ define %t6 @f0 "txt_level_read_write" "approx-func-fp-math"="true" "frame-pointe
 bb0:
   %i0 = load i32, %a1, align 4
   %i1 = tail call ptr addrspace(2) @f1 [air Sampler(GetReadSampler)]()
-  %i2 = tail call %t11 @f2 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(ReadWrite) })](%a0, %i1, %a2, <2 x i32> zeroinitializer, %i0, i32 3) arg0( Ref nocapture )
+  %i2 = tail call %t11 @f2 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(ReadWrite) })](%a0, %i1, %a2, <2 x i32> zeroinitializer, %i0, i32 3) arg0( Ref nocapture )
   %i3 = extractvalue <4 x float> %i2, 0
   %i4 = fmul reassoc nnan ninf nsz arcp contract afn <4 x float> %i3, <4 x float> c21
   %i5 = fadd reassoc nnan ninf nsz arcp contract afn <4 x float> %i4, <4 x float> c22
-  tail call void @f3 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(ReadWrite) })](%a0, %a2, %i5, %i0, i32 3) arg0( nocapture )
+  tail call void @f3 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(ReadWrite) })](%a0, %a2, %i5, %i0, i32 3) arg0( nocapture )
   ret void
 }
 

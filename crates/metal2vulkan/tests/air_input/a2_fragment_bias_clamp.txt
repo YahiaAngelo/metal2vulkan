@@ -32,7 +32,7 @@ bb0:
   %i13 = fmul reassoc nnan ninf nsz arcp contract afn <2 x float> %i11, %i12
   %i14 = fadd reassoc nnan ninf nsz arcp contract afn <2 x float> %i13, <2 x float> c27
   %i15 = extractelement %i10, i64 1
-  %i16 = tail call %t14 @f3 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, %i14, i1 1, <2 x i32> zeroinitializer, i1 0, %i15, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i16 = tail call %t14 @f3 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, %i14, i1 1, <2 x i32> zeroinitializer, i1 0, %i15, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i17 = extractvalue <4 x float> %i16, 0
   ret %i17
 }

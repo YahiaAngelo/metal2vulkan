@@ -51,10 +51,10 @@ define %t11 @f2 "pdc_slot" convergent memory(Ref, Ref, Ref) "approx-func-fp-math
 bb0:
   %i0 = load <4 x float>, %a3, align 16
   %i1 = extractelement %i0, i64 0
-  %i2 = tail call %t15 @f5 [air Texture(Texture { op: Sample { compare: true, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a1, %a2, i32 1, <2 x float> c41, %i1, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i2 = tail call %t15 @f5 [air Texture(Texture { op: Sample { compare: true, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, %a2, i32 1, <2 x float> c41, %i1, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i3 = extractvalue float %i2, 0
   %i4 = extractelement %i0, i64 1
-  %i5 = tail call %t20 @f6 [air Texture(Texture { op: Gather { component: None, compare: true, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a1, %a2, i32 1, <2 x float> c41, %i4, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i5 = tail call %t20 @f6 [air Texture(Texture { op: Gather { component: None, compare: true, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, %a2, i32 1, <2 x float> c41, %i4, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i6 = extractvalue <4 x float> %i5, 0
   %i7 = insertelement <4 x float> c37, %i3, i64 0
   %i8 = shufflevector <4 x float> %i7, %i6, <0, 4, 2, 3>
@@ -65,10 +65,10 @@ define %t12 @f3 "pdc_constexpr" convergent memory(Ref, Ref, Ref) "approx-func-fp
 bb0:
   %i0 = load <4 x float>, %a2, align 16
   %i1 = extractelement %i0, i64 0
-  %i2 = tail call %t15 @f5 [air Texture(Texture { op: Sample { compare: true, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, i32 1, <2 x float> c41, %i1, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i2 = tail call %t15 @f5 [air Texture(Texture { op: Sample { compare: true, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, i32 1, <2 x float> c41, %i1, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i3 = extractvalue float %i2, 0
   %i4 = extractelement %i0, i64 1
-  %i5 = tail call %t20 @f6 [air Texture(Texture { op: Gather { component: None, compare: true, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, i32 1, <2 x float> c41, %i4, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i5 = tail call %t20 @f6 [air Texture(Texture { op: Gather { component: None, compare: true, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, i32 1, <2 x float> c41, %i4, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i6 = extractvalue <4 x float> %i5, 0
   %i7 = insertelement <4 x float> c37, %i3, i64 0
   %i8 = shufflevector <4 x float> %i7, %i6, <0, 4, 2, 3>
@@ -83,7 +83,7 @@ bb0:
   %i3 = extractelement %i2, i64 0
   %i4 = getelementptr inbounds %t28, %a1, i64 0, i32 0, i32 0
   %i5 = load ptr addrspace(1), %i4, align 8
-  %i6 = tail call %t15 @f5 [air Texture(Texture { op: Sample { compare: true, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%i5, %i1, i32 1, <2 x float> c41, %i3, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i6 = tail call %t15 @f5 [air Texture(Texture { op: Sample { compare: true, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%i5, %i1, i32 1, <2 x float> c41, %i3, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i7 = extractvalue float %i6, 0
   %i8 = insertelement <4 x float> c46, %i7, i64 0
   ret %i8

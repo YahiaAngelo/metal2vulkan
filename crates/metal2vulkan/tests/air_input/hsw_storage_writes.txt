@@ -21,7 +21,7 @@ bb0:
   %i5 = zext %i4 to i64
   %i6 = getelementptr inbounds <4 x float>, %a1, %i5
   %i7 = load <4 x float>, %i6, align 16
-  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Write) })](%a0, %a3, %i7, i32 0, i32 2) arg0( nocapture )
+  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%a0, %a3, %i7, i32 0, i32 2) arg0( nocapture )
   ret void
 }
 
@@ -35,7 +35,7 @@ bb0:
   %i5 = zext %i4 to i64
   %i6 = getelementptr inbounds <4 x float>, %a1, %i5
   %i7 = load <4 x float>, %i6, align 16
-  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(ReadWrite) })](%a0, %a3, %i7, i32 0, i32 3) arg0( nocapture )
+  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(ReadWrite) })](%a0, %a3, %i7, i32 0, i32 3) arg0( nocapture )
   ret void
 }
 
@@ -44,7 +44,7 @@ bb0:
   %i0 = zext %a2 to i64
   %i1 = getelementptr inbounds <4 x float>, %a1, %i0
   %i2 = load <4 x float>, %i1, align 16
-  tail call void @f5 [air Texture(Texture { op: Write, image: ImageShape { dim: Buffer, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Write) })](%a0, %a2, %i2, i32 2) arg0( nocapture )
+  tail call void @f5 [air Texture(Texture { op: Write, image: ImageShape { dim: Buffer, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%a0, %a2, %i2, i32 2) arg0( nocapture )
   ret void
 }
 
@@ -60,7 +60,7 @@ bb0:
   %i7 = load <4 x float>, %i6, align 16
   %i8 = getelementptr inbounds %t17, %a0, i64 0, i32 0, i32 0
   %i9 = load ptr addrspace(1), %i8, align 8
-  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Write) })](%i9, %a3, %i7, i32 0, i32 2) arg0( nocapture )
+  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%i9, %a3, %i7, i32 0, i32 2) arg0( nocapture )
   ret void
 }
 

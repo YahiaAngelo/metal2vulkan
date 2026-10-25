@@ -36,8 +36,8 @@ bb0:
   %i20 = tail call i1 @f3 [air BoolReduce(BoolReduce { all: true, lanes: 2 })](%i19)
   br %i20, bb1, bb2
 bb1:
-  tail call void @f5 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: true, form: Current, access: Some(Write) })](%a0, %i0, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, %a4, i16 2, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
-  tail call void @f6 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 1 }, sign: None }), coord16: true, form: Current, access: Some(Write) })](%a1, %i15, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, %a4, i16 1, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
+  tail call void @f5 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write) })](%a0, %i0, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, %a4, i16 2, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
+  tail call void @f6 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 1 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write) })](%a1, %i15, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, %a4, i16 1, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
   br bb2
 bb2:
   ret void

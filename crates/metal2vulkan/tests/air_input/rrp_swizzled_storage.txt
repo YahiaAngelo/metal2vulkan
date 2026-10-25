@@ -18,7 +18,7 @@ c28 = <4 x i32> [5, 5, 5, 5]
 define %t3 @f0 "rrp_sw_read_f" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( Ref nocapture ) %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = tail call ptr addrspace(2) @f7 [air Sampler(GetReadSampler)]()
-  %i1 = tail call %t12 @f8 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a0, %i0, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
+  %i1 = tail call %t12 @f8 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i0, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
   %i2 = extractvalue <4 x float> %i1, 0
   store %i2, %a1, align 16
   ret void
@@ -27,7 +27,7 @@ bb0:
 define %t3 @f1 "rrp_sw_rwread_f" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( Ref nocapture ) %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = tail call ptr addrspace(2) @f7 [air Sampler(GetReadSampler)]()
-  %i1 = tail call %t12 @f8 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(ReadWrite) })](%a0, %i0, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 3) arg0( Ref nocapture )
+  %i1 = tail call %t12 @f8 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(ReadWrite) })](%a0, %i0, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 3) arg0( Ref nocapture )
   %i2 = extractvalue <4 x float> %i1, 0
   store %i2, %a1, align 16
   ret void
@@ -36,21 +36,21 @@ bb0:
 define %t7 @f2 "rrp_sw_write_f" memory(ModRef, NoModRef, NoModRef) "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( nocapture ) %a1( Ref nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = load <4 x float>, %a1, align 16
-  tail call void @f9 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Write) })](%a0, %a2, %i0, i32 0, i32 2) arg0( nocapture )
+  tail call void @f9 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%a0, %a2, %i0, i32 0, i32 2) arg0( nocapture )
   ret void
 }
 
 define %t7 @f3 "rrp_sw_rwwrite_f" memory(ModRef, NoModRef, NoModRef) "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( nocapture ) %a1( Ref nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = load <4 x float>, %a1, align 16
-  tail call void @f9 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(ReadWrite) })](%a0, %a2, %i0, i32 0, i32 3) arg0( nocapture )
+  tail call void @f9 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(ReadWrite) })](%a0, %a2, %i0, i32 0, i32 3) arg0( nocapture )
   ret void
 }
 
 define %t3 @f4 "rrp_sw_rwread_u" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( Ref nocapture ) %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = tail call ptr addrspace(2) @f7 [air Sampler(GetReadSampler)]()
-  %i1 = tail call %t16 @f10 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(ReadWrite) })](%a0, %i0, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 3) arg0( Ref nocapture )
+  %i1 = tail call %t16 @f10 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(ReadWrite) })](%a0, %i0, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 3) arg0( Ref nocapture )
   %i2 = extractvalue <4 x i32> %i1, 0
   store %i2, %a1, align 16
   ret void
@@ -59,13 +59,13 @@ bb0:
 define %t7 @f5 "rrp_sw_write_u" memory(ModRef, NoModRef, NoModRef) "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( nocapture ) %a1( Ref nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = load <4 x i32>, %a1, align 16
-  tail call void @f11 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(Write) })](%a0, %a2, %i0, i32 0, i32 2) arg0( nocapture )
+  tail call void @f11 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Write) })](%a0, %a2, %i0, i32 0, i32 2) arg0( nocapture )
   ret void
 }
 
 define %t3 @f6 "rrp_sw_atomic_u" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( nocapture ) %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
-  %i0 = tail call <4 x i32> @f12 [air Texture(Texture { op: Atomic(Add), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(ReadWrite) })](%a0, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, <4 x i32> c28, i32 0, i32 3) arg0( nocapture )
+  %i0 = tail call <4 x i32> @f12 [air Texture(Texture { op: Atomic(Add), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(ReadWrite) })](%a0, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, <4 x i32> c28, i32 0, i32 3) arg0( nocapture )
   store %i0, %a1, align 16
   ret void
 }

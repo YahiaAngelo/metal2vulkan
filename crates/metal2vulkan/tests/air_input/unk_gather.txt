@@ -35,55 +35,55 @@ bb0:
   %i7 = extractelement %i2, i64 3
   %i8 = tail call i32 @f1 [air Convert(Convert { dst: NumTy { elem: I32, lanes: 1 }, dst_kind: Unsigned, src: NumTy { elem: F32, lanes: 1 }, src_kind: Float, src_fp8: None })](%i7)
   %i9 = shufflevector <3 x float> %i4, <4 x float> poison, <0, 1, 2>
-  %i10 = tail call %t12 @f2 [air Texture(Texture { op: Gather { component: Some(X), compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i9, i32 0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i10 = tail call %t12 @f2 [air Texture(Texture { op: Gather { component: Some(X), compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i9, i32 0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i11 = extractvalue <4 x float> %i10, 0
   %i12 = mul i32 %a8, i32 9
   %i13 = zext %i12 to i64
   %i14 = getelementptr inbounds <4 x float>, %a7, %i13
   store %i11, %i14, align 16
-  %i16 = tail call %t12 @f2 [air Texture(Texture { op: Gather { component: Some(W), compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i9, i32 3, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i16 = tail call %t12 @f2 [air Texture(Texture { op: Gather { component: Some(W), compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i9, i32 3, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i17 = extractvalue <4 x float> %i16, 0
   %i18 = add i32 %i12, i32 1
   %i19 = zext %i18 to i64
   %i20 = getelementptr inbounds <4 x float>, %a7, %i19
   store %i17, %i20, align 16
-  %i22 = tail call %t12 @f3 [air Texture(Texture { op: Gather { component: Some(Z), compare: false, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, %i9, %i8, i32 2, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i22 = tail call %t12 @f3 [air Texture(Texture { op: Gather { component: Some(Z), compare: false, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, %i9, %i8, i32 2, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i23 = extractvalue <4 x float> %i22, 0
   %i24 = add i32 %i12, i32 2
   %i25 = zext %i24 to i64
   %i26 = getelementptr inbounds <4 x float>, %a7, %i25
   store %i23, %i26, align 16
-  %i28 = tail call %t12 @f4 [air Texture(Texture { op: Gather { component: None, compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a4, ptr addrspace(2) @g0, i32 1, %i9, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i28 = tail call %t12 @f4 [air Texture(Texture { op: Gather { component: None, compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a4, ptr addrspace(2) @g0, i32 1, %i9, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i29 = extractvalue <4 x float> %i28, 0
   %i30 = add i32 %i12, i32 3
   %i31 = zext %i30 to i64
   %i32 = getelementptr inbounds <4 x float>, %a7, %i31
   store %i29, %i32, align 16
-  %i34 = tail call %t12 @f5 [air Texture(Texture { op: Gather { component: None, compare: false, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a5, ptr addrspace(2) @g0, i32 1, %i9, %i8, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i34 = tail call %t12 @f5 [air Texture(Texture { op: Gather { component: None, compare: false, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a5, ptr addrspace(2) @g0, i32 1, %i9, %i8, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i35 = extractvalue <4 x float> %i34, 0
   %i36 = add i32 %i12, i32 4
   %i37 = zext %i36 to i64
   %i38 = getelementptr inbounds <4 x float>, %a7, %i37
   store %i35, %i38, align 16
-  %i40 = tail call %t12 @f6 [air Texture(Texture { op: Gather { component: None, compare: true, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a2, ptr addrspace(2) @g1, i32 1, %i5, %i6, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i40 = tail call %t12 @f6 [air Texture(Texture { op: Gather { component: None, compare: true, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a2, ptr addrspace(2) @g1, i32 1, %i5, %i6, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i41 = extractvalue <4 x float> %i40, 0
   %i42 = add i32 %i12, i32 5
   %i43 = zext %i42 to i64
   %i44 = getelementptr inbounds <4 x float>, %a7, %i43
   store %i41, %i44, align 16
-  %i46 = tail call %t12 @f7 [air Texture(Texture { op: Gather { component: None, compare: true, offset: true }, image: ImageShape { dim: D2, array: true, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a3, ptr addrspace(2) @g1, i32 1, %i5, %i8, %i6, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i46 = tail call %t12 @f7 [air Texture(Texture { op: Gather { component: None, compare: true, offset: true }, image: ImageShape { dim: D2, array: true, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a3, ptr addrspace(2) @g1, i32 1, %i5, %i8, %i6, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i47 = extractvalue <4 x float> %i46, 0
   %i48 = add i32 %i12, i32 6
   %i49 = zext %i48 to i64
   %i50 = getelementptr inbounds <4 x float>, %a7, %i49
   store %i47, %i50, align 16
-  %i52 = tail call %t12 @f8 [air Texture(Texture { op: Gather { component: None, compare: true, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a4, ptr addrspace(2) @g1, i32 1, %i9, %i6, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i52 = tail call %t12 @f8 [air Texture(Texture { op: Gather { component: None, compare: true, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a4, ptr addrspace(2) @g1, i32 1, %i9, %i6, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i53 = extractvalue <4 x float> %i52, 0
   %i54 = add i32 %i12, i32 7
   %i55 = zext %i54 to i64
   %i56 = getelementptr inbounds <4 x float>, %a7, %i55
   store %i53, %i56, align 16
-  %i58 = tail call %t12 @f9 [air Texture(Texture { op: Gather { component: None, compare: true, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a5, ptr addrspace(2) @g1, i32 1, %i9, %i8, %i6, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i58 = tail call %t12 @f9 [air Texture(Texture { op: Gather { component: None, compare: true, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a5, ptr addrspace(2) @g1, i32 1, %i9, %i8, %i6, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i59 = extractvalue <4 x float> %i58, 0
   %i60 = add i32 %i12, i32 8
   %i61 = zext %i60 to i64

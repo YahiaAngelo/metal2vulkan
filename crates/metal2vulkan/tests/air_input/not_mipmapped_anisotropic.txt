@@ -27,7 +27,7 @@ bb0:
   %i5 = insertelement <2 x float> c31, %i4, i64 0
   %i6 = extractelement %i2, i64 3
   %i7 = insertelement <2 x float> c33, %i6, i64 1
-  %i8 = tail call %t11 @f3 [air Texture(Texture { op: SampleGrad { compare: false, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i3, %i5, %i7, float 0x0, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i8 = tail call %t11 @f3 [air Texture(Texture { op: SampleGrad { compare: false, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i3, %i5, %i7, float 0x0, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i9 = extractvalue <4 x float> %i8, 0
   %i10 = getelementptr inbounds <4 x float>, %a2, %i0
   store %i9, %i10, align 16
@@ -44,7 +44,7 @@ bb0:
   %i5 = insertelement <2 x float> c31, %i4, i64 0
   %i6 = extractelement %i2, i64 3
   %i7 = insertelement <2 x float> c33, %i6, i64 1
-  %i8 = tail call %t11 @f3 [air Texture(Texture { op: SampleGrad { compare: false, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a0, ptr addrspace(2) @g1, %i3, %i5, %i7, float 0x0, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i8 = tail call %t11 @f3 [air Texture(Texture { op: SampleGrad { compare: false, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g1, %i3, %i5, %i7, float 0x0, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i9 = extractvalue <4 x float> %i8, 0
   %i10 = getelementptr inbounds <4 x float>, %a2, %i0
   store %i9, %i10, align 16
@@ -61,7 +61,7 @@ bb0:
   %i5 = insertelement <2 x float> c31, %i4, i64 0
   %i6 = extractelement %i2, i64 3
   %i7 = insertelement <2 x float> c33, %i6, i64 1
-  %i8 = tail call %t11 @f3 [air Texture(Texture { op: SampleGrad { compare: false, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a0, ptr addrspace(2) @g2, %i3, %i5, %i7, float 0x0, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i8 = tail call %t11 @f3 [air Texture(Texture { op: SampleGrad { compare: false, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g2, %i3, %i5, %i7, float 0x0, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i9 = extractvalue <4 x float> %i8, 0
   %i10 = getelementptr inbounds <4 x float>, %a2, %i0
   store %i9, %i10, align 16

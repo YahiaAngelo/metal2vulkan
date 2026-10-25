@@ -1,6 +1,10 @@
 //! The status word of a texel result.
 //!
-//! `read`, `sample`, and `gather` return `{T, i8}`. The status word is Metal's residency status:
+//! `read`, `sample`, and `gather` return `{T, i8}` where their declaration states a residency
+//! status (`intrinsics::Texture::status`, which AIR 2.2 added); an AIR 2.1 declaration returns
+//! the texel alone, so such a call has no word, nothing here follows it, and lowering builds no
+//! status composite for it (`emit::with_word` hands back the texel). The status word is Metal's
+//! residency status:
 //! `sparse_read`, `sparse_sample`, and `sparse_gather` compile to the same intrinsics as `read`,
 //! `sample`, and `gather`, and `sparse_color::resident()` is `(status & 1) == 0` (bit 0 set: the
 //! access touched a non-resident region). No MSL function reads another bit: `metal_stdlib`'s
@@ -41,14 +45,16 @@ pub enum StatusUse {
     Other,
 }
 
-/// Whether `kind` is a texture call returning a texel with a status word.
+/// Whether `kind` is a texture call returning a texel with a status word: one whose declaration
+/// states a residency status, so its result is `{T, i8}`. An AIR 2.1 declaration states none and
+/// returns the texel itself, which carries no word to observe.
 fn texel_call(kind: &InstKind) -> bool {
     let InstKind::Call(c) = kind else {
         return false;
     };
     matches!(
         &c.callee,
-        Callee::Air { op: AirIntrinsic::Texture(t), .. } if matches!(
+        Callee::Air { op: AirIntrinsic::Texture(t), .. } if t.status && matches!(
             t.op,
             TexOp::Read | TexOp::Sample { .. } | TexOp::SampleGrad { .. } | TexOp::Gather { .. }
         )

@@ -23,7 +23,7 @@ bb0:
   %i8 = load <4 x float>, %i7, align 16
   %i9 = getelementptr inbounds %t17, %a2, i64 0, i32 1
   %i10 = load i32, %i9, align 4
-  tail call void @f2 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Write) })](%a0, %a3, %i10, %i8, i32 0, i32 2) arg0( nocapture )
+  tail call void @f2 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%a0, %a3, %i10, %i8, i32 0, i32 2) arg0( nocapture )
   ret void
 }
 
@@ -32,7 +32,7 @@ bb0:
   %i0 = getelementptr inbounds %t17, %a2, i64 0, i32 1
   %i1 = load i32, %i0, align 4
   %i2 = tail call ptr addrspace(2) @f3 [air Sampler(GetReadSampler)]()
-  %i3 = tail call %t12 @f4 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a0, %i2, %a3, %i1, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
+  %i3 = tail call %t12 @f4 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i2, %a3, %i1, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
   %i4 = extractvalue <4 x float> %i3, 0
   %i5 = extractelement %a3, i64 1
   %i6 = getelementptr inbounds %t17, %a2, i64 0, i32 0

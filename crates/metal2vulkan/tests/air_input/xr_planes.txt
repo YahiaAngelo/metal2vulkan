@@ -14,24 +14,24 @@ c22 = <4 x i32> [3, 3, 3, 3]
 define %t5 @f0 "xr_planes_join" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="64" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( Ref nocapture ) {
 bb0:
   %i0 = tail call ptr addrspace(2) @f2 [air Sampler(GetReadSampler)]()
-  %i1 = tail call %t11 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a0, %i0, %a3, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
+  %i1 = tail call %t11 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i0, %a3, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
   %i2 = extractvalue <4 x half> %i1, 0
-  %i3 = tail call %t11 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a1, %i0, %a3, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
+  %i3 = tail call %t11 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a1, %i0, %a3, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
   %i4 = extractvalue <4 x half> %i3, 0
   %i5 = shufflevector <4 x half> %i2, %i4, <0, 1, 2, 4>
-  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Write) })](%a2, %a3, %i5, i32 0, i32 2) arg0( nocapture )
+  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%a2, %a3, %i5, i32 0, i32 2) arg0( nocapture )
   ret void
 }
 
 define %t5 @f1 "xr_planes_split" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="64" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( Ref nocapture ) {
 bb0:
   %i0 = tail call ptr addrspace(2) @f2 [air Sampler(GetReadSampler)]()
-  %i1 = tail call %t11 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a0, %i0, %a3, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
+  %i1 = tail call %t11 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i0, %a3, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
   %i2 = extractvalue <4 x half> %i1, 0
   %i3 = insertelement %i2, half 0x3C00, i64 3
-  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Write) })](%a1, %a3, %i3, i32 0, i32 2) arg0( nocapture )
+  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%a1, %a3, %i3, i32 0, i32 2) arg0( nocapture )
   %i5 = shufflevector <4 x half> %i2, <4 x half> undef, <3, 3, 3, 3>
-  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Write) })](%a2, %a3, %i5, i32 0, i32 2) arg0( nocapture )
+  tail call void @f4 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%a2, %a3, %i5, i32 0, i32 2) arg0( nocapture )
   ret void
 }
 

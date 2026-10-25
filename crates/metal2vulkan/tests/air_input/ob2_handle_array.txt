@@ -21,7 +21,7 @@ bb0:
   %i4 = getelementptr inbounds %t18, %a1, i64 0, i32 0, i32 0, %i3, i32 0
   %i5 = load ptr addrspace(1), %i4, align 8
   %i6 = tail call ptr addrspace(2) @f1 [air Sampler(GetReadSampler)]()
-  %i7 = tail call %t9 @f2 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(Read) })](%i5, %i6, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
+  %i7 = tail call %t9 @f2 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read) })](%i5, %i6, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
   %i8 = extractvalue <4 x i32> %i7, 0
   %i9 = extractelement %i8, i64 0
   %i10 = getelementptr inbounds i32, %a2, %i0
@@ -30,7 +30,7 @@ bb0:
   %i13 = zext %i12 to i64
   %i14 = getelementptr inbounds %t18, %a1, i64 0, i32 1, i32 0, %i13, i32 0
   %i15 = load ptr addrspace(1), %i14, align 8
-  %i16 = tail call %t9 @f2 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, access: Some(Read) })](%i15, %i6, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
+  %i16 = tail call %t9 @f2 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read) })](%i15, %i6, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
   %i17 = extractvalue <4 x i32> %i16, 0
   %i18 = extractelement %i17, i64 0
   %i19 = add i32 %a3, i32 8

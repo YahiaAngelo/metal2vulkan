@@ -79,7 +79,7 @@ bb0:
 
 define %t13 @f6 "psc_read_samples" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
-  %i0 = tail call i32 @f12 [air Texture(Texture { op: Query(NumSamples), image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: None, coord16: false, form: Current, access: None })](%a0) arg0( Ref nocapture )
+  %i0 = tail call i32 @f12 [air Texture(Texture { op: Query(NumSamples), image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0) arg0( Ref nocapture )
   %i1 = icmp eq %i0, i32 0
   br %i1, bb2, bb1
 bb1:
@@ -98,7 +98,7 @@ bb2:
 bb3:
   %i14 = phi i32 [i32 0, bb1], [%i23, bb3]
   %i15 = phi i32 [i32 0, bb1], [%i24, bb3]
-  %i16 = tail call %t20 @f14 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a0, %i3, %a2, %i15, i32 1) arg0( Ref nocapture )
+  %i16 = tail call %t20 @f14 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i3, %a2, %i15, i32 1) arg0( Ref nocapture )
   %i17 = extractvalue <4 x float> %i16, 0
   %i18 = extractelement %i17, i64 0
   %i19 = fcmp reassoc nnan ninf nsz arcp contract afn ogt %i18, float 0x3F000000
@@ -114,7 +114,7 @@ bb3:
 define %t13 @f7 "psc_read" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( Ref nocapture ) %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = tail call ptr addrspace(2) @f13 [air Sampler(GetReadSampler)]()
-  %i1 = tail call %t20 @f15 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a0, %i0, %a2, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
+  %i1 = tail call %t20 @f15 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i0, %a2, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
   %i2 = extractvalue <4 x float> %i1, 0
   %i3 = extractelement %i2, i64 0
   %i4 = fcmp reassoc nnan ninf nsz arcp contract afn ogt %i3, float 0x3F000000
@@ -131,7 +131,7 @@ bb0:
 
 define %t13 @f8 "psc_read_depth_samples" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="64" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
-  %i0 = tail call i32 @f16 [air Texture(Texture { op: Query(NumSamples), image: ImageShape { dim: D2, array: false, ms: true, depth: true }, texel: None, coord16: false, form: Current, access: None })](%a0) arg0( Ref nocapture )
+  %i0 = tail call i32 @f16 [air Texture(Texture { op: Query(NumSamples), image: ImageShape { dim: D2, array: false, ms: true, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0) arg0( Ref nocapture )
   %i1 = icmp eq %i0, i32 0
   br %i1, bb2, bb1
 bb1:
@@ -150,7 +150,7 @@ bb2:
 bb3:
   %i14 = phi i32 [i32 0, bb1], [%i23, bb3]
   %i15 = phi i32 [i32 0, bb1], [%i22, bb3]
-  %i16 = tail call %t23 @f17 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a0, %i3, i32 1, %a2, %i14, i32 1) arg0( Ref nocapture )
+  %i16 = tail call %t23 @f17 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i3, i32 1, %a2, %i14, i32 1) arg0( Ref nocapture )
   %i17 = extractvalue float %i16, 0
   %i18 = fcmp reassoc nnan ninf nsz arcp contract afn olt %i17, float 0x3F400000
   %i19 = and i32 %i14, i32 31
@@ -165,7 +165,7 @@ bb3:
 define %t13 @f9 "psc_read_depth" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="64" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( Ref nocapture ) %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = tail call ptr addrspace(2) @f13 [air Sampler(GetReadSampler)]()
-  %i1 = tail call %t23 @f18 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a0, %i0, i32 1, %a2, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
+  %i1 = tail call %t23 @f18 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i0, i32 1, %a2, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
   %i2 = extractvalue float %i1, 0
   %i3 = fcmp reassoc nnan ninf nsz arcp contract afn olt %i2, float 0x3F400000
   %i4 = zext %i3 to i32

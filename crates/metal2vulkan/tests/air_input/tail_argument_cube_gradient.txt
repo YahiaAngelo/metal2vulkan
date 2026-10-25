@@ -29,7 +29,7 @@ bb0:
   %i10 = insertelement <3 x float> c26, %i4, i64 1
   %i11 = getelementptr inbounds %t19, %a0, i64 0, i32 0, i32 0
   %i12 = load ptr addrspace(1), %i11, align 8
-  %i13 = tail call %t10 @f2 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%i12, %i6, %i8, %i9, %i10, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i13 = tail call %t10 @f2 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%i12, %i6, %i8, %i9, %i10, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i14 = extractvalue <4 x float> %i13, 0
   %i15 = zext %a2 to i64
   %i16 = getelementptr inbounds <4 x float>, %a1, %i15

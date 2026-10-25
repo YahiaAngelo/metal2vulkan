@@ -1205,6 +1205,175 @@ fn read_forms_are_chosen_by_the_declaration() {
     assert_eq!(roles(l), [R::Texture, R::Coord, R::Lod, R::Access]);
 }
 
+/// AIR 2.1 states no residency status on a sample, gather, or read: the result is the texel alone
+/// rather than `{T, i8}`, and a sample carries no min-LOD-clamp position. AIR 2.2 added both in
+/// one step. The declaration picks the form, as it does a read's or an atomic's operand
+/// positions; a read of an AIR 2.1 module has the legacy operand form as well.
+#[test]
+fn the_air_2_1_forms_without_a_residency_status_are_chosen_by_the_declaration() {
+    use TexRole as R;
+    let texture = |name: &str, decl: &str| match declared_air(name, decl) {
+        AirIntrinsic::Texture(t) => t,
+        other => panic!("{name} {decl}: {other:?}"),
+    };
+    let roles = |t: Texture| t.layout().positions().map(|(r, _)| r).collect::<Vec<_>>();
+    // Every declaration below is one `xcrun metal -std=macos-metal2.1
+    // -mmacosx-version-min=10.14` (Apple metal 32023.921) writes, which records
+    // `!air.version = !{i32 2, i32 1, i32 0}` and the triple `air64_v21`.
+    let cases: &[(&str, &str)] = &[
+        // Sampling: no status, and no min-LOD clamp after the bias-or-level value.
+        (
+            "air.sample_texture_2d.v4f32",
+            "v4f32 (p1, p2, v2f32, i1, v2i32, i1, f32, i32)",
+        ),
+        (
+            "air.sample_texture_1d.v4f32",
+            "v4f32 (p1, p2, f32, i1, i32, i1, f32, i32)",
+        ),
+        (
+            "air.sample_texture_2d_array.v4f32",
+            "v4f32 (p1, p2, v2f32, i32, i1, v2i32, i1, f32, i32)",
+        ),
+        (
+            "air.sample_texture_3d.v4f32",
+            "v4f32 (p1, p2, v3f32, i1, v3i32, i1, f32, i32)",
+        ),
+        // A cube has no offset pair in either form.
+        (
+            "air.sample_texture_cube.v4f32",
+            "v4f32 (p1, p2, v3f32, i1, f32, i32)",
+        ),
+        (
+            "air.sample_texture_cube_array.v4f32",
+            "v4f32 (p1, p2, v3f32, i32, i1, f32, i32)",
+        ),
+        // A gradient sample: the clamp sat between the gradients and the offset pair.
+        (
+            "air.sample_texture_2d_grad.v4f32",
+            "v4f32 (p1, p2, v2f32, v2f32, v2f32, i1, v2i32, i32)",
+        ),
+        // Depth: the depth word stays before the coordinate.
+        (
+            "air.sample_depth_2d.f32",
+            "f32 (p1, p2, i32, v2f32, i1, v2i32, i1, f32, i32)",
+        ),
+        (
+            "air.sample_compare_depth_2d.f32",
+            "f32 (p1, p2, i32, v2f32, f32, i1, v2i32, i1, f32, i32)",
+        ),
+        (
+            "air.sample_depth_cube.f32",
+            "f32 (p1, p2, i32, v3f32, i1, f32, i32)",
+        ),
+        // Gathers have no clamp position in either form; only the result changes.
+        (
+            "air.gather_texture_2d.v4f32",
+            "v4f32 (p1, p2, v2f32, i1, v2i32, i32, i32)",
+        ),
+        (
+            "air.gather_depth_2d.v4f32",
+            "v4f32 (p1, p2, i32, v2f32, i1, v2i32, i32)",
+        ),
+        (
+            "air.gather_compare_depth_2d.f32",
+            "v4f32 (p1, p2, i32, v2f32, f32, i1, v2i32, i32)",
+        ),
+        // Reads: AIR 2.1 writes the legacy operand form (no sampler, no offset) and no status.
+        ("air.read_texture_2d.v4f32", "v4f32 (p1, v2i32, i32, i32)"),
+        ("air.read_texture_2d.u.v4i32", "v4i32 (p1, v2i32, i32, i32)"),
+        ("air.read_texture_2d.v4f16", "v4f16 (p1, v2i32, i32, i32)"),
+        ("air.read_texture_1d.v4f32", "v4f32 (p1, i32, i32, i32)"),
+        (
+            "air.read_texture_2d_array.v4f32",
+            "v4f32 (p1, v2i32, i32, i32, i32)",
+        ),
+        ("air.read_texture_3d.v4f32", "v4f32 (p1, v3i32, i32, i32)"),
+        (
+            "air.read_texture_cube.v4f32",
+            "v4f32 (p1, v2i32, i32, i32, i32)",
+        ),
+        (
+            "air.read_texture_cube_array.v4f32",
+            "v4f32 (p1, v2i32, i32, i32, i32, i32)",
+        ),
+        (
+            "air.read_texture_2d_ms.v4f32",
+            "v4f32 (p1, v2i32, i32, i32)",
+        ),
+        ("air.read_texture_buffer_1d.v4f32", "v4f32 (p1, i32, i32)"),
+        ("air.read_depth_2d.f32", "f32 (p1, i32, v2i32, i32, i32)"),
+    ];
+    for (name, decl) in cases {
+        let t = texture(name, decl);
+        assert!(!t.status, "{name}");
+        assert!(!roles(t).contains(&R::MinLodClamp), "{name}");
+    }
+    // A read of such a module has the legacy operand positions too.
+    let read = texture("air.read_texture_2d.v4f32", "v4f32 (p1, v2i32, i32, i32)");
+    assert_eq!(read.form, Form::Legacy);
+    assert_eq!(roles(read), [R::Texture, R::Coord, R::Lod, R::Access]);
+    // The sample's immediates are read at the shifted positions: the LOD mode is still the
+    // position before the value, and the access qualifier the last.
+    let sample = texture(
+        "air.sample_texture_2d.v4f32",
+        "v4f32 (p1, p2, v2f32, i1, v2i32, i1, f32, i32)",
+    );
+    assert_eq!(
+        roles(sample),
+        [
+            R::Texture,
+            R::Sampler,
+            R::Coord,
+            R::OffsetFlag,
+            R::Offset,
+            R::LodMode,
+            R::LodValue,
+            R::Access
+        ]
+    );
+    // The current forms still decode, and as the status-stating form.
+    for (name, decl) in [
+        (
+            "air.sample_texture_2d.v4f32",
+            "{v4f32} (p1, p2, v2f32, i1, v2i32, i1, f32, f32, i32)",
+        ),
+        (
+            "air.read_texture_2d.v4f32",
+            "{v4f32} (p1, p2, v2i32, v2i32, i32, i32)",
+        ),
+        ("air.read_texture_2d.v4f32", "{v4f32} (p1, v2i32, i32, i32)"),
+    ] {
+        assert!(texture(name, decl).status, "{name} {decl}");
+    }
+    // The mixtures no emitter has written stay unknown: a status result without the clamp, a
+    // clamp without the status, and a read with the sampler and offset but no status.
+    for (name, decl) in [
+        (
+            "air.sample_texture_2d.v4f32",
+            "{v4f32} (p1, p2, v2f32, i1, v2i32, i1, f32, i32)",
+        ),
+        (
+            "air.sample_texture_2d.v4f32",
+            "v4f32 (p1, p2, v2f32, i1, v2i32, i1, f32, f32, i32)",
+        ),
+        (
+            "air.read_texture_2d.v4f32",
+            "v4f32 (p1, p2, v2i32, v2i32, i32, i32)",
+        ),
+    ] {
+        assert!(
+            matches!(declared(name, decl), DeclClass::Mismatch),
+            "{name} {decl}"
+        );
+    }
+    // An operation that carries no status in any form has no second form from this axis.
+    let write = texture(
+        "air.write_texture_2d.v4f32",
+        "void (p1, v2i32, v4f32, i32, i32)",
+    );
+    assert!(write.status && write.alternative().is_none());
+}
+
 /// A 2D or 3D texture atomic's two forms: Xcode's AIR passes an offset after the coordinate (and
 /// layer), the AIR macOS 26.6's Metal on x86-64 hands its device omits it. The declaration picks
 /// the form; a 1D, 1D array or buffer atomic has one form, without an offset.

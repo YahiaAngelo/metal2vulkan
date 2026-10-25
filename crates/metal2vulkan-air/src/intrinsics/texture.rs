@@ -17,6 +17,13 @@
 //!   [2d/3d, not ms: offset], ms ? sample : lod, i32 access)`; the **legacy** form omits the
 //!   sampler and offset positions. A texture buffer has no level: `(tex, [smp], coord,
 //!   i32 access)`.
+//! - a sample, gather, or read **states a residency status** ([`Texture::status`]) from AIR 2.2
+//!   on: its result is `{T, i8}`, the texel and Metal's residency byte, and a sample carries the
+//!   min-LOD-clamp position above. An AIR 2.1 declaration of the same name states neither: it
+//!   returns the texel alone and a sample has no clamp position. The declaration picks the form,
+//!   as it does for a read's or an atomic's operand positions. The two changed in one emitter
+//!   step, and no module has been seen with one without the other, so the mixtures stay unknown:
+//!   a current-form read (with the sampler and offset) without the status is not a form of it.
 //! - **write** `void (tex, coord, [cube: face], [array: layer], texel, [not buffer: lod],
 //!   i32 access)`.
 //! - a read's or write's texel is `f32` or `f16`, `s`/`u` `i32` or `i16`, or, for Metal's
@@ -221,6 +228,12 @@ pub struct Texture {
     /// The operand form: a read's or a 2D or 3D atomic's current or legacy form; `Current` for
     /// every other operation.
     pub form: Form,
+    /// Whether a sample, gather, or read states a residency status: its result is `{T, i8}` (the
+    /// texel and Metal's residency byte) and a sample carries a min-LOD-clamp operand. AIR 2.2
+    /// added both in one step; an AIR 2.1 declaration states neither, so its result is the texel
+    /// alone and its sample has no clamp position. `true` for every operation whose result
+    /// carries no status in either form (a write, a query, an atomic).
+    pub status: bool,
     /// The access qualifier, for operations that carry one.
     pub access: Option<Access>,
 }
@@ -687,6 +700,7 @@ impl Texture {
             texel,
             coord16,
             form: Form::Current,
+            status: true,
             access: None,
         };
         // The `ulong` stems take a `ulong` texel, and the others none.
@@ -695,18 +709,36 @@ impl Texture {
         (t.valid() && ulong_stem == ulong_atomic).then_some(t)
     }
 
-    /// The other operand form a declaration of the same name may have (a read's, or a 2D or 3D
-    /// atomic's, legacy form).
+    /// The next declaration of the same name a module may have, searched in order: a read's, or
+    /// a 2D or 3D atomic's, legacy operand form, and then, for an operation whose result carries
+    /// a residency status, the AIR 2.1 form that states none. A read has all three (AIR 2.8's
+    /// sampler and offset, AIR 2.2's status, and AIR 2.1's bare texel); a sample or gather has
+    /// the status axis alone, and an atomic the operand axis alone.
     pub(super) fn alternative(self) -> Option<Texture> {
         let legacy = match self.op {
             TexOp::Read => true,
             TexOp::Atomic(_) => matches!(self.image.dim, ImageDim::D2 | ImageDim::D3),
             _ => false,
         };
-        (legacy && self.form == Form::Current).then_some(Texture {
-            form: Form::Legacy,
+        if legacy && self.form == Form::Current {
+            return Some(Texture {
+                form: Form::Legacy,
+                ..self
+            });
+        }
+        (self.status && self.states_status()).then_some(Texture {
+            status: false,
             ..self
         })
+    }
+
+    /// Whether this operation's result carries a residency status in the current form: a sample,
+    /// a gather, or a read ([`Texture::status`]).
+    fn states_status(&self) -> bool {
+        matches!(
+            self.op,
+            TexOp::Sample { .. } | TexOp::SampleGrad { .. } | TexOp::Gather { .. } | TexOp::Read
+        )
     }
 
     /// Whether the texel is Metal's `ulong` (a `u` `i64`): a `ulong` atomic returns nothing.
@@ -783,17 +815,28 @@ impl Texture {
         let ci = if self.coord16 { Elem::I16 } else { Elem::I32 };
         let (sample_lanes, int_lanes) = coord_lanes(shape.dim);
         let texel = self.texel.map_or(Operand::Void, |t| Operand::Num(t.ty));
-        let status = self
-            .texel
-            .map_or(Operand::Void, |t| Operand::WithStatus(t.ty));
+        // The result of a sample, gather, or read: `{T, i8}` where the operation states a
+        // residency status, the texel alone in the AIR 2.1 form that states none.
+        let status = self.texel.map_or(Operand::Void, |t| {
+            if self.status {
+                Operand::WithStatus(t.ty)
+            } else {
+                Operand::Num(t.ty)
+            }
+        });
         let cube = shape.dim == ImageDim::Cube;
         let mut l = match self.op {
             TexOp::Gather { compare: true, .. } => {
                 Layout::new(self.texel.map_or(Operand::Void, |t| {
-                    Operand::WithStatus(NumTy {
+                    let four = NumTy {
                         elem: t.ty.elem,
                         lanes: 4,
-                    })
+                    };
+                    if self.status {
+                        Operand::WithStatus(four)
+                    } else {
+                        Operand::Num(four)
+                    }
                 }))
             }
             TexOp::Sample { .. } | TexOp::SampleGrad { .. } | TexOp::Gather { .. } => {
@@ -824,7 +867,7 @@ impl Texture {
                 }
                 l.push(R::LodMode, flag);
                 l.push(R::LodValue, f32s);
-                l.push(R::MinLodClamp, f32s);
+                l.push_if(self.status, R::MinLodClamp, f32s);
                 l.push(R::Access, access);
             }
             TexOp::SampleGrad { compare, .. } => {
@@ -837,7 +880,7 @@ impl Texture {
                 l.push_if(compare, R::CompareRef, f32s);
                 l.push(R::Dpdx, grad);
                 l.push(R::Dpdy, grad);
-                l.push(R::MinLodClamp, f32s);
+                l.push_if(self.status, R::MinLodClamp, f32s);
                 if !cube {
                     l.push(R::OffsetFlag, flag);
                     l.push(R::Offset, num(Elem::I32, sample_lanes));

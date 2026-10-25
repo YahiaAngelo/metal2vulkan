@@ -291,7 +291,7 @@ bb0:
   %i12 = and i32 %i11, %i3
   %i13 = icmp ne %i12, i32 0
   %i14 = tail call i32 @f19 [air Group(Group { scope: Simdgroup, op: Sum, ty: Some(NumTy { elem: I32, lanes: 1 }), sign: Some(Signed) })](i32 1) convergent
-  %i15 = tail call %t21 @f20 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a3, %a4, <2 x float> c62, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i15 = tail call %t21 @f20 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a3, %a4, <2 x float> c62, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i16 = extractvalue <4 x float> %i15, 0
   %i17 = extractelement %i16, i64 0
   %i18 = tail call i32 @f10 [air Convert(Convert { dst: NumTy { elem: I32, lanes: 1 }, dst_kind: Signed, src: NumTy { elem: F32, lanes: 1 }, src_kind: Float, src_fp8: None })](%i17)
@@ -341,7 +341,7 @@ bb0:
   %i13 = icmp ne %i12, i32 0
   %i14 = tail call i32 @f19 [air Group(Group { scope: Simdgroup, op: Sum, ty: Some(NumTy { elem: I32, lanes: 1 }), sign: Some(Signed) })](i32 1) convergent
   %i15 = tail call ptr addrspace(2) @f21 [air Sampler(GetReadSampler)]()
-  %i16 = tail call %t21 @f22 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, access: Some(Sample) })](%a3, %i15, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
+  %i16 = tail call %t21 @f22 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a3, %i15, <2 x i32> zeroinitializer, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
   %i17 = extractvalue <4 x float> %i16, 0
   %i18 = extractelement %i17, i64 0
   %i19 = tail call i32 @f10 [air Convert(Convert { dst: NumTy { elem: I32, lanes: 1 }, dst_kind: Signed, src: NumTy { elem: F32, lanes: 1 }, src_kind: Float, src_fp8: None })](%i18)

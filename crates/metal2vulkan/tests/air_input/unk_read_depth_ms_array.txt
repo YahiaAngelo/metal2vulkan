@@ -13,9 +13,9 @@ c12 = %t18 [27, 0]
 
 define %t4 @f0 "unk_read_depth_ms_array" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="64" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
-  %i0 = tail call i32 @f2 [air Texture(Texture { op: Query(Width), image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: None, coord16: false, form: Current, access: None })](%a0) arg0( Ref nocapture )
-  %i1 = tail call i32 @f3 [air Texture(Texture { op: Query(Height), image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: None, coord16: false, form: Current, access: None })](%a0) arg0( Ref nocapture )
-  %i2 = tail call i32 @f4 [air Texture(Texture { op: Query(NumSamples), image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: None, coord16: false, form: Current, access: None })](%a0) arg0( Ref nocapture )
+  %i0 = tail call i32 @f2 [air Texture(Texture { op: Query(Width), image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0) arg0( Ref nocapture )
+  %i1 = tail call i32 @f3 [air Texture(Texture { op: Query(Height), image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0) arg0( Ref nocapture )
+  %i2 = tail call i32 @f4 [air Texture(Texture { op: Query(NumSamples), image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0) arg0( Ref nocapture )
   %i3 = urem i32 %a2, %i2
   %i4 = udiv i32 %a2, %i2
   %i5 = urem i32 %i4, %i0
@@ -26,16 +26,16 @@ bb0:
   %i10 = insertelement %i6, %i9, i64 1
   %i11 = mul i32 %i7, %i1
   %i12 = udiv i32 %a2, %i11
-  %i13 = tail call i32 @f5 [air Texture(Texture { op: Query(ArraySize), image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: None, coord16: false, form: Current, access: None })](%a0) arg0( Ref nocapture )
+  %i13 = tail call i32 @f5 [air Texture(Texture { op: Query(ArraySize), image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0) arg0( Ref nocapture )
   %i14 = urem i32 %i12, %i13
   %i15 = tail call ptr addrspace(2) @f6 [air Sampler(GetReadSampler)]()
-  %i16 = tail call %t14 @f7 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, access: Some(Read) })](%a0, %i15, i32 1, %i10, %i14, %i3, i32 1) arg0( Ref nocapture )
+  %i16 = tail call %t14 @f7 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i15, i32 1, %i10, %i14, %i3, i32 1) arg0( Ref nocapture )
   %i17 = extractvalue float %i16, 0
   %i18 = insertelement <2 x float> undef, %i17, i64 0
   %i19 = tail call <2 x i16> @f1 [air Convert(Convert { dst: NumTy { elem: I16, lanes: 2 }, dst_kind: Unsigned, src: NumTy { elem: I32, lanes: 2 }, src_kind: Unsigned, src_fp8: None })](%i10)
   %i20 = trunc %i14 to i16
   %i21 = trunc %i3 to i16
-  %i22 = tail call %t14 @f8 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: true, form: Current, access: Some(Read) })](%a0, %i15, i32 1, %i19, %i20, %i21, i32 1) arg0( Ref nocapture )
+  %i22 = tail call %t14 @f8 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: true, ms: true, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Read) })](%a0, %i15, i32 1, %i19, %i20, %i21, i32 1) arg0( Ref nocapture )
   %i23 = extractvalue float %i22, 0
   %i24 = insertelement %i18, %i23, i64 1
   %i25 = zext %a2 to i64
