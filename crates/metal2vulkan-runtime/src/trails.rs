@@ -54,6 +54,10 @@ struct Open {
     next: u64,
     /// The trails open, by number.
     numbers: BTreeSet<u64>,
+    /// The waits that found a trail open below their mark, counted once each, for the tests'
+    /// handshake with a wait that has gone on to block (`Trails::blocked_waits`).
+    #[cfg(test)]
+    blocked: usize,
 }
 
 /// An open trail: closed when dropped. It holds nothing of the device.
@@ -96,13 +100,15 @@ impl Trails {
     pub(crate) fn wait_below(&self, mark: u64, deadline: Option<Instant>) -> Result<bool, Ended> {
         let mut open = lock(&self.open);
         let mut waited = false;
-        #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+        #[cfg(test)]
         let mut counted = false;
         while open.numbers.first().is_some_and(|&first| first < mark) {
             waited = true;
-            #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+            #[cfg(test)]
             if !counted {
                 counted = true;
+                open.blocked += 1;
+                #[cfg(any(m2v_gpu, m2v_cpu_icd))]
                 blocked::count();
             }
             if exit_guard::closed() {
@@ -131,6 +137,15 @@ impl Trails {
     #[cfg(test)]
     pub(crate) fn open_now(&self) -> usize {
         lock(&self.open).numbers.len()
+    }
+
+    /// How many waits found a trail open below their mark, counted once each as they go on to
+    /// block on `closed`. It rises while the wait holds this registry's lock, which it gives up
+    /// only to block: a test that sees it rise, and then closes a trail, closes it under a wait
+    /// that has already blocked.
+    #[cfg(test)]
+    pub(crate) fn blocked_waits(&self) -> usize {
+        lock(&self.open).blocked
     }
 }
 

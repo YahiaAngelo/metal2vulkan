@@ -2,7 +2,7 @@
 //! and returns as the last of them closes.
 
 use crate::trails::{Ended, Trails};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// The longest a test waits for another thread.
@@ -45,15 +45,21 @@ fn a_blocked_wait_returns_as_the_trail_closes() {
     let trails = Arc::new(Trails::default());
     let trail = trails.open();
     let mark = trails.mark();
-    let (started, waiting) = mpsc::channel();
     let waiter = {
         let trails = Arc::clone(&trails);
-        std::thread::spawn(move || {
-            started.send(()).unwrap();
-            trails.wait_below(mark, Some(Instant::now() + WAIT))
-        })
+        std::thread::spawn(move || trails.wait_below(mark, Some(Instant::now() + WAIT)))
     };
-    waiting.recv_timeout(WAIT).unwrap();
+    // The trail closes only once the waiter is genuinely inside the wait: the count rises while
+    // the wait holds the registry's lock, which it gives up only to block on the trail closing.
+    // A wait that found the trail already closed would never raise it, and the spin would fail.
+    let since = Instant::now();
+    while trails.blocked_waits() == 0 {
+        assert!(
+            since.elapsed() < WAIT,
+            "the waiter never blocked on the open trail"
+        );
+        std::thread::sleep(Duration::from_micros(100));
+    }
     drop(trail);
     assert_eq!(
         waiter.join().unwrap(),
