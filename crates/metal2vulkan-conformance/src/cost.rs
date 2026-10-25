@@ -2392,6 +2392,18 @@ mod the_ratio {
 /// share went from 242 of 750 (32%) to 815 of 1,439 (57%) as the number of rows grew by 225. A
 /// ceiling that rises with coverage is the honest reading of a bigger census; what it must not do
 /// is rise while the rows stay the same, and that is what this fails on.
+///
+/// # And the total is two predictions, which is the thing it cannot say
+///
+/// `creation_pipelines_made` is one count over the render prediction (`pipeline/predicted.rs`) and
+/// the compute one (`pipeline/dispatch_making.rs`), so 631 says nothing about either. Split by the
+/// commands each record's own counts say our leg replayed ([`Speculated`], and no new counter was
+/// needed for it), the two are nothing like each other: **the render prediction is taken 754 times
+/// in 799 over the 154 rows that draw and do not dispatch, and the compute prediction 0 times in
+/// 461 over the 277 rows that dispatch and do not draw.** 461 of the 631 is one prediction with no
+/// hit in the whole committed census, and 455 of those 461 are rows that make no render pass at
+/// all. [`WASTED_BY_CLASS`] holds the four classes apart and [`DRAWS_TAKEN`] holds the render
+/// prediction's reach, which a ceiling on waste does not.
 #[cfg(test)]
 mod the_creation_prediction {
     /// The most `VkPipeline`s the committed recordings may hold made at a creation and taken by no
@@ -2412,6 +2424,58 @@ mod the_creation_prediction {
     /// the legitimate half of the question and the shape `known-slow-calls.tsv` already names as
     /// the largest single share of this count.
     const WASTED: u64 = 631;
+
+    /// **The same ceiling, per class of speculation**, which is the statement [`WASTED`] cannot
+    /// make: it is one number over two predictions, so it holds neither.
+    ///
+    /// The classes are [`Speculated`]'s, and here is what the committed recordings read today,
+    /// every figure from the files alone:
+    ///
+    /// | class | rows | made | taken | by none | taken |
+    /// |---|---|---|---|---|---|
+    /// | draws and no dispatch | 154 | 799 | 754 | 45 | 94.4% |
+    /// | dispatches and no draw | 277 | 461 | 0 | 461 | 0.0% |
+    /// | both kinds | 84 | 107 | 61 | 46 | 57.0% |
+    /// | no command at all | 74 | 79 | 0 | 79 | 0.0% |
+    /// | all | 589 | 1,446 | 815 | 631 | 56.4% |
+    ///
+    /// **So the two predictions are nothing like each other, and the total hides it.** The render
+    /// prediction is taken 754 times in 799 on the cases that draw, and its 45 misses are spread
+    /// one or two to a row over 42 rows led by `sample-positions-*` and the `a2c-*` sweeps — the
+    /// shape this module's docs already name as unpredictable, since `GraphicsKey` carries
+    /// `sample_positions` and the pass. The compute prediction is taken **0** times in 461 over
+    /// 277 rows. 461 of the 631 is one prediction, and 455 of those 461 are rows that make no
+    /// render pass at all.
+    ///
+    /// # Why the total cannot hold this
+    ///
+    /// A ceiling on the sum passes a trade between the halves. Were the compute prediction's 461
+    /// to go to nothing while the render prediction lost half its accuracy — 799 made, about 400
+    /// taken — the census would read about 586 against the ceiling of 631 and this family would
+    /// report everything well. The per-class ceilings below fail it, and name the class that
+    /// widened.
+    ///
+    /// Raising one of these is the same act as raising [`WASTED`] and wants the same answer: were
+    /// the rows that grew rows that run no command of that kind — legitimate — or rows that
+    /// mispredict a command they do run.
+    const WASTED_BY_CLASS: [(Speculated, u64); 4] = [
+        (Speculated::Draws, 45),
+        (Speculated::Dispatches, 461),
+        (Speculated::Both, 46),
+        (Speculated::NoCommand, 79),
+    ];
+
+    /// **The floor under the render prediction's reach**: the predicted `VkPipeline`s a draw took,
+    /// over the rows that draw and do not dispatch.
+    ///
+    /// A ceiling on waste is not this statement. A case family that stops drawing, or a landing
+    /// that removes one, lowers the waste and the reach together, and only the ceiling notices
+    /// nothing. This is the half that says the prediction is still *right*, and it is the reason
+    /// the render prediction must not be made lazy: at 754 of 799 it is taken 94.4% of the time,
+    /// so a lazy render pipeline would move a creation's compile into the first draw's command
+    /// buffer 94 times in 100 — which is the cold making inside a command buffer's execution that
+    /// `pipeline/predicted.rs` exists to have removed.
+    const DRAWS_TAKEN: u64 = 754;
 
     /// The cases whose prediction the existing pair of bounds already holds **exactly**, and the
     /// reach that must not be lost.
@@ -2440,11 +2504,74 @@ mod the_creation_prediction {
     /// alone measurement on a device, so the gap is recorded here and not guessed at.
     const EXACTLY_HELD: usize = 111;
 
+    /// **Which speculation a record's creation pipelines are**, and so which prediction its waste
+    /// belongs to: the one thing the two counts are blind to, because both are totals over the
+    /// render prediction (`pipeline/predicted.rs`) and the compute one
+    /// (`pipeline/dispatch_making.rs`) together.
+    ///
+    /// It is read off the commands the record's own counts say our leg replayed, and from nothing
+    /// else — no case name, no family, no list. A `VkPipeline` made at a creation can only ever be
+    /// taken by a command of its own kind, so a record that replayed draws and no dispatch can
+    /// only hold the render prediction's pipelines, and one that replayed dispatches and no draw
+    /// only the compute one's. That is a structural fact about the record, available in every
+    /// committed recording today, which is why this needed no new counter.
+    ///
+    /// **The signal is `commands_replayed.cmd_draw*` and `cmd_dispatch*` and not
+    /// `draw_states_recorded`**, which looks like the same question and is not: 22 of these rows
+    /// replay a `vkCmdDraw` while reading `draw_states_recorded` 0 — every `sample-fills-*` and
+    /// `buffer-depth-samples-*` row — so classifying by it would file a drawing case under
+    /// [`Speculated::NoCommand`] and hide exactly the rows this family already knows mispredict.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Speculated {
+        /// Draw commands and no dispatch: the render prediction's, all of it.
+        Draws,
+        /// Dispatch commands and no draw: the compute prediction's, all of it.
+        Dispatches,
+        /// Both kinds, so the record cannot say which prediction a pipeline of it belongs to.
+        /// Attributing these wants the counter split named in this module's docs.
+        Both,
+        /// Neither kind reached the driver, so no command could have taken anything the creation
+        /// made. The one class where the waste is not a mispredict at all.
+        NoCommand,
+    }
+
+    impl Speculated {
+        /// What `bounds`, a record's, say the record's creation pipelines are.
+        fn of(bounds: &std::collections::BTreeMap<String, u64>) -> Speculated {
+            let any = |prefix: &str| {
+                bounds
+                    .iter()
+                    .any(|(count, most)| count.starts_with(prefix) && *most > 0)
+            };
+            match (
+                any("commands_replayed.cmd_draw"),
+                any("commands_replayed.cmd_dispatch"),
+            ) {
+                (true, false) => Speculated::Draws,
+                (false, true) => Speculated::Dispatches,
+                (true, true) => Speculated::Both,
+                (false, false) => Speculated::NoCommand,
+            }
+        }
+
+        /// The class in words, for a failure and for the census the tests print.
+        fn label(self) -> &'static str {
+            match self {
+                Speculated::Draws => "draws and no dispatch",
+                Speculated::Dispatches => "dispatches and no draw",
+                Speculated::Both => "both kinds",
+                Speculated::NoCommand => "no command at all",
+            }
+        }
+    }
+
     /// One recording's reading of the prediction.
     struct Row {
         case: String,
         made: u64,
         drawn: u64,
+        /// Which prediction the row's pipelines are ([`Speculated`]).
+        class: Speculated,
         /// Whether both counts are gated, so the pair already says the case takes every one.
         held: bool,
     }
@@ -2471,6 +2598,7 @@ mod the_creation_prediction {
                     case: case.name().to_owned(),
                     made,
                     drawn,
+                    class: Speculated::of(&record.bounds),
                     held: made == drawn
                         && gated("creation_pipelines_made")
                         && gated("creation_pipelines_drawn"),
@@ -2478,6 +2606,36 @@ mod the_creation_prediction {
             }
         }
         rows
+    }
+
+    /// What one class of speculation reads over the census.
+    struct Class {
+        rows: usize,
+        made: u64,
+        drawn: u64,
+    }
+
+    impl Class {
+        /// The rows of `class` in `rows`, added up.
+        fn of(rows: &[Row], class: Speculated) -> Class {
+            let mine = rows.iter().filter(|row| row.class == class);
+            let mut read = Class {
+                rows: 0,
+                made: 0,
+                drawn: 0,
+            };
+            for row in mine {
+                read.rows += 1;
+                read.made += row.made;
+                read.drawn += row.drawn;
+            }
+            read
+        }
+
+        /// The pipelines of this class no command took.
+        fn wasted(&self) -> u64 {
+            self.made - self.drawn
+        }
     }
 
     /// **The suite-wide ceiling on predicted pipelines no command took.**
@@ -2521,6 +2679,147 @@ mod the_creation_prediction {
             "only {} recording(s) were found to make a creation pipeline at all, so this census \
              is reading the wrong thing",
             rows.len()
+        );
+    }
+
+    /// **The same ceiling held per class of speculation** ([`WASTED_BY_CLASS`]), which the total
+    /// cannot do: it is one number over the render prediction and the compute one, so a trade
+    /// between them passes it.
+    #[test]
+    fn neither_prediction_wastes_more_than_it_does_today() {
+        let rows = census();
+        let mut over = Vec::new();
+        for (class, ceiling) in WASTED_BY_CLASS {
+            let read = Class::of(&rows, class);
+            let taken = match read.made {
+                0 => 0.0,
+                made => read.drawn as f64 / made as f64 * 100.0,
+            };
+            println!(
+                "{:24} {:4} row(s), {:5} made, {:5} taken, {:5} by none against the ceiling \
+                 {ceiling} ({taken:5.1}% taken)",
+                class.label(),
+                read.rows,
+                read.made,
+                read.drawn,
+                read.wasted(),
+            );
+            if read.wasted() > ceiling {
+                let mut worst: Vec<&Row> = rows
+                    .iter()
+                    .filter(|row| row.class == class && row.made > row.drawn)
+                    .collect();
+                worst.sort_by_key(|row| std::cmp::Reverse(row.made - row.drawn));
+                let named: Vec<String> = worst
+                    .iter()
+                    .take(8)
+                    .map(|row| format!("{} made {} took {}", row.case, row.made, row.drawn))
+                    .collect();
+                over.push(format!(
+                    "{}: {} predicted pipeline(s) no command took, where the ceiling is \
+                     {ceiling}. Worst rows:\n    {}",
+                    class.label(),
+                    read.wasted(),
+                    named.join("\n    ")
+                ));
+            }
+        }
+        assert!(
+            over.is_empty(),
+            "a class of speculation now wastes more than it did, which the suite-wide ceiling \
+             cannot see: it is one number over two predictions, so it passes a change that breaks \
+             one while the other is fixed. Fix the named prediction, or raise that class's \
+             ceiling in the same commit as the measurement that justifies it:\n  {}",
+            over.join("\n  ")
+        );
+        // The classes must still partition the census, or a ceiling above holds a class that no
+        // longer has any rows in it.
+        let classed: usize = WASTED_BY_CLASS
+            .iter()
+            .map(|(class, _)| Class::of(&rows, *class).rows)
+            .sum();
+        assert_eq!(
+            classed,
+            rows.len(),
+            "the classes do not partition the census, so a ceiling holds rows nobody counted"
+        );
+        for (class, _) in WASTED_BY_CLASS {
+            assert!(
+                Class::of(&rows, class).rows > 0,
+                "no row of the census is {}, so that class's ceiling holds nothing",
+                class.label()
+            );
+        }
+    }
+
+    /// **The render prediction is still taken as often as it is** ([`DRAWS_TAKEN`]), which is the
+    /// half a ceiling on waste does not hold.
+    #[test]
+    fn the_prediction_a_drawing_case_makes_is_still_taken_as_often() {
+        let rows = census();
+        let read = Class::of(&rows, Speculated::Draws);
+        println!(
+            "the {} row(s) that draw and do not dispatch take {} of the {} pipelines their \
+             creations make, against the floor {DRAWS_TAKEN}",
+            read.rows, read.drawn, read.made,
+        );
+        assert!(
+            read.drawn >= DRAWS_TAKEN,
+            "the rows that draw and do not dispatch now take {} of the {} pipelines their \
+             creations make, where {DRAWS_TAKEN} were taken. A ceiling on waste cannot say this: \
+             a family that stops drawing lowers the waste and the reach together. The render \
+             prediction being taken 94% of the time is why it is made at a creation at all, so a \
+             drop here is a cold compile moving back inside a first draw's command buffer",
+            read.drawn,
+            read.made,
+        );
+    }
+
+    /// The classifier reads the commands and nothing else, over rows this test writes itself.
+    ///
+    /// The census above reads committed files, so a classifier that answered one class for
+    /// everything would still make its ceilings add up. This is the input that says it does not.
+    #[test]
+    fn a_record_is_classed_by_the_commands_it_replayed() {
+        let bounds = |counts: &[(&str, u64)]| {
+            counts
+                .iter()
+                .map(|(name, most)| ((*name).to_owned(), *most))
+                .collect::<std::collections::BTreeMap<String, u64>>()
+        };
+        let draw = ("commands_replayed.cmd_draw_indexed_indirect", 1);
+        let dispatch = ("commands_replayed.cmd_dispatch_indirect", 1);
+        let other = ("commands_replayed.cmd_copy_buffer", 7);
+        assert_eq!(
+            Speculated::of(&bounds(&[draw, other])),
+            Speculated::Draws,
+            "an indirect indexed draw is a draw"
+        );
+        assert_eq!(
+            Speculated::of(&bounds(&[dispatch, other])),
+            Speculated::Dispatches,
+            "an indirect dispatch is a dispatch"
+        );
+        assert_eq!(Speculated::of(&bounds(&[draw, dispatch])), Speculated::Both);
+        assert_eq!(
+            Speculated::of(&bounds(&[other])),
+            Speculated::NoCommand,
+            "a copy is neither"
+        );
+        assert_eq!(Speculated::of(&bounds(&[])), Speculated::NoCommand);
+        // A count present at zero is a count that did not happen: `bounds` holds the most a count
+        // reached, and a recording that carries the name at 0 replayed no such command.
+        assert_eq!(
+            Speculated::of(&bounds(&[("commands_replayed.cmd_draw", 0), dispatch])),
+            Speculated::Dispatches,
+            "a draw count of zero is not a draw"
+        );
+        // `draw_states_recorded` is not the signal, and must not become one: 22 census rows read
+        // it at 0 while replaying a draw.
+        assert_eq!(
+            Speculated::of(&bounds(&[("draw_states_recorded", 4), dispatch])),
+            Speculated::Dispatches,
+            "a recorded draw state is not a replayed draw command"
         );
     }
 
