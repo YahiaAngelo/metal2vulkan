@@ -15,8 +15,10 @@
 //! Device tests: compiled only under the validation crate's GPU safety cfgs (`m2v_gpu`,
 //! `m2v_cpu_icd`), on the kind of device the cfg selects.
 
-use super::blit_holds::{device, Scratch};
-use crate::{Device, Region, ResourceOptions, Texture, TextureDescriptor};
+use super::blit_holds::{device, Scratch, WAIT};
+use crate::{
+    BlitOption, Device, Origin, Region, ResourceOptions, Size, Texture, TextureDescriptor,
+};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 
 /// The byte a caller's bytes hold where no row lands.
@@ -274,12 +276,12 @@ fn two_plane_cpu_copies_wait_for_no_submission_where_a_textures_do() {
 }
 /// A block-compressed texture's `replaceRegion` waits for no submission on any device: the copy
 /// is staged for the device's next submission (`texture/first_move.rs`) where the image takes no
-/// host copies, and runs on the host where it does. Its `getBytes` waits for none either, but
-/// only where the device copies such an image's blocks on the host: a driver that copies a
-/// host-transfer image out of its memory as the memory is bound takes block formats off that
-/// path (`RuntimeDriverDefect::HostTransferImagesCopiedAtBind`, MoltenVK), and there the read
-/// goes through a staging buffer by a submission it waits for -- one a call, which is what the
-/// suite's `compressed-moves` cases spend their blocked time on.
+/// host copies, and runs on the host where it does. Its `getBytes` waits for none either where
+/// the device copies such an image's blocks on the host, and for one between all of them where a
+/// driver that copies a host-transfer image out of its memory as the memory is bound takes block
+/// formats off that path (`RuntimeDriverDefect::HostTransferImagesCopiedAtBind`, MoltenVK): the
+/// first read makes a host shadow of the image's texels and every read after it comes out of that
+/// (`texture/host_shadow.rs`, whose own tests hold the shadow's rules).
 ///
 /// The levels here are small and few, so the staged copies stay under the bound past which a
 /// `replaceRegion` makes a submission of its own (`first_move.rs`, `STAGED_BYTES` and
@@ -338,12 +340,345 @@ fn block_cpu_copies_stage_their_writes_and_read_where_the_device_copies_on_the_h
         waited, 0,
         "a block-compressed texture's `replaceRegion` waited for an internal submission"
     );
-    // Where the device reads such an image's blocks on the host, so does `getBytes`.
-    if read_host > 0 {
-        assert_eq!(
+    // Where the device reads such an image's blocks on the host, so does `getBytes`; elsewhere
+    // the levels' reads share the one submission the first of them makes its shadow by.
+    match read_host > 0 {
+        true => assert_eq!(
             [read_host, read_waited],
             [levels, 0],
             "a block-compressed texture's `getBytes` waited for an internal submission"
-        );
+        ),
+        false => assert_eq!(
+            read_waited, 1,
+            "a block-compressed texture's {levels} `getBytes` calls took more than the one              submission the first of them makes its host shadow by"
+        ),
     }
+}
+
+// ------------------------------------------------------------------------------------------
+// A block-compressed texture's host shadow (`texture/host_shadow.rs`)
+// ------------------------------------------------------------------------------------------
+
+/// The shadow counts a texture's host shadow moves while `run` runs: shadows made, bytes they
+/// hold, reads laid out of one, shadows dropped, and the internal submissions the device waited
+/// for.
+fn shadows(device: &Device, run: impl FnOnce()) -> [u64; 5] {
+    let before = device.work_counts();
+    run();
+    let after = device.work_counts();
+    [
+        after.texel_shadows_made - before.texel_shadows_made,
+        after.texel_shadow_bytes - before.texel_shadow_bytes,
+        after.texel_shadow_reads - before.texel_shadow_reads,
+        after.texel_shadows_dropped - before.texel_shadows_dropped,
+        after.internal_submissions - before.internal_submissions,
+    ]
+}
+
+/// A `Shared` `BC1_RGBA` texture 13 x 7 with every level, or `None`, printed, where the device
+/// holds no such texture.
+fn bc1(device: &Device) -> Option<Texture> {
+    let mut descriptor = TextureDescriptor::texture_2d(PixelFormat::BC1RGBA, 13, 7, true);
+    descriptor.usage = TextureUsage::SHADER_READ;
+    descriptor.resource_options = ResourceOptions::shared();
+    match device.new_texture(&descriptor) {
+        Ok(texture) => Some(texture),
+        Err(_) => {
+            eprintln!("{}: no `BC1_RGBA` texture", device.name());
+            None
+        }
+    }
+}
+
+/// Level `level`'s texels, its rows of blocks and its blocks, of [`bc1`]'s texture.
+fn bc1_level(level: u64) -> ([u64; 2], u64, u64) {
+    let (width, height) = ((13u64 >> level).max(1), (7u64 >> level).max(1));
+    ([width, height], width.div_ceil(4), height.div_ceil(4))
+}
+
+/// Level `level`'s blocks of seed `seed`: 8 bytes a block, packed.
+fn bc1_blocks(level: u64, seed: u64) -> Vec<u8> {
+    let (_, across, down) = bc1_level(level);
+    (0..8 * across * down)
+        .map(|i| ((i * 31 + 7 + seed * 101) % 251) as u8)
+        .collect()
+}
+
+/// Write level `level` of `texture` whole with the blocks of seed `seed`, and the blocks.
+fn bc1_put(texture: &Texture, level: u64, seed: u64) -> Vec<u8> {
+    let ([width, height], across, _) = bc1_level(level);
+    let blocks = bc1_blocks(level, seed);
+    let region = Region::new_2d(0, 0, width, height);
+    (texture.replace_region(region, level, 0, &blocks, 8 * across, 0)).unwrap();
+    blocks
+}
+
+/// Read level `level` of `texture` whole, its rows packed.
+fn bc1_get(texture: &Texture, level: u64) -> Vec<u8> {
+    let ([width, height], across, down) = bc1_level(level);
+    let mut back = vec![UNTOUCHED; (8 * across * down) as usize];
+    let region = Region::new_2d(0, 0, width, height);
+    (texture.get_bytes(&mut back, 8 * across, 0, region, level, 0)).unwrap();
+    back
+}
+
+/// Every CPU read of a block-compressed texture after the first comes out of the host shadow its
+/// first read made, with no submission and no wait, and answers the texels the image holds
+/// (`texture/host_shadow.rs`). The first read makes the shadow by the one submission it waits for
+/// either way, and no second submission.
+///
+/// On a device that copies such an image's blocks on the host there is no shadow to make, and the
+/// test says so: it holds the reads to that path instead.
+#[test]
+fn block_cpu_reads_come_out_of_the_textures_host_shadow() {
+    let scratch = Scratch::new("block-host-shadow");
+    let device = device(&scratch.0);
+    let Some(texture) = bc1(&device) else {
+        return;
+    };
+    let levels = texture.mipmap_level_count();
+    let mut written = Vec::new();
+    for level in 0..levels {
+        written.push(bc1_put(&texture, level, level));
+    }
+    // The first pass over the levels: one shadow of the whole image, by one submission.
+    let mut first = Vec::new();
+    let counted = shadows(&device, || {
+        for level in 0..levels {
+            first.push(bc1_get(&texture, level));
+        }
+    });
+    // The second pass: the same answers, out of the shadow, with no submission at all.
+    let mut second = Vec::new();
+    let again = shadows(&device, || {
+        for level in 0..levels {
+            second.push(bc1_get(&texture, level));
+        }
+    });
+    assert_eq!(first, written, "the first pass's blocks");
+    assert_eq!(second, written, "the second pass's blocks");
+    let [made, bytes, reads, dropped, waited] = counted;
+    let [made_again, _, reads_again, dropped_again, waited_again] = again;
+    eprintln!(
+        "{}: {levels} levels read twice: {made} shadow(s) of {bytes} bytes, {reads} and \
+         {reads_again} reads out of one, {dropped} and {dropped_again} dropped, {waited} and \
+         {waited_again} internal submissions",
+        device.name()
+    );
+    if made == 0 {
+        // No shadow: the device copies the blocks on the host, so no read waits for a submission.
+        assert_eq!(
+            [waited, waited_again],
+            [0, 0],
+            "a block-compressed texture's `getBytes` neither made a host shadow nor copied on \
+             the host: a read regressed onto a submission"
+        );
+        return;
+    }
+    assert_eq!(
+        [made, made_again],
+        [1, 0],
+        "the shadow is made once, at the first read, and read from after"
+    );
+    assert_eq!(
+        [reads, reads_again],
+        [levels, levels],
+        "every read came out of the shadow"
+    );
+    assert_eq!(
+        [dropped, dropped_again],
+        [0, 0],
+        "nothing but CPU copies touched the texture, and the shadow was dropped"
+    );
+    assert_eq!(
+        [waited, waited_again],
+        [1, 0],
+        "the reads waited for one submission between them: the one the first read needs either way"
+    );
+}
+
+/// A block-compressed texture the program writes and never reads back has no host shadow: the
+/// memory is paid by the textures someone reads, and by no others. The read after says the
+/// shadow is lazy and not absent.
+#[test]
+fn no_host_shadow_is_made_for_a_texture_nobody_reads() {
+    let scratch = Scratch::new("block-shadow-lazy");
+    let device = device(&scratch.0);
+    let Some(texture) = bc1(&device) else {
+        return;
+    };
+    let levels = texture.mipmap_level_count();
+    let written = shadows(&device, || {
+        for level in 0..levels {
+            bc1_put(&texture, level, level);
+        }
+    });
+    let read = shadows(&device, || {
+        bc1_get(&texture, 0);
+    });
+    eprintln!(
+        "{}: {levels} levels written made {} shadow(s) of {} bytes; the read after made {}",
+        device.name(),
+        written[0],
+        written[1],
+        read[0]
+    );
+    assert_eq!(
+        [written[0], written[1]],
+        [0, 0],
+        "a texture nobody read back was shadowed as it was written"
+    );
+    if read[0] == 0 {
+        // The device copies the blocks on the host: there is no shadow on this device at all.
+        return;
+    }
+    assert_eq!(read[0], 1, "the read after made the shadow");
+}
+
+/// A commit of the program's drops the host shadow, and the read after it answers what the
+/// committed work wrote and not what the shadow held (`texture/host_shadow.rs`).
+#[test]
+fn a_commit_drops_the_host_shadow_and_the_read_after_it_sees_the_gpus_blocks() {
+    let scratch = Scratch::new("block-shadow-commit");
+    let device = device(&scratch.0);
+    let Some(texture) = bc1(&device) else {
+        return;
+    };
+    let put = bc1_put(&texture, 0, 1);
+    assert_eq!(bc1_get(&texture, 0), put, "the written blocks");
+    // Level 0's blocks again, through a blit the program commits: another seed, so a stale shadow
+    // would answer the bytes above.
+    let blits = bc1_blocks(0, 2);
+    assert_ne!(blits, put, "the two seeds' blocks differ");
+    let ([width, height], across, _) = bc1_level(0);
+    let staged = (device.new_buffer_with_bytes(&blits, ResourceOptions::shared())).unwrap();
+    let queue = device.new_command_queue().unwrap();
+    let mut back = Vec::new();
+    let counted = shadows(&device, || {
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut blit = command_buffer.blit_command_encoder().unwrap();
+        blit.copy_from_buffer_to_texture(
+            &staged,
+            0,
+            8 * across,
+            0,
+            Size::new(width, height, 1),
+            &texture,
+            0,
+            0,
+            Origin::new(0, 0, 0),
+            BlitOption::None,
+        )
+        .unwrap();
+        blit.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.error(), None);
+        back = bc1_get(&texture, 0);
+    });
+    eprintln!(
+        "{}: the commit dropped {} shadow(s) and the read after it made {}; it read {}",
+        device.name(),
+        counted[3],
+        counted[0],
+        match back == blits {
+            true => "the blit's blocks",
+            false => "stale blocks",
+        }
+    );
+    assert_eq!(
+        back, blits,
+        "the read after the commit answered stale blocks"
+    );
+    if counted[0] == 0 {
+        // The device copies the blocks on the host: there is no shadow on this device at all.
+        return;
+    }
+    assert_eq!(
+        [counted[3], counted[0]],
+        [1, 1],
+        "the commit dropped the shadow and the read after it made one again"
+    );
+}
+
+/// A CPU write keeps the host shadow current: the read after it answers the written blocks out of
+/// the shadow, with no submission and nothing dropped (`texture/host_shadow.rs`).
+#[test]
+fn a_cpu_write_keeps_the_host_shadow_current() {
+    let scratch = Scratch::new("block-shadow-write");
+    let device = device(&scratch.0);
+    let Some(texture) = bc1(&device) else {
+        return;
+    };
+    let first = bc1_put(&texture, 0, 3);
+    let made = shadows(&device, || {
+        assert_eq!(bc1_get(&texture, 0), first, "the first blocks");
+    });
+    let second = bc1_blocks(0, 4);
+    assert_ne!(first, second, "the two seeds' blocks differ");
+    let mut back = Vec::new();
+    let counted = shadows(&device, || {
+        bc1_put(&texture, 0, 4);
+        back = bc1_get(&texture, 0);
+    });
+    eprintln!(
+        "{}: the write after the shadow left {} read(s) out of it, {} dropped and {} internal \
+         submission(s)",
+        device.name(),
+        counted[2],
+        counted[3],
+        counted[4]
+    );
+    assert_eq!(
+        back, second,
+        "the read after the CPU write answered stale blocks"
+    );
+    if made[0] == 0 {
+        // The device copies the blocks on the host: no shadow, and nothing to keep current.
+        return;
+    }
+    assert_eq!(
+        [counted[0], counted[2], counted[3], counted[4]],
+        [0, 1, 0, 0],
+        "a CPU write kept the shadow, and the read after it came out of it with no submission"
+    );
+}
+
+/// The program taking the image's `VkImage` ends its host shadow for good: it may write through
+/// the handle whenever it likes, and no call of the runtime's sees it
+/// (`texture/host_shadow.rs`, `interop.rs`).
+#[test]
+fn the_program_taking_the_images_handle_ends_its_host_shadow() {
+    let scratch = Scratch::new("block-shadow-interop");
+    let device = device(&scratch.0);
+    let Some(texture) = bc1(&device) else {
+        return;
+    };
+    let put = bc1_put(&texture, 0, 5);
+    // SAFETY: the handle is read and not used: the test never destroys the image or records a
+    // command of its own on it.
+    let handed = unsafe { texture.vk_image() };
+    let counted = shadows(&device, || {
+        for _ in 0..2 {
+            assert_eq!(bc1_get(&texture, 0), put, "the written blocks");
+        }
+    });
+    eprintln!(
+        "{}: with the image's handle {}, the two reads made {} shadow(s) and read {} out of one",
+        device.name(),
+        match handed.is_some() {
+            true => "handed out",
+            false => "not handed out",
+        },
+        counted[0],
+        counted[2]
+    );
+    if handed.is_none() {
+        return;
+    }
+    assert_eq!(
+        [counted[0], counted[2]],
+        [0, 0],
+        "the image's texels were held on the host after its handle was handed out"
+    );
 }

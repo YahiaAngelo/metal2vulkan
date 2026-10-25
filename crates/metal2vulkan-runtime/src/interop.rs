@@ -181,6 +181,9 @@ impl CommandQueue {
     /// only under this lock).
     pub unsafe fn with_vk_queue<R>(&self, f: impl FnOnce(vk::Queue, u32) -> R) -> R {
         let shared = self.device().shared();
+        // The caller's own submissions are GPU work of the program's: textures' host shadows are
+        // read against the device's count of it (`texture/host_shadow.rs`).
+        shared.program_gave_gpu_work();
         let family = shared.queue_family_of(self.vk_queue());
         // Where the queue's failures are relayed, a mark after `f`'s submissions keeps a failure
         // of theirs the caller's (`device/relay.rs`); where freed memory waits for the work in

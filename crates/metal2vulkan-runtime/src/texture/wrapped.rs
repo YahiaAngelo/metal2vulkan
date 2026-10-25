@@ -623,6 +623,7 @@ impl Device {
             second: std::sync::OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            host_shadow: Mutex::default(),
             between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),

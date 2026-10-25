@@ -2444,6 +2444,13 @@ impl CommandBuffer {
     ) -> Result<(), Error> {
         let device = &self.0.device;
         let committed = Instant::now();
+        // Textures' host shadows hold their images' texels only until the program gives the device
+        // GPU work of its own, which is what a commit is: raised here, before anything of this
+        // command buffer can run, so a `getBytes` after the commit reads the image and not a
+        // shadow this command buffer may write over (`texture/host_shadow.rs`). Raised even where
+        // the checks below refuse the commit: the cost of a shadow read again is a submission, and
+        // a refusal that left the count behind would be a correctness question.
+        device.shared().program_gave_gpu_work();
         let (segments, places, failure, reached, hangs): (
             Vec<(Deferred, bool)>,
             Vec<usize>,

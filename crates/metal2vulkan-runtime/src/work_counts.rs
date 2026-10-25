@@ -169,6 +169,10 @@ pub(crate) struct Counters {
     commits_handed_off: AtomicU64,
     images_started_on_the_host: AtomicU64,
     host_texel_copies: AtomicU64,
+    texel_shadows_made: AtomicU64,
+    texel_shadow_bytes: AtomicU64,
+    texel_shadow_reads: AtomicU64,
+    texel_shadows_dropped: AtomicU64,
     staging_submissions: AtomicU64,
     uncached_host_images: AtomicU64,
     cpu_block_decodes: AtomicU64,
@@ -2205,6 +2209,25 @@ impl Counters {
         self.host_texel_copies.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// A texture's host shadow of `bytes` was made at a CPU read of it
+    /// (`texture/host_shadow.rs`).
+    pub(crate) fn texel_shadow_made(&self, bytes: u64) {
+        self.texel_shadows_made.fetch_add(1, Ordering::Relaxed);
+        self.texel_shadow_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// A CPU read was laid out of a texture's host shadow, with no submission
+    /// (`texture/host_shadow.rs`).
+    pub(crate) fn texel_shadow_read(&self) {
+        self.texel_shadow_reads.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A texture's host shadow was dropped: something other than a CPU write may have written
+    /// its texels (`texture/host_shadow.rs`).
+    pub(crate) fn texel_shadow_dropped(&self) {
+        self.texel_shadows_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// A stand-in of `bytes` was made for textures over detached bytes (`texture/stand_in.rs`).
     pub(crate) fn stand_in_made(&self, bytes: u64) {
         self.stand_ins_made.fetch_add(1, Ordering::Relaxed);
@@ -3185,6 +3208,20 @@ pub struct WorkCounts {
     /// `replace_region` and `get_bytes` copies that ran on the host, with no submission
     /// (`texture/host_copy.rs`).
     pub host_texel_copies: u64,
+    /// Host shadows of textures' texels made at a CPU read of them (`texture/host_shadow.rs`):
+    /// one a texture whose CPU reads the driver keeps off the host and that the program reads
+    /// back, made by the submission its first read waits for either way. A texture the program
+    /// never reads back has none.
+    pub texel_shadows_made: u64,
+    /// The bytes those shadows hold on the host, each counted as its shadow was made.
+    pub texel_shadow_bytes: u64,
+    /// CPU reads laid out of a texture's host shadow, with no submission and no wait
+    /// (`texture/host_shadow.rs`).
+    pub texel_shadow_reads: u64,
+    /// Host shadows dropped because something other than a CPU write may have written the
+    /// texture's texels (`texture/host_shadow.rs`): a commit of the program's, its own Vulkan
+    /// submission, another `VkImage` presented, or a detach.
+    pub texel_shadows_dropped: u64,
     /// Submissions on the device's staging queue (`device/staging.rs`), each one a host call
     /// waits for: a `Shared` or `Managed` texture's first move, `replace_region` or `get_bytes`
     /// on a device that copies none on the host from memory the host caches.
@@ -4264,6 +4301,10 @@ impl Device {
             commits_handed_off: counters.commits_handed_off.load(Ordering::Relaxed),
             images_started_on_the_host: counters.images_started_on_the_host.load(Ordering::Relaxed),
             host_texel_copies: counters.host_texel_copies.load(Ordering::Relaxed),
+            texel_shadows_made: counters.texel_shadows_made.load(Ordering::Relaxed),
+            texel_shadow_bytes: counters.texel_shadow_bytes.load(Ordering::Relaxed),
+            texel_shadow_reads: counters.texel_shadow_reads.load(Ordering::Relaxed),
+            texel_shadows_dropped: counters.texel_shadows_dropped.load(Ordering::Relaxed),
             staging_submissions: counters.staging_submissions.load(Ordering::Relaxed),
             uncached_host_images: counters.uncached_host_images.load(Ordering::Relaxed),
             cpu_block_decodes: counters.cpu_block_decodes.load(Ordering::Relaxed),

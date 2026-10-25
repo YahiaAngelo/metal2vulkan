@@ -66,7 +66,7 @@ use super::color_resolve::KeptResolves;
 use super::command_buffer::CommandBuffer;
 use super::copy_plan::{
     check_region, copy_unit, level_extent, plan_host_copy, surface_depth_unit, BlitOption,
-    CopyProblem, CopyRefusal, HostLayout, ImageRegion, TextureRegion,
+    CopyProblem, CopyRefusal, CopyUnit, HostLayout, ImageRegion, TextureRegion,
 };
 use super::degradation::Degradation;
 use super::device::lock;
@@ -164,6 +164,7 @@ pub(super) mod heap_tiled;
 pub(super) mod heap_two_planes;
 pub(crate) mod held_depth;
 pub(crate) mod host_copy;
+pub(crate) mod host_shadow;
 pub(super) mod kept_image;
 pub(super) mod requirements;
 #[cfg(unix)]
@@ -592,6 +593,11 @@ struct Image {
     /// It was made with host-transfer usage, moved to `GENERAL` and zeroed on the host, so its
     /// CPU copies may run there (`texture/host_copy.rs`).
     host_copies: bool,
+    /// Its texels on the host, where a driver defect keeps its CPU reads off the host path
+    /// (`texture/host_shadow.rs`): made at the first CPU read of its texture and never as the
+    /// texture is made, read from by every CPU read after it while nothing but a CPU write may
+    /// have written the texels.
+    host_shadow: Mutex<host_shadow::HostShadow>,
     /// Its `VkImage` has linear tiling, or `DRM_FORMAT_MOD_LINEAR`'s, whose rows lie as a linear
     /// image's: a texture over a buffer's memory (`alias_image`), or a heap's linear image
     /// (`texture/heap.rs`).
@@ -1162,6 +1168,10 @@ impl Image {
             None => RawGoes::Destroyed,
         };
         *detached = Some(DetachedImage { stand_in, own });
+        // The texels on the host go with the bytes: a reattach presents the image's own `VkImage`
+        // again, so the handle alone would not say the texels had gone
+        // (`texture/host_shadow.rs`).
+        self.shadow_dropped();
         // A dedicated import of dma-buf pages goes with the `VkImage` bound to it.
         Some(ImageObjects {
             device: self.device.clone(),
@@ -1892,6 +1902,7 @@ impl Device {
             second: OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            host_shadow: Mutex::default(),
             between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
@@ -2020,6 +2031,7 @@ impl Device {
             second: OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            host_shadow: Mutex::default(),
             between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
@@ -2656,6 +2668,7 @@ impl Device {
             second: OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            host_shadow: Mutex::default(),
             between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
@@ -2704,6 +2717,7 @@ impl Device {
             second: OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            host_shadow: Mutex::default(),
             between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
@@ -3108,6 +3122,7 @@ impl Device {
             second: OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            host_shadow: Mutex::default(),
             between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
@@ -5446,6 +5461,7 @@ impl Texture {
         let HostCopy {
             region: image_region,
             host,
+            unit,
             cpu_order,
             planes,
             ..
@@ -5543,6 +5559,10 @@ impl Texture {
                 std::slice::from_raw_parts_mut(contents.as_ptr(), host.packed_len() as usize)
             };
             bytes.pack(&host, packed);
+            // The image's texels on the host, where it holds them: the staged copy writes the
+            // image these very bytes, so the shadow holds its texels still
+            // (`texture/host_shadow.rs`).
+            truth.shadow_written(&image_region, &unit, packed);
             let (source, start) = staging.at(0);
             let copy = vk::BufferImageCopy {
                 buffer_offset: copy.buffer_offset + start,
@@ -5570,7 +5590,10 @@ impl Texture {
             return truth.queue_second_decode(regions);
         }
         let mut staging = Staging::new(device, host.packed_len())?;
-        bytes.pack(&host, staging.bytes());
+        let packed = staging.bytes();
+        bytes.pack(&host, packed);
+        // As above: the copy below writes the image these bytes.
+        truth.shadow_written(&image_region, &unit, packed);
         let (buffer, twin, image) = (staging.raw, self.twin_image(), truth.raw.get());
         // The decoded twin's texels of the region, after the copy; the submission is waited for.
         let decode = truth.decode_pass(std::slice::from_ref(&image_region), PassScratch::Own)?;
@@ -5644,6 +5667,7 @@ impl Texture {
         let HostCopy {
             region: image_region,
             host,
+            unit,
             cpu_order,
             planes,
             ..
@@ -5666,10 +5690,10 @@ impl Texture {
         }
         // A PVRTC level's rows, read whole, then laid out in Metal's CPU order.
         let Some(blocks) = cpu_order else {
-            return self.read_region(CALL, &image_region, &host, bytes);
+            return self.read_region(CALL, &image_region, &unit, &host, bytes);
         };
         let mut rows = vec![0; host.packed_len() as usize];
-        self.read_region(CALL, &image_region, &host, &mut rows)?;
+        self.read_region(CALL, &image_region, &unit, &host, &mut rows)?;
         cpu_order_of_rows(&rows, blocks, bytes);
         Ok(())
     }
@@ -5783,6 +5807,7 @@ impl Texture {
         &self,
         call: &'static str,
         image_region: &ImageRegion,
+        unit: &CopyUnit,
         host: &HostLayout,
         bytes: &mut [u8],
     ) -> Result<(), Error> {
@@ -5820,6 +5845,12 @@ impl Texture {
             if read {
                 return Ok(());
             }
+        }
+        // Laid out from the image's texels on the host, where a driver defect keeps the image's
+        // CPU reads off the host path: made by the submission the first read waits for either way
+        // (`texture/host_shadow.rs`).
+        if truth.shadow_read(image_region, unit, host, bytes)? {
+            return Ok(());
         }
         // Laid out from the staging buffer.
         if truth.takes_staging_copies()
@@ -6006,6 +6037,7 @@ impl Texture {
         Ok(Some(HostCopy {
             region: planned,
             host,
+            unit,
             cpu_order,
             planes,
             volume: planes && record.texture_type == TextureType::Type3D,
@@ -6019,6 +6051,10 @@ impl Texture {
 struct HostCopy {
     region: ImageRegion,
     host: HostLayout,
+    /// The unit the copy moves: the texture's blocks or texels, as the region names them
+    /// (`copy_plan::copy_unit`). A host shadow of the image's texels is laid out in it
+    /// (`texture/host_shadow.rs`).
+    unit: CopyUnit,
     cpu_order: Option<[u64; 2]>,
     /// A two-plane extended-range texture's color words, its image's texels 8 bytes each
     /// (`two_planes.rs`).

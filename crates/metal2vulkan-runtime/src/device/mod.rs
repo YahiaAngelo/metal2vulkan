@@ -359,6 +359,13 @@ pub(super) struct DeviceShared {
     /// Whether the runtime made a sparse image on the device: the driver's first sparse resource
     /// may wait for every queue's work (`DriverFact::FirstSparseResourceWaitsForQueues`).
     pub(super) sparse_image_made: AtomicBool,
+    /// How much GPU work of the program's own the device has been given: every commit of a command
+    /// buffer raises it, and so does the program's own use of a `VkQueue`
+    /// (`CommandQueue::with_vk_queue`). A texture's host shadow holds the image's texels only
+    /// while it stands where it stood when the shadow was read (`texture/host_shadow.rs`): a
+    /// commit is the only way a command of the program's reaches the device, so this one count
+    /// stands for every route its GPU work could write a texture by.
+    gpu_work: AtomicU64,
     /// The crate-owned compute kernels the runtime dispatches for itself, made on first use
     /// (`owned_kernel.rs`).
     pub(super) owned_kernels: Mutex<OwnedKernels>,
@@ -531,6 +538,20 @@ impl DeviceShared {
     /// (`functions.rs`).
     pub(crate) fn vk(&self) -> &Vk {
         self.functions.get()
+    }
+
+    /// How much GPU work of the program's own the device has been given
+    /// ([`gpu_work`](Self::gpu_work) field): the count a texture's host shadow is read against
+    /// (`texture/host_shadow.rs`).
+    pub(crate) fn gpu_work(&self) -> u64 {
+        self.gpu_work.load(Ordering::Acquire)
+    }
+
+    /// The program gave the device GPU work of its own: a command buffer's commit, or its own use
+    /// of a `VkQueue`. Called before the work can run, so a host shadow read after it is read
+    /// against the new count (`texture/host_shadow.rs`).
+    pub(crate) fn program_gave_gpu_work(&self) {
+        self.gpu_work.fetch_add(1, Ordering::AcqRel);
     }
 
     /// A share of the device's functions, which holds nothing of the device: for the releases
@@ -1712,6 +1733,7 @@ impl Device {
             layered_rate_map_released: AtomicBool::new(false),
             mutable_rate_map_called: AtomicBool::new(false),
             sparse_image_made: AtomicBool::new(false),
+            gpu_work: AtomicU64::new(0),
             owned_kernels: Mutex::new(OwnedKernels::default()),
             mipmap_scratch: Mutex::default(),
             planes: Mutex::new(PlanesObjects::default()),

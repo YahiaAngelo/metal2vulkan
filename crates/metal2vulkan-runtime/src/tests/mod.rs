@@ -111,6 +111,7 @@ mod host_import_counts;
 mod host_memory;
 #[cfg(all(any(m2v_gpu, m2v_cpu_icd), target_os = "linux"))]
 mod host_residency;
+mod host_shadow;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod host_step_neutrals;
 mod image_barriers;

@@ -310,6 +310,10 @@ impl Texture {
     pub(crate) fn exported_image(&self) -> Result<vk::Image, Error> {
         let image = self.image()?;
         image.settle()?;
+        // The caller may write through the handle whenever it likes, and no call of the runtime's
+        // sees it: the image's texels are never held on the host again
+        // (`texture/host_shadow.rs`).
+        image.shadow_off();
         Ok(image.export())
     }
 
