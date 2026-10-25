@@ -2237,7 +2237,7 @@ A case whose difference from Metal is recorded rather than compared away. The le
 | `half-output-blends-rgba32f` | A blend whose factor reads the blend colour, at the same product rounding as this family's other divergent sites and not yet fitted to a rule there. What is mea… |
 | `half-output-blends-rgba32f` | A blend whose factor reads the blend colour, at the same product rounding as this family's other divergent sites and not yet fitted to a rule there. What is mea… |
 | `format-footprints-astc-4x2-and-8x4` | The runtime answers Metal's heap footprint for ASTC's 4x2 and 8x4 footprints, which is arithmetic over a descriptor, but holds no image of any of them, so `newT… |
-| `format-footprints-plain-stragglers` | The runtime answers Metal's heap footprint for BGRA4Unorm and ARGB8Unorm_sRGB, which is arithmetic over a descriptor, but holds no image of any of them, so `new… |
+| `format-footprints-plain-stragglers` | Plain Metal makes a texture of `ARGB8Unorm_sRGB` in all eight non-multisample texture types and takes a host `replaceRegion:`/`getBytes:` round trip through eac… |
 | `format-footprints-one-plane-ycbcr` | The runtime answers Metal's heap footprint for Apple's nine one-plane YCbCr formats, which is arithmetic over a descriptor, but holds no image of any of them, s… |
 | `format-footprints-padded-wide-channels` | The runtime answers Metal's heap footprint for the ten padded 10- and 12-bit display formats, which is arithmetic over a descriptor, but holds no image of any o… |
 | `format-footprints-two-plane-ten-bit` | The runtime answers Metal's heap footprint for the four two-plane RGB10A8_2P formats, which is arithmetic over a descriptor, but holds no image of any of them, … |

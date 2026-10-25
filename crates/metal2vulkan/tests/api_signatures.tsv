@@ -3398,12 +3398,14 @@ field	metal2vulkan::bind::ShadowMergeModule.spirv	pub spirv: Arc<[u32]>
 field	metal2vulkan::bind::StageInRegion.origin	pub origin: [u32; 3]
 field	metal2vulkan::bind::StageInRegion.size	pub size: [u32; 3]
 field	metal2vulkan::bind::StageShape.buffers	pub buffers: BTreeMap<u32, BufferShape>
+field	metal2vulkan::bind::StageShape.dropped_store_buffers	pub dropped_store_buffers: u32
 field	metal2vulkan::bind::StageShape.samplers	pub samplers: BTreeMap<u32, BoundSamplerShape>
 field	metal2vulkan::bind::StageShape.textures	pub textures: BTreeMap<u32, TextureShape>
 field	metal2vulkan::bind::StageShape.threadgroup_lengths	pub threadgroup_lengths: BTreeMap<u32, u32>
 field	metal2vulkan::bind::StageTable.acceleration_structures	pub acceleration_structures: BTreeMap<u32, BoundAccelerationStructure>
 field	metal2vulkan::bind::StageTable.at_bind_views	pub at_bind_views: u64
 field	metal2vulkan::bind::StageTable.buffers	pub buffers: BTreeMap<u32, BoundBuffer>
+field	metal2vulkan::bind::StageTable.dropped_store_buffers	pub dropped_store_buffers: u32
 field	metal2vulkan::bind::StageTable.samplers	pub samplers: BTreeMap<u32, BoundSampler>
 field	metal2vulkan::bind::StageTable.textures	pub textures: BTreeMap<u32, BoundTexture>
 field	metal2vulkan::bind::StageTable.threadgroup_lengths	pub threadgroup_lengths: BTreeMap<u32, u32>
@@ -7716,6 +7718,7 @@ method	metal2vulkan-runtime::Device::with_registry_id	pub fn with_registry_id(re
 method	metal2vulkan-runtime::Device::work_counts	pub fn work_counts(&self) -> WorkCounts
 method	metal2vulkan-runtime::DeviceProperties::are_programmable_sample_positions_supported	pub fn are_programmable_sample_positions_supported(&self) -> Result<bool, RuntimeGap>
 method	metal2vulkan-runtime::DeviceProperties::are_raster_order_groups_supported	pub fn are_raster_order_groups_supported(&self) -> Result<bool, RuntimeGap>
+method	metal2vulkan-runtime::DeviceProperties::drops_gpu_writes_to_read_only_memory	pub fn drops_gpu_writes_to_read_only_memory(&self) -> bool
 method	metal2vulkan-runtime::DeviceProperties::is_depth24_stencil8_pixel_format_supported	pub fn is_depth24_stencil8_pixel_format_supported(&self) -> Result<bool, RuntimeGap>
 method	metal2vulkan-runtime::DeviceProperties::minimum_linear_texture_alignment_for_pixel_format	pub fn minimum_linear_texture_alignment_for_pixel_format(&self, format: PixelFormat) -> Result<u64, Error>
 method	metal2vulkan-runtime::DeviceProperties::supports_primitive_type	pub fn supports_primitive_type(&self, raw: u64) -> bool
@@ -13772,6 +13775,7 @@ variant	metal2vulkan::pipeline::SpecKey::AmplificationCount	AmplificationCount
 variant	metal2vulkan::pipeline::SpecKey::BicubicTexels	BicubicTexels(SlotRef)
 variant	metal2vulkan::pipeline::SpecKey::BoundTexelFormat	BoundTexelFormat(SlotRef)
 variant	metal2vulkan::pipeline::SpecKey::ConstantLanes	ConstantLanes(SlotRef)
+variant	metal2vulkan::pipeline::SpecKey::DroppedStoreSlots	DroppedStoreSlots(Stage)
 variant	metal2vulkan::pipeline::SpecKey::FlatLocalSize	FlatLocalSize
 variant	metal2vulkan::pipeline::SpecKey::ImageblockHeight	ImageblockHeight
 variant	metal2vulkan::pipeline::SpecKey::ImageblockWidth	ImageblockWidth
