@@ -2592,9 +2592,11 @@ fn the_interface_states_the_textures_read_at_the_fragments_own_pixel() {
 /// fragment window; still states the slot, as read at the own pixel and through a snapshot; and
 /// writes no memory of the function's. A profile without the interlock refuses it, naming the
 /// feature. A variant asked for `tob_sample`'s slot, which the fact does not list, would sample the
-/// texture beside the copy: refused, never compiled so. All of it holds under the exact answers too,
-/// whose texel reaches its output through a call of Metal's conversion routine
-/// (`lower::texture::float_texel`) where the device's conversion is not Metal's.
+/// texture beside the copy: refused, never compiled so. All of it holds under the exact answers
+/// too, and there each snapshot variant names Metal's conversion routine
+/// (`lower::texture::float_texel`) exactly where the direct read does: the read decodes the
+/// snapshot's codes and converts the value by the bound format's class, so what a program reads
+/// back through a snapshot is what it reads without one.
 #[test]
 fn a_snapshot_variant_reads_its_texture_in_the_copy_alone() {
     use crate::device::requirements::VkFeature;
@@ -2637,7 +2639,8 @@ fn a_snapshot_variant_reads_its_texture_in_the_copy_alone() {
             .unwrap_or_else(|e| panic!("{stem}: {e}"));
         assert_eq!(base.interface.snapshot_textures, [0u32], "{stem}");
         let routine = crate::lower::texture::float_texel::CENSUS_NAME;
-        if base.strategies.entries.contains_key(routine) {
+        let converts = base.strategies.entries.contains_key(routine);
+        if converts {
             assert_eq!(
                 policy.texel_conversion,
                 crate::device::TexelConversionPolicy::Exact,
@@ -2681,9 +2684,22 @@ fn a_snapshot_variant_reads_its_texture_in_the_copy_alone() {
                 [0u32],
                 "{stem} {form:?}"
             );
+            // The snapshot's codes reach the output through the same conversion the direct read
+            // takes: the read decodes them and converts the value by the bound format's class,
+            // so the value a program reads back is the one it reads without a snapshot.
+            assert_eq!(
+                narrow.strategies.entries.contains_key(routine),
+                converts,
+                "{stem} {form:?}: the conversion routine"
+            );
         }
         let a = variant.unwrap_or_else(|e| panic!("{stem}: {e}"));
         assert_eq!(a.interface.snapshot_textures, [0u32], "{stem}");
+        assert_eq!(
+            a.strategies.entries.contains_key(routine),
+            converts,
+            "{stem}: the conversion routine"
+        );
         assert_eq!(a.interface.own_pixel_textures, [0u32], "{stem}");
         assert!(!a.interface.writes_memory, "{stem}");
         assert!(
