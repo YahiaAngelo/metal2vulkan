@@ -142,8 +142,12 @@ gap	AccelerationStructures	rare	ray tracing (out of scope by ruling)
 gap	FeatureEnable	none	device creation with a feature the runtime's chain lacks
 gap	ExtensionEnable	none	device creation with an extension under an unknown name
 gap	Render	system	render pass, resolve and attachment forms not built (20 sites: see the appendix)
-gap	TexelsPastBufferLength	rare	a 2D array over a buffer past its length
+gap	TexelsPastBufferLength	rare	a texture over a buffer past its length
 gap	OverlappingSurfaceRows	rare	an IOSurface plane whose rows overlap
+gap	MemorylessSurfacePlane	rare	a memoryless texture over an IOSurface plane
+gap	IndirectCommandPastSize	none	an indirect command at or past the buffer's size
+gap	ExecutionRangePastBuffer	rare	an execution range whose 8 bytes run past its buffer
+gap	ExecutionRangeOffFour	rare	an execution range at an offset off 4 bytes
 gap	SamplePositionsAtBegin	rare	custom sample positions Vulkan takes only at begin
 gap	SharedEventAcrossDevices	rare	a shared event opened on another device
 gap	ViewportDepthRange	rare	viewport depth outside [0, 1] without the device features

@@ -388,8 +388,11 @@ impl IndirectCommandBufferDescriptor {
     }
 }
 
-/// What an indirect command buffer call did wrong (`Problem::IndirectCommandBuffer`): each is
-/// what Metal's API validation stops, or what ends Metal's process.
+/// What an indirect command buffer call did wrong (`Problem::IndirectCommandBuffer`): misuse
+/// plain Metal itself refuses, ending its process or failing the call ([`Error::Invalid`]'s own
+/// doc). What only Metal's API validation layer stops is not here: plain Metal takes it, so the
+/// runtime takes it too, or, where no exact answer is built, names its own gap
+/// ([`RuntimeGap`](crate::RuntimeGap)).
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IndirectCommandBufferProblem {
@@ -409,21 +412,6 @@ pub enum IndirectCommandBufferProblem {
         count: u32,
         /// The most the runtime binds.
         limit: u32,
-    },
-    /// A command at or past the buffer's size. Plain Metal checks no bound there, the API
-    /// validation layer off: `indirectComputeCommandAtIndex:` and `indirectRenderCommandAtIndex:`
-    /// give a command for any index, every setter of it returns, and the write lands where that
-    /// index's record would be, past the buffer's records. What it lands on is not defined and
-    /// turns on the index: on a buffer of 4 commands, writing index 4 left command 0 dispatching
-    /// nothing, while writing index 100 left command 0 dispatching as before, and index 2^40
-    /// returned from its setters too (an M3 Max under macOS 27.0.1, a buffer of
-    /// `ConcurrentDispatch` and one of `Draw` alike). The runtime holds no bytes there and will
-    /// not guess what Metal overwrote, so it refuses the call.
-    CommandIndex {
-        /// The command's index.
-        index: u64,
-        /// The buffer's size, in commands.
-        size: u64,
     },
     /// A range of commands not inside the buffer: for `reset_with_range`, one that starts at or
     /// past its size (an empty one too, but the empty one at the size) or ends past it; for the
@@ -452,16 +440,6 @@ pub enum IndirectCommandBufferProblem {
     /// not enabled on this indirect command buffer"), but plain Metal runs one their records hold,
     /// as the runtime does.
     CommandType(IndirectCommandType),
-    /// An execution range read from a buffer (`execute_commands_in_buffer_indirect`) at an
-    /// `offset` that is not a multiple of 4 bytes, or whose 8 bytes run past the buffer's
-    /// `length`. Metal's validation stops neither, but what it reads is not defined: its GPU
-    /// faulted the command buffer at an offset of 2.
-    RangeBuffer {
-        /// The range's offset in the buffer.
-        offset: u64,
-        /// The buffer's length.
-        length: u64,
-    },
     /// A compute command of a buffer whose commands are render ones, or a setter plain Metal does
     /// not ignore on a render command of a buffer whose commands are dispatches. Plain Metal ends
     /// its process at each, the API validation layer off: `indirectComputeCommandAtIndex:` on a
@@ -1557,12 +1535,13 @@ impl IndirectCommandBuffer {
         lock(&self.device().shared().addresses).holds_records_slot(self.0.id.held)
     }
 
-    /// `indirectComputeCommandAtIndex:`: command `index`'s setters. Refused (`Invalid`): an index
-    /// at or past the size, which plain Metal takes and writes past its records
-    /// (`CommandIndex`); a buffer of render command types
-    /// (`CommandKind`), which ends Metal's process. A `Private` buffer's commands are encoded
-    /// here too, as plain Metal encodes, reads back and runs them where its validation stops the
-    /// call (an M3 Max and an M4).
+    /// `indirectComputeCommandAtIndex:`: command `index`'s setters. Refused (`Invalid`): a buffer
+    /// of render command types (`CommandKind`), which ends Metal's process. An index at or past
+    /// the size, which plain Metal takes and writes past its records, is
+    /// `NotImplemented(IndirectCommandPastSize)`: the runtime holds no bytes there, and what
+    /// Metal's write lands on is not defined. A `Private` buffer's commands are encoded here too,
+    /// as plain Metal encodes, reads back and runs them where its validation stops the call (an M3
+    /// Max and an M4).
     pub fn indirect_compute_command_at(&self, index: u64) -> Result<IndirectComputeCommand, Error> {
         const CALL: &str = "indirect_compute_command_at";
         let index = self.command_at(CALL, index, false)?;
@@ -1588,20 +1567,18 @@ impl IndirectCommandBuffer {
 
     /// Command `index` for `call`, of a buffer whose commands are render ones where `render`:
     /// refused (`Invalid`) for a buffer of the other kind's commands (but a render command of a
-    /// buffer of dispatches alone), a buffer of no command types, and an index at or past the
-    /// size. A `Private` buffer's commands are the CPU's as a `Shared` one's are, as plain Metal
-    /// encodes, reads back and runs them.
+    /// buffer of dispatches alone) and a buffer of no command types, and
+    /// `NotImplemented(IndirectCommandPastSize)` for an index at or past the size. A `Private`
+    /// buffer's commands are the CPU's as a `Shared` one's are, as plain Metal encodes, reads back
+    /// and runs them.
     fn command_at(&self, call: &'static str, index: u64, render: bool) -> Result<u32, Error> {
         self.check_command_types(call)?;
         self.check_kind(call, render)?;
         if index >= u64::from(self.0.size) {
-            return Err(problem(
-                call,
-                IndirectCommandBufferProblem::CommandIndex {
-                    index,
-                    size: self.size(),
-                },
-            ));
+            return Err(Error::NotImplemented(RuntimeGap::IndirectCommandPastSize {
+                index,
+                size: self.size(),
+            }));
         }
         Ok(index as u32)
     }

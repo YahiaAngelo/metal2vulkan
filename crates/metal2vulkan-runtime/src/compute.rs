@@ -1348,10 +1348,14 @@ impl ComputeCommandEncoder {
     /// announces once (`Degradation::HostReplayedIndirectCommands`; the encoder copies the range
     /// where it is encoded, behind a barrier from everything before).
     ///
-    /// Refused, changing nothing (`Invalid`): a buffer of another device, a range Metal's reading
-    /// of is not defined (an offset that is not a multiple of 4 bytes, or 8 bytes that run past
-    /// `range_buffer`: `IndirectCommandBufferProblem::RangeBuffer`), and no pipeline state set
-    /// where `icb` inherits it. A buffer of render command types is refused as
+    /// A range plain Metal takes and the runtime has no exact answer for is its own gap, not
+    /// misuse: 8 bytes that run past `range_buffer`, which Metal reads from whatever follows it
+    /// (`NotImplemented(ExecutionRangePastBuffer)`), and an `offset` that is not a multiple of 4
+    /// bytes, which Metal's GPU faults the command buffer over where the range read there runs a
+    /// command (`NotImplemented(ExecutionRangeOffFour)`; both carry the measurement).
+    ///
+    /// Refused, changing nothing (`Invalid`): a buffer of another device, and no pipeline state
+    /// set where `icb` inherits it. A buffer of render command types is refused as
     /// [`execute_commands_in_buffer`](Self::execute_commands_in_buffer) refuses it. A buffer of
     /// no command types runs nothing, its range unread, as plain Metal's. What a command's dispatch
     /// would be refused fails the command buffer.
@@ -1401,7 +1405,7 @@ impl ComputeCommandEncoder {
                 if icb.is_render() {
                     return Err(Error::NotImplemented(RuntimeGap::IndirectRenderCommands));
                 }
-                indirect_execute::check_range_buffer(CALL, range_buffer.length(), offset)?;
+                indirect_execute::check_range_buffer(range_buffer.length(), offset)?;
                 let pipeline = this.inherited_pipeline(CALL, icb)?;
                 // A buffer of no command types runs nothing, as plain Metal's; its range is not
                 // read.

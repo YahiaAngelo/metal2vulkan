@@ -138,3 +138,42 @@ fn a_buffer_answers_metal_s_allocated_size() {
         assert_eq!(metal_allocated_size(&descriptor, 0), 16384, "types {types}");
     }
 }
+
+/// An execution range read from a buffer, as measured on an Apple M3 Max under macOS 27.0.1 with
+/// the API validation layer off (`rangebuf.m`, `rangebuf2.m`, `rangebuf3.m`, one case per process,
+/// on a compute encoder's dispatches and a render encoder's draws alike): plain Metal refuses
+/// neither of the two rules below, so neither is misuse. Both are the runtime's own gaps.
+#[test]
+fn an_execution_range_metal_takes_is_the_runtime_s_gap() {
+    use crate::error::{Error, RuntimeGap};
+    use crate::indirect_execute::check_range_buffer;
+    // Aligned and inside the buffer: taken, as Metal takes it.
+    for offset in [0, 4, 8, 1000, 4088] {
+        check_range_buffer(4096, offset).unwrap();
+    }
+    // An offset that is not a multiple of 4: Metal's GPU faults the command buffer where the
+    // range read there runs a command, and completes where it runs none.
+    for offset in [1, 2, 3, 6, 1002] {
+        assert_eq!(
+            check_range_buffer(4096, offset).unwrap_err(),
+            Error::NotImplemented(RuntimeGap::ExecutionRangeOffFour { offset }),
+            "offset {offset}"
+        );
+    }
+    // 8 bytes that run past the buffer: Metal reads whatever bytes follow it.
+    for (length, offset) in [(12, 8), (12, 12), (12, 16), (16384, 16400), (4096, 4092)] {
+        assert_eq!(
+            check_range_buffer(length, offset).unwrap_err(),
+            Error::NotImplemented(RuntimeGap::ExecutionRangePastBuffer { offset, length }),
+            "{offset} of {length}"
+        );
+    }
+    // An offset whose 8 bytes overflow is past the buffer, not off four.
+    assert_eq!(
+        check_range_buffer(16, u64::MAX - 3).unwrap_err(),
+        Error::NotImplemented(RuntimeGap::ExecutionRangePastBuffer {
+            offset: u64::MAX - 3,
+            length: 16,
+        })
+    );
+}

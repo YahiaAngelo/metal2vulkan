@@ -923,10 +923,7 @@ fn setters_refuse_what_metal_refuses() {
         let made = icb(device, &compute_descriptor(), 2);
         assert_eq!(
             made.indirect_compute_command_at(2).unwrap_err(),
-            icb_problem(
-                "indirect_compute_command_at",
-                IndirectCommandBufferProblem::CommandIndex { index: 2, size: 2 }
-            )
+            Error::NotImplemented(RuntimeGap::IndirectCommandPastSize { index: 2, size: 2 })
         );
         // A `Private` buffer's commands are the CPU's, as plain Metal encodes and reads them back.
         let private = device
@@ -2313,10 +2310,7 @@ fn render_setters_refuse_what_metal_refuses() {
         mixed.indirect_compute_command_at(0).unwrap();
         assert_eq!(
             made.indirect_render_command_at(2).unwrap_err(),
-            icb_problem(
-                "indirect_render_command_at",
-                IndirectCommandBufferProblem::CommandIndex { index: 2, size: 2 }
-            )
+            Error::NotImplemented(RuntimeGap::IndirectCommandPastSize { index: 2, size: 2 })
         );
         let first = made.indirect_render_command_at(0).unwrap();
         assert_eq!(

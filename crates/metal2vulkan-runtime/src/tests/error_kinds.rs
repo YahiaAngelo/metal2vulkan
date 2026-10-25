@@ -1,6 +1,7 @@
-//! `Error::Invalid` is what Metal's validation stops, ending the process, and `Error::Nil` what
-//! plain Metal answers nil for. These tests walk the runtime's own sources: every refusal its docs
-//! label `Invalid`, and every problem a call refuses `Invalid`, checking that none is one Metal is
+//! `Error::Invalid` is misuse plain Metal itself refuses, and `Error::Nil` what plain Metal
+//! answers nil for; Metal's API validation layer is not Metal, so a rule only the layer stops is
+//! no refusal at all. These tests walk the runtime's own sources: every refusal its docs label
+//! `Invalid`, and every problem a call refuses `Invalid`, checking that none is one Metal is
 //! documented to answer nil for.
 
 use std::collections::BTreeSet;

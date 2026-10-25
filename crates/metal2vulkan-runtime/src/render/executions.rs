@@ -247,10 +247,12 @@
 //!   a buffer whose location lies past the size, or that passes `2^32 - 1`, runs nothing (`RANGE`):
 //!   Metal's GPU faults the command buffer.
 //! - **What is refused.** At the call (`Invalid`): a buffer of another device, a range past the
-//!   size, an inherited pipeline state that is unset or made without
-//!   `supportIndirectCommandBuffers` (Metal's validation stops each), and a range read from a
-//!   buffer at an offset that is not a multiple of 4 bytes or whose 8 bytes run past the buffer
-//!   (`RangeBuffer`, as a compute encoder's). A buffer of compute commands, and a range read
+//!   size, and an inherited pipeline state that is unset or made without
+//!   `supportIndirectCommandBuffers` (Metal's validation stops each). A range read from a buffer
+//!   at an offset that is not a multiple of 4 bytes, and one whose 8 bytes run past the buffer,
+//!   are the runtime's own gaps, as a compute encoder's are
+//!   (`NotImplemented(ExecutionRangeOffFour)` and `NotImplemented(ExecutionRangePastBuffer)`).
+//!   A buffer of compute commands, and a range read
 //!   from a buffer that a draw of the encoder before the call may write, are
 //!   `NotImplemented(IndirectRenderCommands)`. What a command's draw refuses (a pipeline of
 //!   other formats than the pass's, among others) is refused so: it either refuses the commit,
@@ -460,7 +462,7 @@ impl RenderLowering {
         if !icb.is_render() {
             return Err(Error::NotImplemented(RuntimeGap::IndirectRenderCommands));
         }
-        indirect_execute::check_range_buffer(CALL_INDIRECT, range_buffer.length(), offset)?;
+        indirect_execute::check_range_buffer(range_buffer.length(), offset)?;
         // Not in a pass of several color groups (`render/color_groups.rs`).
         self.check_group_execution()?;
         let pipeline = match self.inherited_pipeline(CALL_INDIRECT, icb)? {
@@ -843,12 +845,15 @@ impl RenderCommandEncoder {
     /// encoder wrote is read; a host step records the pass once the work before it completed, which
     /// the device announces once (`Degradation::HostReplayedIndirectCommands`).
     ///
+    /// A range plain Metal takes and the runtime has no exact answer for is its own gap, not
+    /// misuse: 8 bytes that run past `range_buffer`, which Metal reads from whatever follows it
+    /// (`NotImplemented(ExecutionRangePastBuffer)`), and an `offset` that is not a multiple of 4
+    /// bytes, which Metal's GPU faults the command buffer over where the range read there runs a
+    /// command (`NotImplemented(ExecutionRangeOffFour)`; both carry the measurement).
+    ///
     /// Refused, changing nothing: what
     /// [`execute_commands_in_buffer`](Self::execute_commands_in_buffer) refuses but a range (an
-    /// unset inherited state whatever the range); a range buffer of another device, and a range
-    /// Metal's reading of is not defined (`Invalid`, `IndirectCommandBufferProblem::RangeBuffer`):
-    /// an offset that is not a multiple of 4 bytes, at which Metal's GPU faulted, or 8 bytes that
-    /// run past `range_buffer`, which Metal reads from whatever follows it. A range a draw of the
+    /// unset inherited state whatever the range), and a range buffer of another device. A range a draw of the
     /// encoder before the call may write is `NotImplemented(IndirectRenderCommands)`: Metal's
     /// execution reads that draw's write, where the runtime's copy, made before the pass, would
     /// not; as for the index bounds pass, an untracked buffer's writes are not seen. Under an

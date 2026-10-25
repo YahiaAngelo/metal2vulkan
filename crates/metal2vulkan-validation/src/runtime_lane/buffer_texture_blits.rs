@@ -1703,11 +1703,8 @@ fn iosurface_planes_take_their_descriptors_options() {
                 held.buffer
                     .new_texture_with_iosurface_plane(&d, OPTIONS_PLANE)
                     .err(),
-                Some(Error::Invalid(Invalid::new(
-                    "new_texture_with_iosurface_plane",
-                    Problem::BufferTexture(BufferTextureProblem::Options),
-                ))),
-                "{kind:?}: a memoryless plane"
+                Some(Error::NotImplemented(RuntimeGap::MemorylessSurfacePlane)),
+                "{kind:?}: a memoryless plane, which plain Metal makes"
             );
         }
     });

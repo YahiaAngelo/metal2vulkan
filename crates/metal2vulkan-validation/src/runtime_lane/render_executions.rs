@@ -1771,11 +1771,12 @@ fn a_render_execution_reads_its_range_from_a_buffer_as_metal_s_does() {
     });
 }
 
-/// Refused at the call, recording nothing (a probe, an M3 Max and an M4): a range at an offset that
-/// is not a multiple of 4 bytes (Metal's GPU faulted the command buffer) or whose 8 bytes run past
-/// its buffer (Metal reads whatever follows it; here it ran nothing), a buffer of compute commands,
-/// and a range a draw of the encoder before the call wrote, which Metal's execution reads and the
-/// runtime's copy before the pass would not.
+/// Refused at the call, recording nothing (a probe, an M3 Max and an M4): a range at an offset
+/// that is not a multiple of 4 bytes, which Metal's GPU faults the command buffer over where the
+/// range read there runs a command, or whose 8 bytes run past its buffer, which Metal reads from
+/// whatever follows it — plain Metal takes both calls, so both are the runtime's own gaps, not
+/// misuse; a buffer of compute commands; and a range a draw of the encoder before the call wrote,
+/// which Metal's execution reads and the runtime's copy before the pass would not.
 #[test]
 fn a_render_execution_s_range_is_refused_where_metal_s_read_is_not_the_copy_s() {
     on_device(|device, _| {
@@ -1788,18 +1789,25 @@ fn a_render_execution_s_range_is_refused_where_metal_s_read_is_not_the_copy_s() 
         let queue = device.new_command_queue().unwrap();
         let command_buffer = queue.command_buffer().unwrap();
         let mut encoder = command_buffer.render_command_encoder(&pass()).unwrap();
-        for (offset, length) in [(2, 16), (12, 16), (u64::MAX - 3, 16)] {
+        for offset in [2, 6] {
             assert_eq!(
                 encoder
                     .execute_commands_in_buffer_indirect(&icb, &range, offset)
                     .err(),
-                Some(Error::Invalid(Invalid::new(
-                    "execute_commands_in_buffer_indirect",
-                    Problem::IndirectCommandBuffer(IndirectCommandBufferProblem::RangeBuffer {
-                        offset,
-                        length,
-                    })
-                ))),
+                Some(Error::NotImplemented(RuntimeGap::ExecutionRangeOffFour {
+                    offset
+                })),
+                "offset {offset}"
+            );
+        }
+        for (offset, length) in [(12, 16), (u64::MAX - 3, 16)] {
+            assert_eq!(
+                encoder
+                    .execute_commands_in_buffer_indirect(&icb, &range, offset)
+                    .err(),
+                Some(Error::NotImplemented(
+                    RuntimeGap::ExecutionRangePastBuffer { offset, length }
+                )),
                 "offset {offset}"
             );
         }

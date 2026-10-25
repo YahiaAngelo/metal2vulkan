@@ -4,8 +4,8 @@
 //!
 //! **Metal's rules** (probes 9 to 9f, on an Apple M3 Max, macOS 26.7, and an M4, macOS 27.0.1,
 //! which agree; each case run plain and under API validation). The runtime refuses as `Invalid`
-//! what Metal asserts on in either run and what its validation alone stops, and as `Nil` what
-//! plain Metal answers nil for:
+//! what Metal asserts on in a plain run, and as `Nil` what plain Metal answers nil for; what only
+//! its API validation layer stops is no refusal, since plain Metal takes it:
 //!
 //! - **Formats.** `minimumLinearTextureAlignmentForPixelFormat:` and
 //!   `minimumTextureBufferAlignmentForPixelFormat:` are both 16 bytes for every format a buffer
@@ -34,13 +34,19 @@
 //!   each slice starts `bytesPerRow` × `height`, rounded up to 128, after the one before. Metal's
 //!   validation alone asserts that it is a multiple of 128; a plain run makes the array at any (16,
 //!   32, 64, 80 and 192 measured, probe 9b), so the runtime does too.
-//! - **Length.** Validation counts `offset + bytesPerRow × (height × slices − 1) + the packed row`
-//!   against the buffer's length: for an array, as if its slices were not rounded. Where an
-//!   array's last slice still runs past the length, Metal answers nil when the buffer is at least
-//!   16 KiB and its rounded slices end past the length rounded up to 16 KiB (its
-//!   `allocatedSize`), and otherwise makes the texture over bytes past the length. The runtime's
-//!   buffers have no bytes there, so it refuses that texture as not implemented
-//!   ([`BufferRefusal::TexelsPastLength`]).
+//! - **Length.** Metal's validation counts `offset + bytesPerRow × (height × slices − 1) + the
+//!   packed row` against the buffer's length, for an array as if its slices were not rounded, and
+//!   stops a texture whose count runs past it; plain Metal reads the buffer's `allocatedSize`
+//!   alone. It answers nil where the buffer is at least 16 KiB and the texture's rounded slices
+//!   end past the length rounded up to 16 KiB (its `allocatedSize`), and otherwise makes the
+//!   texture over bytes past the length, however far past (an M3 Max under macOS 27.0.1, the
+//!   layer off: a 2D texture and a texture buffer over a 4096-byte buffer whose rows end 128 and
+//!   12288 bytes past it are made, as is one over a 20000-byte buffer, `allocatedSize` 32768,
+//!   from offset 20000; the same ending past 32768 is nil, and so is one over a 16384-byte
+//!   buffer, `allocatedSize` 16384, ending at 16640, where one ending at 16384 is made). The
+//!   runtime's buffers have no bytes past the length, so it refuses that texture as not
+//!   implemented ([`BufferRefusal::TexelsPastLength`]) and the nil one as Metal's nil
+//!   ([`BufferTextureProblem::PastAllocation`]).
 //!
 //! **IOSurface planes** (`Buffer::new_texture_with_iosurface_plane`, the stand-in for
 //! `newTextureWithDescriptor:iosurface:plane:` over the caller's memory). Measured on the M3 Max
@@ -64,8 +70,10 @@
 //!   write the surface's bytes as a `Shared` one's do, so the runtime makes it too. A plain run
 //!   makes a `Memoryless` one too, whose CPU reaches the plane's bytes while its GPU uses fail the
 //!   command buffer and a render pass into it stores nothing; the runtime holds no form that
-//!   answers all three, so it refuses that texture
-//!   ([`BufferTextureProblem::Options`], which carries the measurement).
+//!   answers all three, so it refuses that texture as not implemented
+//!   ([`BufferRefusal::MemorylessPlane`],
+//!   [`RuntimeGap::MemorylessSurfacePlane`](crate::RuntimeGap::MemorylessSurfacePlane), which
+//!   carries the measurement).
 //! - **The CPU** (`getBytes`, `replaceRegion`) reads and writes the plane where the surface lays it
 //!   out: from its offset, rows `bytesPerRow` apart.
 //! - **The GPU** (a blit's reads and writes, a copy to or from another texture, a kernel's
@@ -115,8 +123,9 @@
 //! The runtime holds both layouts: the GPU's ([`Placed::gpu`]) is the texture's texels for every
 //! command, the copies of its shadow, an aliasing image and their hazards; the CPU's
 //! ([`Placed::cpu`]) is `replace_region`'s and `get_bytes`'s. Both lie in the buffer, else the
-//! texture is refused: a plane past the buffer `Invalid` (`PastBuffer`), GPU texels past it
-//! `NotImplemented` (`TexelsPastBufferLength`; Metal's lie in the surface's pages past the plane).
+//! texture is refused: a plane past the buffer `NotImplemented` (`TexelsPastBufferLength`;
+//! Metal's lie in the surface's pages past the plane, where it reads zeros), and over a surface
+//! without planes, which plain Metal holds the rows to, `Invalid` (`PastBuffer`).
 //! A surface without planes starts at a multiple of 16 in the buffer, as a surface's base does
 //! (`OffsetAlignment` otherwise).
 //!
@@ -157,7 +166,9 @@ pub(super) const ARRAY_ALIGNMENT: u64 = 128;
 /// rounded up to it (a shorter buffer's is its length).
 pub(super) const METAL_PAGE: u64 = 16384;
 
-/// A texture over a buffer Metal stops.
+/// A texture over a buffer plain Metal itself refuses: it asserts, or answers nil
+/// ([`PastAllocation`](Self::PastAllocation)). What only Metal's API validation layer stops is
+/// not here (the module's rules).
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BufferTextureProblem {
@@ -176,22 +187,6 @@ pub enum BufferTextureProblem {
         /// The descriptor's level count.
         count: u32,
     },
-    /// An IOSurface plane's `Memoryless` storage. Metal's API validation layer asserts on it
-    /// ("IOSurface textures must use MTLStorageModeManaged or MTLStorageModeShared"); plain Metal
-    /// makes the texture, the layer off, and answers `Memoryless` with the descriptor's usage, CPU
-    /// cache and hazard tracking modes, over a flat surface and over a planar one's plane alike.
-    /// Its CPU reaches the plane's bytes as a `Shared` one's does (`getBytes` reads them,
-    /// `replaceRegion` writes them); every GPU use measured fails the command buffer instead
-    /// (status `Error`, `MTLCommandBufferErrorInvalidResource`: a kernel's `write()`, a kernel's
-    /// `read()` and a blit out of the texture, the plane's bytes left as they were and the
-    /// read-back zero); and a render pass that clears and draws into it completes and stores
-    /// nothing, where a `Shared` or a `Private` texture over the same plane stores its texels (an
-    /// M3 Max under macOS 27.0.1). The runtime refuses the texture: it holds no form that makes
-    /// the object, serves its CPU exactly and fails the command buffer of every GPU use, and the
-    /// GPU uses beyond those three are unmeasured. A texture made through
-    /// `newTextureWithDescriptor:offset:bytesPerRow:` takes the buffer's options whatever its
-    /// descriptor names, and a plane its descriptor's other modes.
-    Options,
     /// A `bytesPerRow` that does not cover the packed row of `row_bytes`.
     RowPitch {
         /// The `bytesPerRow` given.
@@ -215,9 +210,20 @@ pub enum BufferTextureProblem {
         /// The alignment it needs, in bytes.
         alignment: u64,
     },
-    /// Validation's count of the texture's bytes, `counted`, past the buffer's `length`.
+    /// A texture over a surface without planes whose rows end past the surface's bytes,
+    /// `counted` of the `length` the buffer standing for it holds: a descriptor taller than the
+    /// surface, which plain Metal asserts on, the API validation layer off (`-[IOGPUMetalTexture
+    /// initWithDevice:descriptor:iosurface:plane:field:args:argsSize:]`, "Descriptor
+    /// height*arrayLength > IOSurface height": a 16 by 8 and a 16 by 64 descriptor over a 16 by 4
+    /// `BGRA` surface, on an M3 Max under macOS 27.0.1, where the 16 by 4 one is made).
+    ///
+    /// A *plane* of a surface with planes is not held to it: Metal makes a texture taller than
+    /// the plane and reads zeros past it, which the runtime's buffer has no bytes for
+    /// ([`RuntimeGap::TexelsPastBufferLength`](crate::RuntimeGap::TexelsPastBufferLength)), and a
+    /// texture over a buffer past its bytes Metal makes or answers nil for by the buffer's
+    /// allocation alone (the module's **Length**).
     PastBuffer {
-        /// The bytes validation counts.
+        /// The bytes the rows end at, from the buffer's start.
         counted: u64,
         /// The buffer's length.
         length: u64,
@@ -384,6 +390,10 @@ pub(super) enum BufferRefusal {
     /// An IOSurface plane whose rows overlap on Metal's GPU, where a write's bytes depend on the
     /// order it writes rows in (`NotImplemented`; the module's rules).
     OverlappingRows,
+    /// An IOSurface plane whose descriptor asks for `Memoryless` storage, which plain Metal makes
+    /// and serves on the CPU while every GPU use fails the command buffer (`NotImplemented`; the
+    /// module's rules).
+    MemorylessPlane,
 }
 
 impl From<BufferTextureProblem> for BufferRefusal {
@@ -431,7 +441,7 @@ pub(super) fn plan_buffer_texture(
         .into());
     }
     if surface && texture.storage == StorageMode::Memoryless {
-        return Err(P::Options.into());
+        return Err(BufferRefusal::MemorylessPlane);
     }
     let [width, height, _] = layout.extent.map(u64::from);
     let (offset, bytes_per_row) = (texture.offset, texture.bytes_per_row);
@@ -455,12 +465,7 @@ pub(super) fn plan_buffer_texture(
             rows: height,
             slices: 1,
         };
-        return match plan_iosurface_plane(cpu, planar, buffer.length) {
-            Err(BufferRefusal::Metal(P::PastBuffer { .. })) if ycbcr => {
-                Err(BufferRefusal::TexelsPastLength)
-            }
-            planned => planned,
-        };
+        return plan_iosurface_plane(cpu, planar, buffer.length);
     }
     let array = texture_type == T::Type2DArray;
     let alignment = if array {
@@ -497,15 +502,9 @@ pub(super) fn plan_buffer_texture(
         slices,
     };
     let length = buffer.length;
-    // Validation's count: the slices' rows as if contiguous.
-    let counted = BufferLayout {
-        slice_pitch: image,
-        ..placed
-    }
-    .end();
-    if counted > length {
-        return Err(P::PastBuffer { counted, length }.into());
-    }
+    // Metal's validation counts the slices' rows as if contiguous against the length and stops
+    // the texture there; plain Metal reads the buffer's allocation alone (the module's
+    // **Length**), so the runtime does too.
     if placed.end() > length {
         let end = offset.saturating_add(slice_pitch.saturating_mul(slices));
         if length >= METAL_PAGE {
@@ -545,12 +544,18 @@ fn plan_iosurface_plane(
         }
         .into());
     }
+    // A surface without planes holds the texture's rows: plain Metal asserts on a descriptor
+    // taller than it (`P::PastBuffer`). Over a plane Metal makes such a texture and reads zeros
+    // past the plane, which the runtime's buffer has no bytes for.
     if cpu.end() > length {
-        return Err(P::PastBuffer {
-            counted: cpu.end(),
-            length,
-        }
-        .into());
+        return Err(match planar {
+            true => BufferRefusal::TexelsPastLength,
+            false => P::PastBuffer {
+                counted: cpu.end(),
+                length,
+            }
+            .into(),
+        });
     }
     let gpu = iosurface_gpu_layout(&cpu)?;
     if gpu.end() > length {

@@ -87,7 +87,7 @@ use super::compute::{
 use super::degradation::Degradation;
 use super::device::lock;
 use super::encoder::{EncoderCore, RecordedSegment};
-use super::error::{internal, invalid, Error, Problem};
+use super::error::{internal, invalid, Error, Problem, RuntimeGap};
 use super::executed_commands::{ExecutedCommand, RecordsRead};
 use super::indirect_command_buffer::{
     IndirectCommandBuffer, IndirectCommandBufferProblem, IndirectCommandCheck,
@@ -116,27 +116,26 @@ pub(super) const CALL_INDIRECT: &str = "execute_commands_in_buffer_indirect";
 /// The bytes of an `MTLIndirectCommandBufferExecutionRange`: `location`, then `length`.
 pub(super) const RANGE_BYTES: u64 = 8;
 
-/// Refuse the execution range at `offset` of a buffer of `length` bytes where Metal's reading of
-/// it is not defined (`execute_commands_in_buffer_indirect`; where API
-/// validation stops neither): an offset that is not a multiple of 4 bytes, at which Metal's GPU
-/// faulted the command buffer, and a range whose 8 bytes run past the buffer, which Metal reads
-/// from whatever follows it.
-pub(super) fn check_range_buffer(
-    call: &'static str,
-    length: u64,
-    offset: u64,
-) -> Result<(), Error> {
+/// Refuse the execution range at `offset` of a buffer of `length` bytes where the runtime has no
+/// exact answer (`execute_commands_in_buffer_indirect`). Metal's API validation layer stops
+/// neither rule below and plain Metal refuses neither: the call always returns (an M3 Max under
+/// macOS 27.0.1 with the layer off, `rangebuf.m`, `rangebuf2.m` and `rangebuf3.m`, one case per
+/// process, on a compute encoder's dispatches and a render encoder's draws alike). Both are the
+/// runtime's own gaps ([`RuntimeGap::ExecutionRangePastBuffer`],
+/// [`RuntimeGap::ExecutionRangeOffFour`], which carry the measurements).
+pub(super) fn check_range_buffer(length: u64, offset: u64) -> Result<(), Error> {
     let past = offset
         .checked_add(RANGE_BYTES)
         .is_none_or(|end| end > length);
-    if !offset.is_multiple_of(4) || past {
-        return Err(invalid(
-            call,
-            Problem::IndirectCommandBuffer(IndirectCommandBufferProblem::RangeBuffer {
-                offset,
-                length,
-            }),
+    if past {
+        return Err(Error::NotImplemented(
+            RuntimeGap::ExecutionRangePastBuffer { offset, length },
         ));
+    }
+    if !offset.is_multiple_of(4) {
+        return Err(Error::NotImplemented(RuntimeGap::ExecutionRangeOffFour {
+            offset,
+        }));
     }
     Ok(())
 }

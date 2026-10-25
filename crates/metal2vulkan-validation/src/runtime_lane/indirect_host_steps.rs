@@ -1066,18 +1066,26 @@ fn an_execution_reads_its_range_as_it_runs() {
         let range = range_buffer(device, 1, 2);
         let command_buffer = queue.command_buffer().unwrap();
         let mut encoder = command_buffer.compute_command_encoder().unwrap();
-        for (offset, length) in [(2, 16), (12, 16), (u64::MAX - 3, 16)] {
+        // Plain Metal takes both, so neither is misuse: the runtime's own gaps.
+        for offset in [2, 6] {
             assert_eq!(
                 encoder
                     .execute_commands_in_buffer_indirect(&setup.icb, &range, offset)
                     .err(),
-                Some(Error::Invalid(Invalid::new(
-                    "execute_commands_in_buffer_indirect",
-                    Problem::IndirectCommandBuffer(IndirectCommandBufferProblem::RangeBuffer {
-                        offset,
-                        length,
-                    })
-                ))),
+                Some(Error::NotImplemented(RuntimeGap::ExecutionRangeOffFour {
+                    offset
+                })),
+                "offset {offset}"
+            );
+        }
+        for (offset, length) in [(12, 16), (u64::MAX - 3, 16)] {
+            assert_eq!(
+                encoder
+                    .execute_commands_in_buffer_indirect(&setup.icb, &range, offset)
+                    .err(),
+                Some(Error::NotImplemented(
+                    RuntimeGap::ExecutionRangePastBuffer { offset, length }
+                )),
                 "offset {offset}"
             );
         }

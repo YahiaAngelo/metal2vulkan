@@ -260,6 +260,7 @@ fn refusal_error(call: &'static str, refusal: BufferRefusal) -> Error {
             Error::NotImplemented(RuntimeGap::TexelsPastBufferLength)
         }
         BufferRefusal::OverlappingRows => Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows),
+        BufferRefusal::MemorylessPlane => Error::NotImplemented(RuntimeGap::MemorylessSurfacePlane),
     }
 }
 
@@ -362,13 +363,14 @@ impl Buffer {
     /// ([`AppleOnly::SurfaceClientDirection`](super::AppleOnly::SurfaceClientDirection)); what
     /// Metal stops (`Invalid`, with a [`TextureProblem`](super::TextureProblem) or a
     /// [`BufferTextureProblem`](super::BufferTextureProblem): a type other than 2D, more than one
-    /// level, `Memoryless` storage (whose measurement is
-    /// [`BufferTextureProblem::Options`](super::BufferTextureProblem::Options)'s), a pitch below
-    /// the row, a surface without planes at
-    /// another pitch or offset, a plane past the buffer); rows that overlap on Metal's GPU, of more
-    /// than 16 bytes at a `bytes_per_row` whose multiple of 16 below it is shorter than the row,
-    /// where Metal's writes depend on their order (`NotImplemented(OverlappingSurfaceRows)`); GPU
-    /// texels past the buffer, which Metal's surface holds in its pages
+    /// level, a pitch below the row, a surface without planes at another pitch or offset, or one
+    /// whose rows end past it, which plain Metal asserts on); `Memoryless` storage, which plain
+    /// Metal makes and serves on the CPU while its GPU uses fail the command buffer
+    /// (`NotImplemented(MemorylessSurfacePlane)`, which carries the measurement); rows that
+    /// overlap on Metal's GPU, of more than 16 bytes at a `bytes_per_row` whose multiple of 16
+    /// below it is shorter than the row, where Metal's writes depend on their order
+    /// (`NotImplemented(OverlappingSurfaceRows)`); a plane's own rows or its GPU texels past the
+    /// buffer, which Metal's surface holds in its pages
     /// (`NotImplemented(TexelsPastBufferLength)`); and as [`new_texture`](Self::new_texture)
     /// refuses a format or an image.
     ///

@@ -91,15 +91,12 @@ fn textures_over_buffers_are_made_or_refused_as_metal_makes_them() {
                 }
             )
         );
+        // A texture buffer whose row ends past the buffer's length, which Metal's validation
+        // counts and stops: plain Metal makes it over bytes past the length, which the runtime's
+        // buffer does not have (`past.m`, an M3 Max under macOS 27.0.1).
         assert_eq!(
             refused(&d, 3968, 256),
-            invalid(
-                CALL,
-                BufferTextureProblem::PastBuffer {
-                    counted: 4224,
-                    length: 4096
-                }
-            )
+            Error::NotImplemented(RuntimeGap::TexelsPastBufferLength)
         );
         // A plain run takes the buffer's options whatever the descriptor names.
         let mut private = d;

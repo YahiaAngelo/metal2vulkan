@@ -404,6 +404,11 @@ impl Nil {
 /// [`Problem::UnwrittenFragmentInputsUnproven`], a device's [`Problem::HostReleaseUnmeasured`], and
 /// [`Problem::IndirectCommandsDirectArgumentUndecided`].
 ///
+/// What is unproven is Metal's *answer*, not what the call then does: a call measured to return,
+/// whose effect Metal leaves undefined, is not one of these. Metal's answer there is known, and
+/// having no exact form for the effect is the runtime's own gap
+/// ([`Error::NotImplemented`]).
+///
 /// The first refusal in Metal's order decides, proven or not: an unproven answer stops the call's
 /// checks even where a later one would be a proven refusal. A fragment function's unproven direct
 /// argument hides the vertex function's proven one, and the indirect command buffers' unproven
@@ -651,7 +656,8 @@ pub enum Problem {
     Copy(CopyProblem),
     /// A `generate_mipmaps` Metal stops.
     Mipmap(MipmapProblem),
-    /// A texture over a buffer Metal stops.
+    /// A texture over a buffer plain Metal itself refuses: [`BufferTextureProblem`] says
+    /// which, and whether Metal asserts or answers nil.
     BufferTexture(BufferTextureProblem),
     /// A render pass descriptor, or a render encoder's late store action, Metal stops.
     RenderPass(RenderPassProblem),
@@ -718,7 +724,8 @@ pub enum Problem {
     /// A visible-function table call, or a table or buffer binding a dispatch reads as the other,
     /// Metal stops.
     FunctionTable(FunctionTableProblem),
-    /// An indirect command buffer call Metal stops or ends the process for.
+    /// An indirect command buffer call plain Metal itself refuses, ending its process or
+    /// failing the call: [`IndirectCommandBufferProblem`] says which.
     IndirectCommandBuffer(IndirectCommandBufferProblem),
     /// A rasterization-rate map's descriptor Metal stops (`new_rasterization_rate_map`).
     RateMap(RateMapProblem),
@@ -1124,8 +1131,11 @@ pub enum ArchivedPipeline {
     Tile,
 }
 
-/// A runtime piece a later build step adds. Each is refused typed until then: Metal itself takes
-/// these inputs.
+/// A runtime piece a later build step adds, or a use whose effect on Metal is not defined and the
+/// runtime holds nothing exact for. Each is refused typed: Metal itself takes these inputs, so
+/// none of them is misuse ([`Error::Invalid`]), and none is unmeasured
+/// ([`Error::Unproven`]) — what Metal does with the input is known, and is either not built here
+/// yet or not a thing to build.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RuntimeGap {
@@ -1219,10 +1229,12 @@ pub enum RuntimeGap {
     ExtensionEnable(VkExtension),
     /// Render pipelines, passes and draws.
     Render,
-    /// A 2D array over a buffer whose texels run past the buffer's length, which Metal makes
-    /// over bytes its buffer's allocation has past the length, or a two-plane YCbCr texture over
-    /// a surface's plane whose luma codes run past the buffer, which Metal reads as zeros there:
-    /// the runtime's buffers have no bytes there.
+    /// A texture over a buffer whose texels run past the buffer's length, which Metal makes over
+    /// bytes its buffer's allocation has past the length (a 2D texture, a texture buffer and a 2D
+    /// array alike, up to the allocation, past which Metal answers nil:
+    /// [`Problem::BufferTexture`]'s `PastAllocation`), or a texture over a plane of a surface
+    /// with planes whose rows or GPU texels run past the buffer standing for the surface, which
+    /// Metal reads as zeros there: the runtime's buffers have no bytes there.
     TexelsPastBufferLength,
     /// A texture of an IOSurface plane (`Buffer::new_texture_with_iosurface_plane`, the stand-in
     /// for `newTextureWithDescriptor:iosurface:plane:`) whose rows overlap on Metal's GPU: more
@@ -1231,6 +1243,77 @@ pub enum RuntimeGap {
     /// rows' writes meet, which one wins depends on the order of its writes (a blit's and a
     /// kernel's differ).
     OverlappingSurfaceRows,
+    /// A texture of an IOSurface plane (`Buffer::new_texture_with_iosurface_plane`, the stand-in
+    /// for `newTextureWithDescriptor:iosurface:plane:`) whose descriptor asks for `Memoryless`
+    /// storage. Metal's API validation layer asserts on it ("IOSurface textures must use
+    /// MTLStorageModeManaged or MTLStorageModeShared"); plain Metal makes the texture, the layer
+    /// off, and answers `Memoryless` with the descriptor's usage, CPU cache and hazard tracking
+    /// modes, over a flat surface and over a planar one's plane alike. Its CPU reaches the plane's
+    /// bytes as a `Shared` one's does (`getBytes` reads them, `replaceRegion` writes them); every
+    /// GPU use measured fails the command buffer instead (status `Error`,
+    /// `MTLCommandBufferErrorInvalidResource`: a kernel's `write()`, a kernel's `read()` and a
+    /// blit out of the texture, the plane's bytes left as they were and the read-back zero); and a
+    /// render pass that clears and draws into it completes and stores nothing, where a `Shared` or
+    /// a `Private` texture over the same plane stores its texels (an M3 Max under macOS 27.0.1).
+    /// The runtime holds no form that makes the object, serves its CPU exactly and fails the
+    /// command buffer of every GPU use, and the GPU uses beyond those three are unmeasured. A
+    /// texture made through `newTextureWithDescriptor:offset:bytesPerRow:` takes the buffer's
+    /// options whatever its descriptor names, and a plane its descriptor's other modes.
+    MemorylessSurfacePlane,
+    /// A command of an indirect command buffer at or past its size
+    /// (`indirectComputeCommandAtIndex:`, `indirectRenderCommandAtIndex:`). Plain Metal checks no
+    /// bound there, the API validation layer off: it gives a command for any index, every setter
+    /// of it returns, and the write lands where that index's record would be, past the buffer's
+    /// records. What it lands on is not defined and turns on the index: on a buffer of 4 commands,
+    /// writing index 4 left command 0 dispatching nothing, while writing index 100 left command 0
+    /// dispatching as before, and index 2^40 returned from its setters too (an M3 Max under macOS
+    /// 27.0.1, a buffer of `ConcurrentDispatch` and one of `Draw` alike). The runtime holds no
+    /// bytes there and will not guess what Metal overwrote, so there is nothing exact to build and
+    /// nothing to measure further: the call is refused.
+    IndirectCommandPastSize {
+        /// The command's index.
+        index: u64,
+        /// The buffer's size, in commands.
+        size: u64,
+    },
+    /// An `MTLIndirectCommandBufferExecutionRange` whose 8 bytes run past the buffer it is read
+    /// from (`execute_commands_in_buffer_indirect`, a compute encoder's and a render encoder's).
+    /// Metal's API validation layer stops it and plain Metal takes it: the call returns, and its
+    /// GPU reads whatever bytes follow the buffer, inside its allocation and past it alike, and
+    /// runs what they say (the pair written at offset 8 of a 12-byte buffer ran both of its
+    /// commands, and offset 4092 of a 4096-byte buffer, whose `allocatedSize` is its length, read
+    /// a pair written across its end; offsets 12 and 16 of the 12-byte buffer, and 16400 of a
+    /// 16384-byte one, read zeros and ran nothing; an M3 Max under macOS 27.0.1, the layer off).
+    /// The runtime's buffer has no bytes there and will not guess Metal's, so the call is
+    /// refused. An offset that is not a multiple of 4 is
+    /// [`ExecutionRangeOffFour`](Self::ExecutionRangeOffFour).
+    ExecutionRangePastBuffer {
+        /// The range's offset in the buffer.
+        offset: u64,
+        /// The buffer's length, in bytes.
+        length: u64,
+    },
+    /// An `MTLIndirectCommandBufferExecutionRange` read at an offset that is not a multiple of 4
+    /// bytes (`execute_commands_in_buffer_indirect`, a compute encoder's and a render encoder's).
+    /// Metal's API validation layer stops it and plain Metal takes it: the call returns, and what
+    /// its GPU does turns on the range read there. With a length of 0 the command buffer
+    /// completes, running nothing, as it does for an aligned range of no commands; with any other
+    /// length its GPU faults the command buffer, which completes with status `Error` and
+    /// `MTLCommandBufferErrorPageFault` ("Caused GPU Address Fault Error
+    /// (0000000b:kIOGPUCommandBufferCallbackErrorPageFault)") and runs nothing, for a location
+    /// inside the buffer's commands and one past them alike — where an aligned range whose
+    /// location is past them completes and reports `ReplayFaults::RANGE`
+    /// (offsets 1, 2, 3 and 6 of a 16-byte buffer and 2 and 1002 of a 4096-byte one, with `{0, 2}`,
+    /// `{1, 1}` and `{5, 2}` there, against `{0, 0}` at the same offsets and every pair at offsets
+    /// 0, 4, 8 and 1000; an M3 Max under macOS 27.0.1, the layer off).
+    ///
+    /// The runtime reads the range at its host step, once the work before it completed, and
+    /// failing the command buffer from there is not built: the exact answer is the encoder faulted
+    /// then, and only where the range read runs a command.
+    ExecutionRangeOffFour {
+        /// The range's offset in the buffer.
+        offset: u64,
+    },
     /// A render pass whose custom sample positions Vulkan takes only through what the runtime
     /// does not build: a depth/stencil attachment of a caller's image not made with
     /// `VK_IMAGE_CREATE_SAMPLE_LOCATIONS_COMPATIBLE_DEPTH_BIT_EXT`, of a format the device does
