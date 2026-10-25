@@ -29,6 +29,7 @@ use crate::pipeline::link::{LinkInputs, LinkTable};
 use crate::pipeline::relocate::relocate;
 use crate::pipeline::sym::{
     Axis, PushField, ResourceKind, ResourceSlot, SlotClass, SlotRef, SpecKey, Stage,
+    SyntheticBinding,
 };
 use crate::pipeline::testing::{
     compile, engine_dir, fixtures_dir, link_and_validate, llvm_assemble, metal_assemble, meter,
@@ -39,6 +40,12 @@ use crate::vk;
 
 /// The M1 profiles.
 const M1_PROFILES: [&str; 3] = ["moltenvk-m3", "lunarg-desktop-baseline-2023", "vk12-floor"];
+
+/// The M1 profiles that can select between two descriptors' pointers (`variablePointers` and
+/// `variablePointersStorageBuffer`, their JSON), and so bind the kernel's write-only store sink
+/// rather than branching around its dropped store (`lower::access::sink`). `vk12-floor` has
+/// neither feature and keeps the branch.
+const SELECTS_POINTERS: [&str; 2] = ["moltenvk-m3", "lunarg-desktop-baseline-2023"];
 
 /// `store_const` as opaque bitcode, or `None` (skipped visibly) without `llvm-as`.
 fn store_const() -> Option<Vec<u8>> {
@@ -70,8 +77,9 @@ fn opcodes(words: &[u32]) -> Vec<u32> {
     ops
 }
 
-/// The artifact facts `store_const` must carry on every profile.
-fn check_artifact(a: &FunctionArtifact, what: &str) {
+/// The artifact facts `store_const` must carry on every profile. `sink` says whether the profile
+/// binds the kernel's write-only store sink beside buffer 0 ([`SELECTS_POINTERS`]).
+fn check_artifact(a: &FunctionArtifact, what: &str, sink: bool) {
     let i = &a.interface;
     assert_eq!(i.stage, Stage::Kernel, "{what}");
     let SlotInterface::Buffer(b) = i.slots.get(&buffer0()).expect("buffer 0") else {
@@ -106,19 +114,30 @@ fn check_artifact(a: &FunctionArtifact, what: &str) {
     );
     assert_eq!(i.push.push_range, Some((0, 8)), "{what}");
     assert_eq!(i.push.argument_table_size, 0, "{what}");
-    assert_eq!(
-        i.descriptors,
-        vec![StageDescriptor::new(
+    // Buffer 0's storage view and, where the dropped store selects a pointer instead of
+    // branching, the stage's one write-only sink descriptor (`ResourceKind::Synthetic` sorts
+    // after `Buffer`).
+    let mut descriptors = vec![StageDescriptor::new(
+        ResourceSlot {
+            stage: Stage::Kernel,
+            kind: ResourceKind::Buffer,
+            index: 0,
+        },
+        vk::DescriptorType::STORAGE_BUFFER,
+        1,
+    )];
+    if sink {
+        descriptors.push(StageDescriptor::new(
             ResourceSlot {
                 stage: Stage::Kernel,
-                kind: ResourceKind::Buffer,
-                index: 0
+                kind: ResourceKind::Synthetic(SyntheticBinding::StoreSink),
+                index: 0,
             },
             vk::DescriptorType::STORAGE_BUFFER,
-            1
-        )],
-        "{what}"
-    );
+            1,
+        ));
+    }
+    assert_eq!(i.descriptors, descriptors, "{what}");
     // The local size is the `WorkgroupSize` spec composite of `sx, sy, sz`, 4-byte `u32`
     // constants defaulting to 1.
     assert_eq!(
@@ -158,7 +177,7 @@ fn store_const_passes_the_pipeline_on_every_m1_profile() {
         let p = profile(stem, DevicePolicy::default()).expect("profile");
         let a =
             compile(&bitcode, "store_const", &p).unwrap_or_else(|e| panic!("{stem}: compile: {e}"));
-        check_artifact(&a, stem);
+        check_artifact(&a, stem, SELECTS_POINTERS.contains(&stem));
         let (table, words) = link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{stem}: {e}"));
         assert_eq!(table.spec.len(), 3, "{stem}");
         let ops = opcodes(&words);
