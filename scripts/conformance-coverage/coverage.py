@@ -64,6 +64,16 @@ ORACLE = "apple-m3-max"
 
 STATUS = {"I": "implemented", "M": "missing", "O": "out of scope"}
 
+#: What closes an unresolved call site, said once because both branches of the bullet say it. The
+#: shapes a reader would be sent after have to be the ones that still cost something: a pattern is
+#: not one of them, so naming it here sent a reader to rewrite code the derivation already reads.
+ADVICE = (
+    "spell the receiver's type at the call site — a `let` with a type, rather than a `let` with "
+    "none — and this re-derives with the item credited to the case that calls it. A pattern "
+    "binding is not one of the shapes that costs a site: a tuple, a `for`, a `match` arm and a "
+    "closure parameter are each typed from what made them."
+)
+
 
 # --------------------------------------------------------------------------------------------
 # The SDK's items
@@ -193,9 +203,17 @@ def gate_enums(enums: set[str]) -> set[str]:
 
 
 def leg_files() -> list[str]:
-    """The suite's files that reach Metal, by what they import rather than by name."""
+    """The suite's files that reach Metal, by what they import rather than by name.
+
+    A file the crate declares under `#[cfg(test)]` is not among them, whatever it imports: a unit
+    test is the suite's own code about the suite, and reading it as the Metal leg credits Metal
+    selectors to the suite's own types ([`metal_leg.without_test_modules`] says what that cost).
+    """
+    excluded = metal_leg.test_module_paths(SRC)
     out = []
     for path in sorted(SRC.rglob("*.rs")):
+        if path in excluded:
+            continue
         if "objc2_metal" in metal_leg.blanked(path.read_text()):
             out.append(str(path.relative_to(SRC)))
     return out
@@ -607,6 +625,15 @@ def inventory():
             "a receiver typed to something that does not bind the selector sent to it, which is a "
             "bug in metal_leg.py rather than a Metal call:\n"
             + "\n".join(f"  {f}::{fn} sent {rust} to {ty}" for f, fn, rust, ty in sorted(set(leg.mistyped)))
+        )
+    listed = {row["name"] for row in rows if row["status"] == "I"}
+    hidden = sorted({sel for _, _, _, sel in leg.private if sel in listed})
+    if hidden:
+        raise SystemExit(
+            "a hand-sent selector `objc2-metal` binds no name for is an implemented row of the "
+            "coverage map, so the suite exercises an item this document can credit to nothing. "
+            "Give the receiver a type the crate binds, or the map's row a container this can "
+            "resolve:\n" + "\n".join(f"  {sel}" for sel in hidden)
         )
     keyed, unlisted = sdk_keyed(leg, index, api)
     selves = self_named(rows)
@@ -1303,6 +1330,16 @@ def write(data) -> str:
         "cost: " + ", ".join(f"`{rust}`" for rust in sorted({r for _, _, r, _ in leg.foreign}))
         + ", which are `NSObject`'s."
     )
+    w(
+        f"- **{len(leg.private)} call sites send a selector by hand that `objc2-metal` binds no "
+        "name for**, which is why they are sent with `msg_send!` rather than called. The crate "
+        "names no container for such a selector, so no receiver typing can reach one and no item "
+        "here is credited: "
+        + ", ".join(f"`{sel}`" for sel in sorted({s for _, _, _, s in leg.private}))
+        + ". None of them is an implemented row of the coverage map — the generator fails rather "
+        "than writing this document if one is, because that would be an item the suite exercises "
+        "and nothing counts."
+    )
     # The sites that DO cost something, stated in items rather than selector names. Listing the
     # selector names alone -- which this did until 2026-10-24 -- hides exactly what a reader wants:
     # eight items of one family read as uncalled while the leg demonstrably called them, and the
@@ -1327,9 +1364,12 @@ def write(data) -> str:
     hidden = sorted({item for items in blind.values() for item in items})
     head = (
         f"- **{len(leg.unresolved)} call sites resolve to no item although some Metal type binds "
-        "the selector**: an instance send whose receiver this could not type, or a message to a "
-        "class that does not bind the name sent to it. Each sent its selector to exactly one "
-        "receiver, so each exercised one item; which one is what the typing could not say."
+        "the selector**: an instance send whose receiver this could not type, a message to a "
+        "class that does not bind the name sent to it, or a selector sent by hand to a receiver "
+        "whose Rust type is a **supertype** of the one that binds it — which is often why it is "
+        "sent by hand, since `objc2` casts between two protocol objects nowhere. Each sent its "
+        "selector to exactly one receiver, so each exercised one item; which one is what the "
+        "typing could not say."
     )
     if blind:
         w(
@@ -1342,19 +1382,14 @@ def write(data) -> str:
             w(f"  - `{item[0]}`'s `{item[1]}`")
         w(
             "  So every per-item count below is a **floor**, by at least these. To close one, "
-            "spell the receiver's type at the call site — a `let` with a type, rather than a "
-            "pattern binding or an inferred one — and this re-derives with the item credited to "
-            "the case that calls it."
+            + ADVICE
         )
     else:
         w(
             head + " **Every one of their selectors is bound by at least one item some other call "
             "site credits**, so none of these sites proves an item is missing from the count. That "
             "is not a proof that the count is complete: such a site may have sent its selector to "
-            "a type other than the credited one, and this cannot tell. To rule it out, spell the "
-            "receiver's type at the call site — a `let` with a type, rather than a pattern binding "
-            "or an inferred one — and this re-derives with the item credited to the case that "
-            "calls it."
+            "a type other than the credited one, and this cannot tell. To rule it out, " + ADVICE
         )
     w(
         "- **0 call sites typed to a receiver that does not bind the selector sent to it.** The "
