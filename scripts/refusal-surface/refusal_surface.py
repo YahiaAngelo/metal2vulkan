@@ -23,8 +23,8 @@ its sites name), its sites, and a reach mark, which is the one hand-kept column 
 
     scripts/refusal-surface/refusal_surface.py           # write docs/REFUSALS.md
     scripts/refusal-surface/refusal_surface.py --check   # fail when a variant, its condition
-                                                          # or reach mark is stale (sites and
-                                                          # line numbers may drift)
+                                                          # or reach mark is stale (the site lists
+                                                          # may drift)
     scripts/refusal-surface/refusal_surface.py --table   # print the plain table only
 
 It reads source text only (no build), so it runs anywhere.
@@ -33,7 +33,7 @@ import argparse
 import re
 import subprocess
 import sys
-from collections import OrderedDict, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -283,8 +283,13 @@ def scan():
         spans = fn_spans(text)
 
         def site(pos):
+            """A construction site: its file, its line, and the function that builds the refusal.
+
+            The line is carried only so two matches of one construction count as one site; `cite`
+            does not print it.
+            """
             enc = enclosing(spans, pos)
-            return f"{rel}:{line_of(text, pos)}" + (f" ({enc[2]})" if enc else "")
+            return (rel, line_of(text, pos), enc[2] if enc else "")
 
         # Unsupported constructors.
         for m in re.finditer(r"\bUnsupported::(" + "|".join(CONSTRUCTORS) + r")\s*\(", text):
@@ -421,16 +426,34 @@ def load_reach():
     return reach
 
 
+def cite(sites):
+    """The sites of one refusal as `file (function)`, in file order, deduplicated.
+
+    No line number: it is right for one state of the tree only, while the function is right in
+    every tree that has it and is what a reader searches for. Where one function builds more than
+    one site the count says so, so dropping the line loses no site.
+    """
+    counted = Counter((rel, fn) for rel, _, fn in set(sites))
+    out = []
+    for (rel, fn), n in sorted(counted.items()):
+        inside = ", ".join(x for x in (fn, f"{n} sites" if n > 1 else "") if x)
+        out.append(f"{rel} ({inside})" if inside else rel)
+    return out
+
+
 def sites_cell(sites):
+    """How many construction sites, then the first two as `file (function)`."""
     if not sites:
         return "0"
-    first = sorted(set(sites))
-    shown = ", ".join(f"`{s.split(' ')[0]}`" for s in first[:2])
+    first = cite(sites)
+    shown = ", ".join(f"`{s}`" for s in first[:2])
     more = f" (+{len(first) - 2})" if len(first) > 2 else ""
-    return f"{len(first)}: {shown}{more}"
+    return f"{len(set(sites))}: {shown}{more}"
 
 
 def head_sha():
+    """HEAD's short sha, for the `--table` print. A tracked file carries no such stamp: it would
+    differ on every regeneration without a refusal having changed."""
     try:
         return subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--short=9", "HEAD"], text=True).strip()
     except Exception:
@@ -527,7 +550,6 @@ def build():
 
 
 def render(tables):
-    sha = head_sha()
     lines = []
     lines.append("# The refusal surface")
     lines.append("")
@@ -553,7 +575,8 @@ def render(tables):
         "computes its capability says so."
     )
     lines.append(
-        "- **Sites**: construction sites (file:line, the first two). \"via a helper\" counts the places "
+        "- **Sites**: how many construction sites, then the first two as `file (function)`, with "
+        "the count where one function builds more than one. \"via a helper\" counts the places "
         "that hand the feature to a function that builds the refusal; \"family audit only\" is a gap "
         "no call refuses, only `supportsFamily:`'s audit (the API is missing: see the coverage map); "
         "0 is a variant nothing builds today."
@@ -562,8 +585,6 @@ def render(tables):
     for k, v in REACH_MARKS.items():
         lines.append(f"  - `{k}`: {v};")
     lines.append("  - `?`: not assessed yet.")
-    lines.append("")
-    lines.append(f"Generated at `{sha}`.")
     lines.append("")
     # totals
     lines.append("## Totals")
@@ -598,7 +619,7 @@ def render(tables):
         for r in rows:
             if not r["all"]:
                 continue
-            lines.append(f"- `{section}::{r['name']}`: " + "; ".join(f"`{x}`" for x in r["all"]))
+            lines.append(f"- `{section}::{r['name']}`: " + "; ".join(f"`{x}`" for x in cite(r["all"])))
     lines.append("")
     return "\n".join(lines) + "\n"
 

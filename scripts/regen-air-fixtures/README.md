@@ -60,13 +60,16 @@ reassembles into the same module that `xcrun metal` compiled. That is the existi
 convention: macOS tests get typed-pointer bitcode from `metal-as` without a committed `.air`, and
 tests elsewhere use `llvm-as` of `<name>.ll` for the opaque-pointer path.
 
-Output is deterministic for a given toolchain: two runs are byte-identical. A different
+Output is deterministic for a given toolchain: two runs are byte-identical, on any host and under
+any locale. The script pins its collation to byte order, so the `*.metal` glob it walks and
+`TOOLCHAIN`'s sorted fixture lines do not follow the caller's. A different
 toolchain may change the companions; `TOOLCHAIN` records which one produced the committed files,
 and the change is reviewed like any other fixture edit.
 
 **Mixed Metal toolchains.** `TOOLCHAIN` records a base Metal toolchain (`metal:`, `macosx-sdk:`)
 and a line `fixture <name>: metal: ...; macosx-sdk: ...` for each fixture compiled by another
-one, so adding a fixture after an Xcode update does not mean recompiling every other fixture:
+one, in byte order, so adding a fixture after an Xcode update does not mean recompiling every
+other fixture:
 
 - A plain run regenerates every fixture with the host's toolchain and records it alone, a
   deliberate re-keying of the whole set.
@@ -78,8 +81,8 @@ one, so adding a fixture after an Xcode update does not mean recompiling every o
   with the counts of checked and unchecked fixtures. It fails on a stale companion, on a fixture
   whose `.ll` or `.air.ll` records another Metal version (`!llvm.ident`) or SDK (`SDK Version`)
   than `TOOLCHAIN` records for it, on one whose `target triple` names another macOS version than
-  its source selects (checked for every fixture, compiled or not), and when the host's LLVM tools
-  differ from the recorded ones.
+  its source selects (checked for every fixture, compiled or not), on `TOOLCHAIN` fixture lines in
+  any order but byte order, and when the host's LLVM tools differ from the recorded ones.
 
 Fixtures recorded under another Metal toolchain than the host's (those compiled by Metal
 32023.883, SDK 26.5, on a host with 32023.921) are listed as not checked; re-keying them is a

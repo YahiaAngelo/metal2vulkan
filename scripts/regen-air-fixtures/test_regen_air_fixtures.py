@@ -27,7 +27,7 @@ MACOS_MIN = re.search(r"^default_macos_min=([0-9.]+)$", SCRIPT.read_text(), re.M
 NEWER = PIN + 2
 # What the script and the fake run.
 UTILITIES = ["awk", "basename", "bash", "cat", "cmp", "cp", "diff", "dirname", "grep", "head",
-             "mkdir", "mktemp", "mv", "rm", "sed"]
+             "mkdir", "mktemp", "mv", "rm", "sed", "sort"]
 # A host whose Metal toolchain was updated, and the TOOLCHAIN records of both toolchains.
 NEW_METAL = {"FAKE_METAL": "2.0", "FAKE_SDK": "100.0", "FAKE_SDK_BUILD": "100A1"}
 OLD_RECORD = "metal: Fake metal version 1.0; macosx-sdk: 99.0 (99A1)"
@@ -348,6 +348,71 @@ class RegenAirFixturesTests(unittest.TestCase):
 
     def toolchain(self):
         return (self.fixtures / "TOOLCHAIN").read_text().splitlines()
+
+    #: Two fixture names a dictionary collation and byte order disagree about: en_US.UTF-8 weighs
+    #: the letters and ignores the `_` and `:`, so it reads `color_groups_fetch` before
+    #: `color_groups`, while byte order puts `:` (0x3A) and `.` before `_` (0x5F) and reads them
+    #: the other way round. Both the `*.metal` glob and the fixture lines are affected.
+    COLLATING = ("color_groups", "color_groups_fetch")
+
+    def collates_differently(self, locale):
+        """Whether `locale` really orders COLLATING's fixture lines against byte order.
+
+        A host without the locale generated falls back to byte order, and a test that did not ask
+        would then pass without having varied anything.
+        """
+        lines = "".join(f"fixture {n}: x\n" for n in sorted(self.COLLATING))
+        sorted_there = subprocess.run(
+            [str(self.bin / "bash"), "-c", "sort"],
+            env={"PATH": str(self.bin), "LC_ALL": locale},
+            input=lines, capture_output=True, text=True, timeout=60,
+        )
+        return sorted_there.returncode == 0 and sorted_there.stdout != lines
+
+    def collating_fixtures(self):
+        """A tree holding COLLATING's two fixtures, and a TOOLCHAIN of the old Metal toolchain."""
+        for name in self.COLLATING:
+            (self.fixtures / f"{name}.metal").write_text(f"kernel void {name}() {{}}\n")
+        self.assertEqual(self.run_script([self.pinned]).returncode, 0)
+
+    def test_the_fixture_lines_are_in_byte_order_whatever_the_locale(self):
+        # A partial regeneration writes a line per named fixture, in an order that followed the
+        # host's collation before `LC_COLLATE` was pinned and the lines sorted.
+        self.collating_fixtures()
+        wanted = None
+        for locale in (None, "en_US.UTF-8", "C"):
+            variable = {} if locale is None else {"LC_ALL": locale}
+            with self.subTest(locale=locale):
+                if locale not in (None, "C") and not self.collates_differently(locale):
+                    self.skipTest(f"{locale} is not generated on this host")
+                result = self.run_script([self.pinned], *self.COLLATING,
+                                         env={**NEW_METAL, **variable})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                lines = [l for l in self.toolchain() if l.startswith("fixture ")]
+                self.assertEqual(lines,
+                                 [f"fixture {n}: {NEW_RECORD}" for n in sorted(self.COLLATING)])
+                if wanted is None:
+                    wanted = self.toolchain()
+                self.assertEqual(self.toolchain(), wanted)
+
+    def test_check_refuses_fixture_lines_another_collation_ordered(self):
+        # The file a host with another collation writes: the same records, the other order.
+        self.collating_fixtures()
+        self.assertEqual(self.run_script([self.pinned], *self.COLLATING, env=NEW_METAL).returncode, 0)
+        committed = self.fixtures / "TOOLCHAIN"
+        text = committed.read_text()
+        self.assertEqual(self.run_script([self.pinned], "--check", env=NEW_METAL).returncode, 0)
+        swapped, lines = [], [l for l in text.splitlines() if l.startswith("fixture ")]
+        self.assertEqual(len(lines), 2)
+        for line in text.splitlines():
+            swapped.append(line if not line.startswith("fixture ") else lines[1 - lines.index(line)])
+        committed.write_text("\n".join(swapped) + "\n")
+        check = self.run_script([self.pinned], "--check", env=NEW_METAL)
+        self.assertEqual(check.returncode, 1, check.stdout)
+        self.assertIn("out of order: TOOLCHAIN fixture lines", check.stderr)
+        # And rerunning the script puts them back.
+        self.assertEqual(self.run_script([self.pinned], *self.COLLATING, env=NEW_METAL).returncode, 0)
+        self.assertEqual(committed.read_text(), text)
 
     def test_another_directory_regenerates_alone(self):
         other = self.root / "crates/metal2vulkan-validation/fixtures/public/reflection"

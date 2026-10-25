@@ -45,7 +45,19 @@
 #            SDK version than TOOLCHAIN records for it, or targets another macOS version than its
 #            source selects, or when the host's LLVM tools differ.
 #   <name>   regenerate only these fixtures (`<name>.metal`).
+#
+# TOOLCHAIN's fixture lines are sorted by byte value, and the run's own order (the source glob,
+# which is the compile order and the order --check reports in) is byte order too, so two hosts
+# write the same file whatever their locales collate to.
 set -euo pipefail
+
+# Byte order, not the caller's: the `*.metal` glob and the `sort` of the fixture lines both follow
+# the collation, and en_US.UTF-8 orders `color_groups_fetch` before `color_groups` where byte order
+# puts them the other way round, so without this the committed TOOLCHAIN depends on the host's
+# locale (82 of engine's 344 fixture lines move between those two). Character ranges such as
+# `[a-z_]` are byte ranges under it too. LC_ALL outranks LC_COLLATE, so it goes first.
+unset LC_ALL
+export LC_COLLATE=C
 
 # The LLVM major the .ll companions are written for: the oldest LLVM whose llvm-as the gates
 # assemble them with (Ubuntu 26.04's LLVM 21 in Linux CI and the Linux gate image). A newer
@@ -280,7 +292,8 @@ llvm_lines() {
   echo "llvm-as: $(llvm_version "$llvm_as")"
 }
 
-# Writes a TOOLCHAIN with base Metal version line $1 and SDK $2, and the fixture lines in file $3.
+# Writes a TOOLCHAIN with base Metal version line $1 and SDK $2, and the fixture lines in file $3,
+# in byte order.
 write_toolchain() {
   echo "# Toolchain that produced the .ll/.air.ll companions (scripts/regen-air-fixtures)."
   echo "metal: $1"
@@ -288,7 +301,7 @@ write_toolchain() {
   llvm_lines
   if [[ -s "$3" ]]; then
     echo "# Fixtures compiled by another Metal toolchain (regen-air-fixtures.sh <name>...)."
-    cat "$3"
+    sort "$3"
   fi
 }
 
@@ -404,6 +417,13 @@ if [[ $check -eq 1 ]]; then
   done
   if [[ "$(grep -E '^(llvm|llvm-dis|llvm-as): ' "$committed")" != "$(llvm_lines)" ]]; then
     echo "stale: TOOLCHAIN" >&2
+    status=1
+  fi
+  # write_toolchain sorts the fixture lines, so another order is a file written by a run that
+  # followed its host's collation instead.
+  recorded="$(grep '^fixture ' "$committed" || true)"
+  if [[ -n "$recorded" && "$recorded" != "$(printf '%s\n' "$recorded" | sort)" ]]; then
+    echo "out of order: TOOLCHAIN fixture lines; rerun this script to rewrite them" >&2
     status=1
   fi
   while IFS= read -r name; do

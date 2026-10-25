@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Resolve the Metal calls the conformance suite's native leg makes, to items of the SDK.
 
 The suite's Metal leg reaches Metal through `objc2-metal`, whose Rust name for a binding is its
@@ -42,6 +41,7 @@ encloses it:
 """
 
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -934,3 +934,11 @@ def _statement_end(text: str, at: int, end: int) -> int:
         elif c == ";" and depth == 0:
             return i
     return end
+
+
+if __name__ == "__main__":
+    sys.exit(
+        f"{Path(__file__).name} is a module of scripts/conformance-coverage, not a command: it "
+        "derives one part of the document and has no output of its own. The generator is\n"
+        "  python3 -I scripts/conformance-coverage/coverage.py"
+    )

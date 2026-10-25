@@ -123,9 +123,14 @@ cleverer reading of the text here.
 import csv
 import json
 import re
+import sys
 from pathlib import Path
 
-import metal_leg
+# The sibling resolver, found beside this file rather than through the importer's sys.path, so
+# this module imports the same under `python3 -I` (which drops the script's own directory).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import metal_leg  # noqa: E402  (after the path above)
 
 #: The generated files holding the SDK's enumerator names and ordinals.
 GENERATED = (
@@ -1116,3 +1121,11 @@ def inventory(
             root, types, effect, ran_cases, items or {}
         ),
     }
+
+
+if __name__ == "__main__":
+    sys.exit(
+        f"{Path(__file__).name} is a module of scripts/conformance-coverage, not a command: it "
+        "derives one part of the document and has no output of its own. The generator is\n"
+        "  python3 -I scripts/conformance-coverage/coverage.py"
+    )

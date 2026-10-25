@@ -133,3 +133,7 @@ class HigherOrderEdges(unittest.TestCase):
             """
         )
         self.assertNotIn("makeIt", leg.calls_function.get("outer", set()))
+
+
+if __name__ == "__main__":
+    unittest.main()
