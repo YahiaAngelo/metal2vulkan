@@ -97,6 +97,7 @@ mod gpu_time;
 mod heap;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod heap_allocated_size;
+mod heap_footprint_formats;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod heap_refused_notice;
 mod heap_sets;

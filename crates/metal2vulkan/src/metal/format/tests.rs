@@ -2943,3 +2943,139 @@ fn every_block_extent_is_the_vulkan_blocks() {
     assert_eq!(block_extent(P::ASTC12x10SRGB), Some([12, 10]));
     assert_eq!(block_extent(P::ASTC4x2LDR), Some([4, 2]));
 }
+
+/// [`footprint`] answers for a format this crate holds **no** image of, and for no other: a
+/// footprint is arithmetic over a descriptor, which the image path owns wherever there is an
+/// image, so the two tables can never answer for one format and drift apart.
+#[test]
+fn footprint_answers_where_no_image_does() {
+    let sampled = usages(&[FormatUsage::SampledImage]);
+    let mut answered = 0;
+    for &pf in PixelFormat::ALL {
+        let Some(shape) = footprint(pf) else {
+            continue;
+        };
+        answered += 1;
+        assert!(
+            matches!(repr(pf), Repr::NotImplemented),
+            "{pf:?}: {shape:?}, but the crate holds an image of it"
+        );
+        // Every candidate of the format is refused, so no device can hold its texture, whatever
+        // the usages asked of it.
+        for (stem, device) in committed_devices() {
+            let refused = vk_format(pf, &sampled, device.profile());
+            assert!(
+                matches!(
+                    refused,
+                    Err(Error::Unsupported(Unsupported {
+                        feature: Feature::Format,
+                        needs: Needs::NotImplemented,
+                        ..
+                    }))
+                ),
+                "{pf:?} on {stem}: {refused:?}"
+            );
+        }
+        if let Footprint::Tiled { bytes, block } = shape {
+            assert!(bytes.is_power_of_two() && bytes <= 16, "{pf:?}: {bytes}");
+            assert_eq!(
+                block,
+                block_extent(pf).unwrap_or([1, 1]),
+                "{pf:?}: the footprint's block is the format's"
+            );
+        }
+    }
+    // The 33 formats of which Metal answers `heapTextureSizeAndAlignWithDescriptor:` and this
+    // crate holds no image: the six ASTC footprints, two plain stragglers, nine one-plane YCbCr
+    // formats, ten padded 10- and 12-bit display formats, four two-plane ones and two packed
+    // ones Metal makes no texture of.
+    assert_eq!(answered, 6 + 2 + 9 + 10 + 4 + 2);
+}
+
+/// Every byte count [`footprint`] states is the bytes of a format the crate **does** hold whose
+/// element is the same size: a padded 12-bit channel takes the 16-bit word a padded 10-bit one
+/// takes, `BGRA4Unorm`'s texel is `ABGR4Unorm`'s, a transfer-function twin's is its base
+/// format's, a 4:2:2 texel is a luma byte and a chroma byte (`RG8Unorm`'s two), and an ASTC block
+/// is 16 bytes at every footprint. So no number in the table is one nobody checked: each is held
+/// to a Vulkan block size the mapping already answers.
+#[test]
+fn footprint_bytes_match_a_held_twin() {
+    use PixelFormat as P;
+    // (the format with no image, the format the crate holds whose element is the same size).
+    const TWINS: &[(PixelFormat, PixelFormat)] = &[
+        (P::ASTC4x2LDR, P::ASTC4x4LDR),
+        (P::ASTC4x2SRGB, P::ASTC4x4SRGB),
+        (P::ASTC4x2HDR, P::ASTC4x4HDR),
+        (P::ASTC8x4LDR, P::ASTC4x4LDR),
+        (P::ASTC8x4SRGB, P::ASTC4x4SRGB),
+        (P::ASTC8x4HDR, P::ASTC4x4HDR),
+        (P::BGRA4Unorm, P::ABGR4Unorm),
+        (P::ARGB8UnormSRGB, P::ARGB8Unorm),
+        (P::R12UnormX4, P::R10UnormX6),
+        (P::R12UnormX4PQ, P::R10UnormX6),
+        (P::R12UnormX4HLG, P::R10UnormX6),
+        (P::R10UnormX6PQ, P::R10UnormX6),
+        (P::R10UnormX6HLG, P::R10UnormX6),
+        (P::RG12UnormX8, P::RG10UnormX12),
+        (P::RGB10A2UnormPQ, P::RGB10A2Unorm),
+        (P::RGB10A2UnormHLG, P::RGB10A2Unorm),
+        (P::BGR10A2UnormSRGB, P::BGR10A2Unorm),
+        (P::BGR10A2UnormPQ, P::BGR10A2Unorm),
+        (P::YCBCR84221P, P::RG8Unorm),
+        (P::YCBCR84221PSRGB, P::RG8Unorm),
+        (P::YCBCR84221PREV, P::RG8Unorm),
+        (P::YCBCR104441P, P::RGB10A2Unorm),
+        (P::YCBCR104441PSRGB, P::RGB10A2Unorm),
+        (P::YCBCR104441PPQ, P::RGB10A2Unorm),
+        (P::YCBCR104441PXR, P::RGB10A2Unorm),
+        (P::YCBCR104441PHLG, P::RGB10A2Unorm),
+        (P::YCBCRA84441P, P::BGRA8Unorm),
+    ];
+    // The bytes of one block of `pf` as the Vulkan format holding its bytes states them.
+    let held = |pf: PixelFormat| {
+        byte_format(pf)
+            .and_then(|f| f.block())
+            .map(|b| b.size)
+            .unwrap_or_else(|| panic!("{pf:?} has a byte format"))
+    };
+    for &(pf, twin) in TWINS {
+        let bytes = match footprint(pf) {
+            Some(Footprint::Tiled { bytes, .. } | Footprint::OnePlane { bytes, .. }) => bytes,
+            other => panic!("{pf:?}: {other:?} states no bytes"),
+        };
+        assert_eq!(bytes, held(twin), "{pf:?} against {twin:?}");
+    }
+    // Every format of the table whose footprint states bytes is in `TWINS`: a new one must name
+    // the format the crate holds that confirms its number.
+    let states_bytes: Vec<PixelFormat> = PixelFormat::ALL
+        .iter()
+        .copied()
+        .filter(|&pf| {
+            matches!(
+                footprint(pf),
+                Some(Footprint::Tiled { .. } | Footprint::OnePlane { .. })
+            )
+        })
+        .collect();
+    assert_eq!(states_bytes.len(), TWINS.len(), "{states_bytes:?}");
+    // The two-plane formats' planes are `RGB10A8_2P_XR10`'s, whose own answer the runtime holds;
+    // the two packed ones state no bytes, because Metal counts none.
+    for &pf in PixelFormat::ALL {
+        match footprint(pf) {
+            Some(Footprint::TwoPlanes) => assert!(
+                matches!(
+                    pf,
+                    P::RGB10A82P | P::RGB10A82PSRGB | P::RGB10A82PPQ | P::RGB10A82PHLG
+                ),
+                "{pf:?}"
+            ),
+            Some(Footprint::NoTexture) => {
+                assert!(
+                    matches!(pf, P::R10UnormPACKED | P::RG10UnormPACKED),
+                    "{pf:?}"
+                )
+            }
+            _ => {}
+        }
+    }
+}

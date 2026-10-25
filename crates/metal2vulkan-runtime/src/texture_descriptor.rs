@@ -65,7 +65,7 @@ use super::metal_level::MetalLevel;
 use super::resource_ids::IdPlacement;
 use super::values::{ResourceOptions, StorageMode};
 use metal2vulkan::metal::format::{
-    is_depth_stencil, padded_words, ycbcr, ycbcr_format, ExtendedRange,
+    footprint, is_depth_stencil, padded_words, ycbcr, ycbcr_format, ExtendedRange, Footprint,
 };
 pub use metal2vulkan::metal::TextureSwizzleChannels;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
@@ -525,6 +525,9 @@ impl TextureDescriptor {
         if let Some(problem) = type_nil {
             return Err(Refused::Nil(problem));
         }
+        if odd_sided_chroma_pairs(pf, [w, h], ty, self.usage) {
+            return Err(Refused::Nil(TextureProblem::ExtentForFormat));
+        }
         if no_texture_alone(pf) && !(over_surface && ycbcr(pf)) {
             return Err(Refused::Nil(TextureProblem::NoTextureOfFormat));
         }
@@ -743,8 +746,15 @@ pub enum TextureProblem {
 
 /// Whether Metal makes no texture of `pf` from a descriptor alone
 /// ([`TextureProblem::NoTextureOfFormat`]).
+///
+/// `R10Unorm_PACKED` and `RG10Unorm_PACKED` are here on the measurement, not on a lack of ours:
+/// Metal takes a descriptor naming either in every texture type and `newTextureWithDescriptor:`
+/// answers **nil** for every one, while the heap size query answers 0 bytes
+/// (`metal::format::Footprint::NoTexture`; an Apple M3 Max under macOS 27.0.1, plain Metal, every
+/// type in both storage modes, the `format-footprints-packed-without-textures` recording).
 pub(super) fn no_texture_alone(pf: PixelFormat) -> bool {
     ycbcr_format(pf).is_some()
+        || matches!(footprint(pf), Some(Footprint::NoTexture))
         || matches!(
             pf,
             PixelFormat::RGBA16FloatXR | PixelFormat::AnyDepth | PixelFormat::AnyStencil
@@ -772,6 +782,49 @@ pub(super) fn type_refused(pf: PixelFormat, ty: TextureType) -> bool {
             Err(Refused::Stops(TextureProblem::TypeForFormat)
                 | Refused::Nil(TextureProblem::TypeForFormat))
         )
+}
+
+/// Whether plain Metal makes no texture of `pf` at `[width, height]` under `usage` because the
+/// sides are not both even: a **one-plane 4:2:2** format (`metal::format::Footprint::OnePlane`
+/// with `pairs`, Apple's three `YCBCR8_422_1P*` formats), where the usage has `ShaderWrite` or
+/// `RenderTarget`, or is `Unknown`, which is every usage. Metal answers nil and the heap size
+/// query 0 bytes; under `ShaderRead` or `PixelFormatView` usage it makes a texture of any sides.
+///
+/// Measured on an Apple M3 Max under macOS 27.0.1, plain Metal with no API validation layer: for
+/// each of the three formats, every pair of 27 sides from 1 to 100 as a 2D texture under nine
+/// usages, 6561 descriptors a format, the size query and `newTextureWithDescriptor:` together —
+/// the query answers 0 bytes **exactly** where the creator answers nil, and that is exactly the
+/// odd-sided descriptors of those usages. A 2D array's and 3D texture's answer alike (8955 more
+/// answers over the same formats). Unlike `GBGR422`'s even-width rule, which Metal's validation
+/// stops ("MTLPixelFormat422 requires even width"), this one is a nil: the process survives.
+fn odd_sided_chroma_pairs(
+    pf: PixelFormat,
+    [width, height]: [u64; 2],
+    ty: TextureType,
+    usage: TextureUsage,
+) -> bool {
+    use metal2vulkan::metal::format::Footprint;
+    if !matches!(footprint(pf), Some(Footprint::OnePlane { pairs: true, .. })) {
+        return false;
+    }
+    let writes = usage.is_empty()
+        || usage.intersects(TextureUsage::SHADER_WRITE | TextureUsage::RENDER_TARGET);
+    let rows = match ty {
+        TextureType::Type1D | TextureType::Type1DArray | TextureType::TextureBuffer => 1,
+        _ => height,
+    };
+    writes && !(width.is_multiple_of(2) && rows.is_multiple_of(2))
+}
+
+/// Whether Metal lays a texture of `pf` out in planes of rows rather than tiles, where this
+/// crate holds no image of the format (`metal::format::Footprint`): Apple's nine one-plane YCbCr
+/// formats and the four `RGB10A8_2P` ones. They take the type rules a two-plane extended-range
+/// format takes, which is what the measurement shows ([`type_for_format`]).
+fn laid_in_planes(pf: PixelFormat) -> bool {
+    matches!(
+        footprint(pf),
+        Some(Footprint::OnePlane { .. } | Footprint::TwoPlanes)
+    )
 }
 
 /// Whether `pf` is a two-plane extended-range format (`RGB10A8_2P_XR10` or its sRGB twin).
@@ -818,10 +871,13 @@ fn type_for_format(pf: PixelFormat, ty: TextureType) -> Result<(), Refused> {
     let any_depth = matches!(pf, P::AnyDepth | P::AnyStencil);
     let refused = if is_depth_stencil(pf) || any_depth {
         one_dimensional || ty == T::Type3D || ty == T::TextureBuffer || (any_depth && multisample)
-    } else if two_planes(pf) {
+    } else if two_planes(pf) || laid_in_planes(pf) {
         // Measured on an Apple M4 (macOS 27.0.1): Metal answers nil for a cube and a cube array
         // (plain and validated alike) and its validation asserts on a multisample
-        // texture; it makes 1D, 2D, 2D array and 3D ones, mipmapped too.
+        // texture; it makes 1D, 2D, 2D array and 3D ones, mipmapped too. Apple's nine one-plane
+        // YCbCr formats and the four `RGB10A8_2P` ones answer alike on an M3 Max under 27.0.1
+        // (the `format-footprints-one-plane-ycbcr` and `-two-plane-ten-bit` recordings: a size
+        // and no texture for a cube and a cube array, a texture for the other six types).
         if matches!(ty, T::Cube | T::CubeArray) {
             return Err(Refused::Nil(TextureProblem::TypeForFormat));
         }

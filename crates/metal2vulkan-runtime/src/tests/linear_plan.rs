@@ -183,12 +183,15 @@ const ASSERTED_M3: [P; 16] = [
 fn buffers_back_exactly_the_formats_metal_answers_for() {
     // Probe 9 took none of the formats Metal makes no texture of alone (the 69 two-plane YCbCr
     // formats and three more): a buffer's texture of one is refused before this rule
-    // (`texture_over`).
-    let unprobed = P::ALL.iter().filter(|&&pf| no_texture_alone(pf)).count();
+    // (`texture_over`). It did take `R10Unorm_PACKED` and `RG10Unorm_PACKED`, which answer 16 for
+    // the alignment and nil for every texture, so they stay in the sweep.
+    let skipped =
+        |pf: P| no_texture_alone(pf) && !matches!(pf, P::R10UnormPACKED | P::RG10UnormPACKED);
+    let unprobed = P::ALL.iter().copied().filter(|&pf| skipped(pf)).count();
     assert_eq!(unprobed, 72);
     for level in MetalLevel::ALL {
         for &pf in P::ALL {
-            if pf == P::Invalid || no_texture_alone(pf) {
+            if pf == P::Invalid || skipped(pf) {
                 continue;
             }
             let asserted = ASSERTED_M3.contains(&pf);

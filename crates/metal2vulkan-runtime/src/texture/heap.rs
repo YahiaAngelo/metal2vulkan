@@ -198,8 +198,8 @@
 
 use super::first_move::FirstMove;
 use super::heap_tiled::{
-    metal_compresses_layout, metal_heap_layout, modelled_size, shadow_tiles, HeapLayout,
-    HeapTiledCopies, TiledTexture, Untiled,
+    footprint_size, metal_compresses_layout, metal_heap_layout, modelled_size, shadow_tiles,
+    HeapLayout, HeapTiledCopies, TiledTexture, Untiled,
 };
 use super::heap_two_planes::{HeapPlaneCopies, TwoPlaneHeapLayout};
 use super::stand_in::StandIn;
@@ -236,7 +236,7 @@ use crate::Device;
 use ash::vk;
 use metal2vulkan::device::{DriverFact, HeapCompressionPolicy};
 use metal2vulkan::error::{Feature, LinearNeed, Unsupported};
-use metal2vulkan::metal::format::{is_depth_stencil, ycbcr_format};
+use metal2vulkan::metal::format::{footprint, is_depth_stencil, ycbcr_format, Footprint};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::{
     Format, FormatFeatureFlags2, ImageAspectFlags, ImageUsageFlags, SampleCountFlags,
@@ -997,10 +997,24 @@ fn four_two_two_heap_answer(layout: &TextureLayout) -> SizeAndAlign {
 ///   validated, every usage and storage mode), and 128 under macOS 27.0.1 (and an M4 alike).
 pub(crate) fn no_texture_alignment(pf: PixelFormat, ty: TextureType, level: MetalLevel) -> u64 {
     use TextureType as T;
-    if ycbcr_format(pf).is_some() {
+    // `R10Unorm_PACKED` and `RG10Unorm_PACKED` answer as a two-plane YCbCr format does: 0 bytes
+    // at 16, and at 128 for a 2D array, in every texture type (an Apple M3 Max under macOS
+    // 27.0.1, plain Metal, both storage modes; the `format-footprints-packed-without-textures`
+    // recording).
+    // `R10Unorm_PACKED` and `RG10Unorm_PACKED` answer as a two-plane YCbCr format does, and so do
+    // the shapes of a one-plane YCbCr format Metal makes no texture of (a cube, a cube array, and
+    // a 4:2:2 one's odd-sided writable descriptor): 0 bytes at 16, and at 128 for a 2D array, in
+    // every texture type (an Apple M3 Max under macOS 27.0.1, plain Metal, both storage modes;
+    // the `format-footprints-packed-without-textures` and `-one-plane-ycbcr` recordings).
+    if ycbcr_format(pf).is_some()
+        || matches!(
+            footprint(pf),
+            Some(Footprint::NoTexture | Footprint::OnePlane { .. })
+        )
+    {
         return if ty == T::Type2DArray { 128 } else { 16 };
     }
-    if two_planes::holds_planes(pf) {
+    if two_planes::holds_planes(pf) || matches!(footprint(pf), Some(Footprint::TwoPlanes)) {
         return TWO_PLANE_ALIGNMENT;
     }
     match ty {
@@ -1059,6 +1073,94 @@ fn two_plane_heap_answer(layout: &TextureLayout) -> SizeAndAlign {
             size: words.next_multiple_of(TWO_PLANE_PAGE) + alpha,
             align: TWO_PLANE_ALIGNMENT,
         },
+    }
+}
+
+/// Metal's answer for a heap texture of `layout` whose bytes Metal lays out in **one** linear
+/// plane of `unit`-byte texels (`metal::format::Footprint::OnePlane`, Apple's one-plane YCbCr
+/// formats): one level's texels packed, no row padding at all; a 1D or buffer texture one row; a
+/// 2D or 1D array's slices each padded up to a multiple of 128; a mipmapped texture its first
+/// level alone and a 3D one its first depth slice (Metal lays the rest out past the answer, as it
+/// does for a two-plane texture). The alignment is 16, 128 for a 2D array.
+///
+/// Measured on an Apple M3 Max under macOS 27.0.1, plain Metal with no API validation layer: for
+/// each of the nine formats, every pair of 35 sides from 1 to 257 as a 2D texture, 20 x 20 of
+/// them in the other seven types, every level count of ten shapes, 1 to 5 slices and 1 to 32
+/// depth slices, and eight usages in both storage modes with `allowGPUOptimizedContents` both
+/// ways — 3589 answers a format, every one this. The plane is unpadded on every one: a 1 x 2
+/// 4:4:4 texture answers 8 bytes, a 10 x 1 4:2:2 one 20, 16 x 17 544 and 64 x 64 8192, and a
+/// two-slice 64 x 64 array 16384 at 128. A cube and a cube array answer 0 bytes at 16 and Metal
+/// makes neither ([`no_texture_alignment`], the rule a two-plane texture takes).
+fn one_plane_heap_answer(layout: &TextureLayout, unit: u64) -> SizeAndAlign {
+    let [width, height, _] = layout.extent.map(u64::from);
+    let one_row = matches!(
+        layout.texture_type,
+        TextureType::Type1D | TextureType::Type1DArray | TextureType::TextureBuffer
+    );
+    let rows = if one_row { 1 } else { height };
+    let slice = width * rows * unit;
+    match layout.texture_type {
+        TextureType::Type2DArray | TextureType::Type1DArray => {
+            let slices = u64::from(layout.layers);
+            let align = match layout.texture_type {
+                TextureType::Type2DArray => TWO_PLANE_SLICE_ALIGNMENT,
+                _ => FOUR_TWO_TWO_ALIGNMENT,
+            };
+            SizeAndAlign {
+                size: slices * slice.next_multiple_of(TWO_PLANE_SLICE_ALIGNMENT),
+                align,
+            }
+        }
+        _ => SizeAndAlign {
+            size: slice,
+            align: FOUR_TWO_TWO_ALIGNMENT,
+        },
+    }
+}
+
+/// Metal's answer for a heap texture of `layout` whose format this crate holds no image of and
+/// whose footprint the format's own structure decides (`metal::format::footprint`): the tiles of
+/// its elements, one linear plane's rows, or two planes'. `usage` and
+/// `allow_gpu_optimized_contents` are the descriptor's, which decide whether Metal keeps a tiled
+/// one losslessly compressed.
+///
+/// `None` where the format's footprint is an image's to decide, where Metal makes no texture of
+/// the format at all (the descriptor's own check answers 0 bytes for that,
+/// [`no_texture_alignment`]), and for a multisample texture of such a format, whose layout is not
+/// measured — a descriptor Metal's validation may stop, so no sample grid of one was asked.
+///
+/// Answering this is not support for the format: `new_texture`, a view, a copy and a shader's
+/// access stay refused `NotImplemented(Format)`, since the crate holds no image to make.
+pub(crate) fn footprint_answer(
+    layout: &TextureLayout,
+    usage: TextureUsage,
+    allow_gpu_optimized_contents: bool,
+) -> Option<SizeAndAlign> {
+    if layout.samples > 1 {
+        return None;
+    }
+    match footprint(layout.pixel_format)? {
+        // A texture buffer is a row of texels, as it is for a format the crate holds
+        // ([`texture_buffer_size_and_align`]); a plane-laid format answers its planes there
+        // instead, which the arms below do (an M3 Max: a 64-texel `RGB10A8_2P` texture buffer
+        // answers 16448, its 1D texture's answer, not 256).
+        Footprint::Tiled { bytes, .. } if layout.texture_type == TextureType::TextureBuffer => {
+            Some(SizeAndAlign {
+                size: u64::from(layout.extent[0]) * u64::from(bytes),
+                align: LINEAR_ALIGNMENT,
+            })
+        }
+        Footprint::Tiled { bytes, block } => footprint_size(
+            layout,
+            usage,
+            allow_gpu_optimized_contents,
+            u64::from(bytes),
+            block.map(u64::from),
+        ),
+        Footprint::OnePlane { bytes, .. } => Some(one_plane_heap_answer(layout, u64::from(bytes))),
+        Footprint::TwoPlanes => Some(two_plane_heap_answer(layout)),
+        Footprint::NoTexture => None,
+        _ => None,
     }
 }
 
@@ -1352,9 +1454,22 @@ impl Device {
     /// multiple of the alignment in any heap with room. A texture buffer takes Metal's answer: its
     /// row of texels, at a multiple of 16 bytes.
     ///
+    /// A format the translator holds **no image** of, whose footprint its own structure decides
+    /// (`metal::format::footprint`: ASTC's 4x2 and 8x4 footprints, `BGRA4Unorm`,
+    /// `ARGB8Unorm_sRGB`, Apple's nine one-plane `YCBCR*` formats, the ten padded 10- and 12-bit
+    /// display formats, the four `RGB10A8_2P` ones and the two packed 10-bit ones), answers
+    /// Metal's size and alignment all the same: the footprint is arithmetic over the descriptor,
+    /// and no image decides it (`footprint_answer`; every answer of the probe and the
+    /// `format-footprints-*` recordings, 193,296 of them on an Apple M3 Max under macOS 27.0.1).
+    /// Every creator of such a texture, and every view, copy and shader access of one, stays
+    /// refused `Unsupported(Format)` needing `NotImplemented`; so does a multisample descriptor
+    /// of one, whose layout is not measured.
+    ///
     /// A descriptor of which plain Metal makes no texture (its creators answer [`Error::Nil`]:
     /// `Unspecialized`, a two-plane extended-range cube or cube array, a format Metal makes no
-    /// texture of from a descriptor alone such as a two-plane YCbCr one) answers 0 bytes at the
+    /// texture of from a descriptor alone such as a two-plane YCbCr one, `R10Unorm_PACKED` and
+    /// `RG10Unorm_PACKED`, a one-plane 4:2:2 format's odd-sided writable or renderable
+    /// descriptor) answers 0 bytes at the
     /// alignment Metal's query answers for it (`no_texture_alignment`), once every rule Metal stops
     /// passed. A descriptor of `Memoryless` storage, which no heap holds, answers Metal's model
     /// with the texture uncompressed, as plain Metal answers it (`memoryless_answer`); every other
@@ -1394,6 +1509,17 @@ impl Device {
             }
             layout => layout?,
         };
+        // A format this crate holds no image of whose footprint its own structure decides: the
+        // query is arithmetic and needs no image, so it answers Metal's number while every
+        // creator stays refused `NotImplemented(Format)` ([`footprint_answer`]).
+        if let Some(answer) = footprint_answer(
+            &layout,
+            effective_usage(descriptor.usage),
+            descriptor.allow_gpu_optimized_contents
+                && descriptor.resource_options.storage_mode()? != StorageMode::Memoryless,
+        ) {
+            return Ok(answer);
+        }
         if layout.texture_type == TextureType::TextureBuffer {
             return texture_buffer_size_and_align(&layout);
         }
@@ -1453,11 +1579,16 @@ impl Device {
             }
             layout => layout?,
         };
+        let optimized = descriptor.allow_gpu_optimized_contents
+            && descriptor.resource_options.storage_mode()? != StorageMode::Memoryless;
+        if let Some(answer) =
+            footprint_answer(&layout, effective_usage(descriptor.usage), optimized)
+        {
+            return Ok(Some(answer));
+        }
         if layout.texture_type == TextureType::TextureBuffer {
             return texture_buffer_size_and_align(&layout).map(Some);
         }
-        let optimized = descriptor.allow_gpu_optimized_contents
-            && descriptor.resource_options.storage_mode()? != StorageMode::Memoryless;
         self.modelled_answer(CALL, descriptor, &layout, optimized)
     }
 

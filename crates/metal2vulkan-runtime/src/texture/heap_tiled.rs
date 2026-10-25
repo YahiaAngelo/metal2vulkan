@@ -1189,6 +1189,52 @@ fn metal_element(pf: PixelFormat) -> Option<u64> {
     .filter(|&unit| largest_tile(unit).is_some())
 }
 
+/// Metal's answer for a heap texture of `layout` whose elements are `unit` bytes each covering
+/// `block` texels, where no image of this crate holds those elements
+/// (`metal::format::footprint`): the tiles of the module's model, and a plain format's
+/// lossless-compression metadata where `usage` and `allow_gpu_optimized_contents` say Metal keeps
+/// the texture compressed, as for a format the crate does hold. A block-compressed format's
+/// footprint is its blocks' tiles, which Metal never compresses.
+///
+/// This counts bytes and makes nothing: the texture itself stays refused
+/// `NotImplemented(Format)` (`texture/heap.rs`), because the crate holds no image of the format.
+/// A block's placement is `Halved`, which every ASTC footprint measured takes and under which
+/// each level's allocation is the same either way (the module docs).
+pub(crate) fn footprint_size(
+    layout: &TextureLayout,
+    usage: TextureUsage,
+    allow_gpu_optimized_contents: bool,
+    unit: u64,
+    block: [u64; 2],
+) -> Option<SizeAndAlign> {
+    let compressed_block = block != [1, 1];
+    let elements = match compressed_block {
+        true => Elements::Blocks {
+            block,
+            placement: BlockPlacement::Halved,
+            gpu_rows: GpuRows::AsCpu,
+        },
+        false => Elements::Texels,
+    };
+    let tiled = TiledLayout::of(
+        unit,
+        elements,
+        layout.texture_type,
+        layout.extent.map(u64::from),
+        layout.levels,
+        u64::from(layout.layers),
+    )?;
+    // Metal keeps no block-compressed texture losslessly compressed, and a plain one by the rule
+    // every plain format shares.
+    if !compressed_block && metal_compresses_layout(layout, usage, allow_gpu_optimized_contents) {
+        return lossless_answer(&tiled);
+    }
+    Some(SizeAndAlign {
+        size: tiled.size,
+        align: tiled.align,
+    })
+}
+
 /// Metal's answer for a heap texture of `layout` at the Metal level `level` (the module docs),
 /// `usage` and `allow_gpu_optimized_contents` the descriptor's: [`metal_heap_layout`]'s answer,
 /// which no image format decides (the format decides only how a heap over host pages holds the

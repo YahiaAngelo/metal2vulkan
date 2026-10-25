@@ -412,6 +412,15 @@ driver's. Each is open work.
   (`RuntimeGap::DecodedHeapTexture`) and a view of another decode (its HDR form) are refused. The
   heap size query answers one: its footprint is Metal's blocks, which no image of the device
   decides.
+- **The 33 formats this crate holds no image of** (`metal::format::footprint`: ASTC's 4x2 and 8x4
+  footprints, `BGRA4Unorm`, `ARGB8Unorm_sRGB`, Apple's nine one-plane `YCBCR*` formats, the ten
+  padded 10- and 12-bit display formats, the four `RGB10A8_2P` ones and the two packed 10-bit
+  ones). `heapTextureSizeAndAlignWithDescriptor:` answers Metal's exact size and alignment for
+  every one, because the footprint is arithmetic over the descriptor and no image decides it. A
+  texture, a view, a copy, a read and a write of one stay refused `NotImplemented(Format)`: no
+  Vulkan format holds the bytes (an ASTC 4x2 or 8x4 block) or their reads and writes are not
+  measured yet. A **multisample** descriptor of one is refused there too, its layout unmeasured:
+  Metal's validation may stop such a descriptor, so none was asked.
 - **PVRTC textures on a device without PVRTC.** One without a decoded twin (a sparse heap's, or a
   heap's over the caller's host pages or laid out apart from its bytes) holds its blocks for copies
   alone: a command that reads it is refused.

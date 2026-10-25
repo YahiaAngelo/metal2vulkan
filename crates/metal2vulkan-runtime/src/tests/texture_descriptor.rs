@@ -678,8 +678,31 @@ fn texture_types_follow_probe_5s_verdicts_per_format() {
     let rows: [(&str, &[&str]); 6] = [
         // ASTC's 4x2 and 8x4 formats too, measured beside `ASTC_4x4_LDR`.
         ("aaooooo", &["ASTC_", "BC"]),
-        // Metal answers nil for a cube and a cube array.
-        ("ooooaao", &["RGB10A8_2P_XR10", "RGB10A8_2P_XR10_sRGB"]),
+        // Metal answers nil for a cube and a cube array: the two-plane extended-range formats
+        // (probe 5), and every format it lays out in planes — Apple's nine one-plane YCbCr
+        // formats and the four `RGB10A8_2P` ones, measured on an Apple M3 Max under macOS 27.0.1
+        // (the `format-footprints-one-plane-ycbcr` and `-two-plane-ten-bit` recordings: a size
+        // and no texture for a cube and a cube array, a texture for the other six types).
+        (
+            "ooooaao",
+            &[
+                "RGB10A8_2P_XR10",
+                "RGB10A8_2P_XR10_sRGB",
+                "YCBCR8_422_1P",
+                "YCBCR8_422_1P_sRGB",
+                "YCBCR8_422_1P_REV",
+                "YCBCR10_444_1P",
+                "YCBCR10_444_1P_sRGB",
+                "YCBCR10_444_1P_PQ",
+                "YCBCR10_444_1P_XR",
+                "YCBCR10_444_1P_HLG",
+                "YCBCRA8_444_1P",
+                "RGB10A8_2P",
+                "RGB10A8_2P_sRGB",
+                "RGB10A8_2P_PQ",
+                "RGB10A8_2P_HLG",
+            ],
+        ),
         ("aaoaaaa", &["GBGR422", "BGRG422"]),
         (
             "aaooooa",
@@ -707,7 +730,10 @@ fn texture_types_follow_probe_5s_verdicts_per_format() {
         }
         // Probe 5 took no format Metal makes no texture of from a descriptor alone, which
         // answers nil for every type here, but `AnyDepth` and `AnyStencil`, whose 1D, 1D array
-        // and 3D textures Metal stops.
+        // and 3D textures Metal stops. `R10Unorm_PACKED` and `RG10Unorm_PACKED` are here too:
+        // Metal takes a descriptor naming either in every type and makes a texture of neither
+        // (an M3 Max under macOS 27.0.1, the `format-footprints-packed-without-textures`
+        // recording).
         if no_texture_alone(pf) {
             let any_depth = matches!(pf, PixelFormat::AnyDepth | PixelFormat::AnyStencil);
             for ty in TYPES {

@@ -35,8 +35,10 @@ use crate::pipeline::sym::SampledType;
 use crate::vk;
 
 pub(crate) mod extended_srgb;
+mod footprint;
 pub(crate) mod padded_srgb;
 mod word;
+pub use footprint::{footprint, Footprint};
 pub use word::{WordAttachment, WordField};
 
 /// How a Metal pixel format is represented on a device, for a set of usages.
