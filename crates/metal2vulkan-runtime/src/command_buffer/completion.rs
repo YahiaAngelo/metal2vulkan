@@ -52,7 +52,12 @@
 //!   at about a quarter of Metal's rate); its wait for any of several fences has the same flaw. A
 //!   wait for one timeline or one fence counts its one signal under a lock, and loses none. The
 //!   value is read again after every wait, so the waiter relies on no wake for the value, only for
-//!   its timing.
+//!   its timing. Counted by which object the wait named (`WorkCounts::fence_waits`,
+//!   `WorkCounts::timeline_waits`), and by whether the batch was watched while this waiter was
+//!   parked, so the wait for it began only after a notify and a thread wake
+//!   (`WorkCounts::completion_arms` and `WorkCounts::completion_arms_after_a_wake`); a read that
+//!   ran past the wait's value, and so costs one wait more, by
+//!   `WorkCounts::completion_reads_ran_ahead`.
 //! - **Finished by the waiter that saw it, one turn at a time** ([`turns`]). A waiter whose wait
 //!   returned with its queue's value reached, or with a failure, makes the turn itself where none
 //!   is under way: it takes every queue's batches their waiters saw reached (or the failure) and
@@ -669,6 +674,10 @@ fn wait_for_queue(watch: &Watch, queue: usize) {
     // The fence lists of the turns it makes.
     let mut lists = FenceLists::default();
     loop {
+        // Whether the look for a batch to wait for slept first: the batch was watched while this
+        // waiter was parked, so the wait for it began only after a notify and a thread wake, which
+        // sit between the submission and the wait (`WorkCounts::completion_arms_after_a_wake`).
+        let mut slept = false;
         // The front to wait for, and the device, reached through it (held only for the wait); or
         // none, for a turn: its queue holds batches it reached that no turn took yet (a failed
         // command buffer's end, watched at a value its queue reached), or a waiter failed, and no
@@ -700,6 +709,7 @@ fn wait_for_queue(watch: &Watch, queue: usize) {
                     break Some(armed);
                 }
                 pending = wait(watch, pending, queue);
+                slept = true;
             }
         };
         let Some((front, device)) = armed else {
@@ -708,6 +718,7 @@ fn wait_for_queue(watch: &Watch, queue: usize) {
             }
             continue;
         };
+        device.shared().counts.completion_armed(slept);
         // The wait is a section of the exit guard; once the process is exiting the waiters end,
         // and what is pending stays pending, as Metal's does.
         let polled = match exit_guard::enter() {
@@ -801,6 +812,7 @@ fn poll(device: &Device, queue: usize, front: Front) -> Result<u64, CommandBuffe
             // SAFETY: the fence is the device's, in a submission made and not yet reset (its
             // batch is pending, and is not taken while this waits: `take_pending`), live while
             // the device is (held here).
+            shared.counts.fence_wait();
             let waited =
                 unsafe { raw.wait_for_fences(&[fence], true, WAIT_SLICE.as_nanos() as u64) };
             exit_guard::called(Call::WaitForFences);
@@ -841,7 +853,12 @@ fn poll(device: &Device, queue: usize, front: Front) -> Result<u64, CommandBuffe
         slot.completed_value(),
         waited.then_some(front.value),
         read,
-        reaches,
+        |value| {
+            // The read ran past what this wait returned for: one more wait, to put the host
+            // operation after a signal ([`seen`]).
+            shared.counts.completion_read_ran_ahead();
+            reaches(value)
+        },
     )?;
     slot.completed(value);
     // Freed memory that waits for the batches in flight goes once they completed, on a handler

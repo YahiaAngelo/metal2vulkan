@@ -3135,7 +3135,8 @@ impl CommandBuffer {
         };
         self.settle_commit();
         self.0.waits_for_completion();
-        self.0.gate.wait()?;
+        let waited = self.0.gate.wait()?;
+        self.0.device.shared().counts.gate_waited(waited);
         self.trailed(None)
             .map_err(|_| DeadlockCause::Exiting.into())
     }
@@ -3155,11 +3156,12 @@ impl CommandBuffer {
         };
         self.settle_commit();
         self.0.waits_for_completion();
-        match deadline {
+        let waited = match deadline {
             Some(deadline) => self.0.gate.wait_until(deadline)?,
             // Only an exiting process ends a wait with no deadline: that wait's `TimedOut`.
             None => self.0.gate.wait().map_err(|_| TimedOut)?,
-        }
+        };
+        self.0.device.shared().counts.gate_waited(waited);
         self.trailed(deadline).map_err(|_| TimedOut)
     }
 
@@ -3172,7 +3174,10 @@ impl CommandBuffer {
             return Ok(());
         }
         let mark = self.state().trail_mark;
-        self.0.device.shared().trails.wait_below(mark, deadline)
+        let shared = self.0.device.shared();
+        let waited = shared.trails.wait_below(mark, deadline)?;
+        shared.counts.trail_waited(waited);
+        Ok(())
     }
 
     /// What a wait for completion answers on this thread.
@@ -4409,7 +4414,10 @@ impl CommandBufferShared {
                 descriptors.release();
             }
         }
-        self.gate.finish();
+        // The gate notifies its waiters only where it opened here, which this transition's own
+        // hold holds it from: the notify for them is that hold's, as it goes (`gate.rs`).
+        let notified = self.gate.finish();
+        self.device.shared().counts.command_buffer_wake(notified);
         // Its pool's primary begun ahead, where no command buffer took the pool since
         // (`spares.rs`), and no thread waits for the gate, which opens only once this
         // transition's hold goes: a waiter's return is never delayed by the begin, but for one

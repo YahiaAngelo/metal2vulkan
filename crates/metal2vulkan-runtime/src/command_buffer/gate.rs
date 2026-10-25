@@ -24,6 +24,13 @@
 //!   handler, an event the command buffer signals, or its status) may drop its last handles while
 //!   the runtime's thread still holds the command buffer; the device then goes on that thread.
 //!   An exit meanwhile waits for that teardown, or skips it once begun (`exit_guard`).
+//! - **Notified only where it opened.** A notify is a system call, and one made while a [`Hold`]
+//!   is alive wakes every waiting thread to a gate it must find shut and sleep on again. The
+//!   thread that finishes a command buffer holds one over the whole transition
+//!   (`Transition::run`), so the finish itself never opens the gate: it sets the flag and leaves
+//!   the notify to that hold's going, one wake of the program's thread where there were two.
+//!   Counted: `WorkCounts::gate_waits`, `WorkCounts::gate_waits_slept` and
+//!   `WorkCounts::gate_wakes_found_shut`, which `tests::gate` holds to none.
 //! - **Exit.** Once the process is exiting, the threads that would open a gate end, so a wait
 //!   answers at once, and one already blocked within `exit_guard::WAKE`.
 
@@ -37,6 +44,19 @@ use std::time::Instant;
 /// A wait that cannot end: the process is exiting.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Exiting;
+
+/// What one wait for a gate did, for the counters its caller keeps
+/// (`WorkCounts::gate_waits_slept` and `WorkCounts::gate_wakes_found_shut`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Waited {
+    /// The gate was shut when the wait arrived, so it slept at least once.
+    pub(crate) slept: bool,
+    /// Notifies it was woken by that found the gate still shut, and slept again: work the thread
+    /// that opens the gate did between its notify and the gate opening. A sleep that ran out its
+    /// slice is not one ([`exit_guard::WAKE`] is 50 ms, far past any completion), so each of these
+    /// is a notify made while the gate could not yet open.
+    pub(crate) woke_shut: u64,
+}
 
 impl From<Exiting> for DeadlockCause {
     fn from(Exiting: Exiting) -> DeadlockCause {
@@ -74,10 +94,22 @@ impl GateState {
 }
 
 impl Gate {
-    /// The command buffer finished; the gate opens once no [`Hold`] is left.
-    pub(crate) fn finish(&self) {
-        lock(&self.state).finished = true;
-        self.changed.notify_all();
+    /// The command buffer finished; the gate opens once no [`Hold`] is left. Whether it notified
+    /// the waiters, which it does only where the gate opened here: a notify is a system call, and
+    /// one made while a [`Hold`] is still alive wakes every waiting thread to a gate it must find
+    /// shut and sleep on again. The thread that finishes a command buffer holds one over the whole
+    /// transition (`Transition::run`), so that notify was always such a wake, and the
+    /// [`leave`](Self::leave) of its hold notifies for it a moment later.
+    pub(crate) fn finish(&self) -> bool {
+        let opened = {
+            let mut state = lock(&self.state);
+            state.finished = true;
+            state.open()
+        };
+        if opened {
+            self.changed.notify_all();
+        }
+        opened
     }
 
     /// Whether the waiters may return.
@@ -92,52 +124,65 @@ impl Gate {
         lock(&self.state).waiting > 0
     }
 
-    /// Block until the gate opens. `Err` once the process is exiting and it is not open: the
-    /// runtime's threads that would open it end (`exit_guard`).
-    pub(crate) fn wait(&self) -> Result<(), Exiting> {
+    /// Block until the gate opens, answering what the wait did ([`Waited`]). `Err` once the
+    /// process is exiting and it is not open: the runtime's threads that would open it end
+    /// (`exit_guard`).
+    pub(crate) fn wait(&self) -> Result<Waited, Exiting> {
         self.wait_unless(exit_guard::closed)
     }
 
     /// [`Gate::wait`], with `exiting` saying whether the process is exiting (the exit guard's
     /// [`closed`](exit_guard::closed), or a test's own).
-    pub(crate) fn wait_unless(&self, exiting: impl Fn() -> bool) -> Result<(), Exiting> {
+    pub(crate) fn wait_unless(&self, exiting: impl Fn() -> bool) -> Result<Waited, Exiting> {
         let mut state = lock(&self.state);
         state.waiting += 1;
+        let mut did = Waited::default();
+        // Whether the sleep before this look ended at a notify rather than at its slice.
+        let mut notified = false;
         let waited = loop {
             if state.open() {
-                break Ok(());
+                break Ok(did);
             }
+            did.woke_shut += u64::from(notified);
             if exiting() {
                 break Err(Exiting);
             }
-            state = self
+            did.slept = true;
+            let (woke, how) = self
                 .changed
                 .wait_timeout(state, exit_guard::WAKE)
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .0;
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state = woke;
+            notified = !how.timed_out();
         };
         state.waiting -= 1;
         waited
     }
 
-    /// Block until the gate opens, or until `deadline`; at once once the process is exiting, as
-    /// [`Gate::wait`].
-    pub(crate) fn wait_until(&self, deadline: Instant) -> Result<(), TimedOut> {
+    /// Block until the gate opens, or until `deadline`, answering what the wait did ([`Waited`]);
+    /// at once once the process is exiting, as [`Gate::wait`].
+    pub(crate) fn wait_until(&self, deadline: Instant) -> Result<Waited, TimedOut> {
         let mut state = lock(&self.state);
         state.waiting += 1;
+        let mut did = Waited::default();
+        // Whether the sleep before this look ended at a notify rather than at its slice.
+        let mut notified = false;
         let waited = loop {
             if state.open() {
-                break Ok(());
+                break Ok(did);
             }
+            did.woke_shut += u64::from(notified);
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() || exit_guard::closed() {
                 break Err(TimedOut);
             }
-            state = self
+            did.slept = true;
+            let (woke, how) = self
                 .changed
                 .wait_timeout(state, left.min(exit_guard::WAKE))
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .0;
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state = woke;
+            notified = !how.timed_out();
         };
         state.waiting -= 1;
         waited

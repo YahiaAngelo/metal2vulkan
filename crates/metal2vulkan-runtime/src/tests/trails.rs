@@ -16,7 +16,7 @@ fn a_wait_waits_for_the_trails_opened_before_its_mark_alone() {
     assert_eq!(trails.mark(), 0);
     assert_eq!(
         trails.wait_below(0, Some(Instant::now())),
-        Ok(()),
+        Ok(false),
         "a mark of 0 waits for none"
     );
     let before = trails.open();
@@ -32,7 +32,7 @@ fn a_wait_waits_for_the_trails_opened_before_its_mark_alone() {
     drop(before);
     assert_eq!(
         trails.wait_below(mark, Some(Instant::now())),
-        Ok(()),
+        Ok(false),
         "the trail opened after the mark does not"
     );
     drop(after);
@@ -55,5 +55,9 @@ fn a_blocked_wait_returns_as_the_trail_closes() {
     };
     waiting.recv_timeout(WAIT).unwrap();
     drop(trail);
-    assert_eq!(waiter.join().unwrap(), Ok(()));
+    assert_eq!(
+        waiter.join().unwrap(),
+        Ok(true),
+        "the wait that blocked on the trail says it did"
+    );
 }

@@ -33,7 +33,16 @@ pub(crate) struct Counters {
     spare_command_pools_reset: AtomicU64,
     live_tables_uploaded: AtomicU64,
     timeline_waits: AtomicU64,
+    fence_waits: AtomicU64,
     missed_completion_wakes: AtomicU64,
+    completion_arms: AtomicU64,
+    completion_arms_after_a_wake: AtomicU64,
+    completion_reads_ran_ahead: AtomicU64,
+    gate_waits: AtomicU64,
+    gate_waits_slept: AtomicU64,
+    gate_wakes_found_shut: AtomicU64,
+    trail_waits: AtomicU64,
+    trail_waits_blocked: AtomicU64,
     completed_where_seen: AtomicU64,
     scheduled_where_submitted: AtomicU64,
     timestamp_slots_taken: AtomicU64,
@@ -632,10 +641,52 @@ impl Counters {
         self.timeline_waits.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// A queue's waiter waited for the fence its queue's front batch signals, instead of its
+    /// timeline (`command_buffer/fences.rs`).
+    pub(crate) fn fence_wait(&self) {
+        self.fence_waits.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// A completion waiter's wait ran out its slice although what it waited for was signaled when
     /// the waiter looked again (`command_buffer/completion.rs`).
     pub(crate) fn missed_completion_wake(&self) {
         self.missed_completion_wakes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A queue's waiter armed for its queue's front batch, having slept on its condition variable
+    /// first where `woken` (`command_buffer/completion.rs`).
+    pub(crate) fn completion_armed(&self, woken: bool) {
+        self.completion_arms.fetch_add(1, Ordering::Relaxed);
+        if woken {
+            (self.completion_arms_after_a_wake).fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// A completion waiter's read of its queue's timeline showed a value past the one its wait
+    /// returned for, so it waited for that value too (`command_buffer/completion.rs`).
+    pub(crate) fn completion_read_ran_ahead(&self) {
+        (self.completion_reads_ran_ahead).fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A wait for a command buffer's gate ended, having done `waited`
+    /// (`CommandBuffer::wait_until_completed`).
+    pub(crate) fn gate_waited(&self, waited: super::command_buffer::gate::Waited) {
+        self.gate_waits.fetch_add(1, Ordering::Relaxed);
+        if waited.slept {
+            self.gate_waits_slept.fetch_add(1, Ordering::Relaxed);
+        }
+        if waited.woke_shut > 0 {
+            (self.gate_wakes_found_shut).fetch_add(waited.woke_shut, Ordering::Relaxed);
+        }
+    }
+
+    /// A wait for a command buffer's gate went on to wait for the trails below its mark
+    /// (`CommandBuffer::wait_until_completed`), `blocked` where one was open when it looked.
+    pub(crate) fn trail_waited(&self, blocked: bool) {
+        self.trail_waits.fetch_add(1, Ordering::Relaxed);
+        if blocked {
+            self.trail_waits_blocked.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// A command buffer's transition to `Completed` or `Error` ran on the queue waiter that saw
@@ -2451,12 +2502,49 @@ pub struct WorkCounts {
     /// The queues' waiters' waits for a timeline's value, where the batch one waited for had
     /// no fence.
     pub timeline_waits: u64,
+    /// The queues' waiters' waits for the fence their queue's front batch signals, where it has
+    /// one (`command_buffer/fences.rs`): a batch that ends a command buffer on a driver that
+    /// reads the command buffer's objects after its signal, or one of a queue whose failures are
+    /// relayed. Such a wait returns later than the timeline's value by whatever the driver does
+    /// between the two: MoltenVK signals the fence from the last of its Metal command buffer's
+    /// completed handlers, so the host learns of the completion only once those ran.
+    pub fence_waits: u64,
     /// The completion waiters' waits that ran out their 100 ms slice although the fence or the
     /// timeline value they waited for was signaled when the waiter looked again: a wake the wait
     /// missed, which finishes its batch a slice late (MoltenVK 1.4.1's wait for any of several
     /// timelines lost them; `command_buffer/completion.rs`), or a signal in the slice's last
     /// moment.
     pub missed_completion_wakes: u64,
+    /// The queue waiters' arms for their queue's front batch: one per batch waited for, and one
+    /// more wherever a wait ran out its slice and the waiter armed for the same batch again.
+    pub completion_arms: u64,
+    /// Of those, the arms the waiter slept on its condition variable before: the batch was watched
+    /// while its queue's waiter was parked, so a notify and a thread wake sit between the
+    /// submission and the start of the wait for its completion, inside the blocked time of a
+    /// thread that committed and then waited. An arm that slept none found the batch already
+    /// watched.
+    pub completion_arms_after_a_wake: u64,
+    /// The queue waiters' reads of their timeline that showed a value past the one their wait
+    /// returned for, each costing one more `vkWaitSemaphores` before the value is published
+    /// (`command_buffer/completion.rs`): a later batch that completed meanwhile, or the front's
+    /// after a wait that ran out.
+    pub completion_reads_ran_ahead: u64,
+    /// Waits for a command buffer's gate that ended (`CommandBuffer::wait_until_completed` and
+    /// its timed form), however they ended.
+    pub gate_waits: u64,
+    /// Of those, the waits that found the gate shut and slept at least once. The rest found the
+    /// command buffer already finished and every runtime thread's hold of it gone.
+    pub gate_waits_slept: u64,
+    /// Notifies of a gate that woke a waiting thread to a gate still shut, which slept on it
+    /// again: work the thread that opens the gate did between its notify and the gate opening.
+    /// Held to none by `tests::gate`, which is why a gate notifies only where it opened.
+    pub gate_wakes_found_shut: u64,
+    /// Waits for the trails below a completed command buffer's mark, which its waiters make once
+    /// its gate opened (`trails.rs`): one per wait that saw the gate open.
+    pub trail_waits: u64,
+    /// Of those, the waits that found a trail still open below the mark and blocked on it: what a
+    /// runtime thread held to make what the command buffer's work waited for had not gone yet.
+    pub trail_waits_blocked: u64,
     /// Command buffers whose transition to `Completed` or `Error` ran on the queue waiter that
     /// saw their work complete, with no handler thread woken: those with no completed handler, no
     /// pass that captured its tiles' reach, and no earlier transition of their queue that runs
@@ -4056,7 +4144,18 @@ impl Device {
             spare_command_pools_reset: counters.spare_command_pools_reset.load(Ordering::Relaxed),
             live_tables_uploaded: counters.live_tables_uploaded.load(Ordering::Relaxed),
             timeline_waits: counters.timeline_waits.load(Ordering::Relaxed),
+            fence_waits: counters.fence_waits.load(Ordering::Relaxed),
             missed_completion_wakes: counters.missed_completion_wakes.load(Ordering::Relaxed),
+            completion_arms: counters.completion_arms.load(Ordering::Relaxed),
+            completion_arms_after_a_wake: (counters.completion_arms_after_a_wake)
+                .load(Ordering::Relaxed),
+            completion_reads_ran_ahead: (counters.completion_reads_ran_ahead)
+                .load(Ordering::Relaxed),
+            gate_waits: counters.gate_waits.load(Ordering::Relaxed),
+            gate_waits_slept: counters.gate_waits_slept.load(Ordering::Relaxed),
+            gate_wakes_found_shut: counters.gate_wakes_found_shut.load(Ordering::Relaxed),
+            trail_waits: counters.trail_waits.load(Ordering::Relaxed),
+            trail_waits_blocked: counters.trail_waits_blocked.load(Ordering::Relaxed),
             completed_where_seen: counters.completed_where_seen.load(Ordering::Relaxed),
             scheduled_where_submitted: (counters.scheduled_where_submitted).load(Ordering::Relaxed),
             timestamp_slots_taken: counters.timestamp_slots_taken.load(Ordering::Relaxed),

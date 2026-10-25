@@ -1,7 +1,7 @@
 //! `command_buffer/gate.rs`: a command buffer's waiters return once it finished and every
 //! runtime thread let go of it, and a hold lets go of its value before the gate opens.
 
-use crate::command_buffer::gate::{Exiting, Gate, Hold};
+use crate::command_buffer::gate::{Exiting, Gate, Hold, Waited};
 use crate::error::{DeadlockCause, Error, TimedOut};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -51,24 +51,34 @@ fn the_gate_opens_once_finished_and_every_hold_is_gone() {
     let second = Hold::new(&value, &gate);
     assert!(first.same(&second));
     assert_eq!(**first, 7);
-    gate.finish();
+    assert!(
+        !gate.finish(),
+        "a finish behind a hold notified the waiters"
+    );
     assert!(!gate.is_open());
     assert_eq!(gate.wait_until(past), Err(TimedOut));
     drop(first);
     assert!(!gate.is_open());
     drop(second);
     assert!(gate.is_open());
-    assert_eq!(gate.wait_until(past), Ok(()));
-    assert_eq!(gate.wait(), Ok(()));
+    assert_eq!(gate.wait_until(past), Ok(Waited::default()));
+    assert_eq!(gate.wait(), Ok(Waited::default()));
 
     let other = Arc::new(7_u32);
     let gate = Arc::new(Gate::default());
     let held = Hold::new(&value, &gate);
     assert!(!held.same(&Hold::new(&other, &gate)));
-    gate.finish();
+    assert!(!gate.finish());
     assert!(!gate.is_open());
     drop(held);
     assert!(gate.is_open());
+
+    // A finish with no hold alive opens the gate here, and notifies for it.
+    let gate = Arc::new(Gate::default());
+    assert!(
+        gate.finish(),
+        "a finish that opened the gate spared its notify"
+    );
 }
 
 /// The last reference a runtime thread holds goes before the gate opens: what the program's
@@ -79,7 +89,7 @@ fn a_hold_lets_go_of_its_value_before_the_gate_opens() {
     let held = Hold::new(&value, &gate);
     // The program dropped its own reference; the runtime's is the last.
     drop(value);
-    gate.finish();
+    assert!(!gate.finish());
     assert!(!gone.load(Ordering::SeqCst));
     drop(held);
     assert!(gone.load(Ordering::SeqCst));
@@ -98,11 +108,23 @@ fn a_waiter_returns_after_the_last_hold_is_gone() {
         let gate = Arc::clone(&gate);
         let gone = Arc::clone(&gone);
         std::thread::spawn(move || {
-            assert_eq!(gate.wait(), Ok(()));
+            let did = gate.wait().expect("the gate opened");
+            assert!(did.slept, "the waiter did not block on the shut gate");
+            // The gate notifies only where it opened, so no wake of this thread found it shut.
+            assert_eq!(
+                did.woke_shut, 0,
+                "the waiter was woken to a gate it had to find shut"
+            );
             gone.load(Ordering::SeqCst)
         })
     };
-    gate.finish();
+    // The waiter blocks before the finish, so the finish's notify, were one made, would reach it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !gate.awaited() {
+        assert!(Instant::now() < deadline, "no waiter blocked");
+        std::thread::yield_now();
+    }
+    assert!(!gate.finish(), "a finish behind a hold notified the waiter");
     assert_eq!(
         gate.wait_until(Instant::now() + Duration::from_millis(50)),
         Err(TimedOut)
@@ -139,8 +161,8 @@ fn a_wait_once_the_process_is_exiting_is_refused_for_that_cause() {
     let refusal = Error::from(answer.unwrap_err());
     assert_eq!(refusal, Error::WaitWouldDeadlock(DeadlockCause::Exiting));
     // An open gate answers whatever the exit.
-    gate.finish();
-    assert_eq!(gate.wait_unless(|| true), Ok(()));
+    assert!(gate.finish());
+    assert_eq!(gate.wait_unless(|| true), Ok(Waited::default()));
 }
 
 /// A gate is awaited only while a thread is blocked in `wait` or `wait_until`, whichever way the
@@ -169,7 +191,7 @@ fn a_gate_is_awaited_while_a_thread_is_blocked_on_it() {
         assert!(Instant::now() < deadline, "no waiter blocked");
         std::thread::yield_now();
     }
-    gate.finish();
+    assert!(!gate.finish());
     assert!(
         gate.awaited(),
         "the gate is not open while the hold is alive"
@@ -179,6 +201,6 @@ fn a_gate_is_awaited_while_a_thread_is_blocked_on_it() {
         assert!(waiter.join().unwrap());
     }
     assert!(!gate.awaited());
-    assert_eq!(gate.wait(), Ok(()));
+    assert_eq!(gate.wait(), Ok(Waited::default()));
     assert!(!gate.awaited(), "a wait of an open gate is not counted");
 }

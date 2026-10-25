@@ -304,10 +304,9 @@ mod tests {
             1,
             "the reaper let go of what was given back with its trail open"
         );
-        assert_eq!(
-            trails.wait_below(trails.mark(), Some(Instant::now() + WAIT)),
-            Ok(())
-        );
+        assert!(trails
+            .wait_below(trails.mark(), Some(Instant::now() + WAIT))
+            .is_ok());
         assert_eq!(trails.open_now(), 0);
         reaper.stop();
     }

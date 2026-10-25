@@ -91,11 +91,15 @@ impl Trails {
 
     /// Wait until no trail numbered below `mark` is open, at most until `deadline` where one is
     /// given; `Err` at the deadline, and once the process is exiting where a trail was open.
-    pub(crate) fn wait_below(&self, mark: u64, deadline: Option<Instant>) -> Result<(), Ended> {
+    /// `Ok(true)` where it waited at all: a trail below `mark` was open when it looked
+    /// (`WorkCounts::trail_waits`).
+    pub(crate) fn wait_below(&self, mark: u64, deadline: Option<Instant>) -> Result<bool, Ended> {
         let mut open = lock(&self.open);
+        let mut waited = false;
         #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
         let mut counted = false;
         while open.numbers.first().is_some_and(|&first| first < mark) {
+            waited = true;
             #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
             if !counted {
                 counted = true;
@@ -120,7 +124,7 @@ impl Trails {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .0;
         }
-        Ok(())
+        Ok(waited)
     }
 
     /// The trails open now.
