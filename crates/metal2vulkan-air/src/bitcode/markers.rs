@@ -17,8 +17,12 @@
 //! writer reached first through a marker (LLVM 21 numbers `i64` with `lifetime.start`'s type) keeps
 //! that place, where LLVM 22 numbers it at its first other use, so a module whose only earlier
 //! reach of a type is a marker still decodes to two numberings: type/constant numbering differs
-//! between LLVM versions when a marker declaration's type mentions a type first used later, and
-//! such a fixture is regenerated without markers. A decode runs it only when asked
+//! between LLVM versions when a marker declaration's type mentions a type first used later. A
+//! fixture may be unable to drop the marker, because the alloca it brackets is the shape the
+//! fixture pins (an AIR 1.x `atomic_compare_exchange_weak`'s expected-value pointer, `air.frexp`'s
+//! `thread I*` exponent), so the golden-printout test compares such a module with its type and
+//! constant ids renumbered off the pinned major and to the byte under it
+//! (`metal2vulkan/src/tests/air_input.rs`). A decode runs it only when asked
 //! (`DecodeOptions::drop_unused_markers`): it costs a pass over every instruction and a rebuilt
 //! module, and translation does not need it, because entry pruning keeps only what the entry
 //! reaches.

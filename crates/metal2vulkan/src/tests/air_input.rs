@@ -430,29 +430,135 @@ fn golden_path(ll: &Path) -> PathBuf {
 }
 
 /// The golden text: the printer output of the module decoded for comparison
-/// ([`decode_compared`]). It does not depend on the `llvm-as` that assembled the fixture, and no
-/// major is exempt: every gate compares it (Linux CI assembles with LLVM 21, the
-/// fixtures' pin; the macOS host with a newer Homebrew LLVM), and
-/// [`engine_fixtures_match_their_golden_printout`] compares it under both majors on any host
-/// that has both. A new major that writes a fixture's bitcode so that it decodes differently
-/// (LLVM's value enumeration, and so the IR's id order, may change between majors) fails here and
-/// is reviewed like any other change.
+/// ([`decode_compared`]). It is recorded under the pinned LLVM major ([`pinned_llvm_major`]), the
+/// major the `.ll` companions are written for: `scripts/regen-air-fixtures` writes each with
+/// `llvm-dis` of that major and refuses any other, and
+/// `metal2vulkan-validation`'s `every_committed_ll_fixture_assembles_with_the_pinned_llvm_and_decodes`
+/// holds every committed `.ll` to it. Every gate compares the golden, and no fixture is exempt.
 fn golden_text(d: &Decoded) -> String {
     print(&d.module)
 }
 
-/// The golden check's failure hint for the one known way the printout depends on the major
+/// `text` with every type and constant id renumbered by order of first appearance, which is what
+/// two printouts of one fixture under two LLVM majors may differ in and nothing else.
+///
+/// LLVM numbers a module's types and constants in the order its writer reaches them, and a marker
+/// declaration's type is part of that order: LLVM 21 spells `llvm.lifetime.start(i64, ptr)` and
+/// LLVM 22 and later `llvm.lifetime.start(ptr)`, so a type the marker's signature alone reached
+/// first (LLVM 21 numbers `i64` there) is numbered later under a newer major and every type after
+/// it moves down one. Dropping the unused marker (`DecodeOptions::drop_unused_markers`, which
+/// [`decode_compared`] asks for) does not undo that: it renumbers what remains in its old order,
+/// and the orders themselves differ (`air/src/bitcode/markers.rs`).
+///
+/// A quoted name is copied through, since a name may read like an id (`"c0"` is an MSL name in
+/// these fixtures); only `%t<n>` and `c<n>` outside quotes are rewritten. Renaming cannot hide a
+/// changed printout: a line the renumbering does not explain still differs, because the mapping is
+/// by first appearance and every later use must agree with it.
+fn ids_by_first_appearance(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut slots: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    let bytes = text.as_bytes();
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let (mut i, mut quoted) = (0, false);
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            quoted = !quoted;
+            out.push('"');
+            i += 1;
+            continue;
+        }
+        // An id is `%t<n>` or `c<n>` with no word character on either side: `c` in `bitcast` has
+        // one before it, and `%t1` in a longer `%t12` has one after.
+        let prefix = (!quoted)
+            .then(|| {
+                ["%t", "c"].into_iter().find(|p| {
+                    text[i..].starts_with(p)
+                        && (i == 0 || !word(bytes[i - 1]))
+                        && bytes[i + p.len()..].first().is_some_and(u8::is_ascii_digit)
+                })
+            })
+            .flatten();
+        let Some(prefix) = prefix else {
+            let c = text[i..].chars().next().expect("char boundary");
+            out.push(c);
+            i += c.len_utf8();
+            continue;
+        };
+        let start = i + prefix.len();
+        let end = start
+            + bytes[start..]
+                .iter()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+        if bytes.get(end).is_some_and(|&b| word(b)) {
+            out.push_str(prefix);
+            i = start;
+            continue;
+        }
+        let next = counts.entry(prefix).or_default();
+        let slot = *slots.entry((prefix, &text[start..end])).or_insert_with(|| {
+            *next += 1;
+            *next
+        });
+        out.push_str(prefix);
+        out.push('#');
+        out.push_str(&slot.to_string());
+        i = end;
+    }
+    out
+}
+
+/// What [`ids_by_first_appearance`] may and may not hide: a shift of every id after one point
+/// compares equal, while a quoted name that reads like an id, an id inside a word, and an id
+/// changed in only some of its uses do not.
+#[test]
+fn renumbering_ids_hides_a_shift_and_nothing_else() {
+    let same = |a: &str, b: &str| ids_by_first_appearance(a) == ids_by_first_appearance(b);
+    // The real case: the types after the marker's move down one.
+    assert!(same(
+        "%t23 = type void ()\n%t26 = type [2 x i32]\nc25 = %t26 [27, 0]",
+        "%t23 = type void ()\n%t25 = type [2 x i32]\nc25 = %t25 [27, 0]",
+    ));
+    // A name may read like an id; these fixtures have `"c0"`. It is not renumbered, so two
+    // printouts naming different ones differ.
+    assert!(!same(r#"%a0="c0" c1 = i32 1"#, r#"%a0="c9" c1 = i32 1"#));
+    assert_eq!(
+        ids_by_first_appearance(r#"call @f3 "c0" (c7)"#),
+        r#"call @f3 "c0" (c#1)"#
+    );
+    // An id in only some of its uses, and a changed value, are not a shift.
+    assert!(!same(
+        "%t5 = type i32\nc1 = %t5 0\nc2 = %t5 1",
+        "%t5 = type i32\nc1 = %t9 0\nc2 = %t5 1"
+    ));
+    assert!(!same("c25 = %t26 [27, 0]", "c25 = %t26 [28, 0]"));
+    // `c` inside a word is not an id, and `%t1` is not the start of `%t12`.
+    assert_eq!(
+        ids_by_first_appearance("bitcast %t12 c3"),
+        "bitcast %t#1 c#1"
+    );
+    assert!(!same("%t1 = type i32", "%t12 = type i32\n%t1 = type i64"));
+}
+
+/// Why a golden printout's type and constant ids may differ off the pinned major
 /// (`air/src/bitcode/markers.rs`).
-const GOLDEN_HINT: &str = "if only type or constant ids differ between LLVM majors: type/constant \
-     numbering differs between LLVM versions when a marker declaration's type mentions a type \
-     first used later (LLVM 21 spells llvm.lifetime.start(i64, ptr), LLVM 22 and later \
-     llvm.lifetime.start(ptr)); regenerate the fixture without markers";
+const GOLDEN_RENUMBER_CAUSE: &str = "LLVM 21 spells llvm.lifetime.start(i64, ptr) and LLVM 22 and \
+     later llvm.lifetime.start(ptr), so a type the marker's signature alone reached first is \
+     numbered later and the types after it move down one";
 
 /// Every owned fixture's golden printout, under the host's `llvm-as` and under one of the pinned
-/// major ([`pinned_llvm_major`]) when the host's is another major: the printout must not depend on
-/// the major, and a fixture whose printout does (one holding a lifetime marker may) fails on any
-/// host with both, not only on Linux CI (whose `llvm-as` is the pinned major itself). Without an
-/// `llvm-as` of the pinned major that leg is skipped visibly, unless
+/// major ([`pinned_llvm_major`]) when the host's is another major.
+///
+/// Under the pinned major -- the major the goldens are recorded under, Linux CI's own `llvm-as` --
+/// every golden must match to the byte. Under any other major the content must still match, but
+/// type and constant ids may be renumbered, because LLVM's value enumeration is the assembler's
+/// and a marker declaration's signature is part of the order it walks
+/// ([`ids_by_first_appearance`]). Such a fixture is reported by name and counted, not excused by a
+/// list: the comparison still runs, and a line the renumbering does not explain fails. Anything
+/// else -- a changed type, constant, instruction, or metadata -- fails under every major.
+///
+/// Without an `llvm-as` of the pinned major that leg is skipped visibly, unless
 /// `METAL2VULKAN_TEST_REQUIRE_PINNED_LLVM=1`, which makes it a failure.
 #[test]
 fn engine_fixtures_match_their_golden_printout() {
@@ -481,46 +587,93 @@ fn engine_fixtures_match_their_golden_printout() {
         }
     }
     let scratch = Scratch::new("m2v-air-input");
-    let mut differ = Vec::new();
+    let (mut differ, mut renumbered) = (Vec::new(), Vec::new());
     for tool in &tools {
         let version = llvm_major(tool).unwrap_or_else(|| "?".to_string());
+        let pinned = version == major;
         let mut compared = 0;
         for ll in opaque_fixtures(&engine_dir()) {
             let golden = std::fs::read_to_string(golden_path(&ll))
                 .unwrap_or_else(|e| panic!("{:?}: {e}", golden_path(&ll)));
             let d = decode_compared(&llvm_assemble(tool, &ll, &scratch), &ll);
             let text = golden_text(&d);
-            if text != golden {
-                let (line, (want, got)) = golden
-                    .lines()
+            let name = ll.file_name().unwrap().to_string_lossy().into_owned();
+            if text == golden {
+                compared += 1;
+                continue;
+            }
+            // Off the pinned major, ids renumbered by LLVM's value enumeration are the one
+            // accepted difference, and only once the rest of the printout is shown to match.
+            let (canon_text, canon_golden) = (
+                ids_by_first_appearance(&text),
+                ids_by_first_appearance(&golden),
+            );
+            let ids_only = !pinned && canon_text == canon_golden;
+            // Which line to name: off the pinned major the ids differ by design, so the first
+            // line that differs once they are renumbered is the one that changed.
+            let first_differing = |want: &str, got: &str| {
+                want.lines()
                     .chain(std::iter::repeat(""))
-                    .zip(text.lines().chain(std::iter::repeat("")))
-                    .enumerate()
-                    .find(|(_, (want, got))| want != got)
-                    .expect("texts that differ differ in a line");
-                differ.push(format!(
-                    "{} under LLVM {version} ({tool:?}): line {}: golden `{want}`, printed `{got}`",
-                    ll.file_name().unwrap().to_string_lossy(),
+                    .zip(got.lines().chain(std::iter::repeat("")))
+                    .position(|(want, got)| want != got)
+                    .expect("texts that differ differ in a line")
+            };
+            let line = if pinned || ids_only {
+                first_differing(&golden, &text)
+            } else {
+                first_differing(&canon_golden, &canon_text)
+            };
+            let at = |text: &str| text.lines().nth(line).unwrap_or("").to_string();
+            let (want, got) = (at(&golden), at(&text));
+            if ids_only {
+                renumbered.push(format!(
+                    "{name} (first at line {}: `{want}` -> `{got}`)",
                     line + 1
+                ));
+            } else {
+                differ.push(format!(
+                    "{name}: golden recorded under the pinned LLVM {major}, printed under LLVM \
+                     {version} ({tool:?}): line {}: golden `{want}`, printed `{got}`{}",
+                    line + 1,
+                    if pinned {
+                        ""
+                    } else {
+                        " (not a type/constant renumbering: the printout changed)"
+                    }
                 ));
             }
             compared += 1;
         }
         assert!(compared > 0);
     }
+    if !renumbered.is_empty() {
+        eprintln!(
+            "{test}: {} fixture(s) print the same module with type/constant ids renumbered off the \
+             pinned LLVM {major} ({GOLDEN_RENUMBER_CAUSE}): {}",
+            renumbered.len(),
+            renumbered.join(", ")
+        );
+    }
     assert!(
         differ.is_empty(),
-        "{} golden printouts differ:\n{}\n{GOLDEN_HINT}",
+        "{} golden printout(s) differ in content, not only in type/constant ids:\n{}",
         differ.len(),
         differ.join("\n")
     );
 }
 
 /// Rewrite the golden snapshots: `cargo test --all-features --lib tests::air_input -- --ignored`.
+///
+/// Only an `llvm-as` of the pinned major ([`pinned_llvm_major`]) may record them: the goldens are
+/// that major's printout, and recording them under the host's newer `llvm-as` would renumber the
+/// types of a fixture holding a marker and fail on Linux CI, whose `llvm-as` is the pinned major.
 #[test]
 #[ignore]
 fn bless_engine_goldens() {
-    let tool = llvm_as().expect("llvm-as");
+    let major = pinned_llvm_major();
+    let tool = llvm_as_of_major(&major).unwrap_or_else(|| {
+        panic!("no llvm-as of the pinned LLVM {major}: the goldens are that major's printout")
+    });
     let scratch = Scratch::new("m2v-air-input");
     for ll in opaque_fixtures(&engine_dir()) {
         let d = decode_compared(&llvm_assemble(&tool, &ll, &scratch), &ll);
