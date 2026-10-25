@@ -176,21 +176,36 @@ pub(super) const METAL_PAGE: u64 = 16384;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BufferTextureProblem {
     /// A pixel format no buffer can back: compressed, depth or stencil, or no format.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "Linear texture:
+    /// cannot create compressed, depth, or stencil textures" over `Depth32Float` and `Stencil8`,
+    /// the alignment query asserts "Linear textures do not support depth/stencil pixel formats",
+    /// and `BC1_RGBA` answers nil).
     NotLinear {
         /// The descriptor's pixel format.
         pixel_format: PixelFormat,
     },
     /// A texture type the call does not make over a buffer.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "Linear texture:
+    /// must be of type MTLTextureType2D, textureType (MTLTextureType3D) disallowed", and the same
+    /// for a 2D array).
     TextureType {
         /// The descriptor's texture type.
         texture_type: TextureType,
     },
     /// More than one mip level.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "Linear texture:
+    /// cannot be mipmapped, mipmapLevelCount (2) disallowed").
     MipmapLevelCount {
         /// The descriptor's level count.
         count: u32,
     },
     /// A `bytesPerRow` that does not cover the packed row of `row_bytes`.
+    ///
+    /// Basis: unknown (plain Metal's answer for a `bytesPerRow` below the packed row is unmeasured:
+    /// the runs on record vary its alignment, not its length).
     RowPitch {
         /// The `bytesPerRow` given.
         bytes_per_row: u64,
@@ -198,6 +213,10 @@ pub enum BufferTextureProblem {
         row_bytes: u64,
     },
     /// A `bytesPerRow` that is not a multiple of `alignment`.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "Linear texture:
+    /// bytesPerRow (8) must be aligned to 16 bytes", and the same at 17, 24 and 36, where 32 is
+    /// made).
     RowPitchAlignment {
         /// The `bytesPerRow` given.
         bytes_per_row: u64,
@@ -207,6 +226,9 @@ pub enum BufferTextureProblem {
     /// An offset that is not a multiple of `alignment`: a 2D texture's or array's, an IOSurface
     /// plane's, or the SPI's texture buffer's (`newTextureWithDescriptor:offset:bytesPerRow:`'s
     /// texture buffer takes any).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "Linear texture:
+    /// offset (4330536964) must be aligned to 16 bytes" at offsets 4 and 8, where 16 is made).
     OffsetAlignment {
         /// The offset given.
         offset: u64,
@@ -225,6 +247,10 @@ pub enum BufferTextureProblem {
     /// ([`RuntimeGap::TexelsPastBufferLength`](crate::RuntimeGap::TexelsPastBufferLength)), and a
     /// texture over a buffer past its bytes Metal makes or answers nil for by the buffer's
     /// allocation alone (the module's **Length**).
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 27.0.1: plain Metal asserts "Descriptor
+    /// height*arrayLength > IOSurface height", the API validation layer off, where the surface-high
+    /// descriptor is made).
     PastBuffer {
         /// The bytes the rows end at, from the buffer's start.
         counted: u64,
@@ -233,6 +259,10 @@ pub enum BufferTextureProblem {
     },
     /// An array whose slices end past the buffer's `allocatedSize`: Metal answers nil (an
     /// [`Error::Nil`](crate::Error::Nil)).
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 27.0.1: plain Metal answers nil where the texture's
+    /// rounded slices end past the buffer's `allocatedSize`, the layer off, and makes it where they
+    /// do not).
     PastAllocation {
         /// Where the last slice ends, in bytes from the buffer's start.
         end: u64,

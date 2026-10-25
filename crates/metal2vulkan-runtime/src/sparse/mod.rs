@@ -118,12 +118,18 @@ fn undefined(ty: &'static str, raw: u64) -> Error {
 pub enum SparseProblem {
     /// A texture type a sparse heap makes no texture of: 1D, 1D array and texture buffers, for
     /// which Metal answers nil (an [`Error::Nil`](crate::Error::Nil)).
+    ///
+    /// Basis: unknown (plain Metal's nil for a 1D, 1D array or buffer texture of a sparse heap is
+    /// not on record with a device or release).
     TextureType {
         /// The descriptor's texture type.
         texture_type: TextureType,
     },
     /// A dual-plane format (depth and stencil), which validation stops: what mapping its stencil
     /// does without validation is not measured.
+    ///
+    /// Basis: unknown (Metal's validation stops it, and what mapping its stencil does without
+    /// validation is not measured).
     DualPlane {
         /// The descriptor's pixel format.
         pixel_format: PixelFormat,
@@ -131,12 +137,20 @@ pub enum SparseProblem {
     /// A move between a sparse texture and one that is not (not measured; a mapping update of a
     /// texture that is not sparse, and a move between two such, record nothing, as plain Metal
     /// does).
+    ///
+    /// Basis: unknown (a move between a sparse texture and one that is not is not measured).
     NotSparse,
     /// Lists of regions, levels and slices of unequal lengths (`update_texture_mappings`): Metal's
     /// one `numRegions` cannot state them, so no Metal call reaches this.
+    ///
+    /// Basis: ours (this crate's paired lists: Metal's call states one `numRegions`, so no Metal
+    /// call reaches this).
     Lengths,
     /// An indirect update's count, `bytes` of it at `offset`, past the buffer's `length`, where it
     /// is encoded.
+    ///
+    /// Basis: unknown (plain Metal's answer for an indirect mapping update whose arguments run past
+    /// the buffer is unmeasured).
     IndirectArguments {
         /// The arguments' offset.
         offset: u64,

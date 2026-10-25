@@ -90,13 +90,22 @@ pub enum CopyProblem {
     /// up to 8 KiB copies as a shared one, most of 16 KiB and more end the process, a 64x64 one
     /// with `ShaderWrite` of 4 bytes a texel copies nothing, and a combined depth/stencil one
     /// copies nothing at 2x2.
+    ///
+    /// Basis: metal-takes (an M4, macOS 27.0.1: plain Metal copies a private texture of up to 8 KiB
+    /// as a shared one, so the refusal reaches past it; most of 16 KiB and more end the process).
     CpuAccessPrivate,
     /// A level or slice past the texture, or a region past its level (a compressed region past
     /// the level's last block).
+    ///
+    /// Basis: unknown (plain Metal's answer for a blit level, slice or region past the texture is
+    /// unmeasured).
     Region,
     /// A buffer offset that is not a multiple of the copy unit, of a blit whose plain Metal
     /// answer is not measured: a depth or stencil format other than `Depth32Float`, or a
     /// texture over a buffer (other blits copy where plain Metal places the rows).
+    ///
+    /// Basis: unknown (plain Metal's answer for a buffer offset off the copy unit of these blits is
+    /// not measured).
     Offset,
     /// A `bytesPerRow` that is not a multiple of the copy unit, or that does not cover a row,
     /// where plain Metal's answer is undefined or not measured: a blit out of a texture whose
@@ -105,23 +114,40 @@ pub enum CopyProblem {
     /// other than `Depth32Float`, a texture over a buffer, and a CPU copy of a texture over a
     /// buffer or of a pitch of 0 for more than one row and image (other layouts copy where plain
     /// Metal places the rows).
+    ///
+    /// Basis: unknown (undefined or unmeasured by the shapes listed above — Metal's writes race
+    /// where the rows overlap — and no run on record names a device or release).
     BytesPerRow,
     /// Bytes past the end of the buffer: of a no-copy buffer read from, past the end of its
     /// host pages, which plain Metal reads up to. Past that, and past another buffer's length,
     /// plain Metal reads zeros, bytes a write past the length left, or another resource's bytes (an
     /// M4 under macOS 27.0.1).
+    ///
+    /// Basis: metal-takes (an M4, macOS 27.0.1: plain Metal reads past the buffer rather than
+    /// refusing — zeros, bytes a write past the length left, or another resource's bytes).
     BufferRange,
     /// Two textures whose formats a copy does not take. Plain Metal copies the source's bytes
     /// in the GPU's own texel layout, which differs between formats of different units (an M4
     /// under macOS 27.0.1): no defined answer.
+    ///
+    /// Basis: metal-takes (an M4, macOS 27.0.1: plain Metal copies the source's bytes in the GPU's
+    /// own texel layout rather than refusing, which differs between formats of different units: no
+    /// defined answer).
     Format,
     /// Two textures of different sample counts. Plain Metal copies the bytes of the GPU's own
     /// sample layout: no defined answer.
+    ///
+    /// Basis: unknown (plain Metal copies the bytes of the GPU's own sample layout, no defined
+    /// answer, and the run on record names no device or release).
     SampleCount,
     /// A copy of whole textures with no levels of one size, where plain Metal aborts; or a copy
     /// between compressed levels of different sizes, not measured. (Other levels of different
     /// sizes copy their common region, and whole textures the levels and slices they share,
     /// paired by size, as plain Metal copies them.)
+    ///
+    /// Basis: unknown (no run on record names the device where plain Metal aborts over whole
+    /// textures of one size, and the copy between compressed levels of different sizes is
+    /// unmeasured).
     Size,
 }
 

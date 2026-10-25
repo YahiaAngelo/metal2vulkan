@@ -86,26 +86,44 @@ pub enum ArgumentEncoderProblem {
     /// The layout cannot be made: no argument buffer at the function's buffer index, an array of
     /// arrays, or descriptors Metal stops (`bind::ArgumentLayoutError`). Boxed, so a [`Problem`]
     /// stays small: an [`Error`] holds one in each of two kinds.
+    ///
+    /// Basis: unknown (the layout's own refusals carry their reasons in
+    /// `bind::ArgumentLayoutError`, which this column does not read, so Metal's answer for each is
+    /// not settled here).
     Layout(Box<ArgumentLayoutError>),
     /// `new_argument_encoder_for_buffer_at_index`: the buffer at `index` points to no argument
     /// buffer, for which Metal answers nil ("No argument buffer at that index"), an
     /// [`Error::Nil`](crate::Error::Nil).
+    ///
+    /// Basis: metal-documented (Metal's validation says "No argument buffer at that index", for
+    /// which it answers nil).
     NoNestedArgumentBuffer {
         /// The argument's index.
         index: u32,
     },
     /// A setter or `constant_data` with no argument buffer set ("No argument buffer is set").
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal's process ends, SIGSEGV,
+    /// at a setter with no argument buffer set, where `constantDataAtIndex:` answers a null
+    /// pointer).
     NoArgumentBuffer,
     /// No argument of the layout has `index` ("Index 15 does not correspond to any valid member
     /// of the argument buffer", "index (1000) is outside of the valid index range"), where the 8
     /// bytes at the arguments' offset would pass the argument buffer's end, and for a range whose
     /// indices pass `u32::MAX` (`index` is then `u32::MAX`). Elsewhere every setter writes there,
     /// as plain Metal does.
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal takes
+    /// `setBuffer:offset:atIndex:15` on a layout holding index 0 alone, writes nothing and returns,
+    /// its validation alone saying "index (15) is outside of the valid index range `[0, 0]`").
     NoArgument {
         /// The index given.
         index: u32,
     },
     /// The argument at `index` is of type `found`, the call writes `expected`.
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal takes `setTexture:atIndex:0`
+    /// where the layout says a pointer, and returns).
     ArgumentType {
         /// The argument's index.
         index: u32,

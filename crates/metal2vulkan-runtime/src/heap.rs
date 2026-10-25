@@ -186,9 +186,15 @@ pub struct SizeAndAlign {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeapProblem {
     /// A heap of size 0: plain Metal answers nil (`Nil`) for every type and storage mode.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal answers nil for a heap of
+    /// size 0).
     Size,
     /// The call places resources in heaps of the other type: `new_buffer` in an automatic heap,
     /// `new_buffer_at_offset` in a placement heap.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal answers nil for
+    /// `newBufferWithLength:options:` on a placement heap, where an automatic heap's is made).
     HeapType {
         /// The heap's type.
         heap_type: HeapType,
@@ -196,6 +202,9 @@ pub enum HeapProblem {
     /// A placement offset that is not a multiple of the resource's alignment, 256 bytes for a
     /// buffer and `Device::heap_texture_size_and_align`'s for a texture: plain Metal answers nil
     /// (`Nil`).
+    ///
+    /// Basis: unknown (plain Metal's nil for a placement offset off the resource's alignment is not
+    /// on record with a device or release).
     Offset {
         /// The offset given.
         offset: u64,
@@ -203,6 +212,9 @@ pub enum HeapProblem {
     /// A resource whose `length` bytes from `offset` run past its heap's end, of `heap_size`
     /// bytes: a placement heap's buffer or texture, or an automatic heap's buffer longer than
     /// the heap. Plain Metal answers nil (`Nil`).
+    ///
+    /// Basis: unknown (plain Metal's nil for a resource whose bytes run past its heap's end is not
+    /// on record with a device or release).
     PastEnd {
         /// The resource's offset in the heap (0 for an automatic heap's).
         offset: u64,
@@ -212,6 +224,10 @@ pub enum HeapProblem {
         heap_size: u64,
     },
     /// A resource's storage mode other than its heap's (Metal ends the process).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "The requested
+    /// storage mode (MTLStorageModeShared) is not compatible with the heap's mode
+    /// (MTLStorageModePrivate)").
     StorageMode {
         /// The heap's.
         heap: StorageMode,
@@ -219,6 +235,10 @@ pub enum HeapProblem {
         resource: StorageMode,
     },
     /// A resource's CPU cache mode other than its heap's (Metal ends the process).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "The requested CPU
+    /// cache mode (MTLCPUCacheModeWriteCombined) does not match the heap's mode
+    /// (MTLCPUCacheModeDefaultCache)").
     CpuCacheMode {
         /// The heap's.
         heap: CpuCacheMode,
@@ -227,6 +247,9 @@ pub enum HeapProblem {
     },
     /// An alignment other than 0 that is not a power of two (`max_available_size`; Metal ends
     /// the process).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts `!(alignment &
+    /// (alignment - 1))` in `-[IOGPUMetalHeap maxAvailableSizeWithAlignment:]`, where 256 answers).
     Alignment {
         /// The alignment given.
         alignment: u64,
@@ -234,6 +257,9 @@ pub enum HeapProblem {
     /// A no-copy heap's memory that does not start at a multiple of `alignment`, the larger of
     /// the host page and the device's `minImportedHostPointerAlignment`
     /// (`Device::new_heap_with_bytes_no_copy`): its offsets would not be its memory's.
+    ///
+    /// Basis: ours (a runtime extension: Metal makes no heap over the caller's memory, so where its
+    /// offsets begin is this crate's own contract).
     HostMemoryAlignment {
         /// The alignment the memory's first byte needs.
         alignment: u64,

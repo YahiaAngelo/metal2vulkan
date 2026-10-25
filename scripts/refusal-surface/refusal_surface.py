@@ -16,8 +16,9 @@ The refusal surface is read from the construction sites of the typed refusals, o
   runtime's `Error::RateMap`);
 - the translation deadline (`BudgetExceeded`, `Error::Budget`; the runtime's
   `Error::Compile(Budget)`);
-- what a call did wrong (the runtime's `Problem`, carried by `Error::Metal`): each of these is a
-  claim that Metal itself refuses an input, so each carries a declared basis.
+- what a call did wrong (the runtime's `Problem`, carried by `Error::Metal`), and the problem enums
+  it forwards to, found from the forwarding variants' payloads: each of these is a claim that Metal
+  itself refuses an input, so each carries a declared basis.
 
 Each refusal is one row per variant, with what it blocks (the variant's doc comment), the device
 condition (from the constructor: every device, or the capabilities, driver defects or families
@@ -27,7 +28,8 @@ its sites name), its sites, its basis, and a reach mark, which is the one hand-k
 The basis says where the belief that this input must be refused comes from. It is derived from the
 construction site wherever the site states it, and declared in the refusal's own doc comment, as a
 last line `Basis: <value> (the evidence)`, wherever the claim is about Metal itself, which no site
-can state. `--check` requires one of every `Problem`: a refusal that asserts Metal stops an input
+can state. `--check` requires one of every `Problem`, and of every variant of a problem enum a
+`Problem` forwards to with `Basis: delegated(ThatEnum)`: a refusal that asserts Metal stops an input
 cannot be added with nothing behind it, and one whose basis is not settled says
 `Basis: unknown (why)` rather than nothing.
 
@@ -39,6 +41,9 @@ cannot be added with nothing behind it, and one whose basis is not settled says
     scripts/refusal-surface/refusal_surface.py --missing-basis # list refusals whose basis is
                                                                # absent or malformed
     scripts/refusal-surface/refusal_surface.py --selftest      # the basis marker's own cases
+    scripts/refusal-surface/refusal_surface.py --delegations    # the problem enums a `Problem`
+                                                               # forwards to, as the scan finds
+                                                               # them
 
 It reads source text only (no build), so it runs anywhere.
 """
@@ -144,6 +149,10 @@ NAMES_A_DEVICE = re.compile(r"\bM\d\b|\bApple M|\bmacOS\b|\b2[0-9]\.[0-9]")
 # An aggregate variant carries no basis of its own: it forwards to another problem enum, whose
 # variants hold the claims. `delegated(ThatEnum)` says so, and is held to the variant's payload.
 DELEGATED = "delegated"
+
+# A payload that is one problem enum: `Problem`'s forwarding variants carry nothing else, and the
+# enum they name is read here too, so the claims inside it are held to a basis as the parent's are.
+ONE_PROBLEM = re.compile(r"[A-Z][A-Za-z0-9_]*Problem")
 
 
 def split_basis(doc):
@@ -396,8 +405,12 @@ def is_pattern(text, start, end):
     return False
 
 
-def scan():
-    """Rows keyed by (section, variant): conditions, sites."""
+def scan(sub_problems=()):
+    """Rows keyed by (section, variant): conditions, sites.
+
+    `sub_problems` are the problem enums `Problem` forwards to: their variants are construction
+    sites of a refusal too, and are counted as `Problem`'s own are.
+    """
     rows = defaultdict(lambda: {"conds": set(), "kinds": set(), "sites": [], "indirect": []})
     feature_refs = defaultdict(list)
     for tree, rel, text in source_files():
@@ -473,6 +486,14 @@ def scan():
                         continue
                     section = "gap_family" if "/families/" in rel else "gap"
                     rows[(section, m.group(1))]["sites"].append(site(m.start()))
+            # The problem enums `Problem` forwards to. The enum's own module declares it and
+            # also builds it, so the file cannot be skipped the way `error.rs` is: `is_pattern`
+            # keeps the match arms of its `Display` out.
+            for enum in sub_problems:
+                for m in re.finditer(r"(?<![A-Za-z0-9_])" + enum + r"::([A-Z][A-Za-z0-9_]*)", text):
+                    if is_pattern(text, m.start(), m.end()):
+                        continue
+                    rows[("subproblem", f"{enum}::{m.group(1)}")]["sites"].append(site(m.start()))
             for m in re.finditer(r"\bAppleOnly::([A-Z][A-Za-z0-9_]*)", text):
                 if rel.endswith("apple_only.rs") and re.match(r"\s*[,{(]", text[m.end() : m.end() + 2]) is None:
                     pass
@@ -504,11 +525,21 @@ def problem_arms(path):
     declared basis. The payload is read too: an aggregate variant's `delegated` marker must name
     it, so the marker cannot be used where a variant does not forward.
     """
+    return enum_arms(path, "Problem")
+
+
+def enum_arms(path, enum):
+    """(variant, doc, payload) of `pub enum <enum>` in path, in order.
+
+    Struct variants are stepped over by brace depth, so a field's own doc comment is never read as
+    the next variant's. This is the reader for `Problem` and for every problem enum it forwards to:
+    those are the refusals whose basis is declared, and a doc comment read wrongly would lose one.
+    """
     lines = path.read_text().split("\n")
     out, doc, inside, depth = [], [], False, 0
     for line in lines:
         if not inside:
-            if line.startswith("pub enum Problem {"):
+            if re.match(r"pub enum " + enum + r" \{", line):
                 inside = True
             continue
         if depth == 0 and line.startswith("}"):
@@ -554,6 +585,51 @@ def enum_variants(path, enum):
             out.append((m.group(1), " ".join(doc)))
         if s and not s.startswith("//") and not s.startswith("#"):
             doc = []
+    return out
+
+
+def runtime_enum_files():
+    """Each `pub enum` the runtime declares outside tests, by name: the file that declares it.
+
+    Read from the sources, so a problem enum that moves to another module is still found.
+    """
+    where = {}
+    for tree, rel, text in source_files():
+        if tree != "runtime":
+            continue
+        for m in re.finditer(r"^pub enum ([A-Za-z0-9_]+) \{", text, re.M):
+            where.setdefault(m.group(1), ROOT / rel)
+    return where
+
+
+def forwarded_problems(path):
+    """Every problem enum `Problem` forwards to, and every one those forward to, in their order.
+
+    Structural, and no list of names is kept here: a variant whose whole payload is one enum the
+    runtime declares is a forwarding variant, and the enum it names is read as `Problem` is. A
+    sub-problem added later is read with it, and one that forwards again is followed.
+
+    Each is (enum, the file that declares it, the forwarding variant, that variant's basis, whether
+    this family's variants must declare a basis of their own). The forwarding variant's own basis
+    decides the last: `delegated(ThatEnum)` says the claims live in `ThatEnum`, so each of its
+    variants declares its own; any other value is a claim about the whole family (a runtime
+    extension Metal has no counterpart for), which its variants derive from it.
+    """
+    where = runtime_enum_files()
+    out, seen, queue = [], {"Problem"}, [("Problem", path)]
+    while queue:
+        owner, file = queue.pop(0)
+        for name, doc, payload in enum_arms(file, owner):
+            payload = payload.strip()
+            if not ONE_PROBLEM.fullmatch(payload) or payload in seen:
+                continue
+            seen.add(payload)
+            marker = split_basis(doc)[1]
+            value = parse_basis(marker, payload)[0] if marker is not None else None
+            target = where.get(payload)
+            out.append((payload, target, f"{owner}::{name}", value or "", value == DELEGATED))
+            if target is not None:
+                queue.append((payload, target))
     return out
 
 
@@ -628,7 +704,9 @@ def head_sha():
 
 
 def build():
-    rows, feature_refs = scan()
+    error_rs = CRATES / "metal2vulkan-runtime" / "src" / "error.rs"
+    subs = forwarded_problems(error_rs)
+    rows, feature_refs = scan([enum for enum, _, _, _, _ in subs])
     reach = load_reach()
     fdocs = OrderedDict(enum_variants(CRATES / "metal2vulkan" / "src" / "error" / "mod.rs", "Feature"))
     for n, d in enum_variants(CRATES / "metal2vulkan-air" / "src" / "error.rs", "Feature"):
@@ -643,11 +721,26 @@ def build():
     for n, refs in feature_refs.items():
         if n in fdocs and not rows[("feature", n)]["sites"]:
             rows[("feature", n)]["indirect"] = refs
-    pdocs = problem_arms(CRATES / "metal2vulkan-runtime" / "src" / "error.rs")
+    pdocs = problem_arms(error_rs)
     payloads = {n: pay for n, _, pay in pdocs}
     tables = OrderedDict()
     missing_reach = []
     basis_faults = []
+    # The problem enums `Problem` forwards to, each family in the order its forwarding variant
+    # comes: one row for each of their variants, keyed `Enum::Variant`.
+    sdocs = OrderedDict()
+    sub_family = {}
+    for enum, file, parent, value, required in subs:
+        sub_family[enum] = (parent, value, required)
+        if file is None:
+            basis_faults.append(("subproblem", enum, f"forwards from `{parent}` to an enum no source declares"))
+            continue
+        arms = enum_arms(file, enum)
+        if required and not arms:
+            basis_faults.append(("subproblem", enum, f"forwards from `{parent}` to an enum with no variants to read"))
+        for n, d, pay in arms:
+            sdocs[f"{enum}::{n}"] = d
+            payloads[f"{enum}::{n}"] = pay
     sections = [
         ("feature", fdocs, "Translator and front-end refusals (`Unsupported`: a `Feature` and its `Needs`)"),
         ("gap", gdocs, "Runtime gaps (`Error::NotImplemented(RuntimeGap)`)"),
@@ -665,7 +758,13 @@ def build():
             OrderedDict((n, d) for n, d, _ in pdocs),
             "What a call did wrong (`Error::Metal(MetalError)`: a `Problem`)",
         ),
+        (
+            "subproblem",
+            sdocs,
+            "What a call did wrong, in detail (the problem enums a `Problem` forwards to)",
+        ),
     ]
+    sub_section = next(i for i, (s, _, _) in enumerate(sections, 1) if s == "subproblem")
     for section, docs, title in sections:
         out = []
         for name, doc in docs.items():
@@ -688,7 +787,7 @@ def build():
                 conds = ["every device (this crate's bound: Apple's compile unmeasured or crashing there)"]
             elif section == "budget":
                 conds = ["every device (the attempt's deadline, 20 seconds by default)"]
-            elif section == "invalid":
+            elif section in ("invalid", "subproblem"):
                 conds = ["every device (a public call's own check of its arguments)"]
             if not sites and not indirect and not (fam and fam["sites"]):
                 state = "no site"
@@ -697,9 +796,9 @@ def build():
             else:
                 state = "direct"
             notsched = " (not scheduled)" if "not scheduled" in doc.lower() else ""
-            if section == "invalid":
+            if section in ("invalid", "subproblem"):
                 # Reach is not marked here: every one of these is an argument of a public call,
-                # so a reach mark would say `app` 68 times.
+                # so a reach mark would say `app` for all of them.
                 rm = ("-", "")
             else:
                 rm = reach.get((section, name))
@@ -711,12 +810,22 @@ def build():
                 basis, cite = derived_basis(section, (r["kinds"] if r else set())), ""
                 if section == "invalid":
                     basis_faults.append((section, name, "carries no `Basis:` line"))
+                elif section == "subproblem":
+                    parent, value, required = sub_family[name.split("::")[0]]
+                    if required:
+                        basis_faults.append((section, name, "carries no `Basis:` line"))
+                    else:
+                        # The forwarding variant's own basis is a claim about the whole family, so
+                        # this one derives it rather than repeating it.
+                        basis, cite = value, f"from `{parent}`"
             else:
                 basis, cite, complaint = parse_basis(marker, payloads.get(name, ""))
                 if basis is None:
                     basis_faults.append((section, name, complaint))
                     basis = ""
                 doc = prose
+            if section == "invalid" and basis == DELEGATED:
+                cite = f"{cite}, section {sub_section}"
             if sites:
                 sc = sites_cell(sites)
             elif indirect:
@@ -751,11 +860,12 @@ def render(tables):
     lines.append(
         "Every refusal of something Metal accepts, read from the code: the construction sites of the "
         "typed refusals outside tests (`scripts/refusal-surface/refusal_surface.py`, which writes this "
-        "file; edit its `reach.tsv` and the refusals' own doc comments, never the tables). Section 8 "
-        "is the other half: what a call did wrong, each row a claim that Metal itself refuses an "
-        "input, with the basis of that claim. Malformed input of no Metal call at all is misuse and "
-        "is not listed. [`METAL-COVERAGE.md`](METAL-COVERAGE.md) lists the Metal API the runtime has "
-        "no counterpart for at all."
+        "file; edit its `reach.tsv` and the refusals' own doc comments, never the tables). Sections 8 "
+        "and 9 are the other half: what a call did wrong, each row a claim that Metal itself refuses "
+        "an input, with the basis of that claim; section 9 holds the problem enums a `Problem` "
+        "forwards to, where most of those claims live. Malformed input of no Metal call at all is "
+        "misuse and is not listed. [`METAL-COVERAGE.md`](METAL-COVERAGE.md) lists the Metal API the "
+        "runtime has no counterpart for at all."
     )
     lines.append("")
     lines.append("Columns:")
@@ -787,16 +897,19 @@ def render(tables):
         lines.append(f"  - `{k}`: {v};")
     lines.append(
         "  - `delegated`: the variant forwards to another problem enum, whose own variants carry the "
-        "claims; those enums are not read here yet, so a `delegated` row is a gap in this column, not "
-        "an answer."
+        "claims. Those enums are read too: each is a family of section 9, named in the row, and a "
+        "variant of one whose basis is absent or malformed fails the check as a `Problem`'s does. "
+        "A family whose forwarding variant states a basis of its own instead (a runtime extension "
+        "Metal has no counterpart for) carries that value in section 9, cited to the variant it "
+        "comes from."
     )
     lines.append("- **Reach** (hand-kept, `reach.tsv`):")
     for k, v in REACH_MARKS.items():
         lines.append(f"  - `{k}`: {v};")
     lines.append("  - `?`: not assessed yet.")
     lines.append(
-        "  Metal's own refusals (section 8) carry no reach mark: every one of them is an argument of "
-        "a public call."
+        "  Metal's own refusals (sections 8 and 9) carry no reach mark: every one of them is an "
+        "argument of a public call."
     )
     lines.append("")
     # totals
@@ -976,9 +1089,21 @@ def main():
     ap.add_argument("--missing-reach", action="store_true", help="list variants without a reach mark")
     ap.add_argument("--missing-basis", action="store_true", help="list refusals whose basis is absent or malformed")
     ap.add_argument("--selftest", action="store_true", help="run the basis marker's own cases")
+    ap.add_argument(
+        "--delegations",
+        action="store_true",
+        help="list the problem enums a `Problem` forwards to, as the scan finds them",
+    )
     a = ap.parse_args()
     if a.selftest:
         return selftest()
+    if a.delegations:
+        error_rs = CRATES / "metal2vulkan-runtime" / "src" / "error.rs"
+        for enum, file, parent, value, required in forwarded_problems(error_rs):
+            n = len(enum_arms(file, enum)) if file is not None else 0
+            where = file.relative_to(ROOT).as_posix() if file is not None else "?"
+            print(f"{enum}\t{'required' if required else 'derived'}\t{where}\t{n}\t{parent}\t{value or '-'}")
+        return 0
     tables, missing, faults = build()
     if a.missing_reach:
         for s, n in missing:

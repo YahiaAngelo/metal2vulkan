@@ -168,12 +168,19 @@ impl<T> std::ops::DerefMut for ViewportList<T> {
 pub enum RenderStateProblem {
     /// A count of viewports outside 1 to 16, or of no scissor rectangle (more than 16 scissor
     /// rectangles are taken, as plain Metal takes them).
+    ///
+    /// Basis: unknown (plain Metal's answer for a viewport count outside 1 to 16, and for no
+    /// scissor rectangle, is unmeasured; the more than 16 scissor rectangles it takes are not
+    /// refused).
     Count {
         /// The count given.
         count: usize,
     },
     /// A viewport field that is NaN or infinite, but for a NaN origin x, which draws nothing, as
     /// plain Metal's.
+    ///
+    /// Basis: unknown (plain Metal's answer for a viewport field that is NaN or infinite is
+    /// measured only for a NaN origin x, which draws nothing and is not refused).
     ViewportNotFinite,
 }
 

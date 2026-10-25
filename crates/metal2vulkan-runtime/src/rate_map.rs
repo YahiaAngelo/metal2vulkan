@@ -106,6 +106,9 @@ const MAX_SCREEN_EXTENT: u32 = 32768;
 pub enum RateMapProblem {
     /// A screen width or height past 32768. Metal's API validation stops a side of 0 too, and
     /// plain Metal compiles such a map, which the runtime makes (the module docs).
+    ///
+    /// Basis: unknown (plain Metal's answer for a screen side past 32768 is unmeasured; the side of
+    /// 0 its validation stops is compiled by plain Metal and is not refused).
     ScreenSize {
         /// The screen width given.
         width: u32,
@@ -117,15 +120,24 @@ pub enum RateMapProblem {
     /// which Metal's validation also stops, makes a map of no layers, as plain Metal does (the
     /// module docs). At a reset, which Metal's validation does not check, such a count ends
     /// Metal's process.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal's process ends, SIGBUS, at
+    /// `newRasterizationRateMapWithDescriptor:` of 3 and of 4 layers, where 1 and 2 make the map).
     LayerCount {
         /// The descriptor's layer count.
         count: usize,
     },
     /// A coordinate map of a map of no layers, which ends Metal's process.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal's process ends, SIGSEGV,
+    /// at a coordinate map of a map of no layers, which it makes).
     NoLayers,
     /// `mapScreenToPhysicalCoordinates:forLayer:` of a map with a screen width or height of 0,
     /// which ends Metal's process (`mapPhysicalToScreenCoordinates:` of such a map answers, and
     /// the runtime answers with it).
+    ///
+    /// Basis: unknown (Metal's process ends as said above, but no run on record names the device or
+    /// release).
     EmptyScreen {
         /// The map's screen width.
         width: u32,
@@ -134,6 +146,9 @@ pub enum RateMapProblem {
     },
     /// `mapPhysicalToScreenCoordinates:forLayer:` of a mutable map not yet reset, which ends
     /// Metal's process.
+    ///
+    /// Basis: unknown (Metal's process ends as said above, but no run on record names the device or
+    /// release).
     NotCompiled,
 }
 

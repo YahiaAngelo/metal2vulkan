@@ -646,46 +646,92 @@ pub enum TextureProblem {
     /// MTLPixelFormat"). That one assertion lists every rule the descriptor broke at once, so
     /// which of them the runtime names is its own choice: the process ends either way (an M3 Max
     /// under macOS 27.0.1).
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 27.0.1: plain Metal's descriptor validation ends the
+    /// process, "MTLTextureDescriptor has invalid pixelFormat (0)", the API validation layer off).
     NotAFormat,
     /// A width, height or depth of 0.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts
+    /// "MTLTextureDescriptor has width of zero", and the same for a height of zero).
     ZeroExtent,
     /// A height other than 1 for a 1D or buffer texture, or a depth other than 1 for a texture
     /// that is not 3D.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "the texture type
+    /// MTLTextureType1D requires that height is 1", and the same for a 2D texture of depth 2).
     ExtentForType,
     /// A cube whose width and height differ.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts
+    /// "MTLTextureDescriptor width must equal height for cube textures").
     CubeNotSquare,
     /// An array length other than 1 for a type that is not an array, or 0, or more than 2048 (341
     /// for a cube array: Metal stops 342 cubes and more, plain too).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts
+    /// "MTLTextureDescriptor has arrayLength of zero", where an array length of 2 is made).
     ArrayLength,
     /// A level count of 0, more than the full chain `max`, or more than 1 for a multisample,
     /// 1D, 1D array or 4:2:2 texture.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "requests 5 mipmap
+    /// levels, but the dimensions (8, 8, 1) can only support a maxiumum of 4 levels", and the same
+    /// for 0).
     MipmapLevelCount {
         /// The full chain's levels.
         max: u64,
     },
     /// A sample count of 0, or other than 1 for a type that is not multisample; for a
     /// multisample type, 1 or a count neither the device nor an Apple GPU takes.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "has sampleCount
+    /// set but is using a type that does not allow sampleCount" for 0 and for 2 of a 2D texture,
+    /// and "sampleCount (3) is not supported by device").
     SampleCount,
     /// A swizzle other than the default with `ShaderWrite` or `RenderTarget` usage, without
     /// `write_swizzle_enabled` (with it too from `newSharedTextureWithDescriptor:`).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "Texture swizzling
+    /// is not compatable with MTLTextureUsageShaderWrite", where a swizzle of read usage alone is
+    /// made).
     SwizzleWithWrites,
     /// An extent or count past what any device can hold (`u32`).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "has width
+    /// (4294967296) greater than the maximum allowed size of 16384").
     ExtentOverflow,
     /// A texture type the pixel format does not take: Metal stops it (`Invalid`), but a
     /// two-plane extended-range cube or cube array, which plain Metal answers nil for (`Nil`).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "depth/stencil
+    /// pixel formats require texture type of `MTLTextureType2D[Array]` or
+    /// `MTLTextureTypeCube[Array]`"
+    /// for a depth texture buffer, and the same for a compressed one).
     TypeForFormat,
     /// `X24_Stencil8`: a format of texture views only. (A texture made in `X32_Stencil8` is a
     /// stencil texture.)
+    ///
+    /// Basis: unknown (whether plain Metal makes a texture of `X24_Stencil8` from a descriptor is
+    /// unmeasured: an Apple GPU's Metal describes none of that format, so `NotAFormat` answers
+    /// there first).
     ViewOnlyFormat,
     /// An extent the pixel format does not take: a PVRTC texture that is not square with a
     /// power-of-two side, or a 4:2:2 texture of odd width; and, an [`Error::Nil`](crate::Error::Nil)
     /// of plain Metal, a render target of a 4:2:0 or 4:2:2 two-plane YCbCr format over a surface
     /// whose width or height is odd.
+    ///
+    /// Basis: unknown (plain Metal's answer for a PVRTC texture that is not square and for a 4:2:2
+    /// texture of odd width is unmeasured; the odd two-plane render target's nil is the one
+    /// measured part).
     ExtentForFormat,
     /// A usage the pixel format does not take: `ShaderAtomic` of `RGB10A8_2P_XR10`, its sRGB
     /// twin or `Unspecialized` (measured on an Apple M4, macOS 27.0.1: Metal's descriptor
     /// validation asserts, plain too for `Unspecialized`), or of a format of which Metal makes
     /// no texture alone (plain Metal asserts).
+    ///
+    /// Basis: metal-measured (an Apple M4, macOS 27.0.1: plain Metal's descriptor validation
+    /// asserts over `ShaderAtomic` of an extended-range format).
     UsageForFormat,
     /// `Unspecialized`, of which Metal makes no texture, an [`Error::Nil`](crate::Error::Nil):
     /// plain Metal answers nil for the texture, a heap's and a buffer's, in every storage mode
@@ -696,14 +742,25 @@ pub enum TextureProblem {
     /// [`UsageForFormat`](Self::UsageForFormat): Metal stops both, plain too.
     ///
     /// [`Device::heap_texture_size_and_align`]: crate::Device::heap_texture_size_and_align
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 26.7: plain Metal answers nil for a texture of
+    /// `Unspecialized` in every storage mode and usage, as the consumer reported).
     Unspecialized,
     /// A rotation past 4 (Metal's descriptor validation asserts, plain too).
+    ///
+    /// Basis: unknown (the run behind "plain too" above names no device or release, so plain
+    /// Metal's answer for a rotation past 4 is not on record here).
     Rotation,
     /// A rotation other than 0 without `framebuffer_only` (Metal's descriptor validation
     /// asserts, plain too).
+    ///
+    /// Basis: unknown (the run behind "plain too" above names no device or release, so plain
+    /// Metal's answer for a rotation without `framebuffer_only` is not on record here).
     RotationWithoutFramebufferOnly,
     /// `framebuffer_only` for a creator that makes no such texture: the device's, a buffer's or
     /// a heap's (plain Metal asserts "framebufferOnly == NO", or on the rotation).
+    ///
+    /// Basis: metal-documented (Metal asserts "framebufferOnly == NO").
     FramebufferOnly,
     /// A format of which Metal makes no texture from a descriptor alone: the 69 two-plane YCbCr
     /// formats (`metal::format::ycbcr_format`, which it makes over an IOSurface's planes,
@@ -720,6 +777,9 @@ pub enum TextureProblem {
     ///
     /// [`Buffer::new_texture_with_iosurface_plane`]: crate::Buffer::new_texture_with_iosurface_plane
     /// [`Device::heap_texture_size_and_align`]: crate::Device::heap_texture_size_and_align
+    ///
+    /// Basis: metal-measured (an Apple M4, macOS 27.0.1, and an M3 Max under 26.7: plain Metal
+    /// answers nil from the device, a heap and a buffer, for every texture type the format takes).
     NoTextureOfFormat,
     /// A width, height or depth past the largest side Metal makes the type with, `max`: 16384
     /// for every type but a 3D texture and a texture buffer, 2048 for a 3D one, 2^28 texels for a
@@ -732,6 +792,10 @@ pub enum TextureProblem {
     /// `RGBA8Unorm`, `R8Unorm`, `Depth32Float` and `BC1_RGBA`, in `Private`, `Shared` and
     /// `Managed` storage, and far past it (32768 on a 2D texture); the side itself is made for
     /// every type (an M3 Max under macOS 27.0.1).
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 27.0.1: plain Metal asserts "MTLTextureDescriptor
+    /// has width (16385) greater than the maximum allowed size of 16384", the layer off, where the
+    /// side itself is made).
     PastLargestSide {
         /// The largest side of the type.
         max: u64,

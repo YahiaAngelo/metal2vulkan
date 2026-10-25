@@ -13,6 +13,14 @@
 //! settled says `Basis: unknown (why)`: the project's rule is that unknown stays visible, not that
 //! every row gets a green word.
 //!
+//! Most of those claims are not in `Problem` itself but in the problem enums it forwards to, and
+//! those are read too. The scan finds them by structure: a variant whose whole payload is one enum
+//! the runtime declares forwards to it, and the enum it names is read as `Problem` is, so a
+//! sub-problem added later is picked up with it. Where the forwarding variant says
+//! `Basis: delegated(ThatEnum)`, every variant of `ThatEnum` declares a basis of its own and this
+//! test fails over an absent or malformed one; where it states a basis itself (a runtime extension
+//! Metal has no counterpart for), the family derives that value from it.
+//!
 //! The vocabulary is one list, in the script: `metal-measured` and `metal-documented` (Metal itself
 //! refuses, on a run of ours or on Apple's own words), `metal-takes` (measured: plain Metal takes
 //! the input, so the refusal reaches past Metal — an open defect, recorded), `device`, `ours`,
@@ -22,9 +30,12 @@
 //!
 //! - Whether a citation is *true*. It holds a claim about Metal to carrying evidence that names a
 //!   device or a release, never to that evidence being right.
-//! - The problem enums `Problem` forwards to (`TextureProblem`, `CopyProblem`, `HeapProblem` and
-//!   the rest): a `delegated` row says the claims live there, and the surface does not read them
-//!   yet, so a new variant of one of those enums can still carry a bare assertion about Metal.
+//! - Whether the grade matches the evidence beside it. A variant whose prose reports a measurement
+//!   that names no device or release reads `unknown` here, which is the honest answer and not the
+//!   last one: the measurement is what has to be re-run, not the word.
+//! - Anything a `Problem` reaches other than through a variant whose payload is one problem enum:
+//!   a boxed error of another type (`ArgumentEncoderProblem::Layout`) carries its own refusals,
+//!   and those are not rows here.
 //! - The other seven sections' per-variant Metal claims. Their basis is derived from the
 //!   constructor, which states the device axis and not Metal's answer; a declared `Basis:` line
 //!   there is read and held to the vocabulary, and is not yet required.
@@ -96,4 +107,66 @@ fn the_refusal_surface_is_the_committed_document() {
 fn the_basis_parse_still_refuses_what_it_must() {
     let (ok, out) = surface("--selftest");
     assert!(ok, "{out}");
+}
+
+/// Every problem enum a `Problem` forwards to is read, and read from a file with variants in it.
+///
+/// The basis of a forwarded claim is only as good as the scan that reaches it: were the discovery
+/// to stop finding a family, that family's variants would simply leave the table and
+/// `--missing-basis` would go quiet, which is the failure the whole column exists to catch. So the
+/// count is cross-checked against the sources rather than against the script: this test counts the
+/// `delegated(` markers in the runtime's `Problem` itself, and the scan must have resolved exactly
+/// that many families, each to a file and to at least one variant.
+#[test]
+fn the_surface_reads_the_problems_a_problem_forwards_to() {
+    let (ok, out) = surface("--delegations");
+    assert!(ok, "{out}");
+    let refusals = root().join("docs/REFUSALS.md");
+    let document = std::fs::read_to_string(&refusals)
+        .unwrap_or_else(|error| panic!("{}: {error}", refusals.display()));
+    let mut required = 0;
+    for line in out.lines() {
+        let field: Vec<&str> = line.split('\t').collect();
+        assert_eq!(
+            field.len(),
+            6,
+            "a delegations line of another shape: {line}"
+        );
+        let (enum_name, kind, file, variants) = (field[0], field[1], field[2], field[3]);
+        assert_ne!(
+            file, "?",
+            "{enum_name} forwards from {} to no file",
+            field[4]
+        );
+        assert_ne!(
+            variants, "0",
+            "{enum_name} was read from {file} with no variant in it"
+        );
+        // And its variants reach the table: a family the scan finds but does not emit is the
+        // quiet table this column exists to prevent.
+        assert!(
+            document.contains(&format!("| `{enum_name}::")),
+            "{enum_name} was read from {file} but no row of it is in {}",
+            refusals.display()
+        );
+        if kind == "required" {
+            required += 1;
+        }
+    }
+    let error_rs = root().join("crates/metal2vulkan-runtime/src/error.rs");
+    let markers = std::fs::read_to_string(&error_rs)
+        .unwrap_or_else(|error| panic!("{}: {error}", error_rs.display()))
+        .matches("Basis: delegated(")
+        .count();
+    assert!(
+        markers > 0,
+        "no `Basis: delegated(` marker in {}",
+        error_rs.display()
+    );
+    assert_eq!(
+        required, markers,
+        "{markers} `Basis: delegated(` markers in the runtime's `Problem`, but the scan resolved \
+         {required} families to read. Each delegated variant's payload must be an enum the runtime \
+         declares; `--delegations` lists what the scan found.\n{out}"
+    );
 }

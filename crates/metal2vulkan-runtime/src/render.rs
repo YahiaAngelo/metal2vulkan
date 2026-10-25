@@ -461,6 +461,10 @@ pub enum DrawProblem {
     /// the pass's only up to the last color its function reaches through its implicit imageblock,
     /// or at any color where it declares an explicit one: plain Metal runs the function whatever
     /// the formats, the colors it reaches at their places in the state's packing (a Metal probe).
+    ///
+    /// Basis: unknown (what stays refused is what the Metal probes did not reach: a state color
+    /// covering part of a pass color or more than one, a mesh render pipeline's state, and a
+    /// fragment function that fetches a color or declares an imageblock).
     AttachmentFormat(Attachment),
     /// `set_render_pipeline_state`: the state's raster sample count differs from the pass's
     /// (measured). Plain Metal draws a render pipeline's state of more samples in a pass of one
@@ -469,6 +473,10 @@ pub enum DrawProblem {
     /// mesh render pipeline's, one whose fragment function uses an imageblock (unmeasured), and a
     /// state of one sample in a pass of more (plain Metal writes sample 0 alone, under a coverage
     /// rule unmeasured) are refused.
+    ///
+    /// Basis: unknown (what stays refused is what the Metal probes did not reach: alpha to
+    /// coverage, `get_num_samples()`, a mesh render pipeline's state, an imageblock, and a state of
+    /// one sample in a pass of more, whose coverage rule is unmeasured).
     SampleCount,
     /// `set_render_pipeline_state`: a drawing state whose fragment function declares an explicit
     /// imageblock, or a tile pipeline's state whose tile function aliases one onto its implicit
@@ -478,6 +486,9 @@ pub enum DrawProblem {
     /// encoder's perSample imageBlock usage(4)"). A tile state whose explicit imageblock stands
     /// alone runs there, as plain Metal runs it: its dispatches keep the words of the imageblock
     /// below the pass's bytes rounded up to 8 and read every other as zero.
+    ///
+    /// Basis: metal-documented (Metal asserts "the pipelineState's per sample imageBlock usage(32)
+    /// is greater than the encoder's perSample imageBlock usage(4)").
     ImageblockSampleLength {
         /// The state's bytes per sample.
         pipeline: u64,
@@ -486,6 +497,9 @@ pub enum DrawProblem {
     },
     /// A draw with a tile pipeline's state set (measured: "renderPipelineState must be created
     /// using a MTLRenderPipelineDescriptor.").
+    ///
+    /// Basis: metal-documented (Metal asserts "renderPipelineState must be created using a
+    /// MTLRenderPipelineDescriptor.").
     TileState,
     /// A draw of patches with a pipeline that is not a tessellation one (measured on an M4: Metal's
     /// validation stops it, and Metal without it stops the process); a draw of primitives or
@@ -495,22 +509,39 @@ pub enum DrawProblem {
     /// pipeline, which Metal's validation stops too, draws nothing, as plain Metal draws it (the
     /// same probe), and so does a mesh draw of no threadgroups with a drawing state; an empty draw
     /// of patches or primitives of another kind stops plain Metal too, and stays refused.
+    ///
+    /// Basis: metal-measured (an M4: plain Metal stops its process over a patch draw with a
+    /// pipeline that is not a tessellation one, and over a mesh state's draw of primitives or
+    /// patches, its validation off).
     DrawKind,
     /// A patch draw while the encoder has no tessellation factor buffer (measured: Metal's
     /// validation stops it, and Metal without it stops the process).
+    ///
+    /// Basis: unknown (plain Metal stops its process as said above, its validation off, but no run
+    /// on record names the device or release).
     NoTessellationFactorBuffer,
     /// An indirect draw's arguments, read from its offset rounded down to a multiple of 4 as Metal
     /// reads them, run past its indirect buffer's length (measured: Metal's validation stops it;
     /// plain Metal draws nothing, or draws from whatever memory follows the buffer, Metal probe
     /// cases `ind_offset_past` and `indirect_past_end` on an M4: undefined, so refused).
+    ///
+    /// Basis: metal-takes (an M4: plain Metal draws nothing, or draws from whatever memory follows
+    /// the buffer, rather than refusing — probe cases `ind_offset_past` and `indirect_past_end`:
+    /// undefined).
     IndirectBufferRange,
     /// `dispatch_threads_per_tile` with a drawing state set (measured: "the renderPipelineState
     /// was not created with a tileDescriptor").
+    ///
+    /// Basis: metal-documented (Metal asserts "the renderPipelineState was not created with a
+    /// tileDescriptor").
     NotTileState,
     /// `dispatch_threads_per_tile` with threads per tile wider or taller than the pass's tile
     /// (measured: "threadsPerTile.width(32) must be <= 16"). Plain Metal runs them, their
     /// imageblock cells past the tile landing in the neighbouring tiles' pixels: a layout of
     /// Metal's tile memory the runtime does not model, so refused.
+    ///
+    /// Basis: unknown (Metal asserts "threadsPerTile.width(32) must be <= 16" and plain Metal runs
+    /// the threads, so it takes the input, but no run on record names the device or release).
     ThreadsPerTilePastTile {
         /// The threads per tile's width and height.
         threads: [u32; 2],
@@ -525,6 +556,9 @@ pub enum DrawProblem {
     /// (probe 13 `amp2_pipeline1`, a probe: undefined, so refused); a count above 8 is not
     /// measured. One above a larger maximum draws that many amplifications, and a count of 0 draws
     /// nothing, as plain Metal draws them (probe 13 `amp0`, a probe).
+    ///
+    /// Basis: metal-takes (an M4: plain Metal stored garbage in slice 0 for counts 2 and 3 on a
+    /// pipeline of 1, probe `amp2_pipeline1`, rather than refusing; a count above 8 is unmeasured).
     AmplificationCount {
         /// The encoder's count.
         count: u64,
@@ -533,6 +567,9 @@ pub enum DrawProblem {
     },
     /// `set_vertex_amplification_count`: fewer view mappings than the count, past which Metal
     /// would read its pointer (memory the call was not given: undefined, so refused).
+    ///
+    /// Basis: ours (this crate's slice of view mappings: Metal's call takes a pointer, and reading
+    /// the count would pass the memory the caller handed over).
     ViewMappings {
         /// The amplification count.
         count: u64,
@@ -545,6 +582,9 @@ pub enum DrawProblem {
     /// `patchIndexBufferOffset(0) + (patchIndicesUsed(4) * 4) must be <= [patchIndexBuffer
     /// length](8)`); plain Metal reads past the buffer (probe case `pib_short`: undefined, so
     /// refused).
+    ///
+    /// Basis: metal-takes (an M4: plain Metal reads past the patch index buffer rather than
+    /// refusing, probe case `pib_short`: undefined).
     PatchIndexBufferRange {
         /// `patchIndexBufferOffset`.
         offset: u64,
@@ -559,6 +599,9 @@ pub enum DrawProblem {
     /// without a patch index buffer (measured on an M4: `controlPointIndexBufferOffset(0) +
     /// (indexCount(9) * 4) must be <= [controlPointIndexBuffer length](24)`); plain Metal reads
     /// past the buffer (probe cases `cpi_short` and `cpi_start1_count2`: undefined, so refused).
+    ///
+    /// Basis: metal-takes (an M4: plain Metal reads past the control-point index buffer rather than
+    /// refusing, probe cases `cpi_short` and `cpi_start1_count2`: undefined).
     ControlPointIndexBufferRange {
         /// `controlPointIndexBufferOffset`.
         offset: u64,
@@ -574,6 +617,9 @@ pub enum DrawProblem {
     /// `length` (measured: `indexBufferOffset(0) + (indexCount(6) * 4)
     /// must be <= [indexBuffer length](16)`); plain Metal draws from whatever memory follows the
     /// buffer (`idx_past_end`: undefined, so refused).
+    ///
+    /// Basis: unknown (plain Metal draws from whatever memory follows the buffer, probe case
+    /// `idx_past_end`, so it takes the input, but that run on record names no device or release).
     IndexBufferRange {
         /// `indexBufferOffset`.
         offset: u64,

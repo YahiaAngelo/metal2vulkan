@@ -34,6 +34,10 @@ pub enum MipmapProblem {
     /// A compressed format, which is not color-renderable: plain Metal writes zeros over the
     /// first bytes of the levels below the first and leaves the rest (an M4 under macOS 27.0.1), no
     /// defined answer. A depth or stencil texture, also not color-renderable, is left as it is.
+    ///
+    /// Basis: metal-takes (an M4, macOS 27.0.1: plain Metal generates the mipmaps of a compressed
+    /// texture rather than refusing, writing zeros over the first bytes of the lower levels: no
+    /// defined answer).
     NotColorRenderable,
 }
 

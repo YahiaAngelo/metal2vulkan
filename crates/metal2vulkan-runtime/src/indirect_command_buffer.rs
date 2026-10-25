@@ -401,12 +401,20 @@ pub enum IndirectCommandBufferProblem {
     /// such a buffer, where its validation stops it, and executes, resets, optimizes and copies
     /// it to another such as nothing, as the runtime does, but its process ends at a command's
     /// first setter and at its CPU reset; the rest was not measured.
+    ///
+    /// Basis: unknown (plain Metal's process ends at a command's first setter and at its CPU reset
+    /// by the doc's account, but no run on record names the device or release, and the rest was not
+    /// measured).
     NoCommandTypes,
     /// A descriptor with more kernel, vertex, fragment, object or mesh buffers, or kernel
     /// threadgroup lengths, than 65536, past which plain Metal's storage is not defined (a buffer of 2^31 kernel
     /// buffers was made as small as one of few, 2^32 - 1 ended its process).
     /// Metal's validation stops more than 31, but plain Metal makes a buffer of up to 65536, as
     /// the runtime does.
+    ///
+    /// Basis: unknown (plain Metal makes a buffer of more binds than this allows — 2^31 was made as
+    /// small as one of few — so its storage is undefined rather than refused, and that run names no
+    /// device).
     BindCount {
         /// The count the descriptor asks for.
         count: u32,
@@ -416,6 +424,9 @@ pub enum IndirectCommandBufferProblem {
     /// A range of commands not inside the buffer: for `reset_with_range`, one that starts at or
     /// past its size (an empty one too, but the empty one at the size) or ends past it; for the
     /// read-back, one that ends past it.
+    ///
+    /// Basis: unknown (plain Metal's answer for a reset or read-back range that is not inside the
+    /// buffer is unmeasured).
     Range {
         /// The range's first command.
         location: u64,
@@ -426,9 +437,15 @@ pub enum IndirectCommandBufferProblem {
     },
     /// A pipeline state set on a command of a buffer that inherits it (this ends Metal's
     /// process).
+    ///
+    /// Basis: unknown (Metal's process ends as said above, but no run on record names the device or
+    /// release).
     InheritedPipelineState,
     /// A pipeline state made without `supportIndirectCommandBuffers` (this ends Metal's
     /// process).
+    ///
+    /// Basis: unknown (Metal's process ends as said above, but no run on record names the device or
+    /// release).
     PipelineWithoutSupport,
     /// A draw of a kind (`DRAW_INDEXED`, `DRAW_PATCHES` or `DRAW_INDEXED_PATCHES`, a probe) whose
     /// record the buffer's records cannot hold: an indexed draw on a buffer of draws of primitives
@@ -439,6 +456,9 @@ pub enum IndirectCommandBufferProblem {
     /// probe). Metal's validation stops any kind the command types lack ("drawIndexedPrimitives is
     /// not enabled on this indirect command buffer"), but plain Metal runs one their records hold,
     /// as the runtime does.
+    ///
+    /// Basis: unknown (plain Metal's GPU faults or its process ends at each kind as said above, but
+    /// those probes name no device or release).
     CommandType(IndirectCommandType),
     /// A compute command of a buffer whose commands are render ones, or a setter plain Metal does
     /// not ignore on a render command of a buffer whose commands are dispatches. Plain Metal ends
@@ -448,6 +468,10 @@ pub enum IndirectCommandBufferProblem {
     /// buffer of dispatches alone and one of dispatches beside draws alike). The getter itself is
     /// not refused there: Metal gives the command, as the runtime does
     /// (`IndirectRenderCommand`'s `of_compute`).
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 27.0.1: plain Metal's process ends — SIGBUS, SIGBUS
+    /// and SIGSEGV — at `indirectComputeCommandAtIndex:` on a buffer of draws and at a render
+    /// command's setters and reset on one of dispatches, the API validation layer off).
     CommandKind,
     /// A render state set on a render command (`set_depth_stencil_state`, `set_depth_bias`,
     /// `set_depth_clip_mode`, `set_cull_mode`, `set_front_facing_winding`,
@@ -455,16 +479,25 @@ pub enum IndirectCommandBufferProblem {
     /// `APINotSupported` at each, ending its process, on an M4 (macOS 27.0.1), whether the
     /// buffer inherits the state or not; its validation stops the setter on a buffer that
     /// inherits the state, and the creation of one that does not.
+    ///
+    /// Basis: metal-measured (an M4, macOS 27.0.1: plain Metal raises `APINotSupported` at each
+    /// setter and its process ends, whether the buffer inherits the state or not).
     RenderState,
     /// An object threadgroup length set on a render command of a buffer whose command types
     /// hold no mesh draw (`set_object_threadgroup_memory_length`): Metal's process ends, with and
     /// without its validation, on an M4.
+    ///
+    /// Basis: metal-measured (an M4: Metal's process ends at `set_object_threadgroup_memory_length`
+    /// on a buffer of no mesh draw, with and without its validation).
     ObjectThreadgroupMemory,
     /// A render pipeline state set on a command of a buffer whose command types hold no draw of
     /// its kind (`set_render_pipeline_state`): one of a vertex function on a buffer of mesh draws
     /// alone, a mesh one on a buffer of no mesh draw. Metal's process ends in the setter, with
     /// and without its validation, on an M4 (buffers of either mesh kind and of both, Metal's
     /// driver faulting: buffers of draws of primitives, of indexed draws and of patch draws).
+    ///
+    /// Basis: metal-measured (an M4: Metal's process ends in `set_render_pipeline_state` on a
+    /// buffer of no draw of the state's kind, with and without its validation).
     PipelineKind,
 }
 

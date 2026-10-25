@@ -120,8 +120,16 @@ impl VisibilityResultMode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VisibilityProblem {
     /// The pass has no visibility result buffer: Metal stops it with or without API validation.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal's process ends, SIGSEGV,
+    /// at `setVisibilityResultMode:offset:` in a pass with no visibility result buffer).
     NoBuffer,
     /// An offset whose 8 bytes run past the buffer's `length`.
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal takes
+    /// `setVisibilityResultMode:Boolean offset:64` on an 8-byte buffer and the pass ends, its
+    /// validation alone saying "offset(64) + result-size(8) must be <= `[visibilityResultBuffer
+    /// length](8)`").
     OffsetOutOfRange {
         /// The offset given.
         offset: u64,
@@ -131,6 +139,9 @@ pub enum VisibilityProblem {
     /// An offset the encoder took before in the other mode ("using the same offset ... twice in
     /// the same command encoder is not allowed"), `Disabled` between them or not. In its own mode
     /// the offset continues its result, as plain Metal's (the module docs).
+    ///
+    /// Basis: metal-documented (Metal asserts "using the same offset ... twice in the same command
+    /// encoder is not allowed").
     OffsetReused {
         /// The offset given.
         offset: u64,

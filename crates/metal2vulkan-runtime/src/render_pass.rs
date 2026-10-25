@@ -382,36 +382,62 @@ pub enum Attachment {
 pub enum RenderPassProblem {
     /// No attachment has a texture and the target width or height is 0: Metal answers nil (an
     /// [`Error::Nil`](crate::Error::Nil)).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal answers its render command
+    /// encoder nil for a descriptor with no attachment and a 0 by 0 target).
     NoTargets,
     /// The attachment's texture has a format of another kind: a depth or stencil format as a
     /// color attachment, a format without depth as the depth attachment, one without stencil as
     /// the stencil attachment.
+    ///
+    /// Basis: unknown (plain Metal's answer for an attachment whose texture holds another kind of
+    /// format is unmeasured).
     AttachmentFormat(Attachment),
     /// The attachment's level lies past its texture's, its slice past an array's or a cube's
     /// slices, or its depth plane past a 3D texture's planes. An index the texture's type does
     /// not have is ignored, as Metal ignores it.
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal makes the encoder for level 5
+    /// of a 4-level texture and the pass ends, its validation alone saying "mipmap level is 5, but
+    /// the texture at attachment 0 has only 4 levels").
     AttachmentSubresource(Attachment),
     /// The attachments' sample counts differ.
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal makes the encoder for a
+    /// 1-sample and a 4-sample attachment together and the pass ends, its validation alone saying
+    /// "render targets have inconsistent sample counts").
     SampleCounts,
     /// The depth attachment's `Clear` load holds a NaN clear depth, on a depth format whose
     /// store of one is not measured (not `Depth32Float`, `Depth32Float_Stencil8` or
     /// `Depth16Unorm`, which clear as plain Metal clears them; a value outside `[0, 1]` clears to
     /// the nearer end).
+    ///
+    /// Basis: unknown (plain Metal's store of a NaN clear depth is unmeasured for the formats this
+    /// refuses; the three it is measured on clear as plain Metal clears them).
     ClearDepth,
     /// A store action set by the encoder over one the descriptor knew (not `Unknown`), or set to
     /// `Unknown`; or store action options set by the encoder over a store action the descriptor
     /// knew (measured: "store actions known at render command encoder init time may not be
     /// mutated"). Over a color attachment's known action, plain Metal keeps that action and
     /// options, and the encoder does.
+    ///
+    /// Basis: metal-documented (Metal asserts "store actions known at render command encoder init
+    /// time may not be mutated").
     StoreActionKnown(Attachment),
     /// A store action set by the encoder for a stencil attachment without a texture, or store
     /// action options for an attachment without one (plain Metal changes nothing for a color or
     /// depth attachment's store action, nor does the encoder).
+    ///
+    /// Basis: unknown (plain Metal's answer for a store action set on a stencil attachment without
+    /// a texture is unmeasured; the color and depth attachments it changes nothing for are not
+    /// refused).
     NoAttachment(Attachment),
     /// A resolving store action (the descriptor's or the encoder's) without a resolve texture
     /// (measured: "requires resolve texture"), of a depth or stencil attachment, or of a color
     /// attachment set late by `set_color_resolve_target`: the descriptor's or a late store
     /// action of a color attachment resolves nothing there, as plain Metal's.
+    ///
+    /// Basis: metal-documented (Metal asserts "requires resolve texture").
     ResolveWithoutTexture(Attachment),
     /// A resolve target set late (`set_color_resolve_target` and its depth and stencil twins)
     /// under a store action the descriptor knew that does not resolve (Metal takes `Unknown`;
@@ -420,27 +446,47 @@ pub enum RenderPassProblem {
     /// attachment stored by the action, as plain Metal does where its validation stops it
     /// ("must be one of MTLStoreActionMultisampleResolve or
     /// MTLStoreActionStoreAndMultisampleResolve"): a color attachment's, a depth or stencil one's.
+    ///
+    /// Basis: metal-documented (Metal asserts "must be one of MTLStoreActionMultisampleResolve or
+    /// MTLStoreActionStoreAndMultisampleResolve").
     ResolveStoreAction(Attachment),
     /// A resolve of a single-sampled depth or stencil attachment, or a color one's target set
     /// late (measured: Metal's validation stops it; a color attachment's resolving store action
     /// copies its texels into the descriptor's resolve texture, as plain Metal's).
+    ///
+    /// Basis: unknown (Metal's validation stops it, measured; plain Metal's own answer for a
+    /// resolve of a single-sampled depth or stencil attachment is unmeasured).
     ResolveSourceSamples(Attachment),
     /// A multisampled resolve texture (measured): a depth or stencil one, and a color one of
     /// the attachment's sample count (plain Metal copies the samples, not built). A color one of
     /// another count is left untouched, as plain Metal leaves it.
+    ///
+    /// Basis: unknown (plain Metal copies the samples of a multisampled color resolve texture,
+    /// which is not built here, and no run on record names the device; a depth or stencil one is
+    /// unmeasured).
     ResolveSamples(Attachment),
     /// A resolve texture of another pixel format than the attachment's (measured: Metal's
     /// validation stops it, and plain Metal's answer depends on the pair, `resolve.rs`; a
     /// multisampled color attachment resolves into its format's sRGB twin in its own encoding,
     /// as plain Metal's), or an integer color format (measured: "cannot be a MSAA resolve target";
     /// plain Metal writes values no sample holds, changing from run to run).
+    ///
+    /// Basis: metal-documented (Metal asserts "cannot be a MSAA resolve target" for an integer
+    /// color format, and its validation stops a resolve texture of another pixel format than the
+    /// attachment's).
     ResolveFormat(Attachment),
     /// The resolve level, slice or depth plane lies past the resolve texture (measured), an
     /// index its type does not have ignored as for an attachment.
+    ///
+    /// Basis: unknown (Metal's validation stops a resolve level, slice or depth plane past the
+    /// resolve texture, measured; plain Metal's own answer is unmeasured).
     ResolveSubresource(Attachment),
     /// A color resolve level reaches past the attachment, which loads with `Load` or `DontCare`
     /// (measured: "size mismatch"; plain Metal writes what memory held there). A level of another
     /// extent resolves the overlap elsewhere, as plain Metal does.
+    ///
+    /// Basis: unknown (Metal asserts "size mismatch" and plain Metal writes what memory held there,
+    /// so it takes the input, but no run on record names the device or release).
     ResolveSize(Attachment),
     /// The depth and stencil attachments are one texture whose stencil resolves alone
     /// (`MultisampleResolve`) while its depth is stored: plain Metal overwrites the depth's
@@ -448,23 +494,42 @@ pub enum RenderPassProblem {
     /// MTLStoreActionStore and MTLStoreActionMultisampleResolve store actions ... is not allowed").
     /// The depth resolved alone with the stencil stored, and an aspect stored and resolved beside a
     /// stored one, run as Metal runs them.
+    ///
+    /// Basis: unknown (plain Metal overwrites the depth's samples with a layout pattern, so it
+    /// takes the input, but the probes on record name no device or release).
     DepthStencilResolveMix,
     /// The stencil resolves with `DepthResolvedSample` without a depth attachment, whose filter
     /// picks its sample (measured; with a depth attachment that does not resolve, the filter
     /// picks it as for one that does).
+    ///
+    /// Basis: unknown (measured through Metal's validation alone; plain Metal's own answer for a
+    /// stencil resolve by `DepthResolvedSample` without a depth attachment is unmeasured).
     DepthResolvedSampleWithoutDepthResolve,
     /// A memoryless attachment loaded with `Load` (measured: "Memoryless attachment cannot be
     /// loaded as it have no memory to load from").
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal makes the encoder for a
+    /// memoryless attachment loaded with `Load` and the pass ends, its validation alone saying
+    /// "Memoryless attachment cannot be loaded as it have no memory to load from").
     MemorylessLoad(Attachment),
     /// A memoryless attachment stored with `Store` or `StoreAndMultisampleResolve`, the
     /// descriptor's (measured: "Memoryless attachment content cannot be stored in memory") or
     /// the encoder's late one (measured: "storeAction unsupported for Memoryless attachment").
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal makes the encoder for a
+    /// memoryless attachment stored with `Store` and `endEncoding` returns, its validation alone
+    /// saying "Memoryless attachment content cannot be stored in memory").
     MemorylessStore(Attachment),
     /// A memoryless resolve texture (measured: "resolveTexture must not be Memoryless").
+    ///
+    /// Basis: metal-documented (Metal asserts "resolveTexture must not be Memoryless").
     MemorylessResolve(Attachment),
     /// A tile size other than 16x16, 32x16 and 32x32, or a tile with one side 0 (measured:
     /// "Invalid tile dimensions (8, 8)"; plain Metal answers its encoder nil, an
     /// [`Error::Nil`](crate::Error::Nil)).
+    ///
+    /// Basis: metal-documented (Metal asserts "Invalid tile dimensions (8, 8)", for which plain
+    /// Metal answers its encoder nil).
     TileSize {
         /// The tile's width.
         width: u64,
@@ -475,6 +540,9 @@ pub enum RenderPassProblem {
     /// Metal's validation stops, an [`Error::Invalid`](crate::Error::Invalid). Plain Metal
     /// faults there: its command buffer fails, or it makes no encoder (the re-probe on an M4), so
     /// the refusal is Metal's answer.
+    ///
+    /// Basis: metal-measured (an M4: plain Metal faults there — its command buffer fails, or it
+    /// makes no encoder — for a 32 by 32 tile at 4 samples).
     TileSizeAtSamples {
         /// The pass's sample count.
         samples: u32,
@@ -482,6 +550,9 @@ pub enum RenderPassProblem {
     /// Per-sample storage, the imageblock sample length rounded up to 8 bytes, past 64
     /// (measured: "Per sample storage (72) cannot be greater than (64)"; plain Metal answers its
     /// encoder nil, an [`Error::Nil`](crate::Error::Nil)).
+    ///
+    /// Basis: metal-documented (Metal asserts "Per sample storage (72) cannot be greater than
+    /// (64)", for which plain Metal answers its encoder nil).
     PerSampleStorage {
         /// The per-sample storage, in bytes.
         bytes: u64,
@@ -489,6 +560,9 @@ pub enum RenderPassProblem {
     /// A threadgroup memory length past 32768 bytes (measured: "Requested threadgroup memory
     /// length exceeds amount supported by device (32768)"; plain Metal answers its encoder nil, an
     /// [`Error::Nil`](crate::Error::Nil)).
+    ///
+    /// Basis: metal-documented (Metal asserts "Requested threadgroup memory length exceeds amount
+    /// supported by device (32768)", for which plain Metal answers its encoder nil).
     ThreadgroupMemoryLength {
         /// The threadgroup memory length asked for, in bytes.
         length: u64,
@@ -496,6 +570,9 @@ pub enum RenderPassProblem {
     /// Tile memory, the per-sample storage of each pixel of a tile plus the threadgroup memory
     /// length, past 32768 bytes (measured: "Total allocated tile memory (40960) cannot be greater
     /// than (32768)"; plain Metal answers its encoder nil, an [`Error::Nil`](crate::Error::Nil)).
+    ///
+    /// Basis: metal-documented (Metal asserts "Total allocated tile memory (40960) cannot be
+    /// greater than (32768)", for which plain Metal answers its encoder nil).
     TileMemory {
         /// The tile memory asked for, in bytes.
         bytes: u64,
@@ -504,6 +581,9 @@ pub enum RenderPassProblem {
     /// differ (measured: "renderTargetArrayLength (2) must be <= rasterizationRateMap.layerCount
     /// (1)", `rate_mapped_pass.rs`; past a map of layers alike, every slice takes its first
     /// layer, as plain Metal rasterizes past one layer).
+    ///
+    /// Basis: metal-documented (Metal asserts "renderTargetArrayLength (2) must be <=
+    /// rasterizationRateMap.layerCount (1)").
     RateMapArrayLength {
         /// The pass's `renderTargetArrayLength`.
         length: u64,
@@ -513,6 +593,9 @@ pub enum RenderPassProblem {
     /// A pass without attachments whose render target size is past the rasterization-rate map's
     /// screen (measured: "renderTargetWidth (128) must be <= rasterizationRateMap.screenSize.width
     /// (64)").
+    ///
+    /// Basis: metal-documented (Metal asserts "renderTargetWidth (128) must be <=
+    /// rasterizationRateMap.screenSize.width (64)").
     RateMapTargetSize {
         /// The pass's render target width and height.
         target: [u32; 2],
@@ -526,6 +609,10 @@ pub enum RenderPassProblem {
     /// draws a missing layer into the memory after the texture (a cube's seventh face and a
     /// depth array's fifth slice landed in the next texture of a heap, on an M3 Max and an M4),
     /// and a 2D texture's pass stored another word on a second run.
+    ///
+    /// Basis: metal-takes (an M3 Max and an M4: plain Metal clears and draws the missing layer into
+    /// the memory after the texture — a cube's seventh face and a depth array's fifth slice landed
+    /// in the next texture of a heap — rather than refusing).
     ArrayLengthPastSlices {
         /// The attachment.
         attachment: Attachment,
@@ -536,6 +623,9 @@ pub enum RenderPassProblem {
     },
     /// A sample position whose coordinate lies outside `[0, 1)` (measured: "Provided sample
     /// position x-coodinate (1.000000) at index 0 is not within the range [0,1)").
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "Provided sample
+    /// position x-coodinate (1.000000) at index 0 is not within the range [0,1)").
     SamplePosition {
         /// The position's index.
         index: u32,
@@ -543,6 +633,9 @@ pub enum RenderPassProblem {
     /// Sample positions of a count the device takes none at (measured: "count (1) is not a
     /// supported sample count for custom positions", "the device does not support the number of
     /// samples supplied").
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts "count (1) is not
+    /// a supported sample count for custom positions").
     SamplePositionCount {
         /// The number of positions.
         count: u64,
@@ -551,6 +644,9 @@ pub enum RenderPassProblem {
     /// count, "2 custom sample positions were programmed, but this render pass uses 4 rasterizer
     /// sample(s)", and plain Metal ends the process past them; it puts the samples past fewer
     /// positions at the pixel's corner, as the runtime does).
+    ///
+    /// Basis: metal-documented (Metal asserts "2 custom sample positions were programmed, but this
+    /// render pass uses 4 rasterizer sample(s)", and plain Metal ends the process past them).
     SamplePositionsSamples {
         /// The number of positions.
         positions: u64,
@@ -561,12 +657,18 @@ pub enum RenderPassProblem {
     /// sample positions (measured: "includes MTLStoreActionOptionCustomSamplePositions, but no
     /// custom sample positions were specified"; a color or depth attachment's change nothing, as
     /// plain Metal's).
+    ///
+    /// Basis: metal-documented (Metal asserts "includes MTLStoreActionOptionCustomSamplePositions,
+    /// but no custom sample positions were specified").
     StoreActionOptionsWithoutPositions(Attachment),
     /// A stencil attachment's store action options that include `CustomSamplePositions` under a
     /// store action that keeps no samples, `DontCare` or `MultisampleResolve`: the descriptor's,
     /// or at `end_encoding` the encoder's late one (measured: "includes
     /// MTLStoreActionOptionCustomSamplePositions, which does not apply to the store action"; a
     /// color or depth attachment's change nothing, as plain Metal's).
+    ///
+    /// Basis: metal-documented (Metal asserts "includes MTLStoreActionOptionCustomSamplePositions,
+    /// which does not apply to the store action").
     StoreActionOptions(Attachment),
     /// `CustomSampleDepthStore` as a color or stencil attachment's store action: the
     /// descriptor's (measured, with and without API validation: "storeAction is not a valid
@@ -574,10 +676,16 @@ pub enum RenderPassProblem {
     /// A late one of an attachment that does not resolve, which Metal leaves unstored without
     /// validation (its validation stops the pass at `endEncoding`), stores as `DontCare`; a depth
     /// attachment's stores as `Store` does.
+    ///
+    /// Basis: metal-documented (Metal asserts "storeAction is not a valid MTLStoreAction", with and
+    /// without API validation).
     CustomSampleDepthStore(Attachment),
     /// A pass without attachments whose `defaultRasterSampleCount`'s low 8 bits are 8 to 15 or
     /// 128 to 255, or are 0 in a count of 256 or more: plain Metal ends the process making its
     /// encoder, on every device.
+    ///
+    /// Basis: unknown (plain Metal is held to end its process making the encoder, on every device,
+    /// but no run on record names the device or release).
     DefaultRasterSampleCount {
         /// The `defaultRasterSampleCount` given.
         count: u64,

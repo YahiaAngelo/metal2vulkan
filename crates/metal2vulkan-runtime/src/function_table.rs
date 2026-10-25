@@ -107,12 +107,18 @@ pub enum FunctionTableProblem {
     /// calls its own state's function at the handle's position (its last one past them), as the
     /// runtime's does for two compute pipelines' kernels and two drawing states' vertex or
     /// fragment functions.
+    ///
+    /// Basis: unknown (Metal's validation stops the handle, and plain Metal's own answer was not
+    /// measured).
     HandleOfAnotherState,
     /// A command whose function writes a buffer, or reads an intersection function table, at
     /// `index`, where a visible-function table is bound: plain Metal's answer was not measured
     /// (ray tracing's tables are out of scope). A visible-function table where a function only
     /// reads a buffer reads as an unbound buffer, zeros, as plain Metal's read where its
     /// validation stops the command ("incorrect Buffer binding").
+    ///
+    /// Basis: unknown (plain Metal's answer was not measured, and ray tracing's tables are out of
+    /// scope).
     TableAtBufferIndex {
         /// The buffer index.
         index: u32,
@@ -123,6 +129,9 @@ pub enum FunctionTableProblem {
     /// [`Error::Nil`](crate::Error::Nil)), and faults on a table of no stage (an
     /// [`Error::Invalid`](crate::Error::Invalid); an M4 under macOS 27.0.1). One
     /// stage the state has no function of answers no handle and makes a table, as plain Metal's.
+    ///
+    /// Basis: metal-measured (an M4, macOS 27.0.1: plain Metal answers the handle nil and the table
+    /// of more than one stage nil, and faults on a table of no stage).
     StageWithoutFunction {
         /// The stage asked for.
         stage: RenderStages,

@@ -37,12 +37,18 @@ use metal2vulkan::pipeline::{
 pub enum RequiredThreadsProblem {
     /// A size with an axis of 0, though not every axis (all three 0 is no requirement): "must
     /// not be 0", at creation, with or without API validation.
+    ///
+    /// Basis: metal-documented (Metal's creation fails "must not be 0", with or without API
+    /// validation).
     EmptyAxis {
         /// The size given.
         required: [u32; 3],
     },
     /// A size of more threads than the device's limit (its `maxTotalThreadsPerThreadgroup`
     /// answer): "must be <= 1024 (device limit)", at creation, with or without API validation.
+    ///
+    /// Basis: metal-documented (Metal's creation fails "must be <= 1024 (device limit)", with or
+    /// without API validation).
     OverDeviceLimit {
         /// The size's threads.
         threads: u64,
@@ -51,6 +57,9 @@ pub enum RequiredThreadsProblem {
     },
     /// A size of more threads than the descriptor's `maxTotalThreadsPerThreadgroup`: "must be <=
     /// maxTotalThreadsPerThreadgroup (32)", at creation, with or without API validation.
+    ///
+    /// Basis: metal-documented (Metal's creation fails "must be <= maxTotalThreadsPerThreadgroup
+    /// (32)", with or without API validation).
     OverMaxTotal {
         /// The size's threads.
         threads: u64,
@@ -61,6 +70,10 @@ pub enum RequiredThreadsProblem {
     /// fails, with or without API validation ("Kernel specified max total threads per
     /// threadgroup (64) must match compute pipeline specified max total threads per threadgroup
     /// (256)").
+    ///
+    /// Basis: metal-documented (Metal's creation fails "Kernel specified max total threads per
+    /// threadgroup (64) must match compute pipeline specified max total threads per threadgroup
+    /// (256)", with or without API validation).
     MaxTotalDiffers {
         /// The size's threads.
         threads: u64,
@@ -96,6 +109,10 @@ pub enum BinaryFunctionProblem {
     /// `mesh_frag_one_add_two`, `mesh_vertex_add`, `mesh_tile_add`). Plain Metal's answer is
     /// the runtime's for a compute state's kernel and a drawing or tile state's own stages made
     /// without their flags, and for a stage a drawing or tile state lacks.
+    ///
+    /// Basis: metal-measured (an M4, macOS 27.0.1: plain Metal's process ends at the call for a
+    /// mesh state — cases `mesh_frag_two`, `mesh_frag_one_add_two`, `mesh_vertex_add` and
+    /// `mesh_tile_add`).
     NotSupported {
         /// The stage.
         stage: BinaryFunctionStage,
@@ -104,12 +121,18 @@ pub enum BinaryFunctionProblem {
     /// found in binaryFunctions array but is not precompiled.") or among the functions added
     /// ("Function 'f' was found in Fragment functions array but is not precompiled."): Metal's
     /// API validation stops it, and its creation fails without validation.
+    ///
+    /// Basis: metal-documented (Metal's validation says "Function 'f' was found in binaryFunctions
+    /// array but is not precompiled.", and its creation fails without validation).
     NotPrecompiled {
         /// The function's name.
         name: String,
     },
     /// Functions added to a stage the compile layer already compiled (`StageSource::Compiled`),
     /// whose linked functions are fixed: Metal's stages are functions, so it has no such call.
+    ///
+    /// Basis: ours (this crate's already-compiled stage: Metal's descriptor takes a function, so it
+    /// has no such call).
     CompiledStage {
         /// The stage.
         stage: BinaryFunctionStage,

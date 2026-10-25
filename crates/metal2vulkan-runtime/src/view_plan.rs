@@ -252,6 +252,9 @@ pub enum ViewProblem {
     /// [`PixelFormat::Invalid`] or [`PixelFormat::Unspecialized`]: plain Metal makes no such view
     /// and answers nil (an M3 Max under macOS 26.7, the consumer's report), an
     /// [`Error::Nil`](crate::Error::Nil).
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 26.7: plain Metal makes no such view and answers
+    /// nil, as the consumer reported).
     NotAFormat,
     /// A format Metal never views the texture's as: another size or class (compressed,
     /// uncompressed, depth or stencil), another compressed family, or a combined depth/stencil
@@ -260,24 +263,47 @@ pub enum ViewProblem {
     /// pixelFormat not compatible with texture view pixelFormat"). And any format but its own for a texture made in `X32_Stencil8`,
     /// whose `Depth32Float_Stencil8` view plain Metal makes over the stencil texture's bytes in
     /// its GPU's own layout, no defined answer.
+    ///
+    /// Basis: metal-documented (Metal aborts "source texture pixelFormat not compatible with
+    /// texture view pixelFormat").
     FormatIncompatible,
     /// A texture type Metal does not view the texture's type as.
+    ///
+    /// Basis: unknown (plain Metal's answer for a view type the texture's type is not viewed as is
+    /// unmeasured: the cube view of a 2D texture on record is stopped over its slice range, not its
+    /// type).
     TypeIncompatible,
     /// An empty level range, or one past the texture's levels.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts
+    /// "(newLevelRange.location + newLevelRange.length)(7) must be <= `[texture
+    /// mipmapLevelCount](4)`", and "newLevelRange.length must not be 0" for an empty one).
     LevelRange,
     /// An empty slice range, or one past the texture's slices.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts
+    /// "(newSliceRange.location + newSliceRange.length)(3) must be <= (2)").
     SliceRange,
     /// A slice count the view's type does not take: one for a type that is not an array, six for
     /// a cube, a multiple of six for a cube array.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal asserts
+    /// "newSliceRange.length(2) must equal (1) for textureType (MTLTextureType2D)").
     SliceCount,
     /// More than one slice of a 2D array over a buffer: Metal asserts on such a view, plain and
     /// validated (`sliceRange.length == 1`; a Metal probe on the M3 Max and an M4).
+    ///
+    /// Basis: metal-measured (an M3 Max and an M4: Metal asserts `sliceRange.length == 1` on such a
+    /// view, plain and validated).
     BufferSlices,
     /// A view with a swizzle of a texture whose usage is none (a texture made with Apple's private
     /// usage 0x8 alone): Metal asserts on such a view, plain and validated (`_usage !=
     /// MTLTextureUsageUnknown`, an Apple M4). Its views without a swizzle are
     /// made, and so is a swizzled view of a texture of `ShaderWrite` or `RenderTarget` usage alone,
     /// which keeps no usage.
+    ///
+    /// Basis: metal-measured (an Apple M4: Metal asserts `_usage != MTLTextureUsageUnknown` on such
+    /// a view, plain and validated).
     SwizzledViewOfNoUsage,
 }
 
