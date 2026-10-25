@@ -121,7 +121,7 @@ use crate::spirv::ir::{
     Type as SType, UnOp,
 };
 
-use super::emit::{prepare, Mem, Prepared, ViewMem};
+use super::emit::{prepare, Mem, Prepared};
 use super::local::{self, LocalAccess, LocalPtr};
 use super::{not_lowered, refuse, static_roots, view_kind, AccessPlan, BufferReach, Target};
 use crate::error::LowerFamily;
@@ -1109,9 +1109,7 @@ fn on_target(fb: &mut FunctionBuilder<'_>, p: Prepared, o: Op) -> BResult<Option
     let two = k32(fb, 2)?;
     let word = fb.binary(BinOp::ShiftRightLogical, p.off, two)?;
     let ptr = match (p.mem, o.typed) {
-        (Mem::View(ViewMem(view, ..)), None) => {
-            views::word_ptr(fb, view, word)?.ok_or_else(dangling)?
-        }
+        (Mem::View(m), None) => views::word_ptr(fb, m.view(), word)?.ok_or_else(dangling)?,
         (Mem::Psb(m), typed) => {
             let pointee = match typed {
                 Some(t) => t,

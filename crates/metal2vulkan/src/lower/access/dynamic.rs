@@ -536,9 +536,10 @@ fn static_access(
         if write && super::view_kind(cx.profile, plan) != super::ViewKind::Storage {
             return Err(cx.invariant("a pointer store through a uniform view"));
         }
-        cx.push.insert(PushField::SlotBindOffset(plan.slot));
+        let slot = plan.slot;
+        cx.push.insert(PushField::SlotBindOffset(slot));
         if write {
-            super::request_dropped_store_word(cx, plan.slot);
+            super::request_dropped_store_word(cx, t.slot, slot);
         }
     }
     Ok(Access {

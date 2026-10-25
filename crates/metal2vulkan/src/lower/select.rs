@@ -1633,6 +1633,7 @@ fn finish(
     cx.families.arith.widened = arith::widening::widened_loads(&cx, &sel.strategy, m)?;
 
     let slots = access::finish_slots(&mut cx, m)?;
+    access::sink::finish(&mut cx)?;
     access::absent::finish(&mut cx);
     sync::memory_model::finish_interlock(&mut cx, &slots)?;
     charge_facts(&cx, fact_bytes, m)?;

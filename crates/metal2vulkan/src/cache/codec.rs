@@ -797,6 +797,7 @@ codec_enum! {
         ColorWriteTable,
         DepthStandIn,
         StencilStandIn,
+        StoreSink,
     }
     ResourceKind {
         Buffer, Texture, Sampler, Heap(f0), Synthetic(f0), InputAttachment(f0),
@@ -877,6 +878,7 @@ codec_enum! {
         ShaderSharedFloat32AtomicMinMax, ShaderImageFloat32Atomics, ShaderImageFloat32AtomicAdd,
         ShaderImageFloat32AtomicMinMax, BufferDeviceAddress, ScalarBlockLayout,
         UniformBufferStandardLayout, VulkanMemoryModel, VulkanMemoryModelDeviceScope,
+        VariablePointersStorageBuffer, VariablePointers,
         WorkgroupMemoryExplicitLayout, WorkgroupMemoryExplicitLayout8BitAccess,
         WorkgroupMemoryExplicitLayout16BitAccess, ShaderZeroInitializeWorkgroupMemory,
         VertexPipelineStoresAndAtomics, FragmentStoresAndAtomics, ShaderDrawParameters,

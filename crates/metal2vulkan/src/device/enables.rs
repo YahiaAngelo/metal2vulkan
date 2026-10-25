@@ -212,7 +212,7 @@ exposures! {
     Core(v(1)) => [
         StorageBuffer16BitAccess, UniformAndStorageBuffer16BitAccess, StoragePushConstant16,
         StorageInputOutput16, Multiview, ShaderDrawParameters, MultiviewTessellationShader,
-        MultiviewGeometryShader,
+        MultiviewGeometryShader, VariablePointersStorageBuffer, VariablePointers,
     ];
     // `VkPhysicalDeviceVulkan12Features`.
     Core(v(2)) => [
@@ -500,6 +500,11 @@ pub const FEATURE_NEEDS: &[(VkFeature, VkFeature, &str)] = &[
         VkFeature::MultiviewGeometryShader,
         VkFeature::Multiview,
         "VUID-VkPhysicalDeviceMultiviewFeatures-multiviewGeometryShader-00580",
+    ),
+    (
+        VkFeature::VariablePointers,
+        VkFeature::VariablePointersStorageBuffer,
+        "VUID-VkPhysicalDeviceVariablePointersFeatures-variablePointers-01431",
     ),
 ];
 

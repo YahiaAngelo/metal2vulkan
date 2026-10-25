@@ -27,23 +27,104 @@ use super::{
 /// slot's narrow views hold the leaf's units; a 16-byte aligned leaf is one `uvec4` where the slot
 /// has that view.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct ViewMem(pub(super) View, pub(super) WordOps, pub(super) UnitViews);
+pub(super) struct ViewMem {
+    view: View,
+    ops: WordOps,
+    units: UnitViews,
+    /// The condition under which a store lands at the view's own place: `None` for a store that
+    /// always lands there and for every load. Where it is given, every store selects its place
+    /// between the view's and the stage's write-only sink, so no store branches
+    /// ([`store_one`], `super::sink`).
+    at_own: Option<SValue>,
+    /// The stage's write-only sink, where it binds one (`super::sink::declare`).
+    sink: Option<super::sink::SinkViews>,
+}
 
 impl ViewMem {
+    /// The memory of `view`, with plain accesses and no unit view: the constant blob's
+    /// ([`super::blob`]), which nothing stores to.
+    pub(super) fn plain(view: View) -> ViewMem {
+        ViewMem {
+            view,
+            ops: WordOps::default(),
+            units: UnitViews::NONE,
+            at_own: None,
+            sink: None,
+        }
+    }
+
+    /// The memory of slot view `view` with unit views `units` and the stage's sink `sink`.
+    pub(super) fn of(
+        view: View,
+        units: UnitViews,
+        sink: Option<super::sink::SinkViews>,
+    ) -> ViewMem {
+        ViewMem {
+            view,
+            ops: WordOps::default(),
+            units,
+            at_own: None,
+            sink,
+        }
+    }
+
+    /// The same memory, loaded and stored with `ops`.
+    fn with_ops(self, ops: WordOps) -> ViewMem {
+        ViewMem { ops, ..self }
+    }
+
+    /// The same memory, every store of it landing at its own place only where `at_own` holds and
+    /// in the stage's sink otherwise. `None` where the form has no sink to select against, which
+    /// leaves the condition to [`store_one`]'s branch.
+    fn dropping(self, at_own: SValue) -> Option<ViewMem> {
+        self.sink.map(|_| ViewMem {
+            at_own: Some(at_own),
+            ..self
+        })
+    }
+
+    /// The slot's word view.
+    pub(super) fn view(&self) -> View {
+        self.view
+    }
+
     /// The narrow view of `bytes`-byte units: present whenever [`WordMem::units`] says so.
     fn narrow(&self, bytes: u32) -> BResult<views::NarrowView> {
-        self.2.of(bytes).ok_or(self.missing())
+        self.units.of(bytes).ok_or(self.missing())
     }
 
     /// The `uvec4` view: present whenever [`WordMem::units`] says so.
     fn vec4(&self) -> BResult<views::Vec4View> {
-        self.2.vec4.ok_or(self.missing())
+        self.units.vec4.ok_or(self.missing())
     }
 
     fn missing(&self) -> crate::spirv::error::BuildError {
         crate::spirv::error::BuildError::Dangling(crate::spirv::error::Dangling::Global(
-            self.0.global,
+            self.view.global,
         ))
+    }
+
+    /// The place a store lands at: `own`, or, under [`ViewMem::at_own`]'s negation, the sink's
+    /// place `sink_of` gives for the same unit, selected between the two pointers (one `OpSelect`
+    /// of `StorageBuffer` pointers, `VariablePointersStorageBuffer`). Every dropped store lands at
+    /// unit 0 of the sink, which holds a whole leaf.
+    fn store_place(
+        &self,
+        fb: &mut FunctionBuilder<'_>,
+        own: SValue,
+        sink_of: impl FnOnce(
+            &mut FunctionBuilder<'_>,
+            super::sink::SinkViews,
+            SValue,
+        ) -> BResult<SValue>,
+    ) -> BResult<SValue> {
+        let Some(at_own) = self.at_own else {
+            return Ok(own);
+        };
+        let sink = self.sink.ok_or(self.missing())?;
+        let zero = k32(fb, 0)?;
+        let at_sink = sink_of(fb, sink, zero)?;
+        fb.select(at_own, own, at_sink)
     }
 }
 
@@ -53,7 +134,7 @@ impl WordMem for ViewMem {
         // A uniform view's read-only vectors are read plainly, as its words are.
         let access = match view.class {
             crate::spirv::ir::StorageClass::Uniform => MemAccess::default(),
-            _ => self.1.access(fb, MemAccess::default(), false)?,
+            _ => self.ops.access(fb, MemAccess::default(), false)?,
         };
         views::read_vec4(fb, view, index, access)
     }
@@ -65,12 +146,17 @@ impl WordMem for ViewMem {
         value: SValue,
     ) -> BResult<()> {
         let view = self.vec4()?;
-        let access = self.1.access(fb, MemAccess::default(), true)?;
-        views::write_vec4(fb, view, index, value, access)
+        let access = self.ops.access(fb, MemAccess::default(), true)?;
+        let own = views::vec4_ptr(fb, view, index)?;
+        let p = self.store_place(fb, own, |fb, sink, zero| {
+            let view = sink.units.vec4.ok_or(missing(sink.view))?;
+            views::vec4_ptr(fb, view, zero)
+        })?;
+        fb.store(p, value, access)
     }
 
     fn units(&self) -> Units {
-        self.2.units()
+        self.units.units()
     }
 
     fn read_unit(
@@ -80,7 +166,7 @@ impl WordMem for ViewMem {
         index: SValue,
     ) -> BResult<SValue> {
         let view = self.narrow(bytes)?;
-        let access = self.1.access(fb, MemAccess::default(), false)?;
+        let access = self.ops.access(fb, MemAccess::default(), false)?;
         views::read_unit(fb, view, index, access)
     }
 
@@ -92,22 +178,27 @@ impl WordMem for ViewMem {
         value: SValue,
     ) -> BResult<()> {
         let view = self.narrow(bytes)?;
-        let access = self.1.access(fb, MemAccess::default(), true)?;
-        views::write_unit(fb, view, index, value, access)
+        let access = self.ops.access(fb, MemAccess::default(), true)?;
+        let own = views::unit_ptr(fb, view, index)?;
+        let p = self.store_place(fb, own, |fb, sink, zero| {
+            let view = sink.units.of(bytes).ok_or(missing(sink.view))?;
+            views::unit_ptr(fb, view, zero)
+        })?;
+        views::write_unit(fb, view, p, value, access)
     }
 
     fn read(&mut self, fb: &mut FunctionBuilder<'_>, word: SValue) -> BResult<SValue> {
-        if self.1 == WordOps::default() || self.0.kind != ViewKind::Storage {
-            return views::read_word(fb, self.0, word);
+        if self.ops == WordOps::default() || self.view.kind != ViewKind::Storage {
+            return views::read_word(fb, self.view, word);
         }
-        let p = storage_ptr(fb, self.0, word)?;
-        let access = self.1.access(fb, MemAccess::default(), false)?;
+        let p = storage_ptr(fb, self.view, word)?;
+        let access = self.ops.access(fb, MemAccess::default(), false)?;
         fb.load(p, access)
     }
 
     fn write(&mut self, fb: &mut FunctionBuilder<'_>, word: SValue, value: SValue) -> BResult<()> {
-        let p = storage_ptr(fb, self.0, word)?;
-        let access = self.1.access(fb, MemAccess::default(), true)?;
+        let p = self.store_word_place(fb, word)?;
+        let access = self.ops.access(fb, MemAccess::default(), true)?;
         fb.store(p, value, access)
     }
 
@@ -118,12 +209,26 @@ impl WordMem for ViewMem {
         mask: SValue,
         bits: SValue,
     ) -> BResult<()> {
-        let p = storage_ptr(fb, self.0, word)?;
+        let p = self.store_word_place(fb, word)?;
         let keep = fb.unary(UnOp::Not, mask)?;
         let clear = fb.binary(BinOp::BitwiseOr, keep, bits)?;
         fb.atomic(AtomicOp::And, p, Scope::Device, Semantics::RELAXED, clear)?;
         fb.atomic(AtomicOp::Or, p, Scope::Device, Semantics::RELAXED, bits)?;
         Ok(())
+    }
+}
+
+/// A missing view of `view`'s binding: an internal invariant failure (the stage's sink declares
+/// the unit views of every slot whose dropped stores reach it, `super::sink`).
+fn missing(view: View) -> crate::spirv::error::BuildError {
+    crate::spirv::error::BuildError::Dangling(crate::spirv::error::Dangling::Global(view.global))
+}
+
+impl ViewMem {
+    /// The place a word store lands at ([`ViewMem::store_place`] over the word views).
+    fn store_word_place(&self, fb: &mut FunctionBuilder<'_>, word: SValue) -> BResult<SValue> {
+        let own = storage_ptr(fb, self.view, word)?;
+        self.store_place(fb, own, |fb, sink, zero| storage_ptr(fb, sink.view, zero))
     }
 }
 
@@ -149,7 +254,7 @@ impl Mem {
     /// The same memory, loaded and stored with `ops`.
     pub(super) fn with(self, ops: WordOps) -> Mem {
         match self {
-            Mem::View(ViewMem(view, _, units)) => Mem::View(ViewMem(view, ops, units)),
+            Mem::View(m) => Mem::View(ViewMem { ops, ..m }),
             Mem::Psb(m) => Mem::Psb(m.with(ops)),
         }
     }
@@ -357,8 +462,9 @@ pub(super) fn prepare(
         .get(t.slot)
         .copied()
         .unwrap_or(UnitViews::NONE);
+    let sink = cx.decl.families.access.store_sink;
     Ok(Prepared {
-        mem: Mem::View(ViewMem(view, ops, units)),
+        mem: Mem::View(ViewMem::of(view, units, sink).with_ops(ops)),
         off,
         inb,
         guard_store,
@@ -382,11 +488,15 @@ fn load_one(fb: &mut FunctionBuilder<'_>, leaf: &Leaf, p: Prepared) -> BResult<S
 /// Store `v` as `leaf` at `p`, contained and only where the slot's memory keeps the GPU's writes
 /// ([`Prepared::writable`]). Returns whether the store merges a partial word ([`leaf::store`]).
 ///
-/// A condition left here is one the form could not fold into an address selection, so the store
-/// sits in `if_`. That branch is not free of meaning: a value a guarded store alone consumes is
-/// written inside the branch, and Apple's backend expands `air.fast_asinh.f32` and
-/// `air.fast_acosh.f32` to different last bits depending on the basic block their call sits in. The
-/// device-address form leaves nothing here ([`Prepared::writable`]).
+/// A condition left here is one `prepare` could not fold into an address selection: the
+/// device-address form leaves none ([`Prepared::writable`], `psb::prepare`). Where the stage binds
+/// its write-only sink, the store runs unconditionally at a place selected between the view's own
+/// and the sink's (`super::sink`); only where it binds none does the store sit in `if_`.
+///
+/// That branch is not free of meaning: a value a guarded store alone consumes is written inside
+/// the branch, and Apple's backend expands `air.fast_asinh.f32` and `air.fast_acosh.f32` to
+/// different last bits depending on the basic block their call sits in, so the module records
+/// `PrecisionNote::GuardedStoreBranch` where it keeps one.
 fn store_one(fb: &mut FunctionBuilder<'_>, leaf: &Leaf, p: Prepared, v: SValue) -> BResult<bool> {
     let mut mem = p.mem;
     let contained = p.guard_store.then_some(p.inb).flatten();
@@ -396,20 +506,32 @@ fn store_one(fb: &mut FunctionBuilder<'_>, leaf: &Leaf, p: Prepared, v: SValue) 
         (None, Some(keeps)) => Some(keeps),
         (None, None) => None,
     };
-    match guard {
-        Some(guard) => {
-            let leaf = *leaf;
-            let then: ArmFn<'_, bool> = Box::new(move |fb, merged| {
-                let mut mem = p.mem;
-                *merged = leaf::store(fb, &mut mem, &leaf, p.off, v)?;
-                Ok(ArmEnd::FallThrough(Vec::new()))
-            });
-            let mut merged = false;
-            fb.if_(&mut merged, guard, then, None)?;
-            Ok(merged)
+    let Some(guard) = guard else {
+        return leaf::store(fb, &mut mem, leaf, p.off, v);
+    };
+    // The selecting form: no branch, and a dropped or uncontained store lands in the sink, which
+    // no shader reads. The offset is already clamped for containment, so the view's own place is
+    // inside its range whatever the condition says. A store that merges a partial word keeps the
+    // branch: its two word atomics need a place, and an `OpSelect` of two pointers is not one
+    // (SPIRV-Cross writes an atomic's pointer as `&expr`, an lvalue in MSL), so such a store is
+    // still a gap (docs/FAST-PATHS.md, known gaps).
+    if let Mem::View(view) = mem {
+        if !leaf::merges(leaf, view.units()) {
+            if let Some(view) = view.dropping(guard) {
+                let mut mem = Mem::View(view);
+                return leaf::store(fb, &mut mem, leaf, p.off, v);
+            }
         }
-        None => leaf::store(fb, &mut mem, leaf, p.off, v),
     }
+    let leaf = *leaf;
+    let then: ArmFn<'_, bool> = Box::new(move |fb, merged| {
+        let mut mem = p.mem;
+        *merged = leaf::store(fb, &mut mem, &leaf, p.off, v)?;
+        Ok(ArmEnd::FallThrough(Vec::new()))
+    });
+    let mut merged = false;
+    fb.if_(&mut merged, guard, then, None)?;
+    Ok(merged)
 }
 
 /// Part `i` of fat pointer `p` (0 the root, 1 the offset): a constant pointer's part, known at

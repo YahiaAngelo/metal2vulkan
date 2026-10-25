@@ -293,6 +293,16 @@ pub enum SyntheticBinding {
     /// writes as `WriteSource::ExecutionStatus`. A stage module of a device that addresses buffers
     /// reaches the buffer by device address ([`PushField::ExecutionStatusAddress`]) instead.
     ExecutionStatus,
+    /// The write-only sink a dropped store lands in: a storage buffer of
+    /// [`NeutralResource::SINK_BYTES`](crate::bind::NeutralResource::SINK_BYTES) bytes the binder
+    /// binds as `WriteSource::Neutral(NeutralResource::Sink { .. })`, one storage descriptor of a
+    /// stage that stores through a buffer slot's descriptor view
+    /// (`lower::access::sink`). A store the draw's or dispatch's
+    /// [`SpecKey::DroppedStoreSlots`] word drops selects a pointer into it instead of the slot's,
+    /// so the store runs with no branch of its own. No shader reads it. A stage that reaches its
+    /// written slots by device address needs none: the root table's entry 1 is the same sink
+    /// (`memory::roots::SINK_ROOT`).
+    StoreSink,
     /// The resident root table.
     RootTable,
     /// The handle table.

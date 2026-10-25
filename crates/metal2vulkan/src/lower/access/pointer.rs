@@ -489,12 +489,12 @@ fn store_pointer(
         if super::view_kind(cx.profile, plan) != super::ViewKind::Storage {
             return Err(cx.invariant("a pointer store through a uniform view"));
         }
-        // The store is emitted through `emit::access_at` with a value, so it branches on the
+        // The store is emitted through `emit::access_at` with a value, so it is gated on the
         // stage's dropped-store word; `access_with_leaf` below is given none and would not ask.
-        slots.push(plan.slot);
+        slots.push((t.slot, plan.slot));
     }
-    for slot in slots {
-        super::request_dropped_store_word(cx, slot);
+    for (at, slot) in slots {
+        super::request_dropped_store_word(cx, at, slot);
     }
     let to = super::access_with_leaf(cx, ptr, None, leaf, targets, null, None)?;
     let words = !cx.profile.fields().leaf.int64;

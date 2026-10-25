@@ -174,6 +174,8 @@ fn the_old_engine_list_is_unchanged() {
             F::ShaderBufferFloat32AtomicAdd,
             F::ShaderSharedFloat32AtomicAdd,
             F::FragmentShaderBarycentric,
+            F::VariablePointers,
+            F::VariablePointersStorageBuffer,
             // The portability subset's structure is chained with what the device supports, as
             // it always was; the vocabulary names these members, the next three since ARTIFACT 180,
             // and `imageViewFormatSwizzle` since ARTIFACT 203.

@@ -39,6 +39,15 @@ const PROFILES: [&str; 2] = ["vk12-floor", "moltenvk-m3"];
 
 /// Committed profile `stem`, optionally with buffer robustness disabled (the in-shader encoding).
 fn profile_with(stem: &str, robust: bool) -> DeviceProfile {
+    profile_room(stem, robust, 0)
+}
+
+/// [`profile_with`] with `room` more per-stage storage-buffer descriptors than the profile
+/// reports: a kernel of 31 written buffer slots needs one beside them for the stage's store sink
+/// (`lower::access::sink`), and without it a profile whose limit is exactly 31 (MoltenVK's, Metal's
+/// own buffer limit) moves its highest slot to a device address, which is the descriptor
+/// fallback's subject and not this file's.
+fn profile_room(stem: &str, robust: bool, room: u32) -> DeviceProfile {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../metal2vulkan-validation/profiles")
         .join(format!("{stem}.json"));
@@ -48,6 +57,8 @@ fn profile_with(stem: &str, robust: bool) -> DeviceProfile {
         desc.features.remove(&VkFeature::RobustBufferAccess);
         desc.features.remove(&VkFeature::RobustBufferAccess2);
     }
+    desc.limits.max_per_stage_descriptor_storage_buffers += room;
+    desc.limits.max_per_stage_resources += room;
     Device::new(desc, DevicePolicy::default())
         .expect("device")
         .profile()
@@ -700,7 +711,7 @@ fn push_fields_in_the_argument_table_are_read_exactly() {
     for stem in ["lavapipe", "moltenvk-m3", "lunarg-desktop-baseline-2023"] {
         for robust in [true, false] {
             let what = format!("{stem} robust={robust}");
-            let p = profile_with(stem, robust);
+            let p = profile_room(stem, robust, 1);
             let a = compile(&bc, "many_slots", &p).unwrap_or_else(|e| panic!("{what}: {e}"));
             let spilled: Vec<PushField> = a
                 .interface
@@ -713,6 +724,15 @@ fn push_fields_in_the_argument_table_are_read_exactly() {
             // Seven slot residuals and the stage's dropped-store word.
             assert_eq!(spilled.len(), 8, "{what}: {spilled:?}");
             assert_eq!(a.interface.push.argument_table_size, 32, "{what}");
+            // Every slot keeps its descriptor view: the stage's store sink has room beside them
+            // (`slot_room`), so the forms the push placement is read over are the descriptor ones.
+            assert!(
+                !a.facts.iter().any(|f| matches!(
+                    f,
+                    crate::pipeline::facts::RuntimeFact::DeviceAddresses { .. }
+                )),
+                "{what}: a slot moved to its device address"
+            );
             let (table, _) = link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{what}: {e}"));
             assert!(table.bindings.contains_key(&table_slot), "{what}");
             let (plan, m) = typed_module(&bc, "many_slots", &p).expect("module");
