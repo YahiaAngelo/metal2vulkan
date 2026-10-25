@@ -74,8 +74,9 @@ impl<'a> Sources<'a> {
     }
 
     /// `function` compiled under `inputs`, whose key is `key`: found, else compiled under
-    /// `budget`, reading its specialized entry from `entries` where given (A render creation's,
-    /// which its checks and key filled). A refusal is the compile layer's.
+    /// `budget`, reading its specialized entry from `entries` where given (the device's, which a
+    /// render creation's checks and key filled, and which a compute creation's kernel reads too).
+    /// A refusal is the compile layer's.
     pub(crate) fn function(
         &self,
         function: &FunctionDescriptor,

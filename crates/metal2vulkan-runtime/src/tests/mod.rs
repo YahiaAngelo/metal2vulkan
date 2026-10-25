@@ -194,6 +194,8 @@ mod relay_facts;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod released_programs;
 mod render;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod render_sibling_work;
 mod replays;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod rerun_arenas;
@@ -223,6 +225,8 @@ mod spares;
 mod sparse;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod srgb_fetch_images;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod stage_entries_shared;
 mod stand_in;
 mod storage_form;
 mod surface_depth;

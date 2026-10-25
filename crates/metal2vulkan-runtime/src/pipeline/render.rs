@@ -48,6 +48,7 @@ use super::sources::Sources;
 use super::texture_access::{TextureAccessMemo, TextureAccesses};
 use super::tile::TileState;
 use super::BufferForms;
+use super::NoteEntries;
 use super::{compile_error, stand_in, PipelineOptions, PIPELINES, PLANS, VARIANTS};
 use crate::argument_table::AtBindViews;
 use crate::binary_archive::{self, Used};
@@ -1235,18 +1236,6 @@ impl RenderPipelineState {
             .saturating_mul(dimensions.width)
             .saturating_mul(dimensions.height)
             .saturating_mul(samples))
-    }
-}
-
-/// Counts what a creation specialized of the device's stage entries and what it found specialized
-/// already, however the creation ends (`WorkCounts::stage_entries_specialized`,
-/// `stage_entries_shared`): a refusal did its decodes too.
-struct NoteEntries<'a>(&'a Device);
-
-impl Drop for NoteEntries<'_> {
-    fn drop(&mut self) {
-        let shared = self.0.shared();
-        shared.shader_cache.memo.note_stage_entries(&shared.counts);
     }
 }
 

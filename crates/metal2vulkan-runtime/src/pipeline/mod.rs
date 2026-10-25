@@ -605,6 +605,19 @@ impl Device {
     }
 }
 
+/// Counts what a creation or a later variant specialized of the device's stage entries and what it
+/// found specialized already, however it ends (`WorkCounts::stage_entries_specialized`,
+/// `stage_entries_shared`): a refusal did its decodes too. A render creation's too
+/// (`pipeline/render.rs`).
+pub(super) struct NoteEntries<'a>(pub(super) &'a Device);
+
+impl Drop for NoteEntries<'_> {
+    fn drop(&mut self) {
+        let shared = self.0.shared();
+        shared.shader_cache.memo.note_stage_entries(&shared.counts);
+    }
+}
+
 impl ComputePipelineState {
     /// The state `descriptor` describes, made on `device` under `options`; a binary archive's
     /// add notes what the creation used in `used`. The kernel's dynamic libraries are loaded
@@ -651,6 +664,7 @@ impl ComputePipelineState {
         call: &'static str,
         added_unsupported: usize,
     ) -> Result<ComputePipelineState, Error> {
+        let _noted = NoteEntries(device);
         let StageSource::Function(function) = kernel.stage() else {
             return Err(invalid(call, Problem::CompiledKernel));
         };
@@ -1496,6 +1510,7 @@ impl Variant {
         descriptor: &Kernel,
         key: VariantKey,
     ) -> Result<Arc<Variant>, Error> {
+        let _noted = NoteEntries(device);
         let (found, _) = Variant::compiled(&Sources::later(device), function, descriptor, &key)
             .map_err(|error| compile_error(device, error))?;
         Variant::of(device, key, found)
@@ -1508,6 +1523,12 @@ impl Variant {
     /// other fields, held to the device's compiler word bound from `descriptor`, which holds the
     /// function ([`Kernel::fit`]); with `descriptor` holding the function as compiled. A refusal is
     /// the compile layer's.
+    ///
+    /// The compile reads the kernel's specialized entry from the device's stage entries, as a
+    /// render creation's stages do: a sibling pipeline of the same kernel at the same call-stack
+    /// depth compiles under its own lowering inputs, so no memo of compiled functions spares it,
+    /// but it decodes and specializes nothing an earlier sibling did
+    /// (`tests::stage_entries_shared`).
     fn compiled(
         sources: &Sources<'_>,
         function: &FunctionDescriptor,
@@ -1518,7 +1539,12 @@ impl Variant {
         let budget = sources.budget();
         let inputs = descriptor.inputs(key);
         let function_key = compile.function_compile_key(function, &inputs);
-        let compiled = sources.function(function, &inputs, (&function_key, None), &budget)?;
+        // The kernel's specialized entry is the device's, as a render stage's is: a sibling
+        // pipeline of the same kernel at the same call-stack depth decodes and specializes
+        // nothing an earlier one did (`pipeline/memo.rs`, `StageEntries`).
+        let entries = sources.device().shared().shader_cache.memo.stage_entries();
+        let compiled =
+            sources.function(function, &inputs, (&function_key, Some(entries)), &budget)?;
         let compiled = descriptor.with_stage(StageSource::Compiled(compiled));
         let found = sources.kernel(&compiled, (descriptor, &inputs), &budget)?;
         Ok((found, compiled))
