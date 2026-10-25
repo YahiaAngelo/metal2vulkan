@@ -88,8 +88,9 @@ use metal2vulkan::bind::{
 };
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{
-    BarrierScope, BindingAccess, DispatchType, IndexType, IndirectCommandType, Mutability,
-    PixelFormat, PrimitiveType, RenderStages, ResourceUsage, TextureType, TextureUsage,
+    ArgumentBuffersTier, BarrierScope, BindingAccess, DispatchType, IndexType, IndirectCommandType,
+    Mutability, PixelFormat, PrimitiveType, ReadWriteTextureTier, RenderStages, ResourceUsage,
+    TextureType, TextureUsage,
 };
 use metal2vulkan::pipeline::{
     ColorAttachmentDescriptor, ComputePipelineDescriptor, LinkedFunctions, MeshPipelineDescriptor,
@@ -4894,6 +4895,14 @@ impl Side for RuntimeSide<'_> {
             .properties()
             .supports_vertex_amplification_count(count)
             .map_err(|gap| Failure::named("RuntimeGap", format!("{gap:?}")))
+    }
+
+    fn read_write_texture_tier(&mut self) -> Answer<ReadWriteTextureTier> {
+        Ok(self.device.properties().read_write_texture_support)
+    }
+
+    fn argument_buffers_tier(&mut self) -> Answer<ArgumentBuffersTier> {
+        Ok(self.device.properties().argument_buffers_support)
     }
 
     fn supports_rasterization_rate_map_layers(&mut self, layers: u64) -> Answer<bool> {

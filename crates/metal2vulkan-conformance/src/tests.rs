@@ -6598,11 +6598,17 @@ fn every_case_carries_a_cost_recording() {
     /// `cost --write`. A cost record needs the whole set measured
     /// in both shapes -- a case's counts depend on what ran before it in the same process -- so a
     /// selection cannot pay it and the next whole-set run empties these seven lines again.
-    const AFTER_THE_LAST_RUN: [&str; 7] = [
+    const AFTER_THE_LAST_RUN: [&str; 13] = [
+        "device-read-write-tiers",
         "rate-map-degenerate-form-sweep",
         "rate-map-zero-width-layers-subscript",
         "rate-map-zero-width-with-layer-count-and-layers",
         "rate-map-zero-width-with-screen-size-and-layer",
+        "read-write-tier-descriptors",
+        "read-write-tier-held",
+        "read-write-tier-round-trip-float",
+        "read-write-tier-round-trip-sint",
+        "read-write-tier-round-trip-uint",
         "shared-creator-extended-range-samples",
         "shared-creator-padded-format-storage",
         "sparse-mapping-a-slice-past-the-textures",

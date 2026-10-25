@@ -327,6 +327,16 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.supports_vertex_amplification_count(count)
     }
 
+    fn read_write_texture_tier(&mut self) -> Answer<metal2vulkan::metal::ReadWriteTextureTier> {
+        let _span = self.watch("read_write_texture_tier");
+        self.inner.read_write_texture_tier()
+    }
+
+    fn argument_buffers_tier(&mut self) -> Answer<metal2vulkan::metal::ArgumentBuffersTier> {
+        let _span = self.watch("argument_buffers_tier");
+        self.inner.argument_buffers_tier()
+    }
+
     fn supports_rasterization_rate_map_layers(&mut self, layers: u64) -> Answer<bool> {
         let _span = self.watch("supports_rasterization_rate_map_layers");
         self.inner.supports_rasterization_rate_map_layers(layers)

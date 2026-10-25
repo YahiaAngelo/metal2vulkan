@@ -138,6 +138,7 @@ pub mod pvrtc_rows;
 pub mod rate_map_degenerate_forms;
 pub mod rate_map_sweeps;
 pub mod rate_maps;
+pub mod read_write_tiers;
 pub mod render_chains;
 pub mod render_depth_stencil_state;
 pub mod render_draw_forms;
@@ -546,6 +547,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(render_residency::all());
     cases.extend(frame_chains::boxed());
     cases.extend(shared_creator_formats::all());
+    cases.extend(read_write_tiers::all());
     cases
 }
 

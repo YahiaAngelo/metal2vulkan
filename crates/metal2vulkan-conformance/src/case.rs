@@ -1716,6 +1716,24 @@ pub trait Side {
         Err(Failure::unavailable("supports_vertex_amplification_count"))
     }
 
+    /// `readWriteTextureSupport`: which tier of read-write texture access the device reports.
+    ///
+    /// Unlike the three queries around it this is a **reading of the device** and not a model of
+    /// Metal's rule, which is why [`crate::device_queries`] leaves it out and why the one case that
+    /// asks it asks it alone ([`crate::cases::read_write_tiers`]): a venue whose device honestly
+    /// holds less answers a lower tier, and nothing in a transcript can say that of a number. What
+    /// every venue's answer is held to is the **behaviour** the tier it reports promises, which is
+    /// the rest of that family.
+    fn read_write_texture_tier(&mut self) -> Answer<metal2vulkan::metal::ReadWriteTextureTier> {
+        Err(Failure::unavailable("read_write_texture_tier"))
+    }
+
+    /// `argumentBuffersSupport`: which tier of argument buffer the device reports. A reading of the
+    /// device, as [`Side::read_write_texture_tier`] is.
+    fn argument_buffers_tier(&mut self) -> Answer<metal2vulkan::metal::ArgumentBuffersTier> {
+        Err(Failure::unavailable("argument_buffers_tier"))
+    }
+
     /// `supportsRasterizationRateMapWithLayerCount:` of `layers`.
     ///
     /// A model as [`Side::supports_vertex_amplification_count`] is: the runtime answers yes for the

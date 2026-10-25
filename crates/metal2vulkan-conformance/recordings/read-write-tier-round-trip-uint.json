@@ -1,0 +1,1117 @@
+{
+  "format": 1,
+  "case": "read-write-tier-round-trip-uint",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "format_scout.ll",
+      "entry": "scout_read_write_u",
+      "source_sha256": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+    },
+    {
+      "fixture": "format_scout.air.ll",
+      "entry": "scout_read_write_u",
+      "source_sha256": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+                        }
+                      }
+                    },
+                    {
+                      "name": "class",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "c3f2029bb0eab1c09a6f13df3a14edf6359b3c36cf9610941220786f2c751f6b"
+                        }
+                      }
+                    },
+                    {
+                      "name": "formats",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4fbced07cd03d9bb83625d46f7242f2dcd4c49be26404fb6abe8fc0e8565c1b5"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:fill",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "0b63f2dd1d8c152a479b426ca44b32fbe19b2dbaea2a651990ca77bee3497ea4"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/read-write",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "readWriteTextureSupport",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "MTLReadWriteTextureTier2",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/tier1/texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/tier1/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/tier1/read-write",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/tier1/read-write/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/tier1/read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/tier1/read/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/tier1/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/tier1/texels",
+                  "observed": {
+                    "value": {
+                      "bytes": "AAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAA=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 4096
+                          }
+                        },
+                        "element": "u32",
+                        "row_offset": 0,
+                        "row_elements": 1024,
+                        "row_pitch": 4096,
+                        "rows": 1,
+                        "image_pitch": 4096,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Uint/tier2/texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Uint/tier2/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Uint/tier2/read-write",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Uint/tier2/read-write/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Uint/tier2/read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Uint/tier2/read/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Uint/tier2/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Uint/tier2/texels",
+                  "observed": {
+                    "value": {
+                      "bytes": "VWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRGZ3ESIiM0RVdxEiMzNEVWYRIjNERFVmdyIzRFVVZncRM0RVZmZ3ESJEVWZ3dxEiM1VmdxERIjNEZncRIiIzRFV3ESIzM0RVZhEiM0REVWZ3IjNEVVVmdxEzRFVmZncRIkRVZnd3ESIzVWZ3EREiM0RmdxEiIjNEVXcRIjMzRFVmESIzRERVZnciM0RVVWZ3ETNEVWZmdxEiRFVmd3cRIjNVZncRESIzRA=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 4096
+                          }
+                        },
+                        "element": "u32",
+                        "row_offset": 0,
+                        "row_elements": 1024,
+                        "row_pitch": 4096,
+                        "rows": 1,
+                        "image_pitch": 4096,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Uint/tier2/texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Uint/tier2/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Uint/tier2/read-write",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Uint/tier2/read-write/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Uint/tier2/read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Uint/tier2/read/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Uint/tier2/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Uint/tier2/texels",
+                  "observed": {
+                    "value": {
+                      "bytes": "M0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAHcRAABVZgAARFUAACIzAAARIgAAZncAAFVmAAAzRAAAIjMAAHcRAABmdwAARFUAADNEAAARIgAAdxEAAFVmAABEVQAAIjMAABEiAABmdwAAVWYAADNEAAAiMwAAdxEAAGZ3AABEVQAAM0QAABEiAAB3EQAAVWYAAERVAAAiMwAAESIAAGZ3AABVZgAAM0QAACIzAAB3EQAAZncAAERVAAAzRAAAESIAAA=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 4096
+                          }
+                        },
+                        "element": "u32",
+                        "row_offset": 0,
+                        "row_elements": 1024,
+                        "row_pitch": 4096,
+                        "rows": 1,
+                        "image_pitch": 4096,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Uint/tier2/texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Uint/tier2/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Uint/tier2/read-write",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Uint/tier2/read-write/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Uint/tier2/read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Uint/tier2/read/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Uint/tier2/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Uint/tier2/texels",
+                  "observed": {
+                    "value": {
+                      "bytes": "IgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAEQAAAAzAAAAZgAAAFUAAAARAAAAdwAAADMAAAAiAAAAVQAAAEQAAAB3AAAAZgAAACIAAAARAAAARAAAADMAAABmAAAAVQAAABEAAAB3AAAAMwAAACIAAABVAAAARAAAAHcAAABmAAAAIgAAABEAAABEAAAAMwAAAGYAAABVAAAAEQAAAHcAAAAzAAAAIgAAAFUAAABEAAAAdwAAAGYAAAAiAAAAEQAAAA=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 4096
+                          }
+                        },
+                        "element": "u32",
+                        "row_offset": 0,
+                        "row_elements": 1024,
+                        "row_pitch": 4096,
+                        "rows": 1,
+                        "image_pitch": 4096,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Uint/tier2/texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Uint/tier2/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Uint/tier2/read-write",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Uint/tier2/read-write/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Uint/tier2/read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Uint/tier2/read/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Uint/tier2/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Uint/tier2/texels",
+                  "observed": {
+                    "value": {
+                      "bytes": "AAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAA=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 4096
+                          }
+                        },
+                        "element": "u32",
+                        "row_offset": 0,
+                        "row_elements": 1024,
+                        "row_pitch": 4096,
+                        "rows": 1,
+                        "image_pitch": 4096,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Uint/tier2/texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Uint/tier2/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Uint/tier2/read-write",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Uint/tier2/read-write/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Uint/tier2/read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Uint/tier2/read/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Uint/tier2/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Uint/tier2/texels",
+                  "observed": {
+                    "value": {
+                      "bytes": "AAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAA=="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 4096
+                          }
+                        },
+                        "element": "u32",
+                        "row_offset": 0,
+                        "row_elements": 1024,
+                        "row_pitch": 4096,
+                        "rows": 1,
+                        "image_pitch": 4096,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "promised-and-refused",
+                  "observed": {
+                    "value": {
+                      "set": []
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; Metal's leg ran at a one-minute load average of 40.95 and ours at 40.83; the legs run one after the other, so the per-call margin is judged only when both are 26.0 or under and within 2.0x of each other",
+      "instrument": 402,
+      "times": {
+        "case": "read-write-tier-round-trip-uint",
+        "calls": 46,
+        "in_calls": 65260747,
+        "on_cpu": 3268211,
+        "blocked": 62073166,
+        "elsewhere": 7721875,
+        "spend": 72982622,
+        "spend_least": 66058542,
+        "spend_most": 75058333,
+        "per_call": [
+          {
+            "call": "compute_pipeline",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 45125,
+            "on_cpu": 45375,
+            "blocked": 0,
+            "wall_least": 41667,
+            "wall_most": 78458,
+            "wall_total": 165500,
+            "on_cpu_total": 166083,
+            "blocked_total": 0
+          },
+          {
+            "call": "dispatch_threads",
+            "least_calls": 12,
+            "most_calls": 12,
+            "wall": 59208,
+            "on_cpu": 59584,
+            "blocked": 0,
+            "wall_least": 49958,
+            "wall_most": 68500,
+            "wall_total": 869581,
+            "on_cpu_total": 874208,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 54444542,
+            "on_cpu": 1326917,
+            "blocked": 53239084,
+            "wall_least": 51818875,
+            "wall_most": 55546958,
+            "wall_total": 54444542,
+            "on_cpu_total": 1326917,
+            "blocked_total": 53239084
+          },
+          {
+            "call": "read_buffer",
+            "least_calls": 6,
+            "most_calls": 6,
+            "wall": 9417,
+            "on_cpu": 9750,
+            "blocked": 0,
+            "wall_least": 8625,
+            "wall_most": 10250,
+            "wall_total": 59625,
+            "on_cpu_total": 61749,
+            "blocked_total": 0
+          },
+          {
+            "call": "read_write_texture_tier",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 4459,
+            "on_cpu": 4583,
+            "blocked": 0,
+            "wall_least": 4083,
+            "wall_most": 7167,
+            "wall_total": 4459,
+            "on_cpu_total": 4583,
+            "blocked_total": 0
+          },
+          {
+            "call": "texture",
+            "least_calls": 6,
+            "most_calls": 6,
+            "wall": 104959,
+            "on_cpu": 105500,
+            "blocked": 0,
+            "wall_least": 86208,
+            "wall_most": 119083,
+            "wall_total": 637876,
+            "on_cpu_total": 640834,
+            "blocked_total": 0
+          },
+          {
+            "call": "wait",
+            "least_calls": 12,
+            "most_calls": 12,
+            "wall": 188375,
+            "on_cpu": 16625,
+            "blocked": 171583,
+            "wall_least": 161625,
+            "wall_most": 232042,
+            "wall_total": 9410167,
+            "on_cpu_total": 222792,
+            "blocked_total": 9196168
+          },
+          {
+            "call": "zeroed_buffer",
+            "least_calls": 6,
+            "most_calls": 6,
+            "wall": 13250,
+            "on_cpu": 13667,
+            "blocked": 0,
+            "wall_least": 12000,
+            "wall_most": 13833,
+            "wall_total": 78000,
+            "on_cpu_total": 80208,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; Metal's leg ran at a one-minute load average of 40.95 and ours at 40.83; the legs run one after the other, so the per-call margin is judged only when both are 26.0 or under and within 2.0x of each other",
+      "instrument": 286,
+      "times": {
+        "case": "read-write-tier-round-trip-uint",
+        "calls": 46,
+        "in_calls": 39520248,
+        "on_cpu": 28493585,
+        "blocked": 11488083,
+        "elsewhere": 9464875,
+        "spend": 49045080,
+        "spend_least": 46133959,
+        "spend_most": 56945421,
+        "per_call": [
+          {
+            "call": "compute_pipeline",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 7157417,
+            "on_cpu": 6824375,
+            "blocked": 319626,
+            "wall_least": 6825958,
+            "wall_most": 7676375,
+            "wall_total": 19522667,
+            "on_cpu_total": 18656750,
+            "blocked_total": 865917
+          },
+          {
+            "call": "dispatch_threads",
+            "least_calls": 12,
+            "most_calls": 12,
+            "wall": 369834,
+            "on_cpu": 370833,
+            "blocked": 0,
+            "wall_least": 321834,
+            "wall_most": 408500,
+            "wall_total": 4535667,
+            "on_cpu_total": 4455750,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 1916125,
+            "on_cpu": 1917667,
+            "blocked": 0,
+            "wall_least": 1906459,
+            "wall_most": 5321208,
+            "wall_total": 1916125,
+            "on_cpu_total": 1917667,
+            "blocked_total": 0
+          },
+          {
+            "call": "read_buffer",
+            "least_calls": 6,
+            "most_calls": 6,
+            "wall": 2000,
+            "on_cpu": 2375,
+            "blocked": 0,
+            "wall_least": 1667,
+            "wall_most": 2333,
+            "wall_total": 14458,
+            "on_cpu_total": 16458,
+            "blocked_total": 0
+          },
+          {
+            "call": "read_write_texture_tier",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 250,
+            "on_cpu": 541,
+            "blocked": 0,
+            "wall_least": 125,
+            "wall_most": 292,
+            "wall_total": 250,
+            "on_cpu_total": 541,
+            "blocked_total": 0
+          },
+          {
+            "call": "texture",
+            "least_calls": 6,
+            "most_calls": 6,
+            "wall": 177500,
+            "on_cpu": 178584,
+            "blocked": 0,
+            "wall_least": 170834,
+            "wall_most": 198958,
+            "wall_total": 1163167,
+            "on_cpu_total": 1171459,
+            "blocked_total": 0
+          },
+          {
+            "call": "wait",
+            "least_calls": 12,
+            "most_calls": 12,
+            "wall": 459541,
+            "on_cpu": 143458,
+            "blocked": 322375,
+            "wall_least": 416459,
+            "wall_most": 747917,
+            "wall_total": 10905499,
+            "on_cpu_total": 1436042,
+            "blocked_total": 9469457
+          },
+          {
+            "call": "zeroed_buffer",
+            "least_calls": 6,
+            "most_calls": 6,
+            "wall": 20000,
+            "on_cpu": 21125,
+            "blocked": 0,
+            "wall_least": 18500,
+            "wall_most": 21166,
+            "wall_total": 135125,
+            "on_cpu_total": 138585,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
+  ]
+}

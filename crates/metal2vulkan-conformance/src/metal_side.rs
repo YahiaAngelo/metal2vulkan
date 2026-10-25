@@ -90,7 +90,8 @@ use crate::visible_tables::{
 use metal2vulkan::library::LibraryType;
 use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
 use metal2vulkan::metal::{
-    BindingAccess, BindingType, FunctionOptions, FunctionType, PatchType, PixelFormat, RenderStages,
+    ArgumentBuffersTier, BindingAccess, BindingType, FunctionOptions, FunctionType, PatchType,
+    PixelFormat, ReadWriteTextureTier, RenderStages,
 };
 use metal2vulkan_runtime::{PurgeableState, SparsePageSize};
 use objc2::rc::Retained;
@@ -5308,6 +5309,20 @@ impl Side for MetalSide {
         Ok(self.device.supportsVertexAmplificationCount(count as usize))
     }
 
+    fn read_write_texture_tier(&mut self) -> Answer<ReadWriteTextureTier> {
+        let raw = self.device.readWriteTextureSupport().0;
+        let raw = u32::try_from(raw).map_err(|_| unknown_tier("MTLReadWriteTextureTier", raw))?;
+        ReadWriteTextureTier::try_from(raw)
+            .map_err(|_| unknown_tier("MTLReadWriteTextureTier", raw as usize))
+    }
+
+    fn argument_buffers_tier(&mut self) -> Answer<ArgumentBuffersTier> {
+        let raw = self.device.argumentBuffersSupport().0;
+        let raw = u32::try_from(raw).map_err(|_| unknown_tier("MTLArgumentBuffersTier", raw))?;
+        ArgumentBuffersTier::try_from(raw)
+            .map_err(|_| unknown_tier("MTLArgumentBuffersTier", raw as usize))
+    }
+
     fn supports_rasterization_rate_map_layers(&mut self, layers: u64) -> Answer<bool> {
         // SAFETY: the layer count is the case's own small positive number, which the sweep keeps
         // between 1 and 4; the query allocates nothing and makes no map.
@@ -7098,6 +7113,13 @@ pub(crate) fn require_selector(
 ///
 /// A case's own table is held to the same list with no device at all, so this is the second line,
 /// for a row somebody adds to a recorded table by mistake.
+/// A tier value this tree's enumeration does not hold: Metal answered a raw ordinal no
+/// `MTLReadWriteTextureTier` or `MTLArgumentBuffersTier` the SDK declares, which is a fact about
+/// the host's Metal rather than a refusal of ours, so the site records it as the typed answer it is.
+fn unknown_tier(metal_type: &str, raw: usize) -> Failure {
+    Failure::named("UnknownTier", format!("{metal_type} answered {raw}"))
+}
+
 fn would_end_metals_process(query: &HeapTextureQuery) -> Answer<()> {
     match query.forbidden() {
         None => Ok(()),
