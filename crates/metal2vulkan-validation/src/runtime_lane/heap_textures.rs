@@ -1113,6 +1113,114 @@ fn a_heap_depth_texture_without_optimized_contents_answers_metal_s_footprint() {
     layer_reported_nothing_at_all(&messages);
 }
 
+/// A mipmapped `Depth32Float_Stencil8` texture without GPU-optimized contents, sized and made in a
+/// `Private` placement heap where the driver keeps depth and stencil images GPU-optimized
+/// (`DriverFact::DepthStencilImagesStayGpuOptimized`: MoltenVK on Apple's GPUs), announces
+/// `optimized-depth-stencil-texture`: a shadow of Metal's tiles moves one level of **each aspect**
+/// per level of the texture, and the kernel's shape holds 16 of them
+/// (`bind::TiledTexelsModule::MAX_LEVELS`, through `HeapTiledCopies::fit`), so a two-aspect texture
+/// of 9 levels asks 18 and no shadow serves it. Its image is then a shadow of the heap's bytes in
+/// rows rather than in Metal's tiles, announced `heap-texture-untiled-layout` beside this kind.
+///
+/// What the heap **answers** is Metal's model for the descriptor as given: 448256 bytes, the same
+/// as the 8-level row's, where the same shape with `allowGPUOptimizedContents` on answers 451200.
+/// So on this shape the kind's declared cost -- that
+/// `heap_texture_size_and_align` answers Metal's size for the texture with the property on, larger
+/// than Metal's with it off -- does not hold, and the three sizes are asserted so that it cannot be
+/// read into the test. Narrowing the kind, or its cost, belongs to the declaration and not here.
+///
+/// Three controls bind that reason, each the announcing shape with one thing changed: **8 levels**,
+/// 16 moves and the most the shape holds, announces nothing; a one-aspect `Depth32Float` texture of
+/// the same 9 levels, 9 moves, announces nothing; and the 9-level texture with
+/// `allowGPUOptimizedContents` **on** announces nothing, the property being half of what the notice
+/// asks. Nor does the announcing shape as a device's own texture: nothing shows its layout there.
+/// So an announcement here is the level bound and not the format, the mipmapping or the heap.
+///
+/// Measured on an Apple M3 Max under macOS 27.0.1 with MoltenVK 1.4.2 by a sweep of 11088 depth and
+/// stencil shapes with the property off (six depth and stencil formats, nine texture types, seven
+/// extents, up to five level counts, four usages and two storage modes), of which the device
+/// answers 3880: 220 announce the kind. So it is reachable on this venue, and the announcing rows
+/// are of two shapes -- a mipmapped two-aspect texture as here, and a small multisample depth or
+/// stencil texture (4x4 and 37x5 at 2 and 4 samples, of shader-read usage, in a `Private` heap),
+/// whose own reason is unaudited. This test takes the first, whose bound is a constant.
+#[test]
+fn a_heap_two_aspect_texture_of_more_levels_than_the_moves_hold_keeps_its_optimized_layout() {
+    let messages = Messages::default();
+    let cache = ScratchCache::new().unwrap();
+    {
+        // Each occurrence announced, so a count is the number of sites reached and not one.
+        let device = &validated_device_with(TEST_DEVICE, &messages, cache.path(), |options| {
+            options.announce_each = OPTIMIZED.into();
+        })
+        .unwrap();
+        let optimized = device
+            .properties()
+            .driver_facts
+            .contains(&DriverFact::DepthStencilImagesStayGpuOptimized);
+        let options = ResourceOptions::private();
+        let kind = || {
+            counts(&messages.take_notices())
+                .get(&OPTIMIZED[0])
+                .copied()
+                .unwrap_or(0)
+        };
+        // One row: `size` and `align` answered for the descriptor, and the kind's count at each of
+        // three sites in turn -- the size query, a placement at offset 0 of a heap of exactly that
+        // size, and the device's own texture -- so a count names the site that reached it.
+        let row = |pixel_format, levels, allow| {
+            let mut descriptor = TextureDescriptor::texture_2d(pixel_format, 256, 256, true);
+            descriptor.mipmap_level_count = levels;
+            descriptor.usage = TextureUsage::SHADER_READ;
+            descriptor.resource_options = options;
+            descriptor.allow_gpu_optimized_contents = allow;
+            let _ = messages.take_notices();
+            let answer = device.heap_texture_size_and_align(&descriptor).unwrap();
+            let at_query = kind();
+            let placement = heap(device, HeapType::Placement, answer.size, options);
+            let placed = placement.new_texture_at_offset(&descriptor, 0).unwrap();
+            let at_placement = kind();
+            // The descriptor read back off the texture, so a row cannot be of another shape.
+            assert_eq!(placed.mipmap_level_count(), levels, "{pixel_format:?}");
+            assert_eq!(placed.pixel_format(), pixel_format);
+            assert_eq!(placed.allow_gpu_optimized_contents(), allow, "{levels}");
+            let own = device.new_texture(&descriptor).unwrap();
+            let at_the_device = kind();
+            assert_eq!(own.mipmap_level_count(), levels, "{pixel_format:?}");
+            (answer, [at_query, at_placement, at_the_device])
+        };
+        let ds = PixelFormat::Depth32FloatStencil8;
+        let (nine, nine_counts) = row(ds, 9, false);
+        let (eight, eight_counts) = row(ds, 8, false);
+        let (depth, depth_counts) = row(PixelFormat::Depth32Float, 9, false);
+        let (with, with_counts) = row(ds, 9, true);
+        eprintln!(
+            "HEAPTEX optimized levels (query, placement, the device's own): 9 levels {nine:?} \
+             {nine_counts:?}; 8 levels {eight:?} {eight_counts:?}; one aspect {depth:?} \
+             {depth_counts:?}; the property on {with:?} {with_counts:?} (fact {optimized})"
+        );
+        if optimized {
+            // The size query and the placement each announce once; the device's own texture, whose
+            // layout nothing shows, does not.
+            assert_eq!(
+                nine_counts,
+                [1, 1, 0],
+                "the 9-level two-aspect texture's sites"
+            );
+            assert_eq!(eight_counts, [0, 0, 0], "8 levels announced");
+            assert_eq!(depth_counts, [0, 0, 0], "one aspect of 9 levels announced");
+            assert_eq!(with_counts, [0, 0, 0], "the property on announced");
+            // The answer is the property-off model, not the property-on one the cost names.
+            assert_eq!((nine.size, nine.align), (448256, 128));
+            assert_eq!(eight, nine, "8 levels answered another chain than 9");
+            assert_eq!((with.size, with.align), (451200, 128));
+            assert_eq!((depth.size, depth.align), (349824, 128));
+        } else {
+            assert_eq!(nine_counts, [0, 0, 0], "announced without the fact");
+        }
+    }
+    layer_reported_nothing_at_all(&messages);
+}
+
 /// The kinds a heap's colour texture announces on a driver whose compressed images hide writes
 /// through an alias, by the route its image takes: host-transfer usage, a linear image, or the
 /// optimal image, a near-equivalent.

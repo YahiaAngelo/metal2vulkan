@@ -162,13 +162,24 @@ struct Attached {
 pub(super) const MEMORYLESS_TEXEL_BUFFERS: [Degradation; 1] =
     [Degradation::MemorylessTextureBuffer];
 
-/// A memoryless texture buffer, of which plain Metal makes a texture (an Apple M3 Max under macOS
-/// 27.0.1: a 64-texel `RGBA8Unorm` texture buffer of `ShaderRead` usage answers `storageMode` 3 and
-/// its other getters its descriptor's): the runtime lays it over a `Private` buffer of its row of
-/// texels, since no Vulkan buffer takes memory lazily, and announces `memoryless-texture-buffer`
-/// once, nothing more. The texture answers its descriptor's memoryless mode, as Metal's does, and
-/// its CPU access and its views are refused `StorageMode`, as Metal's validation stops every use of
-/// a memoryless texture but as a render pass's attachment, which no texture buffer is.
+/// A memoryless texture buffer, of which plain Metal makes a texture: the runtime lays it over a
+/// `Private` buffer of its row of texels, since no Vulkan buffer takes memory lazily, and announces
+/// `memoryless-texture-buffer` once, nothing more. The texture answers its descriptor's memoryless
+/// mode, its width and height and its default CPU cache mode, as Metal's does, and the hazard
+/// tracking mode Metal resolves rather than its descriptor's `Default`; its CPU access and its
+/// views are refused `StorageMode`, as Metal's validation stops every use of a memoryless texture
+/// but as a render pass's attachment, which no texture buffer is.
+///
+/// Measured in plain Metal on an Apple M3 Max under macOS 27.0.1: a 64-texel `RGBA8Unorm` texture
+/// buffer of `ShaderRead` usage whose descriptor answers `resourceOptions` 48 (`0x30`:
+/// `Memoryless`, the hazard tracking mode left `Default`) makes a texture that answers
+/// `storageMode` 3, `cpuCacheMode` 0, `hazardTrackingMode` **2** (`Tracked`) and
+/// `resourceOptions` **560** (`0x230`), each read twice and alike. `Default` is resolved there and
+/// not echoed: the same descriptor stating `Tracked` answers 560 too and one stating `Untracked`
+/// answers 304 (`0x130`). The neighbours answer by the same rule -- a `Shared` texture buffer 512,
+/// a `Managed` one 528, a `Private` one 544, and a plain memoryless 2D texture 560 of render-target
+/// and of shader-read usage alike, 304 untracked -- so the resolution is the texture's and not this
+/// shape's.
 #[test]
 fn a_memoryless_texture_buffer_is_announced_and_its_uses_refused() {
     on_device(|device, messages| {
@@ -184,6 +195,19 @@ fn a_memoryless_texture_buffer_is_announced_and_its_uses_refused() {
         assert_eq!(texture.texture_type(), TextureType::TextureBuffer);
         assert_eq!(texture.storage_mode(), StorageMode::Memoryless);
         assert_eq!((texture.width(), texture.height()), (width, 1));
+        // The descriptor read back before the getters, so the row cannot be of another shape.
+        assert_eq!(descriptor.resource_options.raw(), 0x30);
+        assert_eq!(texture.cpu_cache_mode(), CpuCacheMode::DefaultCache);
+        assert_eq!(texture.hazard_tracking_mode(), HazardTrackingMode::Tracked);
+        assert_eq!(
+            texture.resource_options(),
+            ResourceOptions::new(
+                StorageMode::Memoryless,
+                CpuCacheMode::DefaultCache,
+                HazardTrackingMode::Tracked,
+            )
+        );
+        assert_eq!(texture.resource_options().raw(), 0x230);
         let storage = |call| Err(Error::Invalid(Invalid::new(call, Problem::StorageMode)));
         let region = Region::new_2d(0, 0, width, 1);
         let row = width * 4;
