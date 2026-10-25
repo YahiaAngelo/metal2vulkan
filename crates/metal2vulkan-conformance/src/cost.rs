@@ -688,7 +688,7 @@ impl Region {
 
 /// The name prefixes that put a count in [`Region::Translation`]: making a module, a layout or a
 /// pipeline.
-const TRANSLATION: [&str; 17] = [
+const TRANSLATION: [&str; 18] = [
     // The AIR decode and specialization a pipeline creation does for its stages, and the question
     // it asks about a linked function's uses. Translation work by definition -- an entry's
     // specialization depends on the functions and the constants, never on the pipeline state -- so
@@ -703,6 +703,10 @@ const TRANSLATION: [&str; 17] = [
     // hidden the fix as well as the bug.
     "stage_entries_",
     "linked_use_questions_asked",
+    // The descriptor key a creation builds to look its compiles, its linked-use answers and its
+    // reflection up under: a digest of every field of the descriptor, each stage by its compile
+    // key, which the creation builds once and passes to all of them.
+    "descriptor_keys_built",
     "shader_modules_",
     "pipeline_layouts_",
     "variant_pipelines_",

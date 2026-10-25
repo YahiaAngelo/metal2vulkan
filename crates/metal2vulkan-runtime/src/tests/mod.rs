@@ -57,6 +57,8 @@ mod depth_stencil_resolve;
 mod derived_once;
 mod descriptor_arena;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod descriptor_key_once;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod detach_lost;
 mod device;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]

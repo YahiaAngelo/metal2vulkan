@@ -608,14 +608,13 @@ impl Device {
                     Some(Reflected::Made(key, made)) => {
                         cache.keep_render_reflection(compile, &key, made.map_err(device_error)?)
                     }
-                    None => {
-                        let key = compile.render_descriptor_key(descriptor);
-                        cache
-                            .render_reflection(compile, &key, || {
-                                descriptor.reflection(&options.budget())
-                            })
-                            .map_err(device_error)?
-                    }
+                    // Where no thread could be made: under the state's own key, the one its
+                    // creation built for this descriptor.
+                    None => cache
+                        .render_reflection(compile, state.descriptor_key(), || {
+                            descriptor.reflection(&options.budget())
+                        })
+                        .map_err(device_error)?,
                 })
             }
             (true, None) => return Err(internal("a render state made of a mesh descriptor")),
@@ -670,10 +669,11 @@ impl Device {
             (true, StateDescriptor::Mesh(loaded)) => {
                 let compile = self.compile_device();
                 let cache = &self.shared().shader_cache;
-                let key = compile.mesh_descriptor_key(loaded);
                 Some(
                     cache
-                        .render_reflection(compile, &key, || loaded.reflection(&options.budget()))
+                        .render_reflection(compile, state.descriptor_key(), || {
+                            loaded.reflection(&options.budget())
+                        })
                         .map_err(device_error)?,
                 )
             }
@@ -1321,7 +1321,7 @@ impl GraphicsState {
         // out now; kept where this creation worked one out and every question has its answer.
         let compile = device.compile_device();
         let cache = &device.shared().shader_cache;
-        let descriptor_key = compile.render_descriptor_key(descriptor);
+        let descriptor_key = render_descriptor_key(device, descriptor);
         let known = cache
             .linked_answers(compile, &descriptor_key)
             .unwrap_or_default();
@@ -1386,18 +1386,25 @@ impl GraphicsState {
             cache.keep_linked_answers(compile, &descriptor_key, answers);
         }
         let rasterized;
-        let descriptor = match descriptor.fragment.is_some() && !descriptor.rasterization_enabled {
-            true => {
-                let mut unrasterized = descriptor.clone();
-                unrasterized.fragment = None;
-                rasterized = unrasterized;
-                &rasterized
-            }
-            false => descriptor,
-        };
+        // The descriptor the state is made from, and its key: the one the checks above asked
+        // their questions under, where it is the same descriptor. Dropping the fragment stage
+        // makes another descriptor, which the key reads as one (a stage no descriptor names is
+        // written apart from any stage), so that creation builds the one other key it needs.
+        let (descriptor, made_key) =
+            match descriptor.fragment.is_some() && !descriptor.rasterization_enabled {
+                true => {
+                    let mut unrasterized = descriptor.clone();
+                    unrasterized.fragment = None;
+                    rasterized = unrasterized;
+                    let key = render_descriptor_key(device, &rasterized);
+                    (&rasterized, key)
+                }
+                false => (descriptor, descriptor_key),
+            };
         // The reflection of the descriptor the state is made from: kept, else worked out on a
-        // thread of its own beside the rest of the creation, which it shares nothing with.
-        let reflection_key = reflect.then(|| compile.render_descriptor_key(descriptor));
+        // thread of its own beside the rest of the creation, which it shares nothing with. Under
+        // the key the compile and the state read, which the creation built once.
+        let reflection_key = reflect.then_some(made_key);
         let kept = reflection_key
             .as_ref()
             .map(|key| cache.kept_render_reflection(compile, key));
@@ -1420,6 +1427,7 @@ impl GraphicsState {
                 device,
                 (descriptor, options, used, added_unsupported),
                 entries,
+                &made_key,
             )?;
             let reflected = match (kept, making) {
                 (Some(Some(reflection)), _) => Some(Reflected::Kept(reflection)),
@@ -1437,8 +1445,11 @@ impl GraphicsState {
 
     /// The state of `descriptor`, the rasterized descriptor of a render creation whose checks
     /// passed, with `entries`, the device's specialized stage entries, which its checks read and
-    /// filled: compiled under stand-ins where it needs them, its variant's objects made, and the
-    /// pipelines Metal compiles at its creation made (`create_reflecting`).
+    /// filled, and `descriptor_key`, the key of `descriptor` its creation built: compiled under
+    /// stand-ins where it needs them, its variant's objects made, and the pipelines Metal
+    /// compiles at its creation made (`create_reflecting`). Every compile of the creation looks
+    /// its pipeline up under the key given, and the state keeps it, so that one creation builds
+    /// it once (`render_descriptor_key`).
     fn create_checked(
         device: &Device,
         (descriptor, options, used, added_unsupported): (
@@ -1448,6 +1459,7 @@ impl GraphicsState {
             [usize; 2],
         ),
         entries: &StageEntries,
+        descriptor_key: &PipelineKey,
     ) -> Result<GraphicsState, Error> {
         let placement = if descriptor.support_indirect_command_buffers {
             pipeline_placement("new_render_pipeline_state", options.placement)?
@@ -1464,7 +1476,7 @@ impl GraphicsState {
         let sources = Sources::creation(device, options, used);
         let profile = device.compile_device().profile();
         let (found, key) = stand_in::compile_with_stand_ins(profile, |key| {
-            RenderVariant::compiled(&sources, descriptor, key, entries)
+            RenderVariant::compiled(&sources, descriptor, key, entries, descriptor_key)
         })
         .map_err(|error| compile_error(device, error))?;
         let sized_class = matches!(
@@ -1500,11 +1512,23 @@ impl GraphicsState {
                 )
             });
         }
-        let large = large_form(device, descriptor, (&base, entries), stand_in);
+        let large = large_form(
+            device,
+            descriptor,
+            (&base, entries),
+            stand_in,
+            descriptor_key,
+        );
         // Each color group's variant, where Metal compiles: a refusal of any group's refuses the
         // creation, as Metal's creation fails (`GraphicsState::color_group`). The first group's
         // is the base.
-        let group_bases = group_bases(&sources, descriptor, entries, (&base, stand_in))?;
+        let group_bases = group_bases(
+            &sources,
+            descriptor,
+            entries,
+            (&base, stand_in),
+            descriptor_key,
+        )?;
         let grouped = base.pipeline.graphics.color_group.clone().map(|group| {
             let mut twin = descriptor.clone();
             // A twin is no state an indirect command names: it takes no ID.
@@ -1529,6 +1553,7 @@ impl GraphicsState {
             (base, large),
             (stand_in, placement, options.label.clone()),
             added_unsupported,
+            Some(*descriptor_key),
         )?;
         state.make_neutrals();
         // Its first draw's predicted `VkPipeline`, made where Metal compiles (`predicted.rs`):
@@ -1563,6 +1588,7 @@ impl GraphicsState {
                     (base, None),
                     (stand_in, IdPlacement::Any, options.label.clone()),
                     added_unsupported,
+                    None,
                 )?;
                 made.make_neutrals();
                 made.make_at_creation();
@@ -1665,6 +1691,7 @@ impl GraphicsState {
             (base, None),
             (stand_in, placement, options.label.clone()),
             [0, 0],
+            None,
         )?;
         state.make_neutrals();
         Ok(state)
@@ -1705,12 +1732,20 @@ impl GraphicsState {
     /// by `placement` where its descriptor supports indirect command buffers, with
     /// `added_unsupported` (`StateShared::added_unsupported`); drawn as `drawn` where given
     /// (`Program::drawn`).
+    ///
+    /// `key` is the key of the descriptor it draws as, where the caller holds it: a creation
+    /// built that key to look its compiles up under, so the state keeps it rather than building
+    /// it again the first time something reads it ([`GraphicsState::descriptor_key`]). `None`
+    /// where the caller's key is of another descriptor -- a twin of a color group draws as its
+    /// group's attachments alone, and the mesh creation builds no key -- and the state builds its
+    /// own when it is first asked.
     fn of(
         device: &Device,
         (descriptor, drawn): (StateDescriptor, Option<StateDescriptor>),
         (base, large): (Arc<RenderVariant>, Option<Arc<RenderVariant>>),
         (stand_in, placement, label): (bool, IdPlacement, Option<String>),
         added_unsupported: [usize; 2],
+        key: Option<PipelineKey>,
     ) -> Result<GraphicsState, Error> {
         let identifier = UniqueIdentifier::state(
             &device.shared().identifiers,
@@ -1747,7 +1782,7 @@ impl GraphicsState {
                 log,
                 label,
                 texture_accesses: TextureAccessMemo::new(),
-                descriptor_key: OnceLock::new(),
+                descriptor_key: key.map_or_else(OnceLock::new, OnceLock::from),
                 captures: Mutex::new(Lru::counted(CAPTURES)),
                 settled: Mutex::new(VecDeque::with_capacity(SETTLED)),
                 last_pipelines: Mutex::new(VecDeque::with_capacity(LAST_PIPELINES)),
@@ -1811,10 +1846,10 @@ impl GraphicsState {
     /// ([`Program::descriptor_key`]).
     pub(crate) fn descriptor_key(&self) -> &PipelineKey {
         self.0.descriptor_key.get_or_init(|| {
-            let compile = self.0.device.compile_device();
+            let device = &self.0.device;
             match self.descriptor() {
-                StateDescriptor::Vertex(descriptor) => compile.render_descriptor_key(descriptor),
-                StateDescriptor::Mesh(descriptor) => compile.mesh_descriptor_key(descriptor),
+                StateDescriptor::Vertex(descriptor) => render_descriptor_key(device, descriptor),
+                StateDescriptor::Mesh(descriptor) => mesh_descriptor_key(device, descriptor),
             }
         })
     }
@@ -2239,12 +2274,19 @@ impl GraphicsState {
                     let translated = {
                         let sources = Sources::later(&device);
                         let entries = device.shared().shader_cache.memo.stage_entries();
-                        RenderVariant::compiled(&sources, &descriptor, &key, entries)
-                            .ok()
-                            .map(|found| match found {
-                                Remembered::Live(variant) => Arc::clone(&variant.pipeline),
-                                Remembered::Compiled(pipeline) => pipeline,
-                            })
+                        let descriptor_key = render_descriptor_key(&device, &descriptor);
+                        RenderVariant::compiled(
+                            &sources,
+                            &descriptor,
+                            &key,
+                            entries,
+                            &descriptor_key,
+                        )
+                        .ok()
+                        .map(|found| match found {
+                            Remembered::Live(variant) => Arc::clone(&variant.pipeline),
+                            Remembered::Compiled(pipeline) => pipeline,
+                        })
                     };
                     // Set once, by its one translation: a later draw may take it, and its command
                     // buffer complete, while this piece still holds the device, until it gave it
@@ -2281,6 +2323,7 @@ impl GraphicsState {
                 descriptor,
                 key,
                 self.0.device.shared().shader_cache.memo.stage_entries(),
+                &render_descriptor_key(&self.0.device, descriptor),
             ),
             // A mesh render pipeline is compiled as it is asked for, past the memo, the archives
             // and the disk cache, which hold the other render pipelines.
@@ -2303,12 +2346,14 @@ impl GraphicsState {
 /// (`GraphicsState::color_group`): the first group's is `base`, each later one's compiled as the
 /// base was, under the empty key of that group (`VariantKey::color_group`), or under the
 /// stand-ins its compile asks for. None where the device draws the pipeline's colors whole. Its
-/// stages' specialized entries are the creation's (`entries`).
+/// stages' specialized entries are the creation's (`entries`), and `descriptor_key` is the key
+/// of `descriptor` the creation built.
 fn group_bases(
     sources: &Sources<'_>,
     descriptor: &RenderPipelineDescriptor,
     entries: &StageEntries,
     (base, stand_in): (&Arc<RenderVariant>, bool),
+    descriptor_key: &PipelineKey,
 ) -> Result<Vec<(Arc<RenderVariant>, bool)>, Error> {
     let device = sources.device();
     let Some(groups) = base
@@ -2325,7 +2370,7 @@ fn group_bases(
         let (found, mut key) = stand_in::compile_with_stand_ins(profile, |key| {
             let mut key = key.clone();
             key.color_group = group;
-            RenderVariant::compiled(sources, descriptor, &key, entries)
+            RenderVariant::compiled(sources, descriptor, &key, entries, descriptor_key)
         })
         .map_err(|error| compile_error(device, error))?;
         key.color_group = group;
@@ -2346,12 +2391,14 @@ fn group_bases(
 /// (whose draws the step compiles), whose base was compiled under stand-ins (its draws' formats
 /// unknown until they bind them), or whose large form is its base; and where the compile
 /// refuses it, which the draw that asks for it meets as it did. Its stages' specialized entries
-/// are the creation's (`entries`).
+/// are the creation's (`entries`), and `descriptor_key` is the key of `descriptor` the creation
+/// built.
 fn large_form(
     device: &Device,
     descriptor: &RenderPipelineDescriptor,
     (base, entries): (&Arc<RenderVariant>, &StageEntries),
     stand_in: bool,
+    descriptor_key: &PipelineKey,
 ) -> Option<Arc<RenderVariant>> {
     if !descriptor.support_indirect_command_buffers
         || stand_in
@@ -2365,7 +2412,14 @@ fn large_form(
     if key == base.key {
         return None;
     }
-    let found = RenderVariant::compiled(&Sources::later(device), descriptor, &key, entries).ok()?;
+    let found = RenderVariant::compiled(
+        &Sources::later(device),
+        descriptor,
+        &key,
+        entries,
+        descriptor_key,
+    )
+    .ok()?;
     RenderVariant::of(device, key, found).ok()
 }
 
@@ -2384,6 +2438,25 @@ fn answers_every_question(
         && answers.unwritten_fragment_inputs.is_some()
 }
 
+/// The key of render pipeline descriptor `d` on `device` (`Device::render_descriptor_key`),
+/// counted. Building one digests every field of the descriptor in its derived `Debug` form and
+/// hashes each stage's compile key, so the runtime builds one per creation and passes it to
+/// everything that wants it rather than building it again at each site; every build it makes goes
+/// through here or [`mesh_descriptor_key`], so `descriptor_keys_built` is how many a call built
+/// (`work_counts.rs`).
+fn render_descriptor_key(device: &Device, d: &RenderPipelineDescriptor) -> PipelineKey {
+    device.shared().counts.descriptor_key_built();
+    device.compile_device().render_descriptor_key(d)
+}
+
+/// The key of mesh render pipeline descriptor `d` on `device`
+/// (`Device::mesh_descriptor_key`), counted as [`render_descriptor_key`] counts a render
+/// descriptor's.
+fn mesh_descriptor_key(device: &Device, d: &MeshPipelineDescriptor) -> PipelineKey {
+    device.shared().counts.descriptor_key_built();
+    device.compile_device().mesh_descriptor_key(d)
+}
+
 /// A stage's function name, or the compile key of a stage compiled already.
 fn stage_name(source: &StageSource) -> String {
     match source {
@@ -2396,25 +2469,30 @@ impl RenderVariant {
     /// `descriptor`'s pipeline under `key`: the variant of it the memo knows live, or the
     /// pipeline `sources` give, else each `Function` stage's translation (found, or compiled)
     /// linked, all under one budget. A refusal is the compile layer's.
+    ///
+    /// `descriptor_key` is `descriptor`'s own key (`render_descriptor_key`), which the caller
+    /// built: a creation compiles its base, its large-buffer form and each of its color groups'
+    /// bases, all of one descriptor, so it builds that key once and every one of them looks its
+    /// pipeline up under it.
     fn compiled(
         sources: &Sources<'_>,
         descriptor: &RenderPipelineDescriptor,
         key: &VariantKey,
         entries: &StageEntries,
+        descriptor_key: &PipelineKey,
     ) -> Result<Remembered<RenderPipeline, RenderVariant>, metal2vulkan::error::Error> {
         let compile = sources.device().compile_device();
         let budget = sources.budget();
         // The pipeline a creation of a descriptor of the same key learned for `key`, found
         // without asking its keys again; else the keys, kept for the next one.
         let cache = &sources.device().shared().shader_cache;
-        let descriptor_key = compile.render_descriptor_key(descriptor);
-        if let Some(pipeline) = cache.variant_pipeline(compile, &descriptor_key, key) {
+        if let Some(pipeline) = cache.variant_pipeline(compile, descriptor_key, key) {
             if let Some(found) = sources.render(&pipeline) {
                 return Ok(found);
             }
         }
         let keys = compile.render_variant_key(descriptor, key, &budget, entries)?;
-        cache.keep_variant_pipeline(compile, &descriptor_key, key, &keys.pipeline);
+        cache.keep_variant_pipeline(compile, descriptor_key, key, &keys.pipeline);
         if let Some(found) = sources.render(&keys.pipeline) {
             return Ok(found);
         }

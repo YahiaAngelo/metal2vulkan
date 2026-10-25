@@ -61,6 +61,7 @@ pub(crate) struct Counters {
     stage_entries_specialized: AtomicU64,
     stage_entries_shared: AtomicU64,
     linked_use_questions_asked: AtomicU64,
+    descriptor_keys_built: AtomicU64,
     shader_modules_made: AtomicU64,
     shader_modules_shared: AtomicU64,
     pipeline_layouts_made: AtomicU64,
@@ -797,6 +798,13 @@ impl Counters {
     pub(crate) fn linked_use_question_asked(&self) {
         self.linked_use_questions_asked
             .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A render or mesh pipeline descriptor's key the runtime built
+    /// (`Device::render_descriptor_key`, `Device::mesh_descriptor_key`): every build the runtime
+    /// makes goes through `pipeline::render::descriptor_key` or `mesh_descriptor_key`.
+    pub(crate) fn descriptor_key_built(&self) {
+        self.descriptor_keys_built.fetch_add(1, Ordering::Relaxed);
     }
 
     /// A pipeline state's variant made a `VkShaderModule` (`pipeline/objects.rs`).
@@ -2625,6 +2633,13 @@ pub struct WorkCounts {
     /// argument, and the fragment inputs no vertex output writes. Each decodes the stage it asks
     /// about.
     pub linked_use_questions_asked: u64,
+    /// Render and mesh pipeline descriptor keys the runtime built
+    /// (`Device::render_descriptor_key`, `Device::mesh_descriptor_key`). Building one digests
+    /// every field of the descriptor in its derived `Debug` form, so it allocates a dozen
+    /// strings and hashes each stage's compile key. A pipeline creation builds one, which its
+    /// checks, its compiles, its reflection and its state then read; a later variant of a state
+    /// builds one of its own, and a `compiledReflection` read builds none.
+    pub descriptor_keys_built: u64,
     /// `VkShaderModule`s pipeline states' variants made: none for a state made again whose
     /// released variant's objects were kept (`pipeline/kept.rs`).
     pub shader_modules_made: u64,
@@ -4179,6 +4194,7 @@ impl Device {
             stage_entries_specialized: counters.stage_entries_specialized.load(Ordering::Relaxed),
             stage_entries_shared: counters.stage_entries_shared.load(Ordering::Relaxed),
             linked_use_questions_asked: counters.linked_use_questions_asked.load(Ordering::Relaxed),
+            descriptor_keys_built: counters.descriptor_keys_built.load(Ordering::Relaxed),
             shader_modules_made: counters.shader_modules_made.load(Ordering::Relaxed),
             shader_modules_shared: counters.shader_modules_shared.load(Ordering::Relaxed),
             pipeline_layouts_made: counters.pipeline_layouts_made.load(Ordering::Relaxed),
