@@ -11447,7 +11447,6 @@ variant	metal2vulkan-runtime::IdPlacement::At	At(ResourceId)
 variant	metal2vulkan-runtime::IdPlacement::Outside	Outside
 variant	metal2vulkan-runtime::IndirectCommand::Compute	Compute(EncodedComputeCommand)
 variant	metal2vulkan-runtime::IndirectCommand::Render	Render(EncodedRenderCommand)
-variant	metal2vulkan-runtime::IndirectCommandBufferProblem::BindCount	BindCount { count: u32, limit: u32 }
 variant	metal2vulkan-runtime::IndirectCommandBufferProblem::CommandKind	CommandKind
 variant	metal2vulkan-runtime::IndirectCommandBufferProblem::CommandType	CommandType(IndirectCommandType)
 variant	metal2vulkan-runtime::IndirectCommandBufferProblem::InheritedPipelineState	InheritedPipelineState

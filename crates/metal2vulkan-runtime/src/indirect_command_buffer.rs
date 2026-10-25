@@ -57,11 +57,11 @@
 //!   as they stand when the execution's batch is submitted, or for records the GPU may write, once
 //!   the work before it completed ([`indirect_execute`](super::indirect_execute)); it refuses a
 //!   buffer of render commands, which a render encoder's runs (`render/executions.rs`).
-//! - **Creation.** The records of every command must fit one buffer of the device's
-//!   `max_buffer_length`; a larger buffer is refused, naming the limit. The record format holds
-//!   every render command type, mesh draws among them, whose object and mesh buffers a command sets
-//!   as its vertex and fragment buffers; a buffer of either mesh kind holds both mesh draws, as
-//!   Metal's does.
+//! - **Creation.** The records of every command, and the slots past them, must each fit one buffer
+//!   of the device's `max_buffer_length`; a larger buffer is refused, naming the limit. The record
+//!   format holds every render command type, mesh draws among them, whose object and mesh buffers a
+//!   command sets as its vertex and fragment buffers; a buffer of either mesh kind holds both mesh
+//!   draws, as Metal's does.
 
 use super::address::{AddressPlacement, Place, RecordsId};
 use super::buffer::{Buffer, Modes};
@@ -107,16 +107,6 @@ use std::sync::{Arc, Mutex, Weak};
 
 /// The threadgroup lengths a fresh descriptor binds, as Metal's answers.
 const DEFAULT_THREADGROUP_LENGTHS: u32 = 31;
-
-/// The most kernel, vertex or fragment buffers, or threadgroup lengths, a descriptor may bind.
-/// Metal's validation stops more than 31, but plain Metal makes a buffer of more, whose commands
-/// keep a buffer set at any index below the count and whose functions bind none past 30 (32, 33 and
-/// 64 kernel buffers, 32 threadgroup lengths, 32 and 33 vertex and 33 fragment buffers, each set at
-/// its last index and run). Its storage grew with the count to 65536 kernel buffers (1024 vertex
-/// and fragment buffers and threadgroup lengths, as kernel buffers grow), but a buffer of 2^31
-/// was made as small as one of few, and 2^32 - 1 ended its process: past 65536 its storage is not
-/// defined.
-const MOST_BINDS: u32 = 65536;
 
 /// `count` bindings, of which the record holds `capacity`: the ones a command's record holds.
 fn held(count: u32, capacity: u32) -> u32 {
@@ -286,10 +276,12 @@ impl IndirectCommandBufferDescriptor {
             && self.inherit_blend_color
     }
 
-    /// The record format's descriptor and inheritance of this descriptor, or what refuses it
-    /// for `call`.
-    fn records(&self, call: &'static str) -> Result<(CommandDescriptor, Inheritance), Error> {
-        let problem = |problem| invalid(call, Problem::IndirectCommandBuffer(problem));
+    /// The record format's descriptor and inheritance of this descriptor. Every buffer, vertex,
+    /// fragment, object, mesh and threadgroup-length count is taken: the record holds the first
+    /// 32 slots of a stage and the first 31 lengths, the rest lie past them ([`Overflow`]), and a
+    /// count whose slots the runtime cannot lay out in one buffer is refused where they are made
+    /// (`new_indirect_command_buffer`, `IndirectCommandBufferPastMaxBufferLength`).
+    fn records(&self) -> (CommandDescriptor, Inheritance) {
         let types = self.command_types;
         // No command types make a buffer of compute records no command reaches (the buffer's
         // calls refuse them, `check_command_types`).
@@ -309,20 +301,7 @@ impl IndirectCommandBufferDescriptor {
             buffers: source(self.inherit_buffers),
         };
         if !mixed && types.intersects(RENDER_TYPES) {
-            for count in [
-                self.max_vertex_buffer_bind_count,
-                self.max_fragment_buffer_bind_count,
-                self.max_object_buffer_bind_count,
-                self.max_mesh_buffer_bind_count,
-            ] {
-                if count > MOST_BINDS {
-                    return Err(problem(IndirectCommandBufferProblem::BindCount {
-                        count,
-                        limit: MOST_BINDS,
-                    }));
-                }
-            }
-            return Ok((
+            return (
                 CommandDescriptor::Render {
                     draws: RenderDraws {
                         primitives: types.contains(IndirectCommandType::DRAW),
@@ -352,18 +331,7 @@ impl IndirectCommandBufferDescriptor {
                     support_dynamic_attribute_stride: self.support_dynamic_attribute_stride,
                 },
                 inheritance,
-            ));
-        }
-        for count in [
-            self.max_kernel_buffer_bind_count,
-            self.max_kernel_threadgroup_memory_bind_count,
-        ] {
-            if count > MOST_BINDS {
-                return Err(problem(IndirectCommandBufferProblem::BindCount {
-                    count,
-                    limit: MOST_BINDS,
-                }));
-            }
+            );
         }
         let dispatch = match (
             types.contains(IndirectCommandType::CONCURRENT_DISPATCH),
@@ -373,7 +341,7 @@ impl IndirectCommandBufferDescriptor {
             (true, false) => ComputeDispatch::Threadgroups,
             _ => ComputeDispatch::Threads,
         };
-        Ok((
+        (
             CommandDescriptor::Compute {
                 dispatch,
                 max_buffer_bind_count: held(self.max_kernel_buffer_bind_count, RECORD_BUFFERS),
@@ -384,7 +352,7 @@ impl IndirectCommandBufferDescriptor {
                 support_dynamic_attribute_stride: self.support_dynamic_attribute_stride,
             },
             inheritance,
-        ))
+        )
     }
 }
 
@@ -396,36 +364,32 @@ impl IndirectCommandBufferDescriptor {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IndirectCommandBufferProblem {
-    /// A command, a CPU reset, a read-back or an argument buffer's encoding of a buffer of no
-    /// command types, or its blit copy to or from a buffer of command types. Plain Metal makes
-    /// such a buffer, where its validation stops it, and executes, resets, optimizes and copies
-    /// it to another such as nothing, as the runtime does, but its process ends at a command's
-    /// first setter and at its CPU reset.
+    /// A call on a buffer of no command types that plain Metal's process does not survive: a
+    /// command's pipeline-state setter, its vertex-buffer setter, its draw, a compute command's
+    /// dispatch or `reset`, and a CPU reset of a range of commands. Plain Metal makes such a
+    /// buffer, where its validation stops it, and gives its commands, executes, resets, optimizes
+    /// and copies it as nothing, as the runtime does; the read-back is refused too, as a runtime
+    /// extension with no Metal call to measure.
     ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal ends the process, SIGBUS, at
-    /// a command's `setRenderPipelineState:` and at `resetWithRange:`, where a buffer of `Draw`
-    /// takes both; but it encodes such a buffer into an argument buffer to the same bytes a `Draw`
-    /// one encodes to, and completes its blit copy into a `Draw` buffer, its execution in a pass
-    /// and its optimize with no error, so those refusals reach past Metal. The read-back is the
-    /// runtime's own extension and has no Metal call to measure).
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1, build 26A434, the validation layer
+    /// off, one shape per process, three processes a shape, each beside the same call on a buffer
+    /// of the matching command type, `probes/icb_refusals_that_metal_takes.m`. Plain Metal ends
+    /// the process — SIGBUS, SIGSEGV in some processes of the same shape — at
+    /// `setRenderPipelineState:`, `setVertexBuffer:offset:atIndex:`, `drawPrimitives:`,
+    /// `drawIndexedPrimitives:`, `setComputePipelineState:`, `concurrentDispatchThreadgroups:`,
+    /// `concurrentDispatchThreads:`, a compute command's `reset`, and `resetWithRange:` of a
+    /// non-empty range, where the buffer of the matching type takes each. It **takes**, and the
+    /// runtime takes with it, `indirectRenderCommandAtIndex:` and
+    /// `indirectComputeCommandAtIndex:` — an object, not nil — a render command's `reset`,
+    /// `setFragmentBuffer:`, `setBarrier` and `clearBarrier`, `setKernelBuffer:` plain and with an
+    /// attribute stride, `setThreadgroupMemoryLength:atIndex:`, `setStageInRegion:`,
+    /// `setImageblockWidth:height:`, `resetWithRange:` of an empty range, the execution in a pass
+    /// which paints nothing, `optimizeIndirectCommandBuffer:`, the blit copy in either direction,
+    /// and the argument-buffer encoding, to the same ID bytes a `Draw` buffer encodes to. The
+    /// argument-buffer encoding and the blit copy are still refused, in `argument_encoder.rs` and
+    /// `blit_indirect.rs`, and reach past Metal there. The read-back is a runtime extension and
+    /// has no Metal call to measure).
     NoCommandTypes,
-    /// A descriptor with more kernel, vertex, fragment, object or mesh buffers, or kernel
-    /// threadgroup lengths, than 65536, past which plain Metal's storage is not defined (a buffer
-    /// of 2^31 kernel buffers was made as small as one of few).
-    /// Metal's validation stops more than 31, but plain Metal makes a buffer of up to 65536, as
-    /// the runtime does.
-    ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal makes the buffer at 4, at
-    /// 65536, at 2^31 and at 2^32 - 1 kernel buffers alike, each taking the same 16 KiB of the
-    /// device's allocated size, where `maxCommandCount` moves that figure — 16 KiB at one command
-    /// against 64 KiB at 64 — so the storage is undefined rather than refused and the refusal
-    /// reaches past Metal).
-    BindCount {
-        /// The count the descriptor asks for.
-        count: u32,
-        /// The most the runtime binds.
-        limit: u32,
-    },
     /// A range of commands not inside the buffer: for `reset_with_range`, one that starts at or
     /// past its size (an empty one too, but the empty one at the size) or ends past it; for the
     /// read-back, one that ends past it.
@@ -447,14 +411,23 @@ pub enum IndirectCommandBufferProblem {
     /// at `setRenderPipelineState:` on a command of a buffer whose `inheritPipelineState` is set,
     /// where the same setter on a buffer that does not inherit it runs the draw).
     InheritedPipelineState,
-    /// A pipeline state made without `supportIndirectCommandBuffers`: plain Metal takes the setter
-    /// and the draw, and its GPU faults where the command runs.
+    /// A pipeline state made without `supportIndirectCommandBuffers`, set on a command. A compute
+    /// state ends plain Metal's process at the setter; a render state is taken, and its command
+    /// faults Metal's GPU where it runs.
     ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal's `setRenderPipelineState:`
-    /// and `drawPrimitives:` on the command both return rather than ending the process, and the
-    /// command buffer fails at execution, "Caused GPU Address Fault Error", where the same pipeline
-    /// with the flag set draws: so the refusal stands on undefined behaviour and not on a refusal
-    /// of Metal's, and reaches past it).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1, build 26A434, the validation layer off,
+    /// one shape per process, three processes a shape,
+    /// `probes/icb_refusals_that_metal_takes.m`. The two kinds do not answer alike.
+    /// `setComputePipelineState:` with a state made without the flag ends the process, SIGSEGV,
+    /// where the same call with the flag set dispatches and the kernel's marker words read back:
+    /// that arm is a refusal of Metal's own. `setRenderPipelineState:` and `drawPrimitives:` both
+    /// return, and the command buffer then fails at execution with status 5 and `Caused GPU
+    /// Address Fault Error 0000000b:kIOGPUCommandBufferCallbackErrorPageFault`, leaving the target
+    /// at its clear value, where the same pipeline with the flag set paints; a plainly valid
+    /// command buffer submitted after the fault completes and paints, so the fault does not poison
+    /// the queue. That arm stands on undefined behaviour — a GPU address fault is not an answer —
+    /// and so reaches past Metal, and the refusal is kept there deliberately: a typed `Invalid` at
+    /// the setter is the useful answer where Metal's own is a page fault at execution).
     PipelineWithoutSupport,
     /// A draw of a kind (`DRAW_INDEXED`, `DRAW_PATCHES` or `DRAW_INDEXED_PATCHES`, a probe) whose
     /// record the buffer's records cannot hold: an indexed draw on a buffer of draws of primitives
@@ -466,11 +439,19 @@ pub enum IndirectCommandBufferProblem {
     /// not enabled on this indirect command buffer"), but plain Metal runs one their records hold,
     /// as the runtime does.
     ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal ends the process, SIGBUS, at
-    /// a patch draw on a buffer of `DRAW` alone, at a mesh pipeline's `setRenderPipelineState:` on
-    /// such a buffer, and at a draw of primitives on a buffer of `DRAW_MESH_THREADGROUPS` alone;
-    /// but an indexed draw on a buffer of `DRAW` alone completes with no error and paints nothing,
-    /// where the same draw on a buffer of `DRAW_INDEXED` paints, so that kind reaches past Metal).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1, build 26A434, the validation layer off,
+    /// one shape per process, `probes/icb_refusals_that_metal_takes.m`. Plain Metal ends the
+    /// process, SIGBUS, at a patch draw on a buffer of `DRAW` alone, at a mesh pipeline's
+    /// `setRenderPipelineState:` on such a buffer, and at a draw of primitives on a buffer of
+    /// `DRAW_MESH_THREADGROUPS` alone, three processes each. One cell reaches past Metal, and one
+    /// only: an indexed draw on a buffer of `DRAW` alone completes with no error and paints
+    /// nothing, three processes, with both controls live beside it — a draw of primitives on the
+    /// same buffer paints 0.75, and the same indexed draw on a buffer of `DRAW_INDEXED` and on one
+    /// of `DRAW_PATCHES` paints 0.75 — and with no byte of a 0xEE guard at the next 256-aligned
+    /// placement-heap offset past the index buffer touched. Taking it needs the execution to run
+    /// nothing for such a record, which is `Asked::of` in `render/executions.rs`, where
+    /// `Asked::Nothing` already stands for a draw that runs nothing: that side is not built, so
+    /// the setter stays refused rather than taken and then painted).
     CommandType(IndirectCommandType),
     /// A compute command of a buffer whose commands are render ones, or a setter plain Metal does
     /// not ignore on a render command of a buffer whose commands are dispatches. Plain Metal ends
@@ -517,15 +498,34 @@ impl Device {
     /// `newIndirectCommandBufferWithDescriptor:maxCommandCount:options:`: a buffer of
     /// `max_count` reset commands of `descriptor`, `max_count` 0 included.
     ///
-    /// Refused `Invalid`: what plain Metal makes no defined storage of (more than 65536 kernel,
-    /// vertex or fragment buffers or threadgroup lengths, `Memoryless` storage). Plain Metal
-    /// makes what its validation stops of the rest, and so does the runtime: no command types (a
-    /// buffer that executes as nothing and whose commands are refused), render types beside
-    /// compute types (a buffer of compute commands), more than 31 buffers or lengths. A placement
-    /// at 16384 or more is refused `Invalid` (`Problem::ResourceId`): Metal writes past its table
-    /// of IDs there. Refused `NotImplemented`: records past one buffer of the device's
-    /// `max_buffer_length` (`IndirectCommandBufferPastMaxBufferLength`). The device's memory can
-    /// refuse it too (`OutOfMemory`), and so can the IDs, once every ID below 2^31 is held.
+    /// Refused `Invalid`: `Memoryless` storage. Plain Metal makes what its validation stops of
+    /// the rest, and so does the runtime: no command types (a buffer that executes as nothing and
+    /// whose commands' pipeline, vertex-buffer and draw setters are refused), render types beside
+    /// compute types (a buffer of compute commands), more than 31 buffers or lengths of a stage. A
+    /// placement at 16384 or more is refused `Invalid` (`Problem::ResourceId`): Metal writes past
+    /// its table of IDs there. Refused `NotImplemented`: records, or slots past the records, that
+    /// one buffer of the device's `max_buffer_length` cannot hold
+    /// (`IndirectCommandBufferPastMaxBufferLength`). The device's memory can refuse it too
+    /// (`OutOfMemory`), and so can the IDs, once every ID below 2^31 is held.
+    ///
+    /// Every buffer and threadgroup-length count is taken, however large: plain Metal lays out
+    /// the slots the count asks for and the runtime does the same. Measured on an Apple M3 Max
+    /// under macOS 27.0.1 (`probes/icb_refusals_that_metal_takes.m`, one shape per process, the
+    /// validation layer off), on a buffer of 8 commands, reading Metal's own `allocatedSize`: a
+    /// compute buffer's `maxKernelBufferBindCount` grows it from 16 KiB at 4, 31, 32 and 33 to 80
+    /// KiB at 1024, 4.01 MiB at 65535, 65536 and 65537, 4.28 MiB at 70000, 64 MiB at 2^20, 1 GiB
+    /// at 2^24 and 2 GiB at 2^25, and a render buffer's `maxVertexBufferBindCount` and
+    /// `maxFragmentBufferBindCount` grow it the same way; a bind at index 69999 of a buffer of
+    /// 70000 returns, and the command still dispatches with the buffer bound at index 0 and no
+    /// byte of a 0xEE guard beside it touched. The same count on a buffer whose layout ignores it
+    /// (a kernel count on a render buffer) leaves `allocatedSize` at 16 KiB at 4, at 65536 and at
+    /// 2^31 alike, and a threadgroup-length count leaves it at 16 KiB at every value from 31 to
+    /// 2^32 - 1: a reading of such a count measures Metal ignoring it, not Metal taking it.
+    /// Past where Metal lays the slots out its storage is not defined: at 2^26 kernel buffers of 8
+    /// commands and at 2^32 - 1 its creation ends the process, and at 2^31 it makes a 16-KiB
+    /// buffer whose `setKernelBuffer:atIndex:` at index 2^31 then ends the process. The runtime
+    /// lays out every slot it answers for, so what will not fit is the `NotImplemented` gap above
+    /// rather than a claim that Metal refuses it.
     pub fn new_indirect_command_buffer(
         &self,
         descriptor: &IndirectCommandBufferDescriptor,
@@ -538,7 +538,7 @@ impl Device {
         if modes.storage == StorageMode::Memoryless {
             return Err(invalid(CALL, Problem::StorageMode));
         }
-        let (records, inheritance) = descriptor.records(CALL)?;
+        let (records, inheritance) = descriptor.records();
         // A device that claims Apple10 would draw a command with its own render states where the
         // buffer does not inherit them: not built.
         if !descriptor.inherits_render_states() && self.supports_family(GpuFamily::Apple10.raw()) {
@@ -555,6 +555,14 @@ impl Device {
         let size = u32::try_from(max_count).map_err(|_| past_length())?;
         let length = storage_length(size);
         if length > max_buffer_length {
+            return Err(past_length());
+        }
+        // The slots past the records, measured before anything is taken: a descriptor may count
+        // buffers of a stage no buffer of the device can lay out, and the refusal names that
+        // limit rather than whatever the steps below run out of first.
+        let layout = OverflowLayout::of(descriptor);
+        let overflow_bytes = layout.map(|layout| layout.bytes(size));
+        if overflow_bytes.is_some_and(|bytes| bytes > max_buffer_length) {
             return Err(past_length());
         }
         // The records are host-visible whatever the storage mode asked for: the CPU initializes
@@ -585,12 +593,8 @@ impl Device {
             Place::Records(held.id),
         )?;
         // The slots past the record's, of their own buffer, as long as Metal's storage grows.
-        let overflow = match OverflowLayout::of(descriptor) {
-            Some(layout) => {
-                let bytes = layout.bytes(size);
-                if bytes > max_buffer_length {
-                    return Err(past_length());
-                }
+        let overflow = match (layout, overflow_bytes) {
+            (Some(layout), Some(bytes)) => {
                 let storage = self.zeroed_buffer(
                     CALL,
                     bytes.max(SLOT_BYTES),
@@ -607,7 +611,7 @@ impl Device {
                     commands: size,
                 })
             }
-            None => None,
+            _ => None,
         };
         let options =
             ResourceOptions::new(modes.storage, modes.cache, storage.hazard_tracking_mode());
@@ -1150,9 +1154,12 @@ impl OverflowLayout {
         self.slot_bytes() + self.lengths_bytes()
     }
 
-    /// The bytes an overflow of `commands` commands holds.
+    /// The bytes an overflow of `commands` commands holds, saturated: a descriptor may ask for
+    /// up to 2^32 - 1 slots of a stage of each of up to 2^32 - 1 commands, whose product is past
+    /// `u64`, and a wrap would walk past the check that refuses what one buffer cannot hold
+    /// (`new_indirect_command_buffer`).
     fn bytes(&self, commands: u32) -> u64 {
-        u64::from(commands) * self.command_bytes()
+        u64::from(commands).saturating_mul(self.command_bytes())
     }
 }
 
@@ -1602,12 +1609,14 @@ impl IndirectCommandBuffer {
 
     /// Command `index` for `call`, of a buffer whose commands are render ones where `render`:
     /// refused (`Invalid`) for a buffer of the other kind's commands (but a render command of a
-    /// buffer of dispatches alone) and a buffer of no command types, and
-    /// `NotImplemented(IndirectCommandPastSize)` for an index at or past the size. A `Private`
-    /// buffer's commands are the CPU's as a `Shared` one's are, as plain Metal encodes, reads back
-    /// and runs them.
+    /// buffer of dispatches alone), and `NotImplemented(IndirectCommandPastSize)` for an index at
+    /// or past the size. A buffer of no command types gives a command, as plain Metal gives one
+    /// (an M3 Max, macOS 27.0.1: `indirectRenderCommandAtIndex:0` and
+    /// `indirectComputeCommandAtIndex:0` both answered an object, three processes each); the
+    /// command's own calls carry the refusal, each where plain Metal's process ends
+    /// (`NoCommandTypes`). A `Private` buffer's commands are the CPU's as a `Shared` one's are, as
+    /// plain Metal encodes, reads back and runs them.
     fn command_at(&self, call: &'static str, index: u64, render: bool) -> Result<u32, Error> {
-        self.check_command_types(call)?;
         self.check_kind(call, render)?;
         if index >= u64::from(self.0.size) {
             return Err(Error::NotImplemented(RuntimeGap::IndirectCommandPastSize {
@@ -1642,9 +1651,9 @@ impl IndirectCommandBuffer {
     }
 
     /// Refuse, for `call`, a buffer of no command types (`Invalid`,
-    /// `IndirectCommandBufferProblem::NoCommandTypes`): plain Metal makes one, and executes,
-    /// resets, optimizes and copies it as nothing, but its process ends at a command's first setter
-    /// and at its CPU reset; what else it does with one was not measured.
+    /// `IndirectCommandBufferProblem::NoCommandTypes`): plain Metal makes one, gives its commands,
+    /// and executes, resets, optimizes and copies it as nothing, but its process ends at the calls
+    /// the refusal's own doc lists. Only those calls, and the read-back, call this.
     pub(super) fn check_command_types(&self, call: &'static str) -> Result<(), Error> {
         if self.has_no_command_types() {
             return Err(problem(call, IndirectCommandBufferProblem::NoCommandTypes));
@@ -2020,10 +2029,16 @@ impl IndirectCommandBuffer {
     /// `resetWithRange:`: reset commands `range`, as a fresh buffer's. Refused (`Invalid`) unless
     /// the range starts below the size and ends at or before it, an empty range included, as
     /// Metal's validation refuses it, but for the empty range at the size, which resets nothing
-    /// as plain Metal's does; a `Private` buffer's are reset too.
+    /// as plain Metal's does; a `Private` buffer's are reset too. On a buffer of no command types
+    /// a range of commands is refused (`NoCommandTypes`), where plain Metal's process ends, and
+    /// an empty range resets nothing, as plain Metal's returns (an Apple M3 Max, macOS 27.0.1:
+    /// `resetWithRange:` of location 0 length 4 ended the process and of location 0 length 0
+    /// returned, three processes each, where both returned on a buffer of `Draw`).
     pub fn reset_with_range(&self, range: Range<u64>) -> Result<(), Error> {
-        self.check_command_types("reset_with_range")?;
         let range = self.inside(&range)?;
+        if !range.is_empty() {
+            self.check_command_types("reset_with_range")?;
+        }
         self.reset_commands(range)
     }
 
@@ -3447,6 +3462,7 @@ impl IndirectComputeCommand {
     /// state of another device.
     pub fn set_compute_pipeline_state(&self, state: &ComputePipelineState) -> Result<(), Error> {
         const CALL: &str = "set_compute_pipeline_state";
+        self.icb.check_command_types(CALL)?;
         if !state.device().same(self.icb.device()) {
             return Err(invalid(CALL, Problem::ForeignObject));
         }
@@ -3548,10 +3564,13 @@ impl IndirectComputeCommand {
         threadgroups: Size,
         threads_per_threadgroup: Size,
     ) -> Result<(), Error> {
-        self.set_dispatch(Action::DispatchThreadgroups {
-            grid: low_bits(threadgroups),
-            local_size: low_bits(threads_per_threadgroup),
-        })
+        self.set_dispatch(
+            "concurrent_dispatch_threadgroups",
+            Action::DispatchThreadgroups {
+                grid: low_bits(threadgroups),
+                local_size: low_bits(threads_per_threadgroup),
+            },
+        )
     }
 
     /// `concurrentDispatchThreads:threadsPerThreadgroup:`: the command dispatches `threads` in
@@ -3563,15 +3582,20 @@ impl IndirectComputeCommand {
         threads: Size,
         threads_per_threadgroup: Size,
     ) -> Result<(), Error> {
-        self.set_dispatch(Action::DispatchThreads {
-            grid: low_bits(threads),
-            local_size: low_bits(threads_per_threadgroup),
-        })
+        self.set_dispatch(
+            "concurrent_dispatch_threads",
+            Action::DispatchThreads {
+                grid: low_bits(threads),
+                local_size: low_bits(threads_per_threadgroup),
+            },
+        )
     }
 
     /// Set the record's dispatch `action`, which every compute buffer's records hold
-    /// (`CommandDescriptor::holds`).
-    fn set_dispatch(&self, action: Action) -> Result<(), Error> {
+    /// (`CommandDescriptor::holds`). Refused for `call` on a buffer of no command types
+    /// (`NoCommandTypes`), where plain Metal's process ends.
+    fn set_dispatch(&self, call: &'static str, action: Action) -> Result<(), Error> {
+        self.icb.check_command_types(call)?;
         self.edit(RecordField::Action(action), None)
     }
 
@@ -3641,6 +3665,7 @@ impl IndirectComputeCommand {
     /// too, as plain Metal's reads back after `reset` (the size set before it, measured by the
     /// integration consumer on an M3 without API validation).
     pub fn reset(&self) -> Result<(), Error> {
+        self.icb.check_command_types("reset")?;
         self.icb.reset_command(self.index, |record, _| {
             let retained = record.bindings.pipeline.or(record.retained_pipeline);
             *record = CommandRecord {
@@ -3658,19 +3683,29 @@ impl IndirectComputeCommand {
     /// the GPU may have written the records may not be what an execution committed earlier
     /// runs ([`IndirectCommandBuffer::gpu_written`]).
     pub fn command_type(&self) -> Result<IndirectCommandType, Error> {
+        self.check_getter("command_type")?;
         self.icb
             .read_record(self.index, |view| command_type(&view.action()))
+    }
+
+    /// Refuse, for `call`, a getter of a command of a buffer of no command types
+    /// (`NoCommandTypes`): the getters are a runtime extension standing for Metal's private
+    /// getters, and such a buffer has no Metal call to measure them against.
+    fn check_getter(&self, call: &'static str) -> Result<(), Error> {
+        self.icb.check_command_types(call)
     }
 
     /// `hasBarrier`, Apple's private getter: the command's
     /// [`barrier`](EncodedComputeCommand::barrier), read alone.
     pub fn has_barrier(&self) -> Result<bool, Error> {
+        self.check_getter("has_barrier")?;
         self.icb.read_record(self.index, |view| view.barrier())
     }
 
     /// `dispatchThreadgroupsArguments` and `dispatchThreadsArguments`, Apple's private getters:
     /// the command's [`dispatch`](EncodedComputeCommand::dispatch), read alone.
     pub fn dispatch(&self) -> Result<Option<IndirectDispatch>, Error> {
+        self.check_getter("dispatch")?;
         self.icb
             .read_record(self.index, |view| dispatch_of(&view.action()))
     }
@@ -3682,6 +3717,7 @@ impl IndirectComputeCommand {
     /// [`EncodedComputeCommand::kernel_buffer_address`] and
     /// [`EncodedComputeCommand::kernel_attribute_stride`] do.
     pub fn kernel_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        self.check_getter("kernel_buffer")?;
         let count = self.descriptor().max_kernel_buffer_bind_count;
         self.icb
             .read_buffer(self.index, BufferStage::Kernel, count, index)
@@ -3700,12 +3736,14 @@ impl IndirectComputeCommand {
     /// them (an M3 Max: 100000 places past command 0's of 3), Metal's getter ends the process,
     /// and the runtime's answers.
     pub fn threadgroup_memory_length(&self, index: u64) -> Result<Option<u32>, Error> {
+        self.check_getter("threadgroup_memory_length")?;
         self.icb.length(self.index, index as u32).map(Some)
     }
 
     /// `getStageInRegion`, Apple's private getter: the command's
     /// [`stage_in_region`](EncodedComputeCommand::stage_in_region), read alone.
     pub fn stage_in_region(&self) -> Result<Region, Error> {
+        self.check_getter("stage_in_region")?;
         let [x, y, z, width, height, depth] = self
             .icb
             .read_record(self.index, |view| view.stage_in_region())?
@@ -3720,6 +3758,7 @@ impl IndirectComputeCommand {
     /// [`imageblock_width`](EncodedComputeCommand::imageblock_width) and
     /// [`imageblock_height`](EncodedComputeCommand::imageblock_height), read alone.
     pub fn imageblock_size(&self) -> Result<(u64, u64), Error> {
+        self.check_getter("imageblock_size")?;
         let [width, height] = self
             .icb
             .read_record(self.index, |view| view.imageblock_size())?;
@@ -3729,12 +3768,14 @@ impl IndirectComputeCommand {
     /// The command's [`pipeline`](EncodedComputeCommand::pipeline), read alone: the state set on
     /// it, none when unset, reset, or when no state of the ID it names lives.
     pub fn pipeline_state(&self) -> Result<Option<ComputePipelineState>, Error> {
+        self.check_getter("pipeline_state")?;
         Ok(self.icb.compute_pipeline_now(self.index)?.0)
     }
 
     /// The command's [`pipeline_id`](EncodedComputeCommand::pipeline_id), read alone: the ID of
     /// the state its record names, none where it names none.
     pub fn pipeline_id(&self) -> Result<Option<ResourceId>, Error> {
+        self.check_getter("pipeline_id")?;
         self.icb.read_record(self.index, |view| {
             view.pipeline().map(|id| ResourceId(id.get()))
         })
@@ -3744,6 +3785,7 @@ impl IndirectComputeCommand {
     /// [`pipeline_unique_identifier`](EncodedComputeCommand::pipeline_unique_identifier), read
     /// alone, whose kind the device announces as `commands` announces it.
     pub fn pipeline_unique_identifier(&self) -> Result<Option<u64>, Error> {
+        self.check_getter("pipeline_unique_identifier")?;
         let (_, identifier) = self.icb.compute_pipeline_now(self.index)?;
         self.icb.announce_identifier(identifier);
         Ok(identifier)
@@ -4039,6 +4081,7 @@ impl IndirectRenderCommand {
     /// one's on a buffer of no mesh draw), where Metal's process ends.
     pub fn set_render_pipeline_state(&self, state: &RenderPipelineState) -> Result<(), Error> {
         const CALL: &str = "set_render_pipeline_state";
+        self.icb.check_command_types(CALL)?;
         if !state.device().same(self.icb.device()) {
             return Err(invalid(CALL, Problem::ForeignObject));
         }
@@ -4101,6 +4144,7 @@ impl IndirectRenderCommand {
         offset: u64,
         index: u32,
     ) -> Result<(), Error> {
+        self.icb.check_command_types("set_vertex_buffer")?;
         if self.of_compute() {
             return Ok(());
         }
@@ -4129,6 +4173,7 @@ impl IndirectRenderCommand {
         index: u32,
     ) -> Result<(), Error> {
         const CALL: &str = "set_vertex_buffer_with_stride";
+        self.icb.check_command_types(CALL)?;
         let dynamic = self.descriptor().support_dynamic_attribute_stride;
         let stride = (dynamic && stride != u64::MAX).then_some(stride);
         self.set_buffer(CALL, BufferStage::Vertex, buffer, offset, stride, index)
@@ -4197,6 +4242,7 @@ impl IndirectRenderCommand {
         kind: IndirectCommandType,
         action: &Action,
     ) -> Result<(), Error> {
+        self.icb.check_command_types(call)?;
         if self.of_compute() {
             return Err(problem(call, IndirectCommandBufferProblem::CommandKind));
         }
@@ -4233,6 +4279,7 @@ impl IndirectRenderCommand {
         base_instance: u64,
     ) -> Result<(), Error> {
         const CALL: &str = "draw_primitives";
+        self.icb.check_command_types(CALL)?;
         if self.of_compute() {
             return Ok(());
         }
@@ -4642,9 +4689,12 @@ impl IndirectRenderCommand {
         self.edit("clear_barrier", RecordField::Barrier(false), None)
     }
 
-    /// `reset`: the command as a fresh buffer's.
+    /// `reset`: the command as a fresh buffer's. Refused (`CommandKind`) for a command of a
+    /// buffer of dispatches, where Metal's process ends (SIGSEGV), but taken on a buffer of no
+    /// command types, where plain Metal's returns (an M3 Max, macOS 27.0.1, three processes,
+    /// beside a compute command's `reset` on the same buffer, which ends the process).
     pub fn reset(&self) -> Result<(), Error> {
-        if self.of_compute() {
+        if self.of_compute() && !self.icb.has_no_command_types() {
             return Err(problem("reset", IndirectCommandBufferProblem::CommandKind));
         }
         self.icb.reset_command(self.index, |record, pipeline| {
@@ -4750,6 +4800,7 @@ impl IndirectRenderCommand {
     /// Refuse, for `call`, a getter of a command of a buffer of dispatches (`CommandKind`,
     /// `of_compute`), whose answers were not measured.
     fn check_getter(&self, call: &'static str) -> Result<(), Error> {
+        self.icb.check_command_types(call)?;
         match self.of_compute() {
             true => Err(problem(call, IndirectCommandBufferProblem::CommandKind)),
             false => Ok(()),

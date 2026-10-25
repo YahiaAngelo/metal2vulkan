@@ -53,13 +53,13 @@ fn a_descriptor_has_metal_s_defaults() {
 }
 
 /// `allocatedSize` is Metal's: rows measured on an M4, at a page's last count and the next where it
-/// turns. Each row: the command types, whether the pipeline and the buffers are inherited, dynamic
+/// turns, and rows measured on an M3 Max for the buffer counts past 31. Each row: the command types, whether the pipeline and the buffers are inherited, dynamic
 /// strides, the vertex, fragment, kernel, object and mesh buffer counts, the count of commands, and
 /// Metal's answer. Every kind answers one page for no commands.
 #[test]
 fn a_buffer_answers_metal_s_allocated_size() {
     type Row = (u32, bool, bool, bool, [u32; 5], u32, u64);
-    let rows: [Row; 47] = [
+    let rows: [Row; 68] = [
         (32, false, false, true, [0, 0, 5, 0, 0], 1000, 802816),
         (64, true, false, false, [0, 0, 31, 0, 0], 1000, 966656),
         (96, false, true, true, [0, 0, 5, 0, 0], 511, 376832),
@@ -109,6 +109,50 @@ fn a_buffer_answers_metal_s_allocated_size() {
         (160, true, false, true, [3, 4, 5, 6, 7], 21, 16384),
         (160, true, false, true, [3, 4, 5, 6, 7], 22, 32768),
         (160, true, false, true, [3, 4, 5, 6, 7], 1000, 770048),
+        // The buffer counts past the 31 Metal's validation allows, measured on an Apple M3 Max
+        // under macOS 27.0.1 at 8 commands (`probes/icb_refusals_that_metal_takes.m`): Metal lays
+        // out the slots the count asks for, so `allocatedSize` grows with it, on past the 65536
+        // a refusal once stopped at. A kernel count moves a compute buffer's layout alone and a
+        // vertex or fragment count a render buffer's; the other kind's rows below read one page
+        // whatever the count, which is what makes these live readings.
+        (32, false, false, false, [0, 0, 4, 0, 0], 8, 16384),
+        (32, false, false, false, [0, 0, 31, 0, 0], 8, 16384),
+        (32, false, false, false, [0, 0, 32, 0, 0], 8, 16384),
+        (32, false, false, false, [0, 0, 33, 0, 0], 8, 16384),
+        (32, false, false, false, [0, 0, 1024, 0, 0], 8, 81920),
+        (32, false, false, false, [0, 0, 65535, 0, 0], 8, 4210688),
+        (32, false, false, false, [0, 0, 65536, 0, 0], 8, 4210688),
+        (32, false, false, false, [0, 0, 65537, 0, 0], 8, 4210688),
+        (32, false, false, false, [0, 0, 70000, 0, 0], 8, 4489216),
+        (32, false, false, false, [0, 0, 1 << 20, 0, 0], 8, 67125248),
+        (
+            32,
+            false,
+            false,
+            false,
+            [0, 0, 1 << 24, 0, 0],
+            8,
+            1073758208,
+        ),
+        (
+            32,
+            false,
+            false,
+            false,
+            [0, 0, 1 << 25, 0, 0],
+            8,
+            2147500032,
+        ),
+        (32, false, false, false, [0, 0, 70000, 0, 0], 2, 1130496),
+        (1, false, false, false, [4, 0, 0, 0, 0], 8, 16384),
+        (1, false, false, false, [1024, 0, 0, 0, 0], 8, 81920),
+        (1, false, false, false, [65536, 0, 0, 0, 0], 8, 4210688),
+        (1, false, false, false, [65537, 0, 0, 0, 0], 8, 4210688),
+        (1, false, false, false, [0, 65536, 0, 0, 0], 8, 4210688),
+        // A count the buffer's own layout ignores: one page, whatever it asks for.
+        (1, false, false, false, [0, 0, 65536, 0, 0], 8, 16384),
+        (1, false, false, false, [0, 0, 0, 65536, 0], 8, 16384),
+        (1, false, false, false, [0, 0, 0, 0, 65536], 8, 16384),
     ];
     for (
         types,

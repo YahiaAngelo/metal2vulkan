@@ -301,23 +301,65 @@ fn creation_refuses_what_metal_refuses() {
                 .unwrap_err()
         };
         let shared = ResourceOptions::shared();
-        // No command types: made, but its commands, reset and read-back are refused (plain
-        // Metal's process ends at a command's first setter and at a reset).
+        // No command types: made, and both getters give a command, as plain Metal gives one; the
+        // calls plain Metal's process does not survive are refused on the command itself, and the
+        // ones it takes are taken (`IndirectCommandBufferProblem::NoCommandTypes`, measured on an
+        // M3 Max under macOS 27.0.1, three processes a call).
         let none = icb(device, &IndirectCommandBufferDescriptor::new(), 4);
         assert_eq!(none.size(), 4);
         let no_types = |call| icb_problem(call, IndirectCommandBufferProblem::NoCommandTypes);
+        let dispatches = none.indirect_compute_command_at(0).unwrap();
+        let draws = none.indirect_render_command_at(0).unwrap();
+        let state = template_state(device, true);
         assert_eq!(
-            none.indirect_compute_command_at(0).unwrap_err(),
-            no_types("indirect_compute_command_at")
+            dispatches.set_compute_pipeline_state(&state).unwrap_err(),
+            no_types("set_compute_pipeline_state")
         );
         assert_eq!(
-            none.indirect_render_command_at(0).unwrap_err(),
-            no_types("indirect_render_command_at")
+            dispatches
+                .concurrent_dispatch_threadgroups(Size::new(1, 1, 1), Size::new(1, 1, 1))
+                .unwrap_err(),
+            no_types("concurrent_dispatch_threadgroups")
         );
+        assert_eq!(
+            dispatches
+                .concurrent_dispatch_threads(Size::new(1, 1, 1), Size::new(1, 1, 1))
+                .unwrap_err(),
+            no_types("concurrent_dispatch_threads")
+        );
+        assert_eq!(dispatches.reset().unwrap_err(), no_types("reset"));
+        assert_eq!(
+            dispatches.command_type().unwrap_err(),
+            no_types("command_type")
+        );
+        assert_eq!(
+            draws.set_vertex_buffer(None, 0, 0).unwrap_err(),
+            no_types("set_vertex_buffer")
+        );
+        assert_eq!(
+            draws
+                .draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)
+                .unwrap_err(),
+            no_types("draw_primitives")
+        );
+        assert_eq!(draws.draw().unwrap_err(), no_types("draw"));
+        // Taken, as plain Metal takes them: a kernel buffer, a threadgroup length, either
+        // barrier, a fragment buffer and a render command's reset, each kept nowhere an
+        // execution of this buffer reads (it runs nothing).
+        dispatches.set_kernel_buffer(None, 0, 0).unwrap();
+        dispatches.set_threadgroup_memory_length(16, 0).unwrap();
+        dispatches.set_barrier().unwrap();
+        dispatches.clear_barrier().unwrap();
+        draws.set_fragment_buffer(None, 0, 0).unwrap();
+        draws.set_barrier().unwrap();
+        draws.reset().unwrap();
+        // A CPU reset of commands ends plain Metal's process; an empty range returns.
         assert_eq!(
             none.reset_with_range(0..1).unwrap_err(),
             no_types("reset_with_range")
         );
+        none.reset_with_range(0..0).unwrap();
+        none.reset_with_range(2..2).unwrap();
         assert_eq!(none.commands(0..1).unwrap_err(), no_types("commands"));
         // Draws of any kind beside dispatches make a buffer of compute commands, as plain
         // Metal's.
@@ -337,13 +379,21 @@ fn creation_refuses_what_metal_refuses() {
                 .set_threadgroup_memory_length(16, 1)
                 .unwrap();
             assert_eq!(command(&compute, 0).threadgroup_memory_lengths, [0, 16]);
+            // Such a buffer gives a render command, as plain Metal gives one, and the setters
+            // plain Metal does not ignore on it are refused (`CommandKind`, where Metal's process
+            // ends); a draw of primitives does nothing, as plain Metal's does.
+            let drawn = compute.indirect_render_command_at(0).unwrap();
+            let kind = |call| icb_problem(call, IndirectCommandBufferProblem::CommandKind);
             assert_eq!(
-                compute.indirect_render_command_at(0).unwrap_err(),
-                icb_problem(
-                    "indirect_render_command_at",
-                    IndirectCommandBufferProblem::CommandKind
-                )
+                drawn
+                    .set_render_pipeline_state(&render_template_state(device, true))
+                    .unwrap_err(),
+                kind("set_render_pipeline_state")
             );
+            assert_eq!(drawn.reset().unwrap_err(), kind("reset"));
+            drawn
+                .draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)
+                .unwrap();
         }
         assert_eq!(icb(device, &render_descriptor(), 4).size(), 4);
         // Indexed, patch and indexed patch draws, and mesh draws, alone or beside draws of
@@ -365,8 +415,11 @@ fn creation_refuses_what_metal_refuses() {
             draws.command_types = held;
             assert_eq!(icb(device, &draws, 4).size(), 4);
         }
-        // Up to 65536 buffers of a stage, or threadgroup lengths, as plain Metal makes them; past
-        // that its storage is not defined.
+        // Every buffer count and threadgroup-length count a descriptor asks for is taken, as
+        // plain Metal takes it: Metal's own `allocatedSize` grows with the count it lays slots
+        // out for (an M3 Max, macOS 27.0.1: 16 KiB at 4, 31, 32 and 33 kernel buffers of 8
+        // commands, 80 KiB at 1024, 4.01 MiB at 65535, 65536 and 65537, 4.28 MiB at 70000, and on
+        // to 2 GiB at 2^25), and the runtime lays out the same slots.
         let counts = |count: u32| {
             let mut buffers = compute_descriptor();
             buffers.max_kernel_buffer_bind_count = count;
@@ -378,8 +431,10 @@ fn creation_refuses_what_metal_refuses() {
             fragment.max_fragment_buffer_bind_count = count;
             [buffers, lengths, vertex, fragment]
         };
-        for descriptor in counts(65536) {
-            assert_eq!(icb(device, &descriptor, 2).size(), 2);
+        for count in [65536, 65537, 70000] {
+            for descriptor in counts(count) {
+                assert_eq!(icb(device, &descriptor, 2).size(), 2);
+            }
         }
         // A buffer set past what a record holds is kept beside the records and read back with
         // the record's slots, every slot the descriptor counts; a length past the record is kept
@@ -404,16 +459,21 @@ fn creation_refuses_what_metal_refuses() {
         let lengths = command(&long, 0).threadgroup_memory_lengths;
         assert_eq!(lengths.len(), 31);
         assert_eq!(lengths[30], 16);
-        for descriptor in counts(65537) {
+        // A threadgroup-length count takes storage of neither side, so even 2^32 - 1 is made, as
+        // plain Metal makes it (16 KiB at every value from 31 to 2^32 - 1). Buffer slots that one
+        // buffer of the device's `max_buffer_length` cannot hold are the gap naming the limit:
+        // plain Metal makes such a buffer and lays out no slots in it (16 KiB at 2^31 kernel
+        // buffers, whose `setKernelBuffer:atIndex:` at index 2^31 then ends the process), and the
+        // runtime lays out every slot it answers for.
+        let [buffers_max, lengths_max, vertex_max, fragment_max] = counts(u32::MAX);
+        assert_eq!(icb(device, &lengths_max, 2).size(), 2);
+        for descriptor in [buffers_max, vertex_max, fragment_max] {
             assert_eq!(
-                refused(&descriptor, 4, shared),
-                icb_problem(
-                    CALL,
-                    IndirectCommandBufferProblem::BindCount {
-                        count: 65537,
-                        limit: 65536
-                    }
-                )
+                refused(&descriptor, 2, shared),
+                Error::NotImplemented(RuntimeGap::IndirectCommandBufferPastMaxBufferLength {
+                    count: 2,
+                    max_buffer_length: device.properties().max_buffer_length,
+                })
             );
         }
         let memoryless = ResourceOptions::new(
