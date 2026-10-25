@@ -15,7 +15,7 @@ use metal2vulkan::bind::indirect_commands::COMMAND_BYTES;
 use metal2vulkan::bind::ArgumentDescriptor;
 use metal2vulkan::metal::{
     BlendFactor, ColorWriteMask, DataType, IndexType, IndirectCommandType, PixelFormat,
-    PrimitiveType, ResourceUsage, TextureUsage,
+    PrimitiveType, RenderStages, ResourceUsage, TextureUsage,
 };
 use metal2vulkan::pipeline::{
     ColorAttachmentDescriptor, ComputePipelineDescriptor, MeshPipelineDescriptor,
@@ -24,13 +24,13 @@ use metal2vulkan::pipeline::{
 use metal2vulkan::reflection::LinkedUseGap;
 use metal2vulkan_devtools::{engine_dir, llvm_assemble, llvm_assemble_text};
 use metal2vulkan_runtime::{
-    BlitCommandEncoder, Buffer, CommandBuffer, ComputePipelineState, CpuCacheMode, Degradation,
-    Device, DrawPrimitiveType, DrawProblem, EncodedComputeCommand, EncodedRenderCommand, Error,
-    EventRef, GpuAddress, HazardTrackingMode, IndirectBufferBinding, IndirectCommand,
-    IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectCommandBufferProblem,
-    IndirectDispatch, IndirectDraw, Invalid, LoadAction, MetalError, PipelineOptions, Problem,
-    PurgeableState, Region, RenderPassDescriptor, RenderPipelineState, ResourceId, ResourceOptions,
-    RuntimeGap, Size, StorageMode, StoreAction, TextureDescriptor,
+    BlitCommandEncoder, Buffer, CommandBuffer, CommandBufferError, ComputePipelineState,
+    CpuCacheMode, Degradation, Device, DrawPrimitiveType, DrawProblem, EncodedComputeCommand,
+    EncodedRenderCommand, Error, EventRef, GpuAddress, HazardTrackingMode, IndirectBufferBinding,
+    IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor,
+    IndirectCommandBufferProblem, IndirectDispatch, IndirectDraw, Invalid, LoadAction, MetalError,
+    PipelineOptions, Problem, PurgeableState, Region, RenderPassDescriptor, RenderPipelineState,
+    ResourceId, ResourceOptions, RuntimeGap, Size, StorageMode, StoreAction, TextureDescriptor,
 };
 use std::ops::Range;
 
@@ -2680,10 +2680,12 @@ fn private_types_read_back_as_metal_s_getters_answer() {
 }
 
 /// What Metal's validation stops at an indexed or patch draw's setter, or ends the process for,
-/// is refused typed: a draw whose record the buffer's records cannot hold (an indexed or a patch
-/// draw in a buffer of draws of primitives), no indices or instances, an index offset that is not a
-/// multiple of the index size, indices past the index buffer (of the whole count), a patch index
-/// offset that is not a multiple of 4; and as the encoder's draw refuses them, patch indices past
+/// is refused typed: a draw whose record the buffer's records cannot hold and whose execution
+/// plain Metal does not survive (a patch draw in a buffer of draws of primitives, where Metal's
+/// process ends; the indexed draw there is taken, which
+/// [`an_indexed_draw_on_a_buffer_of_draws_runs_nothing`] states), no indices or instances, an
+/// index offset that is not a multiple of the index size, indices past the index buffer (of the
+/// whole count), a patch index offset that is not a multiple of 4; and as the encoder's draw refuses them, patch indices past
 /// the buffer (factor offsets and strides that are not multiples of 4, odd ones too, and more than
 /// 32 control points, are taken). A refused draw leaves the command as it was. A draw of primitives
 /// into a buffer of indexed and patch draws, whose records hold it, is set, as plain Metal runs it,
@@ -2695,21 +2697,21 @@ fn indexed_and_patch_setters_refuse_what_metal_refuses() {
         let draws = icb(device, &render_descriptor(), 1);
         let only_draws = draws.indirect_render_command_at(0).unwrap();
         let kind = |call, kind| icb_problem(call, IndirectCommandBufferProblem::CommandType(kind));
-        assert_eq!(
-            only_draws
-                .draw_indexed_primitives(
-                    PrimitiveType::Point,
-                    3,
-                    IndexType::UInt32,
-                    &buffer,
-                    0,
-                    1,
-                    0,
-                    0
-                )
-                .unwrap_err(),
-            kind("draw_indexed_primitives", IndirectCommandType::DRAW_INDEXED)
-        );
+        // An indexed draw there is taken and run as nothing, as plain Metal takes and runs it
+        // ([`an_indexed_draw_on_a_buffer_of_draws_runs_nothing`]).
+        only_draws
+            .draw_indexed_primitives(
+                PrimitiveType::Point,
+                3,
+                IndexType::UInt32,
+                &buffer,
+                0,
+                1,
+                0,
+                0,
+            )
+            .unwrap();
+        only_draws.reset().unwrap();
         assert_eq!(
             only_draws
                 .draw_patches(3, 0, 1, None, 0, 1, 0, &buffer, 0, 0)
@@ -2920,6 +2922,144 @@ fn indexed_patch_draws_read_back_what_was_set() {
             })
         );
     });
+}
+
+/// An indexed draw on a buffer of draws of primitives alone, whose records cannot hold it, is
+/// **taken**, kept in the record, and run as **nothing**: no vertex runs, so the template's output
+/// stays as it was, and the command buffer completes with no error. A draw of primitives on the
+/// same buffer, and the same indexed draw on a buffer of `DRAW_INDEXED` and on one of `DRAW` beside
+/// `DRAW_INDEXED`, each run the four vertices, so a leg that read nothing everywhere has measured
+/// nothing. An indexed draw of primitive type 9 there, which fails the command buffer on a buffer
+/// whose records hold it (`DrawPrimitiveType::Nine`, `CommandBufferError::PageFault`), completes
+/// with no error too: its execution reaches no draw to fail.
+///
+/// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1, build 26A434, the validation layer off, one
+/// shape per process, four processes a shape,
+/// `metal2vulkan-conformance/probes/icb_refusals_that_metal_takes.m`. `kind-indexed-on-draw`
+/// committed with status 4 and no error and left its target at the clear value, -1.0, in all four
+/// processes, with no byte of a 0xEE guard at the next 256-aligned placement-heap offset past the
+/// index buffer touched; the controls `kind-draw-on-draw`, `kind-indexed-on-indexed` and
+/// `kind-indexed-on-patches` each painted 0.75 in all four. The primitive type 9 arm is the
+/// runtime's own consequence of the same reading, not a Metal measurement of its own).
+#[test]
+fn an_indexed_draw_on_a_buffer_of_draws_runs_nothing() {
+    on_device(|device| {
+        let state = render_template_state(device, true);
+        // The template writes `out[(iid << 4) + vid] = params[1] + iid * 1000 + params[0] *
+        // (vid + 1)` per vertex, with rasterization disabled.
+        let params = buffer_with(device, &words(&[7, 100])).unwrap();
+        let indices = buffer_with(device, &words(&[0, 1, 2, 3])).unwrap();
+        const DREW: [u32; 4] = [107, 114, 121, 128];
+        const UNTOUCHED: [u32; 4] = [0; 4];
+        // The four vertices of `types`'s buffer, drawn indexed (of `primitive_type`) or directly,
+        // with the record the setter left, and the command buffer's error.
+        let run = |types: IndirectCommandType,
+                   indexed: Option<DrawPrimitiveType>|
+         -> ([u32; 4], Option<IndirectDraw>, Option<CommandBufferError>) {
+            let mut descriptor = render_descriptor();
+            descriptor.command_types = types;
+            let made = icb(device, &descriptor, 1);
+            let out = buffer_with(device, &[0u8; 64]).unwrap();
+            let command = made.indirect_render_command_at(0).unwrap();
+            command.set_render_pipeline_state(&state).unwrap();
+            command.set_vertex_buffer(Some(&params), 0, 0).unwrap();
+            command.set_vertex_buffer(Some(&out), 0, 1).unwrap();
+            match indexed {
+                Some(primitive_type) => command
+                    .draw_indexed_primitives(
+                        primitive_type,
+                        4,
+                        IndexType::UInt32,
+                        &indices,
+                        0,
+                        1,
+                        0,
+                        0,
+                    )
+                    .unwrap(),
+                None => command
+                    .draw_primitives(PrimitiveType::Point, 0, 4, 1, 0)
+                    .unwrap(),
+            }
+            let drawn = render_command(&made, 0).draw;
+            let queue = device.new_command_queue().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut pass = RenderPassDescriptor::new();
+            pass.render_target_width = 1;
+            pass.render_target_height = 1;
+            pass.default_raster_sample_count = 1;
+            let mut encoder = command_buffer.render_command_encoder(&pass).unwrap();
+            for (resource, usage) in [
+                (params.as_resource(), ResourceUsage::READ),
+                (indices.as_resource(), ResourceUsage::READ),
+                (out.as_resource(), ResourceUsage::WRITE),
+            ] {
+                encoder
+                    .use_resource(resource, usage, RenderStages::VERTEX)
+                    .unwrap();
+            }
+            encoder.execute_commands_in_buffer(&made, 0..1).unwrap();
+            encoder.end_encoding().unwrap();
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            let error = command_buffer.error();
+            let read = read_buffer(&out, 0, 16).unwrap();
+            let read = read
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|word| u32::from_le_bytes(*word))
+                .collect::<Vec<_>>();
+            (read.try_into().unwrap(), drawn, error)
+        };
+        let point = DrawPrimitiveType::from(PrimitiveType::Point);
+        let indexed_draw = Some(IndirectDraw::IndexedPrimitives {
+            primitive_type: point,
+            index_count: 4,
+            index_type: IndexType::UInt32,
+            index_buffer: indices.gpu_address(),
+            instance_count: 1,
+            base_vertex: 0,
+            base_instance: 0,
+        });
+        // The served cell: taken, kept, and run as nothing.
+        assert_eq!(
+            run(IndirectCommandType::DRAW, Some(point)),
+            (UNTOUCHED, indexed_draw, None)
+        );
+        // The controls. A draw of primitives on the same buffer runs; so does the same indexed
+        // draw on a buffer whose records hold it, alone or beside draws of primitives.
+        let (drew, drawn, error) = run(IndirectCommandType::DRAW, None);
+        assert_eq!((drew, error), (DREW, None));
+        assert!(
+            matches!(drawn, Some(IndirectDraw::Primitives { .. })),
+            "{drawn:?}"
+        );
+        for types in [
+            IndirectCommandType::DRAW_INDEXED,
+            IndirectCommandType::DRAW.union(IndirectCommandType::DRAW_INDEXED),
+        ] {
+            assert_eq!(
+                run(types, Some(point)),
+                (DREW, indexed_draw, None),
+                "{types:?}"
+            );
+        }
+        // Primitive type 9: the draw the records hold fails the command buffer, and the one they
+        // cannot hold completes, having reached no draw.
+        let nine = DrawPrimitiveType::Nine;
+        assert_eq!(
+            run(IndirectCommandType::DRAW_INDEXED, Some(nine)).2,
+            Some(CommandBufferError::PageFault)
+        );
+        let (read, _, error) = run(IndirectCommandType::DRAW, Some(nine));
+        assert_eq!((read, error), (UNTOUCHED, None));
+    });
+}
+
+/// Little-endian bytes of `values`.
+fn words(values: &[u32]) -> Vec<u8> {
+    values.iter().flat_map(|word| word.to_le_bytes()).collect()
 }
 
 /// What Metal's validation stops at an indexed patch draw's setter is refused typed (probes): a

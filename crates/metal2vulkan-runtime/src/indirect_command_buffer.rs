@@ -433,29 +433,26 @@ pub enum IndirectCommandBufferProblem {
     /// and so reaches past Metal, and the refusal is kept there deliberately: a typed `Invalid` at
     /// the setter is the useful answer where Metal's own is a page fault at execution).
     PipelineWithoutSupport,
-    /// A draw of a kind (`DRAW_INDEXED`, `DRAW_PATCHES` or `DRAW_INDEXED_PATCHES`, a probe) whose
-    /// record the buffer's records cannot hold: an indexed draw on a buffer of draws of primitives
-    /// alone (plain Metal draws nothing), a patch draw of either kind on one of neither patch kind
-    /// (plain Metal ends its process), a draw of primitives or an indexed one on a buffer of mesh
-    /// draws alone (Metal's process ends, with and without its validation), a mesh draw on one of
-    /// no mesh kind (a kernel's faults Metal's GPU on a buffer of draws of primitives, a Metal
-    /// probe). Metal's validation stops any kind the command types lack ("drawIndexedPrimitives is
-    /// not enabled on this indirect command buffer"), but plain Metal runs one their records hold,
-    /// as the runtime does.
+    /// A draw of a kind (`DRAW_PATCHES`, `DRAW_INDEXED_PATCHES`, a mesh kind, or `DRAW` and
+    /// `DRAW_INDEXED` on a buffer of mesh draws, a probe) whose record the buffer's records cannot
+    /// hold and whose execution plain Metal does not survive: a patch draw of either kind on a
+    /// buffer of neither patch kind (plain Metal ends its process), a draw of primitives or an
+    /// indexed one on a buffer of mesh draws alone (Metal's process ends, with and without its
+    /// validation), a mesh draw on one of no mesh kind (a kernel's faults Metal's GPU on a buffer
+    /// of draws of primitives, a Metal probe). Metal's validation stops any kind the command types
+    /// lack ("drawIndexedPrimitives is not enabled on this indirect command buffer"), but plain
+    /// Metal runs one their records hold, as the runtime does.
+    ///
+    /// Not here, because plain Metal takes it: an **indexed draw on a buffer of `DRAW` alone**,
+    /// which Metal's execution reaches and leaves undrawn. The runtime takes it too, records it,
+    /// and runs nothing for it (`IndirectCommandBuffer::takes_as_nothing`, which carries the
+    /// reading).
     ///
     /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1, build 26A434, the validation layer off,
     /// one shape per process, `probes/icb_refusals_that_metal_takes.m`. Plain Metal ends the
     /// process, SIGBUS, at a patch draw on a buffer of `DRAW` alone, at a mesh pipeline's
     /// `setRenderPipelineState:` on such a buffer, and at a draw of primitives on a buffer of
-    /// `DRAW_MESH_THREADGROUPS` alone, three processes each. One cell reaches past Metal, and one
-    /// only: an indexed draw on a buffer of `DRAW` alone completes with no error and paints
-    /// nothing, three processes, with both controls live beside it — a draw of primitives on the
-    /// same buffer paints 0.75, and the same indexed draw on a buffer of `DRAW_INDEXED` and on one
-    /// of `DRAW_PATCHES` paints 0.75 — and with no byte of a 0xEE guard at the next 256-aligned
-    /// placement-heap offset past the index buffer touched. Taking it needs the execution to run
-    /// nothing for such a record, which is `Asked::of` in `render/executions.rs`, where
-    /// `Asked::Nothing` already stands for a draw that runs nothing: that side is not built, so
-    /// the setter stays refused rather than taken and then painted).
+    /// `DRAW_MESH_THREADGROUPS` alone, three processes each).
     CommandType(IndirectCommandType),
     /// A compute command of a buffer whose commands are render ones, or a setter plain Metal does
     /// not ignore on a render command of a buffer whose commands are dispatches. Plain Metal ends
@@ -2326,6 +2323,35 @@ impl IndirectCommandBuffer {
         self.0.inheritance
     }
 
+    /// Whether the buffer takes `action` and runs nothing for it: a draw whose record its records
+    /// cannot hold (`CommandDescriptor::holds`) that plain Metal's execution still reaches and
+    /// leaves undrawn, rather than ending the process at the setter or faulting its GPU.
+    ///
+    /// One shape, the one measured: an indexed draw on a render buffer whose records hold draws of
+    /// primitives alone (`RenderDraws::PRIMITIVES`). Metal lays a record out for the command
+    /// types the buffer was made for and for nothing else, so a buffer of `Draw` alone lays out a
+    /// draw of primitives' four arguments and no index-buffer address or index type; a record
+    /// holding no such address is not a draw its execution can issue, and the execution reads
+    /// each record against the layout its header states, so it finds nothing to draw there. The
+    /// mesh kinds are a record shape again, whose arguments are an object and a mesh grid rather
+    /// than a vertex draw's, and a draw that crosses into or out of them ends Metal's process; a
+    /// buffer of either mesh kind is therefore not this, and its draw of another kind stays
+    /// refused ([`IndirectCommandBufferProblem::CommandType`]).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1, build 26A434, the validation layer
+    /// off, one shape per process, four processes a shape, four shapes,
+    /// `probes/icb_refusals_that_metal_takes.m`. `kind-indexed-on-draw` committed with status 4
+    /// and no error and left its target at the clear value, -1.0, in all four processes, with no
+    /// byte of a 0xEE guard at the next 256-aligned placement-heap offset past the index buffer
+    /// touched; the three controls, `kind-draw-on-draw`, `kind-indexed-on-indexed` and
+    /// `kind-indexed-on-patches`, each painted 0.75 in all four).
+    pub(super) fn takes_as_nothing(&self, action: &Action) -> bool {
+        let CommandDescriptor::Render { draws, .. } = &self.0.records else {
+            return false;
+        };
+        *draws == RenderDraws::PRIMITIVES && matches!(action, Action::DrawIndexedPrimitives { .. })
+    }
+
     /// `range` as commands for `call`: refused (`Invalid`) when it ends past the size, as Metal's
     /// validation refuses `executeCommandsInBuffer:withRange:`; an empty one anywhere up to the
     /// size names none.
@@ -2622,14 +2648,20 @@ impl IndirectCommandBuffer {
     /// records stand, fails the command buffer that executes them, as Metal's GPU fails it there
     /// (`DrawPrimitiveType::Nine`; measured through indirect command buffers too): `None` where
     /// none draws one that fails it, and at once where the CPU never drew one. A kernel writes no
-    /// such draw (it writes points).
+    /// such draw (it writes points). A draw the buffer takes and runs nothing for
+    /// ([`takes_as_nothing`](Self::takes_as_nothing)) fails nothing, whatever its type: its
+    /// execution reaches no draw of it.
     pub(super) fn nine_among(&self, range: Range<u32>) -> Result<Option<NineDraw>, Error> {
         if !self.0.nines.load(Ordering::Acquire) {
             return Ok(None);
         }
         let nine = DrawPrimitiveType::Nine.raw() as u32;
         for index in range {
-            match self.record(index)?.action {
+            let action = self.record(index)?.action;
+            if self.takes_as_nothing(&action) {
+                continue;
+            }
+            match action {
                 Action::DrawPrimitives {
                     primitive_type,
                     vertex_count,
@@ -2715,6 +2747,12 @@ impl IndirectCommandBuffer {
 
     /// Whether the descriptor allows what `record` sets: its action and buffers, and a pipeline
     /// state or buffers only where the buffer does not inherit them.
+    ///
+    /// A draw the buffer takes and runs nothing for ([`takes_as_nothing`](Self::takes_as_nothing))
+    /// is allowed: its record is checked for everything but its action, which the descriptor's own
+    /// check refuses, by checking it as an empty action's, which every descriptor holds. The
+    /// execution then runs nothing for it (`render::executions`), as it runs nothing for the empty
+    /// action, rather than reporting the record a fault the record does not have.
     fn allows(&self, record: &CommandRecord) -> bool {
         let inheritance = self.0.inheritance;
         let sets_buffers = || {
@@ -2723,7 +2761,15 @@ impl IndirectCommandBuffer {
                 .flat_map(|stage| record.bindings.buffers(stage))
                 .any(Option::is_some)
         };
-        self.0.records.validate_record(record).is_ok()
+        let allows_fields = || match self.takes_as_nothing(&record.action) {
+            true => {
+                let mut taken = record.clone();
+                taken.action = Action::Empty;
+                self.0.records.validate_record(&taken).is_ok()
+            }
+            false => self.0.records.validate_record(record).is_ok(),
+        };
+        allows_fields()
             && !(inheritance.pipeline == StateSource::Parent
                 && (record.bindings.pipeline.is_some() || record.retained_pipeline.is_some()))
             && !(inheritance.buffers == StateSource::Parent && sets_buffers())
@@ -4239,7 +4285,9 @@ impl IndirectRenderCommand {
     /// validation stops a draw of any kind the command types lack ("drawPrimitives is not
     /// enabled on this indirect command buffer"), but plain Metal runs one whose record a kind
     /// they allow holds as on a buffer of its own kind, and faults the GPU or ends the process
-    /// for the others (the M3 Max and the M4 alike), as it runs a kernel's.
+    /// for the others (the M3 Max and the M4 alike), as it runs a kernel's. One kind their
+    /// records cannot hold is **taken** and run as nothing instead
+    /// (`IndirectCommandBuffer::takes_as_nothing`), as plain Metal takes it.
     fn check_draw(
         &self,
         call: &'static str,
@@ -4250,7 +4298,7 @@ impl IndirectRenderCommand {
         if self.of_compute() {
             return Err(problem(call, IndirectCommandBufferProblem::CommandKind));
         }
-        if !self.icb.0.records.holds(action) {
+        if !self.icb.0.records.holds(action) && !self.icb.takes_as_nothing(action) {
             return Err(problem(
                 call,
                 IndirectCommandBufferProblem::CommandType(kind),
@@ -4317,8 +4365,16 @@ impl IndirectRenderCommand {
     /// (but type 9's), and the indices are read from the offset rounded down to a multiple of the
     /// index size, as plain Metal runs them where its validation stops the call
     /// (`idx_count_zero`, `idx_instances_zero`; 32-bit indices at offset 2 and 16-bit ones at 1
-    /// drew those at 0). Refused (`Invalid`): a buffer of draws of primitives alone, whose records
-    /// cannot hold it (`CommandType`; plain Metal's GPU faults), or of mesh draws alone
+    /// drew those at 0).
+    ///
+    /// On a buffer of draws of primitives alone, whose records cannot hold it, the draw is
+    /// **taken** and its record kept, and an execution of the command **runs nothing**: it draws
+    /// no vertex, reads no index, and reports no fault, as plain Metal's execution of it does
+    /// (`IndirectCommandBuffer::takes_as_nothing`, which carries the reading). The read-back is
+    /// the indexed draw as set, the record's own, as every read-back is (what Metal's private
+    /// getters answer for such a record is unmeasured).
+    ///
+    /// Refused (`Invalid`): a buffer of mesh draws alone, whose records cannot hold it
     /// (`CommandType`; Metal's process ends), and, as Metal's validation stops it, indices past
     /// the buffer's length from that offset (`IndexBufferRange`, of the whole count; plain Metal
     /// draws from whatever memory follows), and an index buffer of another device.

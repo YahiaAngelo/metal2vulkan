@@ -1442,7 +1442,15 @@ enum Resolved {
 }
 
 impl Asked {
-    fn of(action: &Action) -> Asked {
+    /// What `action` asks for on a command of `icb`.
+    fn of(action: &Action, icb: &IndirectCommandBuffer) -> Asked {
+        // A draw whose record the buffer's records cannot hold, which plain Metal takes and runs
+        // nothing for: nothing here too (`IndirectCommandBuffer::takes_as_nothing`). The kinds
+        // Metal ends its process or faults its GPU for never reach a record: their setter refuses
+        // them, and a kernel's write of one is dropped.
+        if icb.takes_as_nothing(action) {
+            return Asked::Nothing;
+        }
         match *action {
             Action::Empty
             | Action::DispatchThreadgroups { .. }
@@ -2006,7 +2014,7 @@ impl RenderExecution {
                 .enumerate()
                 .filter_map(|(at, command)| {
                     let (record, own) = command.as_ref()?;
-                    let Asked::Draw(_) = Asked::of(&record.action) else {
+                    let Asked::Draw(_) = Asked::of(&record.action, &self.icb) else {
                         return None;
                     };
                     let pipeline = self.pipeline.as_ref().or(own.as_ref())?;
@@ -2061,7 +2069,7 @@ impl RenderExecution {
                 encoder.run_barrier |= encoder.current.recorded || encoder.earlier.is_empty();
             }
             encoder.command_barrier = record.barrier;
-            let asked = Asked::of(&record.action);
+            let asked = Asked::of(&record.action, &self.icb);
             let draw = match asked {
                 Asked::Draw(draw) => draw,
                 Asked::Nothing => continue,
