@@ -2462,16 +2462,6 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   which the extension requires. Cost: the driver keeps its own cache of the device's pipelines
   beside the shader cache's records, with whatever it writes to disk and holds in memory for it; the
   pipelines made are the same.
-- `metal2vulkan-degrade-shader-cache-entry-not-written` (performance).
-  `ShaderCacheEntryNotWritten`: an entry of the device's shader cache directory was not written --
-  the directory, a temporary file in it or the rename over the entry failed, on the device's cache
-  thread or on the thread that handed the entry over past the queue's bound. A full or read-only
-  directory, a cap no entry fits in, or a write another process won. Nothing is ended by it: the
-  pipeline state, the translation and the compile are made regardless. Announced once per device,
-  naming the directory, its cap and the largest entry it takes; later failures are counted in
-  `ShaderCacheStatistics::write_failures`. Cost: what the entry would hold is made again by the
-  next process that needs it; what this process computes is unchanged. The entry is a translation,
-  a compiled pipeline, a creation's answers or the driver's pipeline cache data.
 - `metal2vulkan-degrade-metal-level-not-macos` (precision). `MetalLevelNotMacOS`: A device made off
   macOS with no Metal level named: it answers as the newest measured release (`MetalLevel::NEWEST`),
   no release of the host's. Cost: where Metal's answers differ by release (which pixel formats a
@@ -2544,6 +2534,16 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   a `float` product or fused multiply-add whose exact value lies within half a unit below `2^-126`
   answers `2^-126` of its sign where Metal answers the zero of its sign; `FloatMathsPolicy::Exact`
   computes Metal's.
+- `metal2vulkan-degrade-shader-cache-entry-not-written` (performance).
+  `ShaderCacheEntryNotWritten`: an entry of the device's shader cache directory was not written --
+  the directory, a temporary file in it or the rename over the entry failed, on the device's cache
+  thread or on the thread that handed the entry over past the queue's bound. A full or read-only
+  directory, a cap no entry fits in, or a write another process won. Nothing is ended by it: the
+  pipeline state, the translation and the compile are made regardless. Announced once per device,
+  naming the directory, its cap and the largest entry it takes; later failures are counted in
+  `ShaderCacheStatistics::write_failures`. Cost: what the entry would hold is made again by the
+  next process that needs it; what this process computes is unchanged. The entry is a translation,
+  a compiled pipeline, a creation's answers or the driver's pipeline cache data.
 - `metal2vulkan-degrade-f16-fma-double-rounding` (precision). `PrecisionNote::F16FmaDoubleRounding`:
   Widened half fma rounds twice.
 - `metal2vulkan-degrade-f16-int-conv-double-rounding` (precision).
