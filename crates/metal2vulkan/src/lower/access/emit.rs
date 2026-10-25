@@ -245,18 +245,25 @@ pub(super) struct Prepared {
     /// A store needs `if_(inb)`: a view's out-of-bounds offset is not redirected (a PSB access
     /// already points at the sink).
     pub(super) guard_store: bool,
-    /// The draw's or dispatch's word says the slot's memory keeps the GPU's writes: a store runs
-    /// only where it holds, so a store through memory whose writes Metal drops is dropped
-    /// ([`writable`], `SpecKey::DroppedStoreSlots`). `None` where the access stores nothing, or at
-    /// a slot no guest buffer can be bound to.
+    /// The draw's or dispatch's word says the slot's memory keeps the GPU's writes, so a store
+    /// through memory whose writes Metal drops is dropped ([`writable`],
+    /// `SpecKey::DroppedStoreSlots`). `None` where the access stores nothing, at a slot no guest
+    /// buffer can be bound to, and on the device-address form, which has already selected the
+    /// sink's address and so needs no condition here (`psb::prepare`).
     pub(super) writable: Option<SValue>,
 }
 
 /// Whether the draw's or dispatch's `SpecKey::DroppedStoreSlots` word leaves `slot`'s stores
 /// standing: `(word >> slot.index) & 1 == 0`, one uniform word read and three uniform
-/// instructions, which every store through the slot branches on. `None` at a slot that is not a
+/// instructions, which every store through the slot reads. `None` at a slot that is not a
 /// guest buffer slot of the stage's argument table (a synthetic binding, which the runtime owns
 /// and never places over a caller's read-only pages) and so has no bit of the word.
+///
+/// The condition selects where the store lands wherever the form has a sink to select: the
+/// device-address form puts it beside the bounds check in the one address selection
+/// (`psb::prepare`), so no store branches on it. A descriptor view has no second buffer of its own
+/// storage class to select against, so there the store still sits in `if_`, which moves what
+/// Apple's fast-math instructions answer (`store_one`).
 fn writable(
     cx: &mut EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,
@@ -294,13 +301,13 @@ pub(super) fn prepare(
     if let Some(SlotLowering::Psb { start }) = lowering {
         let table = cx.push_field(fb, PushField::RootTableAddress)?;
         let contained = cx.plan.families.access.psb_contained;
-        let a = psb::prepare(fb, table, t.root, m, start, n, contained)?;
+        let a = psb::prepare(fb, table, t.root, m, start, n, contained, writable)?;
         return Ok(Prepared {
             mem: Mem::Psb(a.mem.with(ops)),
             off: a.off,
             inb: a.inb,
             guard_store: false,
-            writable,
+            writable: None,
         });
     }
     let Some(view) = cx.decl.families.access.views.get(t.slot).copied().flatten() else {
@@ -374,6 +381,12 @@ fn load_one(fb: &mut FunctionBuilder<'_>, leaf: &Leaf, p: Prepared) -> BResult<S
 
 /// Store `v` as `leaf` at `p`, contained and only where the slot's memory keeps the GPU's writes
 /// ([`Prepared::writable`]). Returns whether the store merges a partial word ([`leaf::store`]).
+///
+/// A condition left here is one the form could not fold into an address selection, so the store
+/// sits in `if_`. That branch is not free of meaning: a value a guarded store alone consumes is
+/// written inside the branch, and Apple's backend expands `air.fast_asinh.f32` and
+/// `air.fast_acosh.f32` to different last bits depending on the basic block their call sits in. The
+/// device-address form leaves nothing here ([`Prepared::writable`]).
 fn store_one(fb: &mut FunctionBuilder<'_>, leaf: &Leaf, p: Prepared, v: SValue) -> BResult<bool> {
     let mut mem = p.mem;
     let contained = p.guard_store.then_some(p.inb).flatten();

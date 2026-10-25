@@ -6,13 +6,15 @@
 //! reachable store gated off at runtime, completed in every one of 8,314 runs). Vulkan has no
 //! read-only import of host memory, so the drop is the shader's: a function that stores through a
 //! buffer slot reads the draw's or dispatch's `SpecKey::DroppedStoreSlots` word as push data and
-//! branches each store on the slot's bit (`lower::access::emit::store_one`). One pipeline runs
-//! with any word.
+//! every store through the slot reads the slot's bit of it (`lower::access::emit::writable`). One
+//! pipeline runs with any word.
 //!
 //! Here the kernel of the owned fixture `engine/fca_kernel_absent_builtin`, whose one store writes
 //! `out[tid]`, runs on the CPU interpreter with the word clear, with its slot's bit set, and with
-//! another slot's bit set, on every committed profile. `llvm-as` assembles the fixture; without it
-//! the tests skip visibly. No GPU is used.
+//! another slot's bit set, on every committed profile. Its slot is a descriptor view, where the
+//! bit still guards the store with a branch; `tests::engine_dropped_store_sink` runs the same word
+//! over a slot reached by its device address, where the bit selects the store's address instead.
+//! `llvm-as` assembles the fixture; without it the tests skip visibly. No GPU is used.
 
 use std::collections::BTreeMap;
 

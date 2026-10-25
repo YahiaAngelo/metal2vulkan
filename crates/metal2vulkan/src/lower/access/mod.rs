@@ -2001,7 +2001,7 @@ fn blob_roots(
 /// Give each of `targets` the profile's containment check and read its slot's `SlotBindOffset`;
 /// a written target is a storage view. A written target also reads the draw's or dispatch's
 /// `SpecKey::DroppedStoreSlots` word, which gates every store through the slot
-/// (`emit::store_one`), so only a function that stores through a buffer slot reads it. Every
+/// (`emit::writable`), so only a function that stores through a buffer slot reads it. Every
 /// static-root access places its targets here ([`access_with_leaf`], `copy::endpoint`).
 fn place_targets(cx: &mut SelectCx<'_>, targets: &mut [Target], write: bool) -> Result<(), Error> {
     let check = contain::encoding(cx.profile);
