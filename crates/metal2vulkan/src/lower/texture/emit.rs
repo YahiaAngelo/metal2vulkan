@@ -1919,6 +1919,29 @@ fn half_bits_texel(
     }
 }
 
+/// The slot's `TexelFormat` class word and whether it names 16-bit float channels of its own
+/// (`BicubicTexels::HALF` without a packed field, `metal::texel_format::half_channels`), the arm
+/// that reads the slot's unsigned integer alias ([`half_bits_alias_texel`]); `None` where the slot
+/// states no class. The copy that fills a snapshot of the slot branches on the same value, so the
+/// one snapshot holds whichever arm the class selects (`lower::fragment`'s `snapshot`).
+pub(crate) fn half_bits_class(
+    cx: &EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    index: u32,
+) -> BResult<Option<(SValue, SValue)>> {
+    use crate::metal::bicubic::BicubicTexels;
+    use crate::metal::texel_format::TexelFormat;
+    let Some(c) = texel_format_const(cx, index) else {
+        return Ok(None);
+    };
+    let word = fb.module().const_value(c)?;
+    let mask = u32s(fb, 1, BicubicTexels::HALF | TexelFormat::PACKED_MASK)?;
+    let half = u32s(fb, 1, BicubicTexels::HALF)?;
+    let family = fb.binary(BinOp::BitwiseAnd, word, mask)?;
+    let halves = fb.binary(BinOp::IEqual, family, half)?;
+    Ok(Some((word, halves)))
+}
+
 /// The held texel (`form`) of a read of slot `index` whose bound format's class names 16-bit float
 /// channels: each channel's own 16 bits, fetched from the slot's unsigned integer alias view at
 /// `coord` with `ops` and widened exactly; `device`, the device's decode above, for every other
@@ -1943,11 +1966,10 @@ fn half_bits_alias_texel(
     fb: &mut FunctionBuilder<'_>,
     index: u32,
     (coord, ops): (SValue, &ImageOperands),
+    codes: Option<SValue>,
     form: TexelForm,
     device: SValue,
 ) -> BResult<SValue> {
-    use crate::metal::bicubic::BicubicTexels;
-    use crate::metal::texel_format::TexelFormat;
     use crate::spirv::builder::constructs::{ArmEnd, ArmFn, Merged};
     let Some(g) = cx.decl.families.texture.raw.get(&index).copied() else {
         return Err(cx.fail(format!(
@@ -1959,19 +1981,21 @@ fn half_bits_alias_texel(
             "texture slot {index} has no half-bits alias declaration"
         )));
     }
-    let Some(c) = texel_format_const(cx, index) else {
+    let Some((word, halves)) = half_bits_class(cx, fb, index)? else {
         return Err(cx.fail(format!("texture slot {index} has no texel class")));
     };
-    let word = fb.module().const_value(c)?;
-    let mask = u32s(fb, 1, BicubicTexels::HALF | TexelFormat::PACKED_MASK)?;
-    let half = u32s(fb, 1, BicubicTexels::HALF)?;
-    let family = fb.binary(BinOp::BitwiseAnd, word, mask)?;
-    let halves = fb.binary(BinOp::IEqual, family, half)?;
     let ops = *ops;
     let alias: ArmFn<'_, EmitCx<'_>> = Box::new(move |fb, _cx| {
-        let ptr = fb.module().global_value(g)?;
-        let img = fb.load(ptr, MemAccess::default())?;
-        let x = fb.fetch(img, coord, &ops)?;
+        let x = match codes {
+            // A snapshot of the slot holds the alias's codes already: its copy fetched them on
+            // this same branch (`lower::fragment`'s `snapshot`).
+            Some(codes) => codes,
+            None => {
+                let ptr = fb.module().global_value(g)?;
+                let img = fb.load(ptr, MemAccess::default())?;
+                fb.fetch(img, coord, &ops)?
+            }
+        };
         let held = alias_halves(fb, word, form, x)?;
         Ok(ArmEnd::FallThrough(vec![held]))
     });
@@ -1989,7 +2013,7 @@ fn half_bits_alias_texel(
 /// widened exactly, a NaN's sign and payload kept, and a lane the class leaves out the constant
 /// Metal reads (0, alpha 1). For a `float` result every NaN is [`QUIET_NAN`], Metal's `float` read
 /// of a half NaN.
-fn alias_halves(
+pub(crate) fn alias_halves(
     fb: &mut FunctionBuilder<'_>,
     word: SValue,
     form: TexelForm,
@@ -3405,9 +3429,19 @@ fn read(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, r: &Read) -> BResult<
         }
         ImageRef::Heap { .. } => None,
     };
+    // Through a snapshot the arm runs only where the copy stored the alias's codes, and reads them
+    // instead of fetching: the snapshot keeps the device's decode of every other slot, so no read
+    // fetches the texture there. The snapshot's own plainness test covers this arm's other
+    // clauses but the shader's check, which no read of the alias takes.
+    let snapshot_half_bits = match r.image {
+        ImageRef::Slot(index) => {
+            snapshot.is_some() && crate::lower::fragment::snapshot_fetches_half_bits(cx, index)
+        }
+        ImageRef::Heap { .. } => false,
+    };
     // Where the read's alias arm may fetch the same texel: the plain fetch of a sampled image, no
-    // check to clamp its operands, no sparse arm, no clamp-to-edge size query, no level views, no
-    // snapshot, and the coordinate as the access built it ([`half_bits_alias_texel`]).
+    // check to clamp its operands, no sparse arm, no clamp-to-edge size query, no level views, and
+    // the coordinate as the access built it ([`half_bits_alias_texel`]).
     let plain_alias = r.half_bits_alias
         && sampled
         && !volume
@@ -3416,7 +3450,10 @@ fn read(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, r: &Read) -> BResult<
         && r.edge.is_none()
         && !r.level_views
         && within.is_none()
-        && snapshot.is_none();
+        && (snapshot.is_none() || snapshot_half_bits);
+    // The codes a snapshot of the slot holds for the read's alias arm, set where the copy stored
+    // the texel's own 16 bits (`lower::fragment`'s `snapshot::fetches_half_bits`).
+    let mut snapshot_codes = None;
     let alias_ops = ops;
     let access = move |fb: &mut FunctionBuilder<'_>, sparse: bool| -> BResult<SValue> {
         match (sampled, sparse) {
@@ -3476,10 +3513,11 @@ fn read(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, r: &Read) -> BResult<
             (texel, Some(word))
         }
         None => match snapshot {
-            Some(s) => (
-                crate::lower::fragment::snapshot_read(cx, fb, s, coord)?,
-                None,
-            ),
+            Some(s) => {
+                let (texel, codes) = crate::lower::fragment::snapshot_read(cx, fb, s, coord)?;
+                snapshot_codes = codes;
+                (texel, None)
+            }
             None => (access(fb, false)?, None),
         },
     };
@@ -3556,8 +3594,22 @@ fn read(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, r: &Read) -> BResult<
     // bound format's class names such channels (`HalfTexelBitsPolicy::Exact`): the arm of every
     // other class is the texel above, the device's decode, whose NaN is Metal's `0x7e00` already.
     let texel = match (plain_alias, r.image) {
-        (true, ImageRef::Slot(index)) => {
-            half_bits_alias_texel(cx, fb, index, (coord, &alias_ops), r.texel, texel)?
+        (true, ImageRef::Slot(index)) => half_bits_alias_texel(
+            cx,
+            fb,
+            index,
+            (coord, &alias_ops),
+            snapshot_codes,
+            r.texel,
+            texel,
+        )?,
+        // A snapshot whose copy stored the texel's own 16 bits with no arm here to widen them
+        // would hand the read codes as a value: the two sites read one predicate, so this says
+        // they have drifted.
+        (false, ImageRef::Slot(index)) if snapshot_codes.is_some() => {
+            return Err(cx.fail(format!(
+                "the snapshot of slot {index} holds a texel's 16 bits that no read widens"
+            )))
         }
         _ => texel,
     };

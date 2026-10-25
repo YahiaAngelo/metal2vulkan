@@ -135,10 +135,10 @@ pub(crate) use absent::absent_arm;
 pub use absent::ABSENT_ARM;
 pub use atomic::TexAtomic;
 pub(crate) use emit::{
-    constant_lanes, constant_lanes_by, dispatch, extended_table, float_class, half_by_class,
-    half_class, heap_element, heap_float_class, heap_half_class, heap_raw_form, heap_raw_image,
-    live_or_zero, metal_texel_nans, reinterpret, resident_access, rgb9e5_word, slot_image,
-    sparse_spec, srgb_filtered_texel, srgb_raw_gather, srgb_raw_tap, srgb_raw_texel,
+    constant_lanes, constant_lanes_by, dispatch, extended_table, float_class, half_bits_class,
+    half_by_class, half_class, heap_element, heap_float_class, heap_half_class, heap_raw_form,
+    heap_raw_image, live_or_zero, metal_texel_nans, reinterpret, resident_access, rgb9e5_word,
+    slot_image, sparse_spec, srgb_filtered_texel, srgb_raw_gather, srgb_raw_tap, srgb_raw_texel,
     swizzled_float, swizzled_gather, swizzled_held, texel_format_const, tile_map, tiled_word,
     with_word, HalfClass, NullLeaf, TileLevel, RGB9E5_WORDS, SRGB_FILTERED_WORDS, SRGB_RAW_WORDS,
     SRGB_TAP_WORDS, SRGB_TEXEL,
@@ -151,6 +151,8 @@ use crate::lower::access::handle::HandleTarget;
 use crate::memory::handles::{Candidate, HeapGroups};
 use crate::pipeline::lower_inputs::StorageImageClass;
 use crate::pipeline::sym::{ImageAccess, ImageHandleClass};
+#[cfg(test)]
+pub(crate) use emit::alias_halves;
 pub(crate) use slot::image_class;
 #[cfg(test)]
 pub use slot::max_levels;
@@ -1734,6 +1736,9 @@ pub enum OneTexel {
 /// binding of the alias view (`ResourceKind::RawTexture`, `RuntimeFact::HalfBitsTexture`), and
 /// states its `TexelFormat` class, on which the read branches: the device's texel stays the arm of
 /// every other class, whose NaN Metal answers `0x7e00` already.
+///
+/// A read through a snapshot takes that arm from the snapshot's codes, where the copy fetched the
+/// alias on the same branch ([`half_bits_snapshot`]).
 pub(crate) fn half_bits_read(
     cx: &mut SelectCx<'_>,
     image: ImageRef,
@@ -1773,6 +1778,38 @@ pub(crate) fn half_bits_read(
     cx.facts
         .insert(crate::pipeline::facts::RuntimeFact::HalfBitsTexture { slot });
     Ok(true)
+}
+
+/// Whether the snapshot of `image`'s slot holds the texel's own 16 bits rather than the copy's
+/// fetch of the slot's image ([`half_bits_read`], `lower::fragment`'s `snapshot`): the slot is one
+/// the draw reads through a snapshot, its snapshot's form holds a 16-bit code, and the read is the
+/// plain fetch the copy makes.
+///
+/// The copy of such a slot fetches the slot's unsigned integer alias where the bound format's
+/// class names 16-bit float channels, on the same branch the read takes, and stores its codes; so
+/// one snapshot holds whichever arm the class selects, and no second image is needed. A read the
+/// shader checks is not that fetch -- the alias arm selects no out-of-bounds texel -- and keeps the
+/// device's decode, as it does without a snapshot.
+///
+/// A 16-bit float texture's snapshot takes one of two forms, whichever the slot's declared type
+/// names: `SnapshotForm::Half`, or `SnapshotForm::Bits` where the variant reads the slot in
+/// another class (`tests::engine_snapshot_exact`'s
+/// `every_half_channel_format_names_a_snapshot_form_of_16_bit_codes`). Both hold a 16-bit code,
+/// and every other form belongs to a texture whose class names no 16-bit float channels, so the
+/// copy of such a slot fetches the slot's image alone, as it did.
+fn half_bits_snapshot(cx: &SelectCx<'_>, image: ImageRef, check: ReadCheck) -> Result<bool, Error> {
+    use crate::pipeline::sym::SnapshotForm;
+    let ImageRef::Slot(index) = image else {
+        return Ok(false);
+    };
+    if check == ReadCheck::Shader {
+        return Ok(false);
+    }
+    let slot = slot_of(cx, index)?.slot;
+    Ok(matches!(
+        cx.inputs.snapshot_textures.get(&slot),
+        Some(SnapshotForm::Half | SnapshotForm::Bits)
+    ))
 }
 
 pub(crate) fn half_texels(
@@ -3558,6 +3595,17 @@ fn select_read_as(
         && !raw
         && extended.is_none()
         && half_bits_read(cx, image, shape)?;
+    // A slot read through a snapshot takes that same arm, from the snapshot's codes: the copy
+    // fetches the alias where the class names 16-bit float channels, so the read widens the
+    // texel's own 16 bits there too, instead of the device's decode the copy would have stored
+    // ([`half_bits_snapshot`]).
+    if half_bits_alias && half_bits_snapshot(cx, image, check)? {
+        if let ImageRef::Slot(index) = image {
+            if let Some(s) = cx.families.texture.slots.get_mut(&index) {
+                s.half_bits_snapshot = true;
+            }
+        }
+    }
     let exact = raw || srgb_codes || half_bits;
     // An extended-range texel is decoded exactly to `f32`, which a `half` result rounds to
     // nearest even, as Metal answers. A read is one texel.

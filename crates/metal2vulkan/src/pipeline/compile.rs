@@ -2464,9 +2464,23 @@ fn compile_kept<K>(
     // function that writes no memory. A variant compiled to read them so states its own: its only
     // texel access of each is the entry's copy, at the fragment's own pixel.
     let snapshots: Vec<u32> = plan.families.fragment.snapshot.keys().copied().collect();
+    // The fetches the copy of each makes: its image, and its unsigned integer alias too where the
+    // snapshot holds the texel's own 16 bits, the copy's two exclusive arms.
+    let copied: Vec<(u32, u32)> = snapshots
+        .iter()
+        .map(|&i| {
+            let half_bits = plan
+                .families
+                .texture
+                .slots
+                .get(&i)
+                .is_some_and(|s| s.half_bits_snapshot);
+            (i, 1 + u32::from(half_bits))
+        })
+        .collect();
     let snapshot_textures = match (snapshots.is_empty(), writes_memory) {
         (false, _) => {
-            if !crate::spirv::requirements::snapshot_copies_alone(&module, &snapshots, m)? {
+            if !crate::spirv::requirements::snapshot_copies_alone(&module, &copied, m)? {
                 return Err(Error::Internal(InternalError::new(
                     InternalKind::Invariant,
                     "a snapshot variant that reads its texture outside the copy",

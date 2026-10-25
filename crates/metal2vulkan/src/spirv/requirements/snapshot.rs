@@ -313,13 +313,17 @@ fn reach(m: &TypedModule, own: &[u32], n: usize) -> Result<Vec<u32>, Error> {
 }
 
 /// Whether module `m`, compiled to read texture slots `slots` through snapshots
-/// (`LoweringInputs::snapshot_textures`), reads each slot's texels in one place alone: one
-/// `OpImageFetch`, the entry's copy, with every other use of the slot's images one that carries
-/// them on or queries their size. A read the lowering left on the texture would race the draw's
-/// own color writes. It charges `meter` for its table while it holds it.
+/// (`LoweringInputs::snapshot_textures`), reads each slot's texels in the entry's copy alone,
+/// each with the `OpImageFetch`es that copy makes: one of the slot's image, and a second of its
+/// unsigned integer alias where the snapshot holds the texel's own 16 bits under the bound
+/// format's class, the two the copy's exclusive arms (`lower::fragment`'s
+/// `snapshot::fetches_half_bits`). Every other use of the slot's images is one that carries them
+/// on or queries their size. A read the lowering left on the texture would race the draw's own
+/// color writes, and shows here as a fetch the copy does not make. It charges `meter` for its
+/// table while it holds it.
 pub fn snapshot_copies_alone(
     m: &TypedModule,
-    slots: &[u32],
+    slots: &[(u32, u32)],
     meter: &mut Meter,
 ) -> Result<bool, Error> {
     let n = m.values().len();
@@ -331,7 +335,7 @@ pub fn snapshot_copies_alone(
 }
 
 /// [`snapshot_copies_alone`] once its table is charged.
-fn copies_alone(m: &TypedModule, slots: &[u32], n: usize) -> Result<bool, Error> {
+fn copies_alone(m: &TypedModule, slots: &[(u32, u32)], n: usize) -> Result<bool, Error> {
     let mut carried = vec![NONE; n];
     for g in m.globals() {
         if let GlobalKind::Resource(slot) = &g.kind {
@@ -374,7 +378,7 @@ fn copies_alone(m: &TypedModule, slots: &[u32], n: usize) -> Result<bool, Error>
         carried
             .get(v.index())
             .copied()
-            .filter(|s| slots.contains(s))
+            .filter(|s| slots.iter().any(|(w, _)| w == s))
     };
     let mut fetches = vec![0u32; slots.len()];
     let mut elsewhere = false;
@@ -398,7 +402,7 @@ fn copies_alone(m: &TypedModule, slots: &[u32], n: usize) -> Result<bool, Error>
                 match use_of(node, v) {
                     Use::NoTexel => {}
                     Use::Fetch { .. } => {
-                        let at = slots.iter().position(|&s| s == slot);
+                        let at = slots.iter().position(|&(s, _)| s == slot);
                         if let Some(f) = at.and_then(|i| fetches.get_mut(i)) {
                             *f += 1;
                         }
@@ -408,7 +412,7 @@ fn copies_alone(m: &TypedModule, slots: &[u32], n: usize) -> Result<bool, Error>
             });
         }
     }
-    Ok(!elsewhere && fetches.iter().all(|&f| f == 1))
+    Ok(!elsewhere && fetches.iter().zip(slots).all(|(&f, &(_, want))| f == want))
 }
 
 /// Add `reach` to `table[v]`; whether it grew.

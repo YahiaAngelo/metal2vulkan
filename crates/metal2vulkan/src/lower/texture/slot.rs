@@ -231,6 +231,12 @@ pub struct SlotPlan {
     /// widens them exactly (`HalfTexelBitsPolicy::Exact`). Never together with
     /// [`raw`](Self::raw): a slot read through one alias view is read through the one view.
     pub half_bits: bool,
+    /// The slot is read through a snapshot (`LoweringInputs::snapshot_textures`) and its
+    /// snapshot holds the alias's codes, not the copy's fetch of the slot's image: the copy
+    /// fetches the alias where the class names 16-bit float channels, and the read widens those
+    /// codes instead of the device's decode (`lower::fragment`'s `snapshot`,
+    /// `HalfTexelBitsPolicy::Exact`). Implies [`half_bits`](Self::half_bits).
+    pub half_bits_snapshot: bool,
     /// A read of the slot, a texture buffer, applies the bound texture buffer's swizzle, which
     /// the slot's `TextureSwizzle` specialization gives (`RuntimeFact::TextureSwizzle`); or the
     /// slot, a storage slot of `LoweringInputs::swizzled_storage`, applies the bound texture's to
@@ -275,6 +281,7 @@ impl SlotPlan {
             norm_write: false,
             raw: false,
             half_bits: false,
+            half_bits_snapshot: false,
             swizzle: false,
             constant_lanes: false,
             offset_base: false,
