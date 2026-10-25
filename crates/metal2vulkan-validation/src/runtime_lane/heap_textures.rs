@@ -42,8 +42,8 @@ use crate::air_library::AirLibrary;
 use crate::candidate::engine::ComputeOutput;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::{DriverFact, HeapCompressionPolicy};
-use metal2vulkan::error::{Feature, LinearNeed};
-use metal2vulkan::metal::format::is_depth_stencil;
+use metal2vulkan::error::{Feature, LinearNeed, Needs};
+use metal2vulkan::metal::format::{footprint, is_depth_stencil, Footprint};
 use metal2vulkan::metal::{
     IndirectCommandType, PixelFormat, PrimitiveType, RenderStages, ResourceUsage, TextureType,
     TextureUsage,
@@ -1286,7 +1286,16 @@ fn tiling_refusal(error: &Error) -> Option<LinearNeed> {
 /// (`TextureProblem::Unspecialized`, Metal's nil; an M4 under macOS 27.0.1, every
 /// usage). A format Metal makes no texture of from a descriptor alone, such as a two-plane YCbCr
 /// one, takes Metal's answers too: 0 bytes from the query, at 16 for a two-plane YCbCr 2D texture
-/// and 128 for another, and nil from the call (`Error::Nil`, `TextureProblem::NoTextureOfFormat`).
+/// and 128 for another, and nil from the call (`Error::Nil`, `TextureProblem::NoTextureOfFormat`);
+/// so do `R10Unorm_PACKED` and `RG10Unorm_PACKED`, whose footprint is Metal's `NoTexture` shape,
+/// at 16.
+/// A format whose heap footprint its own structure decides and of which this crate holds no image
+/// (`metal::format::footprint`) answers that footprint, non-zero, and refuses the call alone
+/// `NotImplemented(Format)`: on an Apple M3 Max under macOS 27.0.1 (26A434) plain Metal answers
+/// the footprint **and** makes the texture, so the refusal is this crate's open gap and the
+/// `HEAPTEX shared no image` lines name every format and descriptor it covers. Every such format
+/// answers in all four swept usages, counted from that table, so one that stops answering fails
+/// rather than passing as a query and a call that both refuse.
 #[test]
 fn shared_heap_textures_are_made_or_refused_for_linear_tiling() {
     on_device(|device| {
@@ -1314,6 +1323,7 @@ fn shared_heap_textures_are_made_or_refused_for_linear_tiling() {
         let mut changed = Vec::new();
         let mut changed_again = Vec::new();
         let mut gaps = Vec::new();
+        let mut no_image = Vec::new();
         let mut check = |what: String, mut descriptor: TextureDescriptor| {
             descriptor.resource_options = options;
             let query = device.heap_texture_size_and_align(&descriptor);
@@ -1365,16 +1375,42 @@ fn shared_heap_textures_are_made_or_refused_for_linear_tiling() {
                     )
                 }
                 // Metal's nil for a format it makes no texture of from a descriptor alone, and
-                // its query's 0 bytes at 16 for a two-plane YCbCr one, 128 for another.
+                // its query's 0 bytes at 16 where the format's bytes are a surface's rows rather
+                // than Metal's tiles, 128 where they are tiles.
                 (Ok(answer), Err(error)) if error == no_texture => {
                     let pf = descriptor.pixel_format;
-                    assert!(no_texture_alone(pf), "{what}: {error:?}");
-                    let align = if metal2vulkan::metal::format::ycbcr_format(pf).is_some() {
-                        16
-                    } else {
-                        128
-                    };
+                    // The two-plane YCbCr formats, `RGBA16Float_XR`, `AnyDepth` and `AnyStencil`
+                    // (`no_texture_alone`), and the two packed 10-bit formats, whose footprint is
+                    // Metal's `NoTexture` shape: a packed 10-bit code crosses byte boundaries, so
+                    // there is no element to count and Metal counts none. A **placement** heap of
+                    // plain Metal's answers one of the packed pair a texture of 0 allocated bytes
+                    // at offset 0 all the same, where its device and its automatic heap answer
+                    // nil; this crate's nil here is its own gap, not Metal's answer.
+                    let packed = footprint(pf) == Some(Footprint::NoTexture);
+                    assert!(no_texture_alone(pf) || packed, "{what}: {error:?}");
+                    let rows = metal2vulkan::metal::format::ycbcr_format(pf).is_some() || packed;
+                    let align = if rows { 16 } else { 128 };
                     assert_eq!((answer.size, answer.align), (0, align), "{what}")
+                }
+                // Metal answers the footprint **and** makes the texture, measured for every
+                // format of the family; this crate answers that footprint from the format's own
+                // structure, which needs no image, and holds no image to make the texture in. So
+                // the making alone stays refused `NotImplemented(Format)` -- the typed refusal
+                // that records the gap -- and the answer is the one the query is asked for.
+                (Ok(answer), Err(Error::Unsupported(ref u)))
+                    if (&u.feature, &u.needs) == (&Feature::Format, &Needs::NotImplemented) =>
+                {
+                    let pf = descriptor.pixel_format;
+                    let Some(shape) = footprint(pf) else {
+                        panic!("{what}: answered {answer:?} with no footprint of its own")
+                    };
+                    assert_ne!(
+                        shape,
+                        Footprint::NoTexture,
+                        "{what}: a format Metal makes no texture of answered {answer:?}"
+                    );
+                    assert!(answer.size > 0, "{what}: answered {answer:?}");
+                    no_image.push(format!("{what}: {answer:?}"));
                 }
                 (Ok(answer), Err(error)) => panic!("{what}: answered {answer:?}, made {error:?}"),
                 (Err(error), Ok(_)) => panic!("{what}: refused {error:?} by the query alone"),
@@ -1425,13 +1461,18 @@ fn shared_heap_textures_are_made_or_refused_for_linear_tiling() {
         for line in &refused {
             eprintln!("HEAPTEX shared refused {line}");
         }
+        for line in &no_image {
+            eprintln!("HEAPTEX shared no image {line}");
+        }
         eprintln!(
             "HEAPTEX shared on {}: {made} made ({round_trips} round trips, {} second reads \
-             differ, {} staging queue submissions), {} refused for linear tiling",
+             differ, {} staging queue submissions), {} refused for linear tiling, {} answered a \
+             footprint with no image of the format",
             device.name(),
             changed_again.len(),
             device.work_counts().staging_submissions - staged,
-            refused.len()
+            refused.len(),
+            no_image.len()
         );
         assert!(made > 0, "no Shared heap texture was made");
         assert!(
@@ -1445,6 +1486,19 @@ fn shared_heap_textures_are_made_or_refused_for_linear_tiling() {
         assert!(
             gaps.is_empty(),
             "colour textures refused as gaps: {gaps:#?}"
+        );
+        // Every format whose footprint its own structure decides, Metal's `NoTexture` shape
+        // aside, answered that footprint in all four swept usages. The count comes from the
+        // product's own table rather than a number here, so a footprint that stops answering
+        // fails this instead of passing quietly as a query and a call that both refuse.
+        let answering = PixelFormat::ALL
+            .iter()
+            .filter(|&&pf| footprint(pf).is_some_and(|shape| shape != Footprint::NoTexture))
+            .count();
+        assert_eq!(
+            no_image.len(),
+            answering * SWEPT_USAGES.len(),
+            "footprints answered with no image of the format"
         );
     });
 }
