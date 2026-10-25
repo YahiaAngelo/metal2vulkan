@@ -18,7 +18,12 @@
 //!
 //! The table must equal `public_fixture_expectations_engine.tsv` exactly. A change from `ok`
 //! to a refusal needs a reviewed TSV edit whose commit states the reason. On a mismatch the test
-//! prints the observed rows so a reviewed update can take them. Rows of a fixture whose assembler
+//! prints the observed rows so a reviewed update can take them, and names every difference: a
+//! cell that moved under a row the table already has, by its fixture, entry and profile and from
+//! what to what, apart from a row that is new or gone. The two classes answer different
+//! questions — a moved cell is a fixture the engine now compiles or refuses differently, a new or
+//! gone row is a fixture or an entry point that came or went — so a review attributes each to the
+//! commit that explains it without diffing the block by hand. Rows of a fixture whose assembler
 //! is not installed (`metal-as` off macOS) are skipped visibly and taken from the expectations.
 //!
 //! The check is split so nextest runs it in parallel, and so the fixtures that need macOS are
@@ -260,23 +265,118 @@ fn check_part(metal_as: bool, part: usize, of: usize) {
     }
     if observed != expected {
         eprintln!("---- observed engine inventory rows ----\n{observed}---- end ----");
-        let exp: Vec<&str> = expected.lines().collect();
-        let obs: Vec<&str> = observed.lines().collect();
-        for (i, line) in obs.iter().enumerate() {
-            if exp.get(i) != Some(line) {
-                eprintln!("first difference at row {} of this part:", i + 1);
-                eprintln!("  expected: {:?}", exp.get(i));
-                eprintln!("  observed: {line:?}");
-                break;
-            }
+        let stems = profiles
+            .iter()
+            .map(|(stem, _)| stem.clone())
+            .collect::<Vec<_>>();
+        let d = diff_rows(&expected, &observed, &stems);
+        eprintln!("---- every difference in this part ----");
+        for line in d.cells.iter().chain(&d.rows) {
+            eprintln!("  {line}");
         }
+        eprintln!("---- end ----");
         panic!(
-            "the engine inventory changed ({} observed vs {} expected rows in this part); \
-             review each changed row and update tests/public_fixture_expectations_engine.tsv",
-            obs.len(),
-            exp.len()
+            "the engine inventory changed in this part: {} cell(s) moved under a row the table \
+             already has, and {} row(s) are new or gone ({} observed vs {} expected rows). \
+             Review each one and update tests/public_fixture_expectations_engine.tsv:\n{}{}",
+            d.cells.len(),
+            d.rows.len(),
+            observed.lines().count(),
+            expected.lines().count(),
+            shown(&d.cells),
+            shown(&d.rows),
         );
     }
+}
+
+/// The differences between a part's expected and observed rows, named one by one.
+#[derive(Default)]
+struct Diff {
+    /// `fixture | entry | profile: was -> now` for each cell of a row both tables hold, and
+    /// `new cell`/`gone cell` where the row's width moved (a committed profile came or went).
+    cells: Vec<String>,
+    /// `new row`/`gone row` for each (fixture, entry) only one table holds.
+    rows: Vec<String>,
+}
+
+/// At most [`SHOWN`] of `lines`, indented, with a count of the rest.
+fn shown(lines: &[String]) -> String {
+    let mut s = String::new();
+    for l in lines.iter().take(SHOWN) {
+        s.push_str("  ");
+        s.push_str(l);
+        s.push('\n');
+    }
+    if lines.len() > SHOWN {
+        s.push_str(&format!("  ... and {} more\n", lines.len() - SHOWN));
+    }
+    s
+}
+
+/// How many differences of each class a panic names; the test prints every one before it.
+const SHOWN: usize = 40;
+
+/// A row's key — its fixture and entry — and its cells, one per committed profile.
+fn split_row(line: &str) -> ((&str, &str), Vec<&str>) {
+    let mut f = line.split('\t');
+    let fixture = f.next().unwrap_or_default();
+    let entry = f.next().unwrap_or_default();
+    ((fixture, entry), f.collect())
+}
+
+/// The rows of a table block, keyed by fixture and entry. A fixture's entries are its ABI's, so
+/// the key is unique; a repeat would hide a row, so it keeps its own key by its position.
+fn index_rows(text: &str) -> BTreeMap<(&str, &str), Vec<&str>> {
+    let mut rows: BTreeMap<(&str, &str), Vec<&str>> = BTreeMap::new();
+    for (i, line) in text.lines().enumerate() {
+        let (key, cells) = split_row(line);
+        if rows.insert(key, cells).is_some() {
+            panic!(
+                "{}: two rows of entry {}, the second at line {}",
+                key.0,
+                key.1,
+                i + 1
+            );
+        }
+    }
+    rows
+}
+
+/// Each difference between `expected` and `observed`, as a cell that moved under a row both hold
+/// or a row only one holds. A moved cell names its profile (`stems`, in column order), what the
+/// table has and what the engine now produces, so a reviewer can attribute it without diffing the
+/// printed block by hand.
+fn diff_rows(expected: &str, observed: &str, stems: &[String]) -> Diff {
+    let (exp, obs) = (index_rows(expected), index_rows(observed));
+    let stem = |i: usize| stems.get(i).map_or("?", String::as_str);
+    let mut d = Diff::default();
+    for (&(fixture, entry), cells) in &obs {
+        let at = |i: usize| format!("{fixture} | {entry} | {}", stem(i));
+        let Some(was) = exp.get(&(fixture, entry)) else {
+            d.rows
+                .push(format!("new row: {fixture} | {entry}: {}", cells.join(" ")));
+            continue;
+        };
+        for (i, cell) in cells.iter().enumerate() {
+            match was.get(i) {
+                Some(b) if b == cell => {}
+                Some(b) => d.cells.push(format!("{}: {b} -> {cell}", at(i))),
+                None => d.cells.push(format!("new cell: {}: {cell}", at(i))),
+            }
+        }
+        for (i, gone) in was.iter().enumerate().skip(cells.len()) {
+            d.cells.push(format!("gone cell: {}: {gone}", at(i)));
+        }
+    }
+    for (&(fixture, entry), cells) in &exp {
+        if !obs.contains_key(&(fixture, entry)) {
+            d.rows.push(format!(
+                "gone row: {fixture} | {entry}: {}",
+                cells.join(" ")
+            ));
+        }
+    }
+    d
 }
 
 /// Whether `path` is a typed-pointer `.air.ll` fixture, which `metal-as` assembles ([`assemble`]).
@@ -306,4 +406,67 @@ mod llvm_as {
 /// elsewhere.
 mod metal_as {
     parts!(true, 4; part_1_of_4 = 0, part_2_of_4 = 1, part_3_of_4 = 2, part_4_of_4 = 3);
+}
+
+/// The mismatch diagnostic on synthetic blocks: it names the row, the entry and the profile of a
+/// cell that moved and says from what to what, keeps that apart from a row that is new or gone,
+/// and says nothing about the rows that held. Without the naming a reviewer only learned that
+/// "the inventory changed".
+#[test]
+fn the_mismatch_diagnostic_names_each_changed_row() {
+    let stems = ["a-gpu".to_owned(), "b-gpu".to_owned()];
+    let expected = "f.ll\tmain\tok\tok\nf.ll\thelper\tok\tok\ng.ll\tmain\tok\tok\n";
+
+    // A cell that moved under a row the table already has.
+    let observed = "f.ll\tmain\tok\tok\nf.ll\thelper\tok\tUnsupported{Foo; NotImplemented}\n\
+                    g.ll\tmain\tok\tok\n";
+    let d = diff_rows(expected, observed, &stems);
+    assert_eq!(
+        d.cells,
+        ["f.ll | helper | b-gpu: ok -> Unsupported{Foo; NotImplemented}"]
+    );
+    assert!(d.rows.is_empty(), "{:?}", d.rows);
+
+    // A row only one block holds is the other class, and the cells of the rows that held are
+    // never named.
+    let observed = "f.ll\tmain\tok\tok\ng.ll\tmain\tok\tok\ng.ll\tsecond\tok\tok\n";
+    let d = diff_rows(expected, observed, &stems);
+    assert!(d.cells.is_empty(), "{:?}", d.cells);
+    assert_eq!(
+        d.rows,
+        [
+            "new row: g.ll | second: ok ok",
+            "gone row: f.ll | helper: ok ok"
+        ]
+    );
+
+    // Equal blocks differ in nothing.
+    let d = diff_rows(expected, expected, &stems);
+    assert!(d.cells.is_empty() && d.rows.is_empty());
+
+    // A committed profile that came or went widens or narrows every row; the cell says which
+    // column it was, so the reader does not read it as a behaviour change.
+    let observed = "f.ll\tmain\tok\tok\tok\nf.ll\thelper\tok\tok\tok\ng.ll\tmain\tok\tok\tok\n";
+    let d = diff_rows(
+        expected,
+        observed,
+        &["a-gpu".to_owned(), "b-gpu".to_owned(), "c".to_owned()],
+    );
+    assert_eq!(
+        d.cells,
+        [
+            "new cell: f.ll | helper | c: ok",
+            "new cell: f.ll | main | c: ok",
+            "new cell: g.ll | main | c: ok"
+        ]
+    );
+    let d = diff_rows(observed, expected, &stems);
+    assert_eq!(
+        d.cells,
+        [
+            "gone cell: f.ll | helper | ?: ok",
+            "gone cell: f.ll | main | ?: ok",
+            "gone cell: g.ll | main | ?: ok"
+        ]
+    );
 }
