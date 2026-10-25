@@ -45,7 +45,7 @@ Its limits, measured rather than asserted:
 | distinct SDK items the Metal leg reaches, of any status | 800 |
 | of those, reached only where this cannot name the family | 2 |
 | ledger rows (a case whose gap is recorded) | 291 |
-| declared crossings of the option space (pairs put to Metal at once) | 25 |
+| declared crossings of the option space (pairs put to Metal at once) | 26 |
 | declared crossings that are no pair of it (a boolean or numeric field, or one type in two slots) | 30 |
 
 A tolerance names a **site of a transcript**, not an item, so the last two rows are read as written: a case that loosens one site of its own transcript may compare every other field of it exactly, and this derivation cannot tell which of a case's fields came from which Metal call. Where the distinction matters, read the case.
@@ -185,7 +185,7 @@ What this axis cannot see, stated rather than implied:
 
 | | |
 |---|---|
-| pairs of the option space declared | 25 |
+| pairs of the option space declared | 26 |
 | distinct pairs of Metal types crossed | 24 |
 | types in at least one such pair | 26 |
 | types with two or more values compared and in no crossing of **either** table | 22 |
@@ -208,6 +208,7 @@ What this axis cannot see, stated rather than implied:
 | `pass_sequence_actions` | `pass-sequence-color-actions` | `MTLStoreAction` x `MTLLoadAction` | whether the next pass over one attachment sees what this one stored. `MTLStoreActionStore` then `MTLLoadActionLoad` keeps pass A's draw and the host's own texels outside it; `MTLStoreActionDontCare` then `MTLLoadActionLoad` keeps **neither** of them, the texels the host wrote before pass A everywhere, so A's clear and A's draw are both gone; and under pass B's `MTLLoadActionClear` over the whole attachment the store action moves no texel at all. So neither value alone says anything: the 36 (load, store, options) triples of `pass_descriptors` only read the fields back, and every other pass case fixes one side of the boundary |
 | `pixel_samplers` | its cases | `MTLPixelFormat` x `MTLSamplerMinMagFilter` x `MTLSamplerAddressMode` | what a pixel-coordinate sample reads at and past the texture's edge: the address mode decides which texel a tap outside falls on, the filter decides how many taps there are, and the format decides what their average rounds to. The family's sixteen cases are the cells |
 | `primitive_type_crossings` | `primitive-type-restart-indices` | `MTLPrimitiveType` x `MTLIndexType` | whether the index value `0xffff` ends a primitive or names a vertex. The value that ends one is the index type's own maximum, and only a strip has a primitive for it to end: over one index run the two strips answer different covered sets under the two index types and the point, the line list and the triangle list answer the same set under both. The primitive type's own sweep states one index type a case over ordinary indices, and the index type's sweep never reaches a strip at its maximum, so neither can ask it |
+| `read_write_tiers` | `read-write-tier-descriptors` | `MTLPixelFormat` x `MTLTextureType` | whether a format's read-write usage is the texture type's to grant. Thirty uncompressed colour formats in each of the eight non-multisample types, one descriptor of `ShaderRead | ShaderWrite` usage and private storage a cell: Metal answered a texture at all 240, and at the 22 further cells where a compressed or a depth format may be asked at all -- the pair's own asymmetry, and why those five formats are swept per permitted type rather than per type. That uniformity is the claim and only the grid states it: a side that granted the usage to a format in one type and refused it in another answers every `Type2D` cell exactly and a 1D, cube, 3D or `TextureBuffer` cell wrongly, where every other case of this family states `Type2D` alone |
 | `render_state` | `render-state-facing` | `MTLCullMode` x `MTLWinding` | which of a triangle and its reverse survives a draw: flipping the winding flips it and flipping the cull mode flips it back, so neither setting's own value decides anything and a side that reads one and not the other draws the wrong one of the pair |
 | `sampler_crossings` | its cases | `MTLSamplerBorderColor` x `MTLSamplerAddressMode` | whether a border-reading mode on one axis substitutes the border for a tap another axis put out of range. One case a border colour, and six address triples that put the border-reading mode on `s` alone, on `t` alone, on `r` alone and on all three: the sweeps that compared every colour read the border on `r` with `s` and `t` inside the texture, so no row of them asks which axis's mode the substitution follows |
 | `sampler_crossings` | its cases | `MTLSamplerMinMagFilter` x `MTLSamplerMipFilter` | which level a sampler reads when the LOD clamp raises the requested one, and with which of the two filters -- `NotMipmapped` ignores the clamp outright, and the two mip filters pick their level and then their filter. The filter sweep samples at texel centres where a linear footprint is one texel, and the mip sweep pins both filters to nearest and says so, so neither can tell the three rules apart |
