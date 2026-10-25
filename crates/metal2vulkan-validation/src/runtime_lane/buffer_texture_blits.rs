@@ -1156,6 +1156,106 @@ fn surface_plane(
         .new_texture_with_iosurface_plane(&d, IoSurfacePlane::new(0, bpr, true))
 }
 
+/// A plane whose GPU rows share bytes, copied out into a buffer: every row of the buffer takes
+/// the plane's bytes at its own GPU row, so a byte two rows share is read once for each row that
+/// holds it, which is what Metal's `copyFromTexture:toBuffer:` reads (an Apple M3 Max under macOS
+/// 27.0.1, one shape a process,
+/// `metal2vulkan-conformance/probes/overlapping_plane_row_reads.m`). Every byte of the buffer is
+/// `7i + 3` of its own address, which names each byte over the plane's span, so a read off Metal's
+/// names the byte it took instead of merely differing.
+///
+/// The copy leaves the plane's own bytes alone and `get_bytes` still reads the plane's rows, not
+/// the GPU's. The copy the other way stays refused: a write must settle which of two rows leaves
+/// the shared bytes behind and Metal settles it no one way, while a read settles nothing -- it
+/// only says where each byte comes from, and both rows that hold a shared byte hold the same byte.
+///
+/// The shapes share 4 bytes at a GPU pitch of 16 and of 32 and 12 bytes at a pitch of 16, over two
+/// to five rows, and include a `bytesPerRow` well past the row whose multiple of 16 still falls
+/// below it (the CPU's rows 28 bytes apart, the GPU's 16).
+#[test]
+fn a_blit_out_of_a_plane_whose_gpu_rows_share_bytes_reads_each_row_at_its_own_pitch() {
+    on_device(|device| {
+        for kind in [Kind::Ordinary, Kind::NoCopy] {
+            let Some(held) = Held::new(device, kind) else {
+                eprintln!("{}: no {kind:?} buffer", device.name());
+                continue;
+            };
+            for [w, h, bpr] in [
+                [5u64, 4, 20],
+                [5, 2, 20],
+                [5, 4, 28],
+                [9, 4, 36],
+                [7, 5, 28],
+            ] {
+                let what = format!("{kind:?} {w}x{h} at {bpr}");
+                let (row, pitch) = (4 * w, (bpr / 16 * 16).max(16));
+                let n = (row * h) as usize;
+                assert!(pitch < row, "{what}: the GPU rows share bytes");
+                let mut d = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, w, h, false);
+                d.usage = TextureUsage::SHADER_READ;
+                d.resource_options = held.buffer.resource_options();
+                let t = held
+                    .buffer
+                    .new_texture_with_iosurface_plane(&d, IoSurfacePlane::new(OFF, bpr, true))
+                    .unwrap_or_else(|e| panic!("{what}: {e}"));
+                let out = buffer_with(device, &vec![0xee; n]).unwrap();
+                blit(device, |e| {
+                    e.copy_from_texture_to_buffer(
+                        &t,
+                        0,
+                        0,
+                        origin([0, 0]),
+                        size([w, h]),
+                        &out,
+                        0,
+                        row,
+                        row * h,
+                        BlitOption::None,
+                    )
+                    .unwrap()
+                });
+                assert_eq!(
+                    read_buffer(&out, 0, n as u64).unwrap(),
+                    gather(&held.model, &gpu_rows(OFF, bpr, row, h)),
+                    "{what}: a blit's read of rows that share bytes"
+                );
+                held.check(&format!("{what}: the plane after the read"));
+                let mut back = vec![0u8; n];
+                t.get_bytes(&mut back, row, 0, Region::new_2d(0, 0, w, h), 0, 0)
+                    .unwrap();
+                assert_eq!(
+                    back,
+                    gather(&held.model, &plane_rows(OFF, bpr, row, h)),
+                    "{what}: get_bytes after the read"
+                );
+                // The write stays refused, the read having settled nothing for it.
+                let from = buffer_with(device, &vec![0u8; n]).unwrap();
+                let queue = device.new_command_queue().unwrap();
+                let command_buffer = queue.command_buffer().unwrap();
+                let mut encoder = command_buffer.blit_command_encoder().unwrap();
+                let into = encoder.copy_from_buffer_to_texture(
+                    &from,
+                    0,
+                    row,
+                    row * h,
+                    size([w, h]),
+                    &t,
+                    0,
+                    0,
+                    origin([0, 0]),
+                    BlitOption::None,
+                );
+                assert_eq!(
+                    into.err(),
+                    Some(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows)),
+                    "{what}: a blit into rows that share bytes"
+                );
+                encoder.end_encoding().unwrap();
+            }
+        }
+    });
+}
+
 /// A depth or stencil texture over a plane of a surface with planes, which Metal makes and
 /// samples or reads and draws (an M4 under macOS 27.0.1, TTG2's format scout: `Depth16Unorm`,
 /// `Depth32Float`, `Depth32Float_Stencil8`, `Stencil8`, `X32_Stencil8`, each for reading and for

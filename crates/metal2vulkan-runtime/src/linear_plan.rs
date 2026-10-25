@@ -122,10 +122,19 @@
 //!   leaves of the shared bytes is not measured; the shapes whose rows of codes or units no row
 //!   rule bounds (a two-plane YCbCr texture's, which overlap by any amount across any number of
 //!   rows, `ycbcr.rs`; a two-plane extended-range one's, a 4:2:2 one's pairs, a depth or stencil
-//!   plane's elements), which two regions do not express; and a blit that addresses such a
-//!   plane's rows as bytes (`blit_texture.rs`), which writes every shared byte from one fixed row
-//!   where Metal's order is no one order ([`super::blit_plan::RowsCopy`] holds only the one
-//!   overlap that has an order, a buffer's rows whose images meet). A rotated plane never reaches
+//!   plane's elements), which two regions do not express; and a blit that would write such a
+//!   plane's rows as bytes (`blit_texture.rs`: a copy into it from a buffer, and one between two
+//!   textures over buffers, whichever side it is on), which writes every shared byte from one
+//!   fixed row where Metal's order is no one order ([`super::blit_plan::RowsCopy`] holds only the
+//!   one overlap that has an order, a buffer's rows whose images meet). A blit out of such a plane
+//!   into a buffer is served instead of refused, its rows being read and not written: each of the
+//!   buffer's rows takes the plane's bytes at its own GPU row, so a byte two rows share is read
+//!   once for each of them, which is what Metal's `copyFromTexture:toBuffer:` reads (an Apple M3
+//!   Max under macOS 27.0.1, one shape a process, `probes/overlapping_plane_row_reads.m`). A read
+//!   is not the mirror of a write here: a write must settle which row leaves the shared bytes
+//!   behind and Metal settles it no one way, while a read settles nothing. A copy between the
+//!   plane and an image texture is refused either way, its one `bufferRowLength` stating no
+//!   sharing. A rotated plane never reaches
 //!   any of this: its `bytesPerRow` must be a multiple of 16
 //!   (`buffer_texture::turned_plane`), so its GPU rows lie at the pitch itself and share no byte
 //!   (`tests::buffer_texture::no_rotated_plane_s_gpu_rows_share_bytes`).

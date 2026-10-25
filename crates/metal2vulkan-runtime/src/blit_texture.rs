@@ -567,7 +567,8 @@ impl BlitCommandEncoder {
                     // leaves it from whichever row its own command wrote last -- an order that
                     // follows the command, the GPU pitch and the row count, and that one shape
                     // does not settle from run to run (`linear_plan.rs`'s **Rows that
-                    // overlap**).
+                    // overlap**). The other direction reads those rows instead of writing them
+                    // and is served (`copy_from_texture_to_buffer`).
                     if texels.plane_rows_overlap() {
                         return Err(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows));
                     }
@@ -719,15 +720,25 @@ impl BlitCommandEncoder {
                 let unit = unit(CALL, source_texture, options)?;
                 let region = region(CALL, source_origin, size, source_level, source_slice)?;
                 if let Some(texels) = source_texture.buffer_texels() {
-                    // Rows that share bytes (an IOSurface plane's on Metal's GPU): the row
-                    // copies would write every shared byte from one fixed row, where Metal
-                    // leaves it from whichever row its own command wrote last -- an order that
-                    // follows the command, the GPU pitch and the row count, and that one shape
-                    // does not settle from run to run (`linear_plan.rs`'s **Rows that
-                    // overlap**).
-                    if texels.plane_rows_overlap() {
-                        return Err(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows));
-                    }
+                    // Rows that share bytes (an IOSurface plane's on Metal's GPU) are served
+                    // here, where they are read and not written. The plane is the source; the
+                    // destination is the caller's buffer, whose rows never share a byte, so no
+                    // row's bytes are taken from another: `plan_rows_copy` refuses a
+                    // `bytesPerRow` below the region's row (`CopyProblem::BytesPerRow`), and a
+                    // plane is a 2D texture of one image, so the only other way a layout's rows
+                    // could meet -- images closer than their rows -- cannot arise and
+                    // `RowsCopy::new` finds nothing to order. Each destination row takes the
+                    // plane's bytes at its own GPU row, so a byte two rows share is read once
+                    // for each of them, which is what Metal's own copy reads (an Apple M3 Max
+                    // under macOS 27.0.1, one shape a process,
+                    // `probes/overlapping_plane_row_reads.m`).
+                    //
+                    // Reading rows that overlap is not the mirror of writing them, so the
+                    // direction above stays refused and this one need not: a write has to settle
+                    // which of two rows leaves the shared bytes behind, and Metal settles it no
+                    // one way (`linear_plan.rs`'s **Rows that overlap**), while a read settles
+                    // nothing -- it only says which byte each destination byte comes from, and
+                    // every row that holds a shared byte holds the same byte.
                     let (to, from) = plan_rows_copy(
                         source_texture.record(),
                         &region,

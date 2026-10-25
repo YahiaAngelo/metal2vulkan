@@ -829,9 +829,13 @@ impl RowsCopy {
     /// row keeps the bytes they share, as plain Metal writes overlapping images in turn (an M4
     /// under macOS 27.0.1, the `ctb.race.*` cases; [`plan_placed_copy`] states the same rule for
     /// a layout off Metal's rules): an earlier row copies only the bytes no later row writes
-    /// ([`later_rows_win`]). A texture's own rows never overlap here -- a plane's shared bytes
-    /// have no one Metal order and are refused (`blit_texture.rs`), and a rotated texture's rows
-    /// share no byte (`buffer_texture::turned_plane`).
+    /// ([`later_rows_win`]). No texture's own rows overlap as the destination: a plane's shared
+    /// bytes, which have no one Metal order, are refused wherever they would be written
+    /// (`blit_texture.rs`), and a rotated texture's rows share no byte
+    /// (`buffer_texture::turned_plane`). A plane's rows do overlap as the source, where they are
+    /// read: each destination row takes the plane's bytes at its own GPU row, so a shared byte is
+    /// read once for each row that holds it, and such a row joins neither neighbour into one
+    /// range.
     pub(super) fn new(src: &[Range<u64>], dst: &[Range<u64>]) -> RowsCopy {
         debug_assert_eq!(src.len(), dst.len());
         // Each row as `later_rows_win` takes it: by the bytes it writes.
@@ -939,9 +943,10 @@ pub(super) fn texel_rows(
 /// whichever of the two rows Metal's command wrote last, an order that follows the command, the
 /// GPU pitch and the row count and that one shape of `copyFromTexture:toTexture:` does not settle
 /// from run to run (`linear_plan.rs`'s **Rows that overlap**), so no order a row copy writes them
-/// in is Metal's. A source plane alone would be read, not written, but the destination is refused
-/// either way: the two sides may be one texture, and a copy out of a plane is refused where it
-/// goes in (`blit_texture.rs`).
+/// in is Metal's. A source plane alone would be read, not written, as a copy out of a plane into a
+/// buffer is (`blit_texture::copy_from_texture_to_buffer`), and so has no such order to miss; what
+/// Metal reads out of one between two textures over buffers is unmeasured, and the source stays
+/// refused with the destination until it is.
 pub(super) fn plan_texels_rows_copy(
     from: (&TexelsLayout, &TexelsLayout),
     to: (&TexelsLayout, &TexelsLayout),
