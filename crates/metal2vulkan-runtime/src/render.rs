@@ -517,8 +517,9 @@ pub enum DrawProblem {
     /// A patch draw while the encoder has no tessellation factor buffer (measured: Metal's
     /// validation stops it, and Metal without it stops the process).
     ///
-    /// Basis: unknown (plain Metal stops its process as said above, its validation off, but no run
-    /// on record names the device or release).
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal ends the process, SIGSEGV,
+    /// at a quad patch draw with no tessellation factor buffer, where the same draw with one set
+    /// runs and paints the target, the API validation layer off).
     NoTessellationFactorBuffer,
     /// An indirect draw's arguments, read from its offset rounded down to a multiple of 4 as Metal
     /// reads them, run past its indirect buffer's length (measured: Metal's validation stops it;
@@ -536,12 +537,14 @@ pub enum DrawProblem {
     /// tileDescriptor").
     NotTileState,
     /// `dispatch_threads_per_tile` with threads per tile wider or taller than the pass's tile
-    /// (measured: "threadsPerTile.width(32) must be <= 16"). Plain Metal runs them, their
-    /// imageblock cells past the tile landing in the neighbouring tiles' pixels: a layout of
-    /// Metal's tile memory the runtime does not model, so refused.
+    /// (measured: "threadsPerTile.width(32) must be <= 16"). Plain Metal takes the dispatch, whose
+    /// threads report positions inside the tile alone: a layout of Metal's tile memory the runtime
+    /// does not model, so refused.
     ///
-    /// Basis: unknown (Metal asserts "threadsPerTile.width(32) must be <= 16" and plain Metal runs
-    /// the threads, so it takes the input, but no run on record names the device or release).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal completes a pass whose
+    /// dispatch is 32 threads wide over a 16 by 16 tile, with no error, its tile function reporting
+    /// positions 0 to 15 alone, where a dispatch of 8 reports 0 to 7: so the refusal reaches past
+    /// Metal, and no thread past the tile was seen to run).
     ThreadsPerTilePastTile {
         /// The threads per tile's width and height.
         threads: [u32; 2],
@@ -618,8 +621,10 @@ pub enum DrawProblem {
     /// must be <= [indexBuffer length](16)`); plain Metal draws from whatever memory follows the
     /// buffer (`idx_past_end`: undefined, so refused).
     ///
-    /// Basis: unknown (plain Metal draws from whatever memory follows the buffer, probe case
-    /// `idx_past_end`, so it takes the input, but that run on record names no device or release).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal completes an indirect indexed
+    /// draw of 6 indices from a 16-byte index buffer, with no error, and paints the target as the
+    /// same draw from a 64-byte buffer does, where a draw whose six in-bounds indices are
+    /// degenerate paints nothing: so the refusal reaches past Metal).
     IndexBufferRange {
         /// `indexBufferOffset`.
         offset: u64,

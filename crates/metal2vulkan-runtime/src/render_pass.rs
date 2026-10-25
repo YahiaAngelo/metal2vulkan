@@ -461,9 +461,11 @@ pub enum RenderPassProblem {
     /// the attachment's sample count (plain Metal copies the samples, not built). A color one of
     /// another count is left untouched, as plain Metal leaves it.
     ///
-    /// Basis: unknown (plain Metal copies the samples of a multisampled color resolve texture,
-    /// which is not built here, and no run on record names the device; a depth or stencil one is
-    /// unmeasured).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal completes the pass with no
+    /// error and copies the attachment's samples into a color resolve texture of its own count, and
+    /// writes the resolved depth into every sample of a 4-sample depth one, where a color resolve
+    /// texture of another count beside them is left at the value it held: so the refusal reaches
+    /// past Metal).
     ResolveSamples(Attachment),
     /// A resolve texture of another pixel format than the attachment's (measured: Metal's
     /// validation stops it, and plain Metal's answer depends on the pair, `resolve.rs`; a
@@ -482,21 +484,28 @@ pub enum RenderPassProblem {
     /// resolve texture, measured; plain Metal's own answer is unmeasured).
     ResolveSubresource(Attachment),
     /// A color resolve level reaches past the attachment, which loads with `Load` or `DontCare`
-    /// (measured: "size mismatch"; plain Metal writes what memory held there). A level of another
-    /// extent resolves the overlap elsewhere, as plain Metal does.
+    /// (measured: "size mismatch"; plain Metal resolves the overlap and leaves the texels past the
+    /// attachment as they were). A level of another extent resolves the overlap elsewhere, as plain
+    /// Metal does.
     ///
-    /// Basis: unknown (Metal asserts "size mismatch" and plain Metal writes what memory held there,
-    /// so it takes the input, but no run on record names the device or release).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal completes a pass whose 128 by
+    /// 128 resolve texture reaches past its 64 by 64 4-sample attachment, with no error, resolving
+    /// the 64 by 64 overlap and leaving the texels at x 64 to 67 at the value they held, so the
+    /// refusal reaches past Metal).
     ResolveSize(Attachment),
     /// The depth and stencil attachments are one texture whose stencil resolves alone
-    /// (`MultisampleResolve`) while its depth is stored: plain Metal overwrites the depth's
-    /// samples with a layout pattern (probes), and its validation stops it ("mixing
+    /// (`MultisampleResolve`) while its depth is stored: plain Metal resolves the stencil and
+    /// stores the depth as a pass that stores both does, and its validation stops it ("mixing
     /// MTLStoreActionStore and MTLStoreActionMultisampleResolve store actions ... is not allowed").
     /// The depth resolved alone with the stencil stored, and an aspect stored and resolved beside a
     /// stored one, run as Metal runs them.
     ///
-    /// Basis: unknown (plain Metal overwrites the depth's samples with a layout pattern, so it
-    /// takes the input, but the probes on record name no device or release).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal completes such a pass over a
+    /// 4-sample `Depth32Float_Stencil8` texture with no error, resolves the stencil — the resolve
+    /// texture reads the cleared 7 — and stores the depth at its clear value in every sample, as
+    /// the pass that stores both does, the clear depths 0.5 and 0.25 read back apart. The layout
+    /// pattern an earlier probe reported over the depth did not reproduce in that shape, so the
+    /// refusal reaches past Metal).
     DepthStencilResolveMix,
     /// The stencil resolves with `DepthResolvedSample` without a depth attachment, whose filter
     /// picks its sample (measured; with a depth attachment that does not resolve, the filter
@@ -684,8 +693,10 @@ pub enum RenderPassProblem {
     /// 128 to 255, or are 0 in a count of 256 or more: plain Metal ends the process making its
     /// encoder, on every device.
     ///
-    /// Basis: unknown (plain Metal is held to end its process making the encoder, on every device,
-    /// but no run on record names the device or release).
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal ends the process, SIGABRT
+    /// and no message, at `renderCommandEncoderWithDescriptor:` of 8, 15, 130 and 256, where 1, 4
+    /// and 260 — whose low 8 bits are 4 — make the encoder and run the pass, the API validation
+    /// layer off).
     DefaultRasterSampleCount {
         /// The `defaultRasterSampleCount` given.
         count: u64,

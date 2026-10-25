@@ -203,8 +203,9 @@ pub enum HeapProblem {
     /// buffer and `Device::heap_texture_size_and_align`'s for a texture: plain Metal answers nil
     /// (`Nil`).
     ///
-    /// Basis: unknown (plain Metal's nil for a placement offset off the resource's alignment is not
-    /// on record with a device or release).
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: a placement heap of 1 MiB answers nil
+    /// for a buffer at offset 255 and for a 64 by 64 texture at offset 129, where offset 256 and
+    /// the texture's own alignment of 128 make them).
     Offset {
         /// The offset given.
         offset: u64,
@@ -213,8 +214,9 @@ pub enum HeapProblem {
     /// bytes: a placement heap's buffer or texture, or an automatic heap's buffer longer than
     /// the heap. Plain Metal answers nil (`Nil`).
     ///
-    /// Basis: unknown (plain Metal's nil for a resource whose bytes run past its heap's end is not
-    /// on record with a device or release).
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: a placement heap of 1 MiB answers nil
+    /// for a 4096-byte buffer at offset 1,047,552 and for a texture at offset 1,048,448, and an
+    /// automatic heap of 1 MiB for a buffer of 4 MiB, where each resource inside the heap is made).
     PastEnd {
         /// The resource's offset in the heap (0 for an automatic heap's).
         offset: u64,

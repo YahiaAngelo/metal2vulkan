@@ -400,21 +400,26 @@ pub enum IndirectCommandBufferProblem {
     /// command types, or its blit copy to or from a buffer of command types. Plain Metal makes
     /// such a buffer, where its validation stops it, and executes, resets, optimizes and copies
     /// it to another such as nothing, as the runtime does, but its process ends at a command's
-    /// first setter and at its CPU reset; the rest was not measured.
+    /// first setter and at its CPU reset.
     ///
-    /// Basis: unknown (plain Metal's process ends at a command's first setter and at its CPU reset
-    /// by the doc's account, but no run on record names the device or release, and the rest was not
-    /// measured).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal ends the process, SIGBUS, at
+    /// a command's `setRenderPipelineState:` and at `resetWithRange:`, where a buffer of `Draw`
+    /// takes both; but it encodes such a buffer into an argument buffer to the same bytes a `Draw`
+    /// one encodes to, and completes its blit copy into a `Draw` buffer, its execution in a pass
+    /// and its optimize with no error, so those refusals reach past Metal. The read-back is the
+    /// runtime's own extension and has no Metal call to measure).
     NoCommandTypes,
     /// A descriptor with more kernel, vertex, fragment, object or mesh buffers, or kernel
-    /// threadgroup lengths, than 65536, past which plain Metal's storage is not defined (a buffer of 2^31 kernel
-    /// buffers was made as small as one of few, 2^32 - 1 ended its process).
+    /// threadgroup lengths, than 65536, past which plain Metal's storage is not defined (a buffer
+    /// of 2^31 kernel buffers was made as small as one of few).
     /// Metal's validation stops more than 31, but plain Metal makes a buffer of up to 65536, as
     /// the runtime does.
     ///
-    /// Basis: unknown (plain Metal makes a buffer of more binds than this allows — 2^31 was made as
-    /// small as one of few — so its storage is undefined rather than refused, and that run names no
-    /// device).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal makes the buffer at 4, at
+    /// 65536, at 2^31 and at 2^32 - 1 kernel buffers alike, each taking the same 16 KiB of the
+    /// device's allocated size, where `maxCommandCount` moves that figure — 16 KiB at one command
+    /// against 64 KiB at 64 — so the storage is undefined rather than refused and the refusal
+    /// reaches past Metal).
     BindCount {
         /// The count the descriptor asks for.
         count: u32,
@@ -438,18 +443,22 @@ pub enum IndirectCommandBufferProblem {
     /// A pipeline state set on a command of a buffer that inherits it (this ends Metal's
     /// process).
     ///
-    /// Basis: unknown (Metal's process ends as said above, but no run on record names the device or
-    /// release).
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal ends the process, SIGBUS,
+    /// at `setRenderPipelineState:` on a command of a buffer whose `inheritPipelineState` is set,
+    /// where the same setter on a buffer that does not inherit it runs the draw).
     InheritedPipelineState,
-    /// A pipeline state made without `supportIndirectCommandBuffers` (this ends Metal's
-    /// process).
+    /// A pipeline state made without `supportIndirectCommandBuffers`: plain Metal takes the setter
+    /// and the draw, and its GPU faults where the command runs.
     ///
-    /// Basis: unknown (Metal's process ends as said above, but no run on record names the device or
-    /// release).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal's `setRenderPipelineState:`
+    /// and `drawPrimitives:` on the command both return rather than ending the process, and the
+    /// command buffer fails at execution, "Caused GPU Address Fault Error", where the same pipeline
+    /// with the flag set draws: so the refusal stands on undefined behaviour and not on a refusal
+    /// of Metal's, and reaches past it).
     PipelineWithoutSupport,
     /// A draw of a kind (`DRAW_INDEXED`, `DRAW_PATCHES` or `DRAW_INDEXED_PATCHES`, a probe) whose
     /// record the buffer's records cannot hold: an indexed draw on a buffer of draws of primitives
-    /// alone (plain Metal's GPU faults), a patch draw of either kind on one of neither patch kind
+    /// alone (plain Metal draws nothing), a patch draw of either kind on one of neither patch kind
     /// (plain Metal ends its process), a draw of primitives or an indexed one on a buffer of mesh
     /// draws alone (Metal's process ends, with and without its validation), a mesh draw on one of
     /// no mesh kind (a kernel's faults Metal's GPU on a buffer of draws of primitives, a Metal
@@ -457,8 +466,11 @@ pub enum IndirectCommandBufferProblem {
     /// not enabled on this indirect command buffer"), but plain Metal runs one their records hold,
     /// as the runtime does.
     ///
-    /// Basis: unknown (plain Metal's GPU faults or its process ends at each kind as said above, but
-    /// those probes name no device or release).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal ends the process, SIGBUS, at
+    /// a patch draw on a buffer of `DRAW` alone, at a mesh pipeline's `setRenderPipelineState:` on
+    /// such a buffer, and at a draw of primitives on a buffer of `DRAW_MESH_THREADGROUPS` alone;
+    /// but an indexed draw on a buffer of `DRAW` alone completes with no error and paints nothing,
+    /// where the same draw on a buffer of `DRAW_INDEXED` paints, so that kind reaches past Metal).
     CommandType(IndirectCommandType),
     /// A compute command of a buffer whose commands are render ones, or a setter plain Metal does
     /// not ignore on a render command of a buffer whose commands are dispatches. Plain Metal ends

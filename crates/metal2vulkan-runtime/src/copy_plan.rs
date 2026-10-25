@@ -135,19 +135,26 @@ pub enum CopyProblem {
     /// defined answer).
     Format,
     /// Two textures of different sample counts. Plain Metal copies the bytes of the GPU's own
-    /// sample layout: no defined answer.
+    /// sample layout: no defined answer. A 4-sample source whose samples hold 0.25, 0.25, 0.75 and
+    /// 0.75 copies into a 2-sample destination as texel 0's two samples and texel 1's two, and into
+    /// a single-sampled one as sample 0's plane alone (an Apple M3 Max under macOS 27.0.1).
     ///
-    /// Basis: unknown (plain Metal copies the bytes of the GPU's own sample layout, no defined
-    /// answer, and the run on record names no device or release).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal completes the copy with no
+    /// error rather than refusing it, spreading the source's samples by the GPU's own layout, where
+    /// the matched 4-sample copy beside it reproduces every sample: no defined answer, so the
+    /// refusal reaches past Metal).
     SampleCount,
     /// A copy of whole textures with no levels of one size, where plain Metal aborts; or a copy
-    /// between compressed levels of different sizes, not measured. (Other levels of different
-    /// sizes copy their common region, and whole textures the levels and slices they share,
-    /// paired by size, as plain Metal copies them.)
+    /// between compressed levels of different sizes, which plain Metal copies. (Other levels of
+    /// different sizes copy their common region, and whole textures the levels and slices they
+    /// share, paired by size, as plain Metal copies them.)
     ///
-    /// Basis: unknown (no run on record names the device where plain Metal aborts over whole
-    /// textures of one size, and the copy between compressed levels of different sizes is
-    /// unmeasured).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: `copyFromTexture:` of level 0 of a BC1
+    /// 16 by 16 texture into level 0 of a BC1 8 by 8 one, through the level-counted selector,
+    /// completes with no error and writes the source's blocks over the destination's own, so that
+    /// half of the refusal reaches past Metal; the whole-texture copy of an 8 by 8 texture of 4
+    /// levels into a 3 by 3 one of 2 does end the process, SIGABRT, on `MTLPickLargestMip`'s
+    /// "Postcondition does not hold", where the 4 by 4 destination beside it copies).
     Size,
 }
 

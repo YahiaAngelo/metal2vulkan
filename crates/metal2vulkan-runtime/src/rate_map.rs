@@ -136,8 +136,9 @@ pub enum RateMapProblem {
     /// which ends Metal's process (`mapPhysicalToScreenCoordinates:` of such a map answers, and
     /// the runtime answers with it).
     ///
-    /// Basis: unknown (Metal's process ends as said above, but no run on record names the device or
-    /// release).
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal ends the process, SIGSEGV,
+    /// at `mapScreenToPhysicalCoordinates:forLayer:` of a map of a 64 by 0 screen, where
+    /// `mapPhysicalToScreenCoordinates:forLayer:` of that same map answers).
     EmptyScreen {
         /// The map's screen width.
         width: u32,
@@ -147,8 +148,9 @@ pub enum RateMapProblem {
     /// `mapPhysicalToScreenCoordinates:forLayer:` of a mutable map not yet reset, which ends
     /// Metal's process.
     ///
-    /// Basis: unknown (Metal's process ends as said above, but no run on record names the device or
-    /// release).
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal ends the process, SIGSEGV,
+    /// at `mapPhysicalToScreenCoordinates:forLayer:` of a map of a `Mutable` descriptor not yet
+    /// reset, where `mapScreenToPhysicalCoordinates:forLayer:` of that same map answers (0, 0)).
     NotCompiled,
 }
 

@@ -748,14 +748,19 @@ pub enum TextureProblem {
     Unspecialized,
     /// A rotation past 4 (Metal's descriptor validation asserts, plain too).
     ///
-    /// Basis: unknown (the run behind "plain too" above names no device or release, so plain
-    /// Metal's answer for a rotation past 4 is not on record here).
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal's descriptor validation
+    /// ends the process, SIGABRT, "rotation is not a valid MTLTextureRotation", at
+    /// `heapTextureSizeAndAlignWithDescriptor:` and at `newTextureWithDescriptor:iosurface:plane:`
+    /// of a rotation of 5, where a rotation of 4 beside it answers a size and makes the texture,
+    /// the API validation layer off).
     Rotation,
     /// A rotation other than 0 without `framebuffer_only` (Metal's descriptor validation
     /// asserts, plain too).
     ///
-    /// Basis: unknown (the run behind "plain too" above names no device or release, so plain
-    /// Metal's answer for a rotation without `framebuffer_only` is not on record here).
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: plain Metal's descriptor validation
+    /// ends the process, SIGABRT, "MTLTextureDescriptor has a non-zero rotation set but is not
+    /// marked as framebufferOnly", for a rotation of 1 without it, where a rotation of 0 without it
+    /// answers a size and a rotation of 1 with it makes the texture, the API validation layer off).
     RotationWithoutFramebufferOnly,
     /// `framebuffer_only` for a creator that makes no such texture: the device's, a buffer's or
     /// a heap's (plain Metal asserts "framebufferOnly == NO", or on the rotation).
