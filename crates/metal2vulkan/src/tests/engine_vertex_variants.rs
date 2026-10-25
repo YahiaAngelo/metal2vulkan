@@ -25,6 +25,13 @@
 //!   profile asks the shader to convert (`VertexNormalizedPolicy::Exact`), is decoded in the
 //!   shader, and each decode is its own code. Necessary, and the count of it is what the exact
 //!   form costs: 2 modules against 21 over the 45-format sweep.
+//! - **the step function: nothing, where the device fetches it.** Metal's constant step is a
+//!   Vulkan binding of divisor 0 and stride 0 (`metal::vertex::attribute_fetch`,
+//!   `link::vertex::binding_stride`), which is `VertexAttribute` and `VertexBinding` state and
+//!   names no instruction, so a constant-step sweep costs exactly what the per-vertex sweep costs.
+//!   Where that binding is not available -- the portability subset forbids a stride of 0, which is
+//!   what makes the fetch independent of the base instance -- every format is pulled instead and
+//!   the sweep is one module a creation: 45 of 45 on `moltenvk-m3`, 2 on a native driver.
 //!
 //! Counts, not times: a count is the same on a loaded host as on a quiet one. No GPU is used, and
 //! `llvm-as` assembles the fixture, so a missing tool skips visibly.
@@ -412,4 +419,217 @@ fn the_integer_attribute_sweep_compiles_thirty_four_modules_of_two_functions() {
         (2 + 2 * FORMATS.len(), 2 + 2 * FORMATS.len()),
         "projections and modules of {creations} creations"
     );
+}
+
+/// Native drivers where a constant-step binding is available: the two divisor features,
+/// `supportsNonZeroFirstInstance`, and no portability subset to forbid a stride of 0.
+const NATIVE: [&str; 4] = [
+    "intel-arl-anv",
+    "nvidia-rtx5080-laptop",
+    "amd-780m-radv",
+    "intel-irisxe-anv",
+];
+
+/// `vertex-format-constant-step`'s own sweep on the venue its recordings were taken on: the
+/// portability subset's `minVertexInputBindingStrideAlignment` forbids the stride of 0 a
+/// constant-step binding needs, so every one of the 45 formats is decoded in the shader and the
+/// sweep is **45** modules -- one a creation, the whole explosion. The pulled fetch carries the
+/// format, the offset and the layout, so no two of the 45 share a projection either.
+#[test]
+fn the_constant_step_sweep_pulls_every_format_on_a_portability_device() {
+    let Some(bc) = fixture() else { return };
+    let got = count(&bc, &prof(), TO_FLOAT4, VertexStepFunction::Constant);
+    assert_eq!(got.creations, 45, "the swept formats");
+    assert_eq!(
+        got.pulled.len(),
+        45,
+        "every format of the sweep is pulled on {PROFILE}"
+    );
+    assert_eq!(
+        (got.projections, got.modules),
+        (45, 45),
+        "projections and modules of {} creations",
+        got.creations
+    );
+}
+
+/// The same sweep where a constant-step binding is available: fixed-function vertex input fetches
+/// the formats the per-vertex sweep fetches, so the constant step costs exactly what the
+/// per-vertex step costs -- **two** modules over the 45 creations, one per `narrow_float`, the
+/// only thing of the format a fixed-function module's instructions name; and one for a `half`
+/// read, which canonicalizes no widening. 45 modules to 2. A format the device does not accept as
+/// a vertex buffer is pulled under either step and is named as such, not as a step the step
+/// function costs (`FloatRGB9E5` on the Intel profiles).
+#[test]
+fn a_constant_step_binding_compiles_two_modules_for_the_whole_sweep() {
+    let Some(bc) = fixture() else { return };
+    for stem in NATIVE {
+        let p = profile(stem, DevicePolicy::default()).expect("committed profile");
+        let got = count(&bc, &p, TO_FLOAT4, VertexStepFunction::Constant);
+        let per_vertex = count(&bc, &p, TO_FLOAT4, VertexStepFunction::PerVertex);
+        assert_eq!(got.creations, 45, "{stem}: the swept formats");
+        assert_eq!(
+            got.pulled, per_vertex.pulled,
+            "{stem}: the constant step pulls what the per-vertex step pulls and no more"
+        );
+        assert_eq!(
+            (got.projections, got.modules),
+            (per_vertex.projections, per_vertex.modules),
+            "{stem}: the constant-step sweep costs what the per-vertex sweep costs"
+        );
+        let half = count(&bc, &p, TO_HALF4, VertexStepFunction::Constant);
+        let half_per_vertex = count(&bc, &p, TO_HALF4, VertexStepFunction::PerVertex);
+        assert_eq!(
+            (half.projections, half.modules),
+            (half_per_vertex.projections, half_per_vertex.modules),
+            "{stem}: the same for a `half` read"
+        );
+        // The absolute figure where the device accepts every swept format as a vertex buffer.
+        if got.pulled.is_empty() {
+            assert_eq!(
+                (got.projections, got.modules, half.projections, half.modules),
+                (2, 2, 1, 1),
+                "{stem}: projections and modules of {} creations",
+                got.creations
+            );
+        } else {
+            assert_eq!(
+                got.pulled,
+                vec!["MTLVertexFormatFloatRGB9E5"],
+                "{stem}: the formats the device does not fetch as a vertex buffer"
+            );
+            assert_eq!(
+                (got.projections, got.modules, half.projections, half.modules),
+                (3, 3, 2, 2),
+                "{stem}: projections and modules of {} creations",
+                got.creations
+            );
+        }
+    }
+}
+
+/// `integer-vertex-attributes`' sweep where a constant-step binding is available: the step
+/// function is not key data of a fixed-function fetch and an unnormalized integer format is not
+/// narrow-float, so all 64 creations -- 16 formats, 2 entry points, 2 step functions -- share
+/// **two** modules, one an entry point. 34 modules to 2.
+#[test]
+fn the_integer_attribute_sweep_compiles_two_modules_where_the_constant_step_is_fixed_function() {
+    let Some(bc) = fixture() else { return };
+    const FORMATS: [VertexFormat; 16] = [
+        VertexFormat::UChar,
+        VertexFormat::UChar2,
+        VertexFormat::UChar3,
+        VertexFormat::UChar4,
+        VertexFormat::Char,
+        VertexFormat::Char2,
+        VertexFormat::Char3,
+        VertexFormat::Char4,
+        VertexFormat::UShort,
+        VertexFormat::UShort2,
+        VertexFormat::UShort3,
+        VertexFormat::UShort4,
+        VertexFormat::Short,
+        VertexFormat::Short2,
+        VertexFormat::Short3,
+        VertexFormat::Short4,
+    ];
+    let stride = SLOT * FORMATS.len() as u32;
+    for stem in NATIVE {
+        let p = profile(stem, DevicePolicy::default()).expect("committed profile");
+        let mut projections = BTreeSet::new();
+        let mut modules = BTreeSet::new();
+        let mut creations = 0;
+        let mut pulled = 0;
+        for entry in [TO_FLOAT4, TO_HALF4] {
+            for step in [VertexStepFunction::PerVertex, VertexStepFunction::Constant] {
+                for (at, &format) in FORMATS.iter().enumerate() {
+                    creations += 1;
+                    let proj = projection(&p, entry, format, at, stride, step);
+                    if matches!(proj.attributes[&0], VertexFetch::Pulled { .. }) {
+                        pulled += 1;
+                    }
+                    modules.insert(words(&bc, &p, entry, &proj));
+                    projections.insert((entry, proj));
+                }
+            }
+        }
+        assert_eq!(creations, 64, "{stem}: the sweep's pipelines");
+        assert_eq!(
+            pulled, 0,
+            "{stem}: every integer format is fetched in fixed function under either step"
+        );
+        assert_eq!(
+            (projections.len(), modules.len()),
+            (2, 2),
+            "{stem}: projections and modules of {creations} creations"
+        );
+    }
+}
+
+/// What makes the constant-step binding exact, stated as the fetch it is: instance rate with a
+/// divisor of 0, which reads element `firstInstance` at the binding's stride, on a binding link
+/// emits with a stride of 0 -- so element 0 for every base instance, as Metal's constant step
+/// fetches the layout's first element for every base instance. Each of the four conditions
+/// withheld on its own puts the fetch back in the shader.
+#[test]
+fn a_constant_step_is_a_zero_divisor_only_where_a_zero_stride_is_legal() {
+    use crate::device::requirements::VkFeature;
+    use crate::metal::vertex::{attribute_fetch, AttributeFetch};
+    use crate::pipeline::testing::description;
+    let format = VertexFormat::Float4;
+    let fetch = |p: &DeviceProfile| attribute_fetch(format, VertexStepFunction::Constant, 0, p);
+    let zero_divisor = AttributeFetch::FixedFunction {
+        format: crate::vk::Format::R32G32B32A32_SFLOAT,
+        input_rate: crate::vk::VertexInputRate::INSTANCE,
+        divisor: 0,
+    };
+    let derive = |desc: crate::device::DeviceDescription| {
+        crate::device::Device::new(desc, DevicePolicy::default())
+            .expect("the description derives")
+            .profile()
+            .clone()
+    };
+    for stem in NATIVE {
+        let desc = description(stem).expect("committed description");
+        assert_eq!(fetch(&derive(desc.clone())), Ok(zero_divisor), "{stem}");
+        for withheld in [
+            VkFeature::VertexAttributeInstanceRateZeroDivisor,
+            VkFeature::VertexAttributeInstanceRateDivisor,
+        ] {
+            let mut d = desc.clone();
+            d.features.remove(&withheld);
+            assert_eq!(
+                fetch(&derive(d)),
+                Ok(AttributeFetch::Pulled),
+                "{stem} without {withheld:?}"
+            );
+        }
+        let mut d = desc.clone();
+        d.limits.supports_non_zero_first_instance = false;
+        assert_eq!(
+            fetch(&derive(d)),
+            Ok(AttributeFetch::Pulled),
+            "{stem} without supportsNonZeroFirstInstance"
+        );
+        let mut d = desc.clone();
+        d.limits.min_vertex_input_binding_stride_alignment = Some(1);
+        assert_eq!(
+            fetch(&derive(d)),
+            Ok(AttributeFetch::Pulled),
+            "{stem} under the portability subset's stride rule"
+        );
+    }
+    // The venue the recordings come from carries that rule, and reports the features.
+    let m3 = prof();
+    assert!(
+        m3.fields().fragment.vertex_attribute_zero_divisor
+            && m3.fields().limits.supports_non_zero_first_instance,
+        "{PROFILE} reports the zero divisor and a nonzero first instance"
+    );
+    assert_eq!(
+        m3.fields().limits.min_vertex_input_binding_stride_alignment,
+        Some(1),
+        "{PROFILE} is a portability device whose vertex stride must be at least 1"
+    );
+    assert_eq!(fetch(&m3), Ok(AttributeFetch::Pulled), "{PROFILE}");
 }

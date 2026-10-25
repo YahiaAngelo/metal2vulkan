@@ -22,20 +22,27 @@
 //!    (`memory::contain::encoding`: containment on and no buffer robustness): Vulkan bounds
 //!    fixed-function input only under robust buffer access (`VUID-vkCmdDraw-None-02721`), and a
 //!    Metal draw may fetch past its buffer, so the fetch moves into the shader behind the check.
-//!    Every later item then finds no fixed-function attribute;
+//!    Every later item then finds no fixed-function attribute.
+//!    A layout of Metal's **constant step** is answered there with a divisor of 0, whose binding
+//!    this module emits with a **stride of 0** ([`binding_stride`]): Vulkan's zero divisor fetches
+//!    element `firstInstance`, Metal's constant step the first element whatever the base instance,
+//!    and a stride of 0 is what makes those the same bytes for every draw. Items 3, 4 and 6 read
+//!    the stride the binding carries and not the layout's, so such a binding meets their limits as
+//!    a stride of 0 does -- including the portability subset's, which a stride of 0 fails, so the
+//!    constant step stays pulled there;
 //! 3. **alignment**: Metal lets a stride and an attribute offset be any byte multiple on Apple5 and
 //!    later, while Vulkan's fixed-function attribute address must be a multiple of the format's
 //!    component size (of the whole format for a packed one). An attribute whose offset or static
-//!    layout stride is not such a multiple is pulled (the pulled fetch reads bytes), and so is one
+//!    binding stride is not such a multiple is pulled (the pulled fetch reads bytes), and so is one
 //!    whose static stride breaks the portability subset's rule (a multiple of
 //!    `minVertexInputBindingStrideAlignment` and at least as large), or that ends past its static
 //!    stride where the subset withholds `vertexAttributeAccessBeyondStride`;
-//! 4. an attribute whose offset or layout stride exceeds `maxVertexInputAttributeOffset` /
+//! 4. an attribute whose offset or binding stride exceeds `maxVertexInputAttributeOffset` /
 //!    `maxVertexInputBindingStride` is pulled;
 //! 5. while the fixed-function attributes exceed `maxVertexInputAttributes` or their layouts
 //!    `maxVertexInputBindings`, the highest fixed-function attribute is pulled. Locations are
 //!    dense in attribute order, so an attribute's index itself is never a limit;
-//! 6. when the strides are dynamic state (`strides_dynamic`: a fixed-function layout's stride
+//! 6. when the strides are dynamic state (`strides_dynamic`: a fixed-function binding's stride
 //!    is set per bind and the profile has dynamic strides), `vkCmdBindVertexBuffers2` passes
 //!    every binding's stride, static ones included, and a nonzero one must cover every
 //!    attribute the binding fetches (`VUID-vkCmdBindVertexBuffers2-pStrides-06209`): a
@@ -154,6 +161,23 @@ fn normalized_exactly(format: VertexFormat, p: &DeviceProfile) -> Result<bool, E
     ))
 }
 
+/// The stride the Vulkan binding of `fetch` on `layout` is emitted with (`None`: set per bind, a
+/// runtime fact the binder owns): **0** for Metal's constant step, which `metal::vertex::fetch_as`
+/// answers with a divisor of 0 and no other step can, and `layout`'s own otherwise.
+///
+/// A zero divisor fetches element `firstInstance` ("Vertex Input Extraction"), and Metal's
+/// constant step fetches the layout's first element whatever the base instance, so the binding
+/// must read the same bytes at every base instance: `firstInstance * 0`. The layout's own stride
+/// is not key data of a fetch that reads one element, and every limit below reads the stride the
+/// binding carries rather than the layout's, so a constant-step binding meets them as a stride of
+/// 0 does.
+fn binding_stride(fetch: AttributeFetch, layout: &VertexBufferLayoutDescriptor) -> Option<u32> {
+    match fetch {
+        AttributeFetch::FixedFunction { divisor: 0, .. } => Some(0),
+        _ => layout.stride,
+    }
+}
+
 /// Whether Vulkan's fixed-function attribute address can be aligned for `format` at `offset` in
 /// a layout of static stride `stride` (`None`: set per bind, a runtime fact the binder owns).
 fn aligned(format: VertexFormat, offset: u32, stride: Option<u32>) -> Result<bool, Error> {
@@ -197,7 +221,8 @@ fn resolve<'a>(
         )?;
         let (vk_format, fits) = class_format(attr.format, numeric, a)?;
         let mut fetch = fetch_as(vk_format, layout.step_function, layout.step_rate, p)?;
-        let beyond_stride = match (fetch, layout.stride) {
+        let emitted = binding_stride(fetch, layout);
+        let beyond_stride = match (fetch, emitted) {
             (AttributeFetch::FixedFunction { format, .. }, Some(stride)) => {
                 let size = format.block().map_or(u32::MAX, |b| b.size);
                 attr.offset.saturating_add(size) > stride
@@ -210,12 +235,10 @@ fn resolve<'a>(
                 && p.fields()
                     .enabled
                     .portability_withholds(VkFeature::VertexAttributeAccessBeyondStride))
-            || !aligned(attr.format, attr.offset, layout.stride)?
-            || layout.stride.is_some_and(|s| !l.portable_vertex_stride(s))
+            || !aligned(attr.format, attr.offset, emitted)?
+            || emitted.is_some_and(|s| !l.portable_vertex_stride(s))
             || attr.offset > l.max_vertex_input_attribute_offset
-            || layout
-                .stride
-                .is_some_and(|s| s > l.max_vertex_input_binding_stride);
+            || emitted.is_some_and(|s| s > l.max_vertex_input_binding_stride);
         if pulled {
             fetch = AttributeFetch::Pulled;
         }
@@ -255,12 +278,12 @@ fn resolve<'a>(
         p,
         out.values()
             .filter(|r| matches!(r.fetch, AttributeFetch::FixedFunction { .. }))
-            .map(|r| r.layout.stride),
+            .map(|r| binding_stride(r.fetch, r.layout)),
     );
     if dynamic {
         for r in out.values_mut() {
             if let (AttributeFetch::FixedFunction { format, .. }, Some(stride)) =
-                (r.fetch, r.layout.stride)
+                (r.fetch, binding_stride(r.fetch, r.layout))
             {
                 let size = format.block().map_or(u32::MAX, |b| b.size);
                 if stride != 0 && r.attr.offset.saturating_add(size) > stride {
@@ -289,10 +312,10 @@ fn resolve<'a>(
 }
 
 /// Whether a render pipeline's vertex strides are dynamic state
-/// (`VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE`) on `p` for fixed-function layouts of
-/// `strides` (`None`: set per bind): the profile has dynamic strides (extended dynamic state)
-/// and some layout's stride is set per bind. Link's graphics state declares the dynamic state
-/// exactly then, and the projection checks static strides against it (item 6).
+/// (`VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE`) on `p` for fixed-function bindings of
+/// `strides` ([`binding_stride`]; `None`: set per bind): the profile has dynamic strides (extended
+/// dynamic state) and some binding's stride is set per bind. Link's graphics state declares the
+/// dynamic state exactly then, and the projection checks static strides against it (item 6).
 pub(crate) fn strides_dynamic(
     p: &DeviceProfile,
     mut strides: impl Iterator<Item = Option<u32>>,
@@ -441,7 +464,7 @@ pub fn vertex_input_state(
                     buffer_index: r.attr.buffer_index,
                     input_rate,
                     divisor,
-                    stride: match r.layout.stride {
+                    stride: match binding_stride(r.fetch, r.layout) {
                         Some(s) => VertexStride::Static(s),
                         None => VertexStride::PerBind,
                     },

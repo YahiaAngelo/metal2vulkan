@@ -141,7 +141,8 @@ pub const MAX_VERTEX_ALIGNMENT: u32 = 4;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AttributeFetch {
     /// Fixed-function vertex input of this format, with this binding input rate and divisor
-    /// (divisor 1 when not divided).
+    /// (divisor 1 when not divided, and 0 -- the same element for every instance -- for Metal's
+    /// constant step, whose binding link emits with a stride of 0).
     FixedFunction {
         format: vk::Format,
         input_rate: vk::VertexInputRate,
@@ -162,8 +163,22 @@ pub enum AttributeFetch {
 ///   it Vulkan requires `firstInstance == 0` for any divisor other than 1), else pulled. Vulkan
 ///   fetches at `firstInstance + (instance - firstInstance) / n`, the same element MoltenVK maps
 ///   Metal's step rate to (expected, not verified on Metal).
-/// - `Constant`: always pulled. Vulkan's zero divisor fetches at `firstInstance`, while Metal
-///   fetches the layout's first element whatever the base instance.
+/// - `Constant`: instance rate with divisor 0, on a binding `pipeline::link::vertex` emits with a
+///   **stride of 0**; pulled where that binding is not available. Metal fetches the layout's first
+///   element whatever the base instance, and Vulkan's zero divisor fetches at
+///   `firstInstance * stride` ("Vertex Input Extraction":
+///   `effectiveVertexOffset = firstInstance * stride` when `divisor` is 0), so the two name the
+///   same element for every draw exactly when that binding's stride is 0 -- which it can be,
+///   because a fetch that reads one element has no use for the layout's own stride. The binding
+///   needs `vertexAttributeInstanceRateZeroDivisor` and `vertexAttributeInstanceRateDivisor`
+///   (`VUID-VkVertexInputBindingDivisorDescription-vertexAttributeInstanceRateZeroDivisor-02228`
+///   and `-vertexAttributeInstanceRateDivisor-02229`), and, being a divisor other than 1 under a
+///   Metal draw that may carry a nonzero base instance, `supportsNonZeroFirstInstance`
+///   (VUID-vkCmdDraw-pNext-09461); and a stride of 0 must be legal, which the portability
+///   subset's `minVertexInputBindingStrideAlignment` forbids
+///   (`VUID-VkVertexInputBindingDescription-stride-04456`: at least as large as the alignment).
+///   Under `robustBufferAccess` a stride of 0 bounds the fetch at the bound range itself, which is
+///   the attribute extent the pulled fetch reads.
 /// - A format the profile cannot fetch as `VERTEX_BUFFER`: pulled.
 /// - Every attribute on a profile whose buffer containment is checked in the shader
 ///   (`contain::encoding` is `Check::InShader`: containment on, neither `robustBufferAccess`
@@ -214,6 +229,19 @@ pub(crate) fn fetch_as(
             }
             _ => return Ok(AttributeFetch::Pulled),
         },
+        // Metal's constant step reads the layout's first element whatever the base instance, and a
+        // zero divisor reads element `firstInstance`: the same element for every draw exactly on a
+        // binding of stride 0, which link emits for this fetch and the portability subset forbids.
+        // A divisor other than 1 also needs a nonzero `firstInstance` to be legal at all, as a
+        // Metal draw may carry a base instance (the `PerInstance` arm above).
+        VertexStepFunction::Constant
+            if f.fragment.vertex_attribute_divisor
+                && f.fragment.vertex_attribute_zero_divisor
+                && f.limits.supports_non_zero_first_instance
+                && f.limits.portable_vertex_stride(0) =>
+        {
+            (vk::VertexInputRate::INSTANCE, 0)
+        }
         VertexStepFunction::Constant => return Ok(AttributeFetch::Pulled),
         VertexStepFunction::PerPatch | VertexStepFunction::PerPatchControlPoint => {
             return Err(Unsupported::not_implemented(Feature::Tessellation).into())

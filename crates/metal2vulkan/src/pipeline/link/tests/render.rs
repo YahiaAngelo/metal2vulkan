@@ -672,6 +672,51 @@ fn limits_pull_attributes_and_a_foreign_projection_is_refused() {
     );
 }
 
+/// A constant-step layout links to one binding of instance rate, divisor 0 and **stride 0**: the
+/// zero divisor fetches element `firstInstance` at that stride, so a stride of 0 reads the
+/// layout's first element for every base instance, which is what Metal's constant step reads. The
+/// layout's own stride does not reach the binding -- here it is set per bind
+/// (`MTLBufferLayoutStrideDynamic`) and the binding is static all the same, because a fetch of one
+/// element has no use for a stride. On the portability subset, where a stride of 0 is illegal, the
+/// attribute stays pulled (`limits_pull_attributes_and_a_foreign_projection_is_refused`).
+#[test]
+fn a_constant_step_links_to_a_zero_divisor_binding_of_zero_stride() {
+    let p = profile("nvidia-rtx5080-laptop");
+    let mut d = descriptor();
+    d.layouts.get_mut(&3).expect("layout 3").step_function = VertexStepFunction::Constant;
+    let proj =
+        vertex::vertex_fetch_projection(Some(&d), &floats(&[0, 1, 4]), &p).expect("projection");
+    assert_eq!(
+        proj.attributes[&4],
+        VertexFetch::FixedFunction {
+            narrow_float: false
+        }
+    );
+    let vs = vertex_stage(&p, &d, &[0, 1, 4]);
+    let va = artifact(vs, None);
+    let l = link(&[&va], &render_with(d), &p).expect("link");
+    let vi = &l.vertex_input;
+    assert!(vi.pulled.is_empty());
+    let binds: Vec<(u32, vk::VertexInputRate, u32, VertexStride)> = vi
+        .bindings
+        .iter()
+        .map(|b| (b.buffer_index, b.input_rate, b.divisor, b.stride))
+        .collect();
+    assert_eq!(
+        binds,
+        vec![
+            (0, vk::VertexInputRate::VERTEX, 1, VertexStride::Static(32)),
+            (3, vk::VertexInputRate::INSTANCE, 0, VertexStride::Static(0)),
+        ]
+    );
+    // The one layout whose stride is set per bind reads it no longer, so the pipeline needs no
+    // dynamic stride state for it.
+    let g = l.graphics.as_ref().expect("graphics");
+    assert!(!g
+        .dynamic_states
+        .contains(&vk::DynamicState::VERTEX_INPUT_BINDING_STRIDE));
+}
+
 /// An attribute is fixed function when fixed-function input delivers the class the shader
 /// declares (`float` for float, normalized, and packed formats, `uint` for unsigned-integer
 /// ones), and so is an unnormalized 8- or 16-bit integer format read into a `float` attribute,
