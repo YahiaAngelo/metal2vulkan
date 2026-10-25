@@ -737,3 +737,39 @@ fn only_a_map_that_moves_a_constexpr_mode_enters_the_variant() {
     // A slot with no texture bound takes no map.
     assert!(address_map_variant(&repeat, &BindShape::default()).is_empty());
 }
+
+/// A stage's dropped-store word reaches the shape over the slots it binds a buffer at, and is
+/// what `SpecKey::DroppedStoreSlots` takes there: a bit of a slot the state binds nothing at names
+/// nothing a store can reach, so the shape leaves it out and one set of bindings keeps one shape
+/// whatever the runtime has recorded for its empty slots.
+#[test]
+fn a_dropped_store_word_covers_the_slots_the_shape_binds() {
+    let bound = |length| BoundBuffer::Buffer {
+        length,
+        offset: 0,
+        gpu_address: 0x1000,
+        device_address: None,
+        attribute_stride: None,
+    };
+    let mut state = BindState::default();
+    let table = state.stages.entry(Stage::Kernel).or_default();
+    table.buffers.insert(0, bound(64));
+    table.buffers.insert(2, bound(64));
+    // Slots 0 and 1 drop their writes; nothing is bound at 1.
+    table.dropped_store_buffers = 0b011;
+    let shape = state.shape();
+    assert_eq!(shape.stages[&Stage::Kernel].dropped_store_buffers, 0b001);
+    assert_eq!(dropped_store_slots(&shape, Stage::Kernel), 0b001);
+    // A stage the shape holds nothing for drops nothing.
+    assert_eq!(dropped_store_slots(&shape, Stage::Fragment), 0);
+    // The state answers its own shape, the word included, without making it again.
+    assert!(state.has_shape(&shape));
+    // The bit alone decides the word: the same bindings with it clear give 0, and the shapes
+    // differ, so a plan is not reused across the change.
+    let table = state.stages.entry(Stage::Kernel).or_default();
+    table.dropped_store_buffers = 0;
+    let kept = state.shape();
+    assert_eq!(dropped_store_slots(&kept, Stage::Kernel), 0);
+    assert_ne!(kept, shape);
+    assert!(!state.has_shape(&shape));
+}

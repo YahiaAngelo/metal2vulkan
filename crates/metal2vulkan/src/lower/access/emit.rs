@@ -7,7 +7,7 @@ use crate::lower::emit::EmitCx;
 use crate::memory::contain::{self, Check};
 use crate::memory::leaf::{self, k32, u32_op, Leaf, Units, WordMem, WordOps};
 use crate::memory::views::{self, UnitViews, View, ViewKind};
-use crate::pipeline::sym::PushField;
+use crate::pipeline::sym::{PushField, SpecKey};
 use crate::spirv::builder::constructs::{ArmEnd, ArmFn};
 use crate::spirv::builder::FunctionBuilder;
 use crate::spirv::error::BResult;
@@ -245,18 +245,49 @@ pub(super) struct Prepared {
     /// A store needs `if_(inb)`: a view's out-of-bounds offset is not redirected (a PSB access
     /// already points at the sink).
     pub(super) guard_store: bool,
+    /// The draw's or dispatch's word says the slot's memory keeps the GPU's writes: a store runs
+    /// only where it holds, so a store through memory whose writes Metal drops is dropped
+    /// ([`writable`], `SpecKey::DroppedStoreSlots`). `None` where the access stores nothing, or at
+    /// a slot no guest buffer can be bound to.
+    pub(super) writable: Option<SValue>,
 }
 
-/// Prepare `t` for an access of `n` bytes at Metal offset `m`.
+/// Whether the draw's or dispatch's `SpecKey::DroppedStoreSlots` word leaves `slot`'s stores
+/// standing: `(word >> slot.index) & 1 == 0`, one uniform word read and three uniform
+/// instructions, which every store through the slot branches on. `None` at a slot that is not a
+/// guest buffer slot of the stage's argument table (a synthetic binding, which the runtime owns
+/// and never places over a caller's read-only pages) and so has no bit of the word.
+fn writable(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    slot: crate::pipeline::sym::SlotRef,
+) -> BResult<Option<SValue>> {
+    if slot.class != crate::pipeline::sym::SlotClass::Buffer || slot.index >= u32::BITS {
+        return Ok(None);
+    }
+    let field = PushField::Specialized(SpecKey::DroppedStoreSlots(slot.stage));
+    let word = cx.push_field(fb, field)?;
+    let bit = k32(fb, 1 << slot.index)?;
+    let dropped = u32_op(fb, BinOp::BitwiseAnd, word, bit)?;
+    let zero = k32(fb, 0)?;
+    Ok(Some(fb.binary(BinOp::IEqual, dropped, zero)?))
+}
+
+/// Prepare `t` for an access of `n` bytes at Metal offset `m`, which stores where `store`.
 pub(super) fn prepare(
     cx: &mut EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,
     t: &Target,
     m: SValue,
     n: u32,
+    store: bool,
 ) -> BResult<Prepared> {
     let Some(choice) = cx.plan.slots.get(t.slot).copied().flatten() else {
         return Err(cx.fail("an access names an unplanned slot"));
+    };
+    let writable = match store {
+        true => writable(cx, fb, choice.slot)?,
+        false => None,
     };
     let lowering = cx.plan.families.access.slots.get(t.slot).copied().flatten();
     let ops = WordOps::of(crate::lower::sync::memory_model::coherence(cx.plan));
@@ -269,6 +300,7 @@ pub(super) fn prepare(
             off: a.off,
             inb: a.inb,
             guard_store: false,
+            writable,
         });
     }
     let Some(view) = cx.decl.families.access.views.get(t.slot).copied().flatten() else {
@@ -323,6 +355,7 @@ pub(super) fn prepare(
         off,
         inb,
         guard_store,
+        writable,
     })
 }
 
@@ -339,12 +372,19 @@ fn load_one(fb: &mut FunctionBuilder<'_>, leaf: &Leaf, p: Prepared) -> BResult<S
     }
 }
 
-/// Store `v` as `leaf` at `p`, contained. Returns whether the store merges a partial word
-/// ([`leaf::store`]).
+/// Store `v` as `leaf` at `p`, contained and only where the slot's memory keeps the GPU's writes
+/// ([`Prepared::writable`]). Returns whether the store merges a partial word ([`leaf::store`]).
 fn store_one(fb: &mut FunctionBuilder<'_>, leaf: &Leaf, p: Prepared, v: SValue) -> BResult<bool> {
     let mut mem = p.mem;
-    match (p.inb, p.guard_store) {
-        (Some(inb), true) => {
+    let contained = p.guard_store.then_some(p.inb).flatten();
+    let guard = match (contained, p.writable) {
+        (Some(inb), Some(keeps)) => Some(fb.binary(BinOp::LogicalAnd, inb, keeps)?),
+        (Some(inb), None) => Some(inb),
+        (None, Some(keeps)) => Some(keeps),
+        (None, None) => None,
+    };
+    match guard {
+        Some(guard) => {
             let leaf = *leaf;
             let then: ArmFn<'_, bool> = Box::new(move |fb, merged| {
                 let mut mem = p.mem;
@@ -352,10 +392,10 @@ fn store_one(fb: &mut FunctionBuilder<'_>, leaf: &Leaf, p: Prepared, v: SValue) 
                 Ok(ArmEnd::FallThrough(Vec::new()))
             });
             let mut merged = false;
-            fb.if_(&mut merged, inb, then, None)?;
+            fb.if_(&mut merged, guard, then, None)?;
             Ok(merged)
         }
-        _ => leaf::store(fb, &mut mem, leaf, p.off, v),
+        None => leaf::store(fb, &mut mem, leaf, p.off, v),
     }
 }
 
@@ -421,7 +461,7 @@ pub(super) fn access_at(
     };
     let mut prepared = Vec::with_capacity(a.targets.len());
     for t in &a.targets {
-        let mut p = prepare(cx, fb, t, m, a.leaf.bytes)?;
+        let mut p = prepare(cx, fb, t, m, a.leaf.bytes, stored.is_some())?;
         p.mem = p.mem.with(ops);
         prepared.push((t.root, t.slot, p));
     }

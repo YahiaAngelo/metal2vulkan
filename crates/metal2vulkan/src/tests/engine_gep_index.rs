@@ -140,7 +140,9 @@ fn push_bytes(plan: &Plan) -> Vec<u8> {
         assert!(
             matches!(
                 f.field,
-                PushField::SlotBindOffset(_) | PushField::DispatchRegion
+                PushField::SlotBindOffset(_)
+                    | PushField::DispatchRegion
+                    | PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(_))
             ),
             "{:?}",
             f.field
@@ -708,7 +710,8 @@ fn push_fields_in_the_argument_table_are_read_exactly() {
                 .filter(|f| matches!(f.loc, PushLoc::ArgumentTable { .. }))
                 .map(|f| f.field)
                 .collect();
-            assert_eq!(spilled.len(), 7, "{what}: {spilled:?}");
+            // Seven slot residuals and the stage's dropped-store word.
+            assert_eq!(spilled.len(), 8, "{what}: {spilled:?}");
             assert_eq!(a.interface.push.argument_table_size, 32, "{what}");
             let (table, _) = link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{what}: {e}"));
             assert!(table.bindings.contains_key(&table_slot), "{what}");
@@ -721,6 +724,10 @@ fn push_fields_in_the_argument_table_are_read_exactly() {
                     PushField::SlotBindOffset(s) => residual(s.index),
                     // `MultiRegion` is 0: the region is not read.
                     PushField::DispatchRegion => continue,
+                    // No slot's writes dropped: the word stays 0.
+                    PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(_)) => {
+                        continue
+                    }
                     other => panic!("{what}: unexpected {other:?}"),
                 };
                 let (bytes, at) = match f.loc {

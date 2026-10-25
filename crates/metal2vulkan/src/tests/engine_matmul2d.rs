@@ -223,7 +223,11 @@ fn resources(plan: &Plan, threads: u32, init: &[Vec<u8>]) -> Resources {
             matches!(
                 (f.field, f.loc),
                 (
-                    PushField::SlotBindOffset(_) | PushField::DispatchRegion,
+                    PushField::SlotBindOffset(_)
+                        | PushField::DispatchRegion
+                        | PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(
+                            _
+                        )),
                     PushLoc::Push { .. }
                 )
             ),

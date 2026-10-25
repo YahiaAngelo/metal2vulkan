@@ -212,7 +212,9 @@ fn run_all(
         assert!(
             matches!(
                 f.field,
-                PushField::SlotBindOffset(_) | PushField::DispatchRegion
+                PushField::SlotBindOffset(_)
+                    | PushField::DispatchRegion
+                    | PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(_))
             ),
             "unexpected push field {f:?}"
         );

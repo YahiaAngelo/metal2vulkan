@@ -382,7 +382,9 @@ fn run_case(plan: &Plan, m: &TypedModule, c: Case, lanes: SubgroupSize) -> Vec<u
         assert!(
             matches!(
                 f.field,
-                PushField::SlotBindOffset(_) | PushField::DispatchRegion
+                PushField::SlotBindOffset(_)
+                    | PushField::DispatchRegion
+                    | PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(_))
             ),
             "unexpected push field {f:?}"
         );

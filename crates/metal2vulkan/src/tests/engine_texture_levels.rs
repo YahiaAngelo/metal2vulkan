@@ -204,6 +204,8 @@ fn push_bytes(plan: &Plan, levels: &[(u32, u32)]) -> Vec<u8> {
             (PushField::TextureHalfChannels(_), PushLoc::Push { .. }) => {}
             // A bound value read as data, which the interpreter writes from `spec`.
             (PushField::Specialized(_), PushLoc::Push { .. }) => {}
+            // No slot's writes dropped: the word stays 0.
+            (PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(_)), _) => {}
             other => panic!("unexpected push field {other:?}"),
         }
     }

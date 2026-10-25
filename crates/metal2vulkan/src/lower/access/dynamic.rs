@@ -537,6 +537,9 @@ fn static_access(
             return Err(cx.invariant("a pointer store through a uniform view"));
         }
         cx.push.insert(PushField::SlotBindOffset(plan.slot));
+        if write {
+            super::request_dropped_store_word(cx, plan.slot);
+        }
     }
     Ok(Access {
         ptr: operand(cx, ptr)?,

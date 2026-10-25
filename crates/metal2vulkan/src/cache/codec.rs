@@ -817,6 +817,7 @@ codec_enum! {
         ObjectLocalSize(f0), ObjectFlatLocalSize, ObjectMultiRegion, SamplerMinLevel(f0),
         ConstantLanes(f0), UnmeasuredTexels(f0), BoundTexelFormat(f0), OffsetBaseAxes(f0),
         SamplerAnisotropy(f0), RangeAtBindOffset(f0), PlainHalfTexels(f0),
+        DroppedStoreSlots(f0),
     }
     PushField {
         RootTableAddress, ExecutionStatusAddress, DispatchRegion, BaseVertexInstance,

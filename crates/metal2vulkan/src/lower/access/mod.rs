@@ -140,7 +140,7 @@ use crate::pipeline::facts::{RuntimeFact, UniformViewChoice};
 use crate::pipeline::interface::{
     AccessSet, BufferForm, DescriptorView, PushLoc, PushPlacement, Window,
 };
-use crate::pipeline::sym::{PushField, SlotRef};
+use crate::pipeline::sym::{PushField, SlotClass, SlotRef, SpecKey};
 use crate::spirv::builder::{FunctionBuilder, ModuleBuilder};
 use crate::spirv::error::BResult;
 use crate::spirv::ids::{DemoteTy, TypeId, Value as SValue};
@@ -320,10 +320,20 @@ impl Access {
             Some(_) => leaf_words(&self.leaf).saturating_add(96),
             None => 0,
         };
+        // A store's dropped-store guard, per target. Charged for a load too: a memory
+        // intrinsic's endpoint and a stored pointer carry no `value` here, so the access cannot
+        // tell a store from a load, and the estimate must bound what emission writes.
+        let guard = DROPPED_STORE_GUARD_WORDS.saturating_mul(self.targets.len() as u32);
         per.saturating_add(blob)
+            .saturating_add(guard)
             .saturating_add(16u32.saturating_mul(self.targets.len() as u32 + 2))
     }
 }
+
+/// SPIR-V words of one store's dropped-store guard: the stage's `SpecKey::DroppedStoreSlots`
+/// word read from its push field or the argument table, the bit test, and the selection the store
+/// runs in (`emit::store_one`).
+const DROPPED_STORE_GUARD_WORDS: u32 = 64;
 
 fn leaf_words(l: &Leaf) -> u32 {
     l.cost()
@@ -1989,8 +1999,10 @@ fn blob_roots(
 }
 
 /// Give each of `targets` the profile's containment check and read its slot's `SlotBindOffset`;
-/// a written target is a storage view. Every static-root access places its targets here
-/// ([`access_with_leaf`], `copy::endpoint`).
+/// a written target is a storage view. A written target also reads the draw's or dispatch's
+/// `SpecKey::DroppedStoreSlots` word, which gates every store through the slot
+/// (`emit::store_one`), so only a function that stores through a buffer slot reads it. Every
+/// static-root access places its targets here ([`access_with_leaf`], `copy::endpoint`).
 fn place_targets(cx: &mut SelectCx<'_>, targets: &mut [Target], write: bool) -> Result<(), Error> {
     let check = contain::encoding(cx.profile);
     for t in targets {
@@ -2004,8 +2016,25 @@ fn place_targets(cx: &mut SelectCx<'_>, targets: &mut [Target], write: bool) -> 
             return Err(cx.invariant("a write through a uniform view"));
         }
         cx.push.insert(PushField::SlotBindOffset(plan.slot));
+        if write {
+            request_dropped_store_word(cx, plan.slot);
+        }
     }
     Ok(())
+}
+
+/// Read the stage's `SpecKey::DroppedStoreSlots` word where a store through `slot` branches on it:
+/// a guest buffer slot of the stage's argument table, the only slot a caller's memory is bound to
+/// (`emit::writable` reads the same predicate, so every selection that emits a store through a
+/// static root asks here). A synthetic binding the runtime owns has no bit of the word and no
+/// branch.
+pub(super) fn request_dropped_store_word(cx: &mut SelectCx<'_>, slot: SlotRef) {
+    if slot.class == SlotClass::Buffer && slot.index < u32::BITS {
+        cx.push
+            .insert(PushField::Specialized(SpecKey::DroppedStoreSlots(
+                slot.stage,
+            )));
+    }
 }
 
 /// Give each slot of `targets` the unit views that read or write `leaf` (a store when `write`)

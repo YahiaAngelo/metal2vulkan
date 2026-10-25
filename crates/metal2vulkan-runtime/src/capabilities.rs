@@ -347,6 +347,28 @@ impl DeviceProperties {
         metal2vulkan::metal::TextureWriteRoundingMode::from_raw(mode).is_ok()
     }
 
+    /// Whether this device keeps the GPU's writes out of read-only memory as Metal does
+    /// everywhere Metal does: no-copy memory made with
+    /// [`ResourceOptions::PRIVATE_BIT`](crate::ResourceOptions::PRIVATE_BIT), Metal's private
+    /// option bit 24, which is what marks a range read-only (the companion of Apple's
+    /// `replaceBackingWithRanges:readOnly:`). Metal has no query of its own for this: it is one of
+    /// the runtime's, so that a consumer can tell what it may stop guarding.
+    ///
+    /// A shader's stores through a buffer slot bound to such memory are dropped on **every**
+    /// device, whatever this answers: the stage's dropped-store word gates them
+    /// (`read_only_view.rs`). This answers yes only where the memory itself takes the GPU's
+    /// writes nowhere, so that Metal's other shapes hold too: a store through an address loaded out
+    /// of an argument buffer or a pointer, a blit fill and a visibility result all complete and
+    /// leave the pages as they were, and a colour attachment with
+    /// [`StoreAction::Store`](crate::StoreAction::Store), a resolve target or a depth or stencil
+    /// attachment over such memory ends its command buffer in error. On macOS, where the device
+    /// imports the pages through a read-only view of them, that is yes; elsewhere the import is of
+    /// the caller's own pages and this answers no, with the difference announced
+    /// ([`Degradation::PrivateResourceOption`](crate::Degradation::PrivateResourceOption)).
+    pub fn drops_gpu_writes_to_read_only_memory(&self) -> bool {
+        crate::read_only_view::VIEWS_DROP_WRITES
+    }
+
     /// `minimumLinearTextureAlignmentForPixelFormat:`: the alignment of a texture's offset and
     /// rows in a buffer, 16 bytes for every format a buffer can back, as Metal answers on an M3 Max
     /// and an M4. Refused, `Invalid` with

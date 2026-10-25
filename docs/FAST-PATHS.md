@@ -284,6 +284,29 @@ recorded here.
 Open differences from Metal that no note announces yet, and runtime costs still above the
 driver's. Each is open work.
 
+- **GPU writes into read-only memory are dropped only through a bound buffer slot.** A shader's
+  stores through a slot bound to memory whose GPU writes Metal drops (no-copy memory of its private
+  option bit 24, or pages replaced read-only) are now dropped in the shader, gated on a uniform
+  per-draw and per-dispatch word (`SpecKey::DroppedStoreSlots`). Four shapes stay open. A store
+  through an address loaded out of an argument buffer or a pointer names no slot and no bit, so the
+  word does not reach it; an atomic is not gated, because what Metal's atomics do to such memory is
+  unmeasured; a blit fill and a visibility result are not a shader's stores and the runtime does not
+  drop them; and a render pass's own store-out over such memory must instead end its command buffer
+  in error (`MTLCommandBufferErrorDomain` / `kIOGPUCommandBufferCallbackErrorPageFault`), which the
+  runtime does not do. That last one is the store-out alone, measured on an M3 Max under macOS
+  27.0.1: a colour, depth, stencil or combined attachment over such memory at
+  `storeAction = DontCare` completes with its draw's own values, and `loadAction = Load` completes
+  too, so those shapes are ours to keep rather than refuse; the same attachments at
+  `storeAction = Store` fault, as does storing a multisample primary into such memory. Resolving
+  *into* such memory is unknown — no page fault in 520 processes, but almost all of them were
+  recovery victims, so the cell has no denominator — and nothing is built for it. On macOS the
+  import's read-only view of the pages keeps all of those out of the pages anyway, so the open
+  shapes are off macOS, where the import is of the
+  caller's own pages and the word is never set: making it set there means honouring bit 24 without
+  a read-only view (`Device::no_copy_options`, `host_lie`'s `drops_writes`) and measuring what the
+  drivers then do, since ANV lost the device and RADV failed every submission over read-only
+  imported pages. Announced meanwhile as `private-resource-option` and `read-only-pages-written`.
+
 - **A function linked from a module that declares function constants** is refused
   (`Unsupported{Linking; NotImplemented}` at a surviving call to the stub, `canon::link`), keyed on
   the module declaring any constant at all. Metal is narrower: it refuses only an *unresolved*

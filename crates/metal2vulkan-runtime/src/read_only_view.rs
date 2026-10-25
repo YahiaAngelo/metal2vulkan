@@ -12,17 +12,38 @@
 //!     kernel's stores, a vertex-stage store, a fragment-stage store, a kernel or fragment store
 //!     through an address loaded out of an argument buffer, and a pass's visibility result all
 //!     complete with no error, and neither the CPU nor a later command buffer sees any of it.
-//!   - **What a render pass's own machinery writes faults the command buffer.** A colour
-//!     attachment over such memory, a resolve into it, and a depth or stencil attachment in a heap
-//!     made with the bit end their command buffer with `MTLCommandBufferErrorDomain` /
-//!     `kIOGPUCommandBufferCallbackErrorPageFault`, on the first command buffer of a fresh
-//!     process, every run — and every later command buffer of that process then errors too.
-//!   - **Later commands of the same command buffer may read a dropped write back** from the GPU's
-//!     caches, and whether they do is not stable: a blit fill and both compute stores were visible
-//!     there in every run including the first of a fresh process, while the visibility result and
-//!     the three draw-stage stores were not visible there in the first run of a fresh process
-//!     (twelve of twelve) and were in seven runs of eight once the process had run them. It is not
-//!     a contract to reproduce.
+//!   - **What faults a render pass is the store-out, not the binding and not the read.** An
+//!     attachment over such memory that the pass does not store completes: a colour attachment at
+//!     `storeAction = DontCare` over 484 fresh processes, each with a witness buffer proving the
+//!     fragment stage ran, and a depth, stencil or combined attachment at `DontCare` over
+//!     2,248 of 2,248 (`Depth32Float`, `Depth16Unorm`, `Stencil8`, `Depth32Float_Stencil8` bound
+//!     to both points, and 4x multisampled `Depth32Float`, the draw's own values read back
+//!     against the clear). `loadAction = Load` completes the same 2,248 of 2,248 for colour,
+//!     depth and stencil, so the clean run is not Metal quietly refusing the memory. The same
+//!     attachments at `storeAction = Store` end their command buffer with
+//!     `MTLCommandBufferErrorDomain` / `kIOGPUCommandBufferCallbackErrorPageFault`, 200 of 200,
+//!     and every later command buffer of that process then errors too; the writable control is
+//!     clean through `Store`, 306 of 306.
+//!   - **A resolve is the same lever: whichever attachment stores out.** Attaching a resolve
+//!     destination over such memory and not resolving into it is clean 2,248 of 2,248 on both
+//!     read-only routes, and so is reading a read-only multisample primary and resolving out of
+//!     it; storing that primary into such memory faults 188 of 188. **Resolving into such memory
+//!     is unknown**: 0 page faults over 520 processes, but about 99 per cent of them were
+//!     discarded as recovery victims at two spacings, so the cell has no denominator to read a
+//!     verdict off. Nothing is built for it. An earlier record called a resolve into such memory
+//!     settled and faulting; that shape kept its multisample primary in Metal's own private
+//!     memory under `MultisampleResolve`, so it never stored a primary into read-only memory at
+//!     all, and its page fault does not reproduce.
+//!   - **Later commands of the same command buffer read a dropped write back** from the GPU's
+//!     caches, deterministically, and what decides it is the process's state rather than chance. A
+//!     blit fill and both compute stores were visible there in every run, the first of a fresh
+//!     process included. The visibility result and the three draw-stage stores were visible in
+//!     every run but a process's own first: over 61 fresh processes, each running one shape once,
+//!     not one saw the write (0 of 61, bit 24 and the `detachBacking` pair alike), and within one
+//!     process running a shape 512 times the split was exactly `answer[1/512] same=none` and
+//!     `answer[511/512] same=visible` in seven processes of eight (`[2/512]` and `[510/512]` in
+//!     the eighth). So the cold first run of a process never reads the dropped write back and every
+//!     later run does. It is still not a contract to reproduce: the caches, not Metal, decide it.
 //! - **Bit 24 is not the only read-only state, and the other one agrees with it.** A consumer's
 //!   production path reaches read-only backing through Apple's SPI instead:
 //!   `detachBacking`, then `replaceBackingWithRanges:readOnly:YES` over its pages (the ranges as
@@ -30,7 +51,7 @@
 //!   `supportsResourceDetachBacking`, which this M3 Max does. Measured against bit 24 over the
 //!   same programs, eight runs a shape, each with the writable control of its own creation path:
 //!   the two forms agree on **all ten shapes measurable under both**, byte for byte, error for
-//!   error and flap for flap, so what is written above holds for either state. The SPI pair also
+//!   error and first run for first run, so what is written above holds for either state. The SPI pair also
 //!   behaves the same on a buffer made with `newBufferWithBytesNoCopy:` as on one made through the
 //!   private `MTLBufferDescriptor`, so the creation path does not enter it. A **detached** backing
 //!   is a different state and not this one: a command buffer that names a detached resource ends
@@ -40,7 +61,10 @@
 //!   `newHeapWithDescriptor:` in either storage mode, because Metal offers no heap over the
 //!   caller's bytes for it to detach (`MTLHeapDescriptor` answers no `setContents:`, `setNoCopy:`
 //!   or `setDeallocator:`, and the device does not respond to `newHeapWithBytesNoCopy:`). The
-//!   runtime's own `new_heap_with_bytes_no_copy` is an extension with no Metal counterpart.
+//!   runtime's own `new_heap_with_bytes_no_copy` is an extension with no Metal counterpart. The
+//!   bit is behavioural there rather than declarative: `heap.resourceOptions` reports it absent on
+//!   the read-only heap and on its writable twin alike, while `storeAction = Store` faults on the
+//!   one and not the other.
 //! - **How.** A no-copy buffer made without the bit over a read-only view of the same pages
 //!   (`mach_vm_remap` sharing them, then `mprotect` read-only) behaved the same on every count
 //!   measured, and the probe above found it agreeing with bit 24 on **every one of its eleven
@@ -55,6 +79,17 @@
 //!   the import's 11 to 20 ms per GiB.
 //! - **Freed.** The view is unmapped once the memory imported from it is freed (`memory.rs`'s
 //!   `Block`), as the import requires it mapped for its whole life.
+//! - **The shader drops its own stores as well**, on every device and through either read-only
+//!   state: a slot bound to such a buffer has its bit set in the stage's dropped-store word
+//!   (`StageTable::dropped_store_buffers`, the translator's `SpecKey::DroppedStoreSlots`), which a
+//!   function that stores through a buffer slot reads as ordinary pipeline data and branches each
+//!   of its stores on. The word is per draw and per dispatch, so one pipeline runs with any of its
+//!   values, and only a function that stores pays the uniform branch. It reaches a store through a
+//!   bound slot alone: a store through an address loaded out of an argument buffer or a pointer
+//!   names no slot, an atomic is not gated (what Metal's atomics do to such memory is not
+//!   measured), and a blit fill, a visibility result and a render pass's own attachment writes are
+//!   not a shader's stores at all. On this system the read-only view keeps all of those out of the
+//!   pages, and the two agree on every shape measured above.
 //! - **Elsewhere** the import is of the caller's pages: Linux drivers pin imported pages for
 //!   writing and refuse or fault on read-only ones (`host_memory.rs`), so there the GPU's writes
 //!   reach the pages, and the difference is announced

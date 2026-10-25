@@ -497,7 +497,11 @@ fn run_fixture(bc: &[u8], entry: &str, stem: &str, threads: u32, per_thread: u32
             matches!(
                 (f.field, f.loc),
                 (
-                    PushField::SlotBindOffset(_) | PushField::DispatchRegion,
+                    PushField::SlotBindOffset(_)
+                        | PushField::DispatchRegion
+                        | PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(
+                            _
+                        )),
                     PushLoc::Push { .. }
                 )
             ),

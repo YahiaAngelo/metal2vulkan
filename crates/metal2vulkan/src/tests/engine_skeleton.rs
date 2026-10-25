@@ -89,13 +89,22 @@ fn check_artifact(a: &FunctionArtifact, what: &str) {
         i.push.fields.iter().map(|f| (f.field, f.loc)).collect();
     assert_eq!(
         placed,
-        vec![(
-            PushField::SlotBindOffset(buffer0()),
-            PushLoc::Push { offset: 0 }
-        )],
+        vec![
+            (
+                PushField::SlotBindOffset(buffer0()),
+                PushLoc::Push { offset: 0 }
+            ),
+            // The kernel stores through the slot, so it reads the stage's dropped-store word.
+            (
+                PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(
+                    crate::pipeline::sym::Stage::Kernel
+                )),
+                PushLoc::Push { offset: 4 }
+            ),
+        ],
         "{what}"
     );
-    assert_eq!(i.push.push_range, Some((0, 4)), "{what}");
+    assert_eq!(i.push.push_range, Some((0, 8)), "{what}");
     assert_eq!(i.push.argument_table_size, 0, "{what}");
     assert_eq!(
         i.descriptors,
@@ -177,18 +186,34 @@ fn containment_without_robustness_guards_the_store() {
     desc.features.remove(&VkFeature::RobustBufferAccess2);
     let dev = Device::new(desc, DevicePolicy::default()).expect("device");
     let p = dev.profile();
+    let merges = |words: &[u32]| {
+        opcodes(words)
+            .iter()
+            .filter(|op| **op == crate::spv::Op::SelectionMerge as u32)
+            .count()
+    };
     let a = compile(&bitcode, "store_const", p).expect("compile");
     assert!(a.strategies.entries.contains_key("access.store.checked"));
     let (_, words) = link_and_validate(&a, p).unwrap_or_else(|e| panic!("{e}"));
     let ops = opcodes(&words);
     assert!(ops.contains(&(crate::spv::Op::ArrayLength as u32)));
-    assert!(ops.contains(&(crate::spv::Op::SelectionMerge as u32)));
+    // One selection: `store_one` ands the containment check into the dropped-store guard's
+    // condition, so the store runs in one `if`.
+    assert_eq!(merges(&words), 1);
     let robust = profile("vk12-floor", DevicePolicy::default()).expect("profile");
     let bare = compile(&bitcode, "store_const", &robust).expect("compile");
+    assert!(bare.strategies.entries.contains_key("access.store"));
     let (_, words) = link_and_validate(&bare, &robust).unwrap_or_else(|e| panic!("{e}"));
     assert!(
-        !opcodes(&words).contains(&(crate::spv::Op::SelectionMerge as u32)),
-        "no selection with robustness"
+        !opcodes(&words).contains(&(crate::spv::Op::ArrayLength as u32)),
+        "no bound read with robustness"
+    );
+    // The store's one selection with robustness is the dropped-store guard, which every store
+    // runs in whatever the profile (`SpecKey::DroppedStoreSlots`): no containment selection.
+    assert_eq!(
+        merges(&words),
+        1,
+        "only the dropped-store guard's selection"
     );
 }
 

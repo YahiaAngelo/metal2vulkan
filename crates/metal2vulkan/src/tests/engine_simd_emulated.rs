@@ -121,7 +121,11 @@ fn run_all(
         assert!(matches!(f.loc, PushLoc::Push { .. }), "{f:?}");
         // Zero residuals: each buffer is bound at its start.
         assert!(
-            matches!(f.field, PushField::SlotBindOffset(_)),
+            matches!(
+                f.field,
+                PushField::SlotBindOffset(_)
+                    | PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(_))
+            ),
             "unexpected push field {f:?}"
         );
     }

@@ -136,7 +136,11 @@ fn push_bytes(plan: &Plan) -> Vec<u8> {
             f.field
         );
         assert!(
-            matches!(f.field, PushField::SlotBindOffset(_)),
+            matches!(
+                f.field,
+                PushField::SlotBindOffset(_)
+                    | PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(_))
+            ),
             "{:?}",
             f.field
         );

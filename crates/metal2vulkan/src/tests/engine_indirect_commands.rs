@@ -451,6 +451,8 @@ fn push_bytes(plan: &Plan) -> Vec<u8> {
             }
             // A zero residual (every slot is bound at its start), and a single region.
             PushField::SlotBindOffset(_) | PushField::DispatchRegion => {}
+            // No slot's writes dropped: the word stays 0.
+            PushField::Specialized(crate::pipeline::sym::SpecKey::DroppedStoreSlots(_)) => {}
             other => panic!("unexpected push field {other:?}"),
         }
     }

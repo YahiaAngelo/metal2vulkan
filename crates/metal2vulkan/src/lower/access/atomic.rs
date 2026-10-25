@@ -1349,7 +1349,10 @@ pub fn emit(
             let m = fb.composite_extract(fat, &[1])?;
             let mut prepared = Vec::with_capacity(targets.len());
             for t in targets {
-                let prep = prepare(cx, fb, t, m, bytes)?;
+                // An atomic is not gated on the slot's dropped-store word: what Metal's
+                // atomics do to memory whose writes it drops is not measured
+                // (`SpecKey::DroppedStoreSlots`), and unknown stays unknown.
+                let prep = prepare(cx, fb, t, m, bytes, false)?;
                 if typed.is_some() && !matches!(prep.mem, Mem::Psb(_)) {
                     return Err(cx.fail("a typed atomic through a descriptor view"));
                 }

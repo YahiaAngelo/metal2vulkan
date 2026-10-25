@@ -938,6 +938,7 @@ impl ArgumentTable {
                 table.buffers.insert(index, bound);
             }
         }
+        table.dropped_store_buffers = self.dropped_store_buffers();
         for (&index, bytes) in &self.bytes {
             table.buffers.insert(index, bound_bytes(bytes));
         }
@@ -950,6 +951,21 @@ impl ArgumentTable {
                 .insert(index, BoundSampler::new(bound_sampler(sampler, *clamps)));
         }
         table
+    }
+
+    /// The buffer slots bound to memory whose GPU writes Metal drops
+    /// (`StageTable::dropped_store_buffers`): bit `i` where the buffer at index `i` drops them
+    /// (`Buffer::drops_writes`, no-copy memory of Metal's private option bit 24). Inline bytes
+    /// are the runtime's own upload and drop nothing. Metal holds 31 buffers a stage, so every
+    /// slot has a bit.
+    fn dropped_store_buffers(&self) -> u32 {
+        let mut slots = 0;
+        for (&index, (buffer, _)) in &self.buffers {
+            if index < u32::BITS && buffer.drops_writes() {
+                slots |= 1 << index;
+            }
+        }
+        slots
     }
 
     /// The table as `stage`'s function of `interface` reads it: `stage_table`, but a buffer bound
@@ -1041,6 +1057,10 @@ impl ArgumentTable {
         // The slots that tell the view base alignment apart first, which the buffers' shapes
         // read.
         reshape.field(&mut kept.at_bind_views, self.at_bind_views(stage, views));
+        reshape.field(
+            &mut kept.dropped_store_buffers,
+            self.dropped_store_buffers(),
+        );
         let alignment = views.alignment;
         kept.buffers.retain(|&index, _| {
             let bound = !self.reads_unbound(read, index)
