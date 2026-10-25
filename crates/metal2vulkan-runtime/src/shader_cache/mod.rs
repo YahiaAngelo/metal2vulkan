@@ -28,8 +28,19 @@
 //!   recently used entries go first, and at device creation other builds' directories unused for
 //!   30 days go (`store.rs`, on the device's cache thread, `worker.rs`). A device's first removal
 //!   past the cap and its first failed write are each said once as a warning
-//!   (`metal2vulkan-shader-cache-evicted`, `metal2vulkan-shader-cache-write-failed`) naming the
-//!   directory and its cap.
+//!   (`metal2vulkan-shader-cache-evicted`, and the degrade notice
+//!   [`Degradation::ShaderCacheEntryNotWritten`](crate::Degradation::ShaderCacheEntryNotWritten))
+//!   naming the directory and its cap; neither ends any work.
+//! - **Off the creating thread.** An entry's bytes are encoded by the creation that made it,
+//!   which needs their length for the memo's weighing, and the directory's write of them -- the
+//!   `mkdir`, the temporary file, the write and the `rename` -- is the device's cache thread's
+//!   (`worker.rs`). The queue is bounded at [`QUEUED_WRITES`](worker::QUEUED_WRITES) entries and
+//!   [`QUEUED_BYTES`](worker::QUEUED_BYTES) bytes;
+//!   a creation that meets either bound writes its entry itself, as every creation once did. A
+//!   queued entry answers this device's lookups from the queue, so nothing is compiled again for
+//!   want of a file not written yet, and what is queued when the device goes is written before its
+//!   drop returns. A process that ends without dropping its devices loses what is still queued:
+//!   at most the bound, and each of them an entry the next process compiles again.
 //! - **In memory first.** Before the directory, every lookup asks the device's memo
 //!   (`pipeline/memo.rs`), which [`ShaderCacheOptions::memory_capacity`] bounds (256 MiB by
 //!   default). An entry read or written here is kept there, weighed at its encoded length.
@@ -37,7 +48,7 @@
 mod creation;
 pub(crate) mod driver;
 pub(super) mod store;
-mod worker;
+pub(super) mod worker;
 
 use super::error::{invalid, Error, Problem, ShaderCacheError};
 use super::pipeline::memo::PipelineMemo;
@@ -54,7 +65,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use store::{count, entry_name, Directory, Lookup, Store};
-use worker::Worker;
+use worker::{Asked, Worker};
 
 /// The default cap of a cache directory, in bytes: 25 GiB.
 pub const DEFAULT_CAPACITY: u64 = 25 << 30;
@@ -148,9 +159,26 @@ pub struct ShaderCacheStatistics {
     pub rejected: u64,
     /// Entries that could not be read.
     pub read_failures: u64,
-    /// Entries written.
+    /// Translations the directory was given: counted when a creation hands them over, which for
+    /// all but a write past the queue's bound is before the file exists. A write that then fails
+    /// counts in [`write_failures`](Self::write_failures) too.
     pub writes: u64,
-    /// Entries that could not be written.
+    /// Entries and records of every kind -- translations, a creation's answers, the driver's
+    /// pipeline cache data -- that the device's cache thread took, and the creating thread did
+    /// not write itself.
+    pub writes_queued: u64,
+    /// Those a thread of the program wrote itself, because the queue was at one of its bounds or
+    /// the entry was larger than the whole bound, or because the store has no cache thread. A
+    /// creation pays four journalled filesystem calls for each of these and none for a queued
+    /// one.
+    pub writes_on_thread: u64,
+    /// The bytes of every entry and record actually written, the driver's pipeline cache data
+    /// among them: what the directory was made to hold, whichever thread wrote it.
+    pub written_bytes: u64,
+    /// Lookups answered from an entry the cache thread had not written yet: a translation or
+    /// compile not run, counted in [`hits`](Self::hits) as a read of the file is.
+    pub queued_hits: u64,
+    /// Entries that could not be written, by whichever thread wrote them.
     pub write_failures: u64,
     /// Entries removed to keep the directory under its cap.
     pub evictions: u64,
@@ -323,8 +351,9 @@ impl ShaderCache {
             directory,
             memory_capacity,
         } = setup;
-        let store = Arc::new(Store::new(directory, sink));
-        let worker = Worker::start(Arc::clone(&store))?;
+        let asked = Arc::new(Asked::new());
+        let store = Arc::new(Store::new(directory, sink, Some(Arc::clone(&asked))));
+        let worker = Worker::start(Arc::clone(&store), asked)?;
         Ok(ShaderCache {
             memo: PipelineMemo::new(memory_capacity),
             creation: CreationMemo::new(),
@@ -339,7 +368,7 @@ impl ShaderCache {
         })
     }
 
-    /// Stop the cache thread: the device is going.
+    /// Stop the cache thread, which writes what is queued first: the device is going.
     pub(super) fn close(&self) {
         self.worker.stop();
     }
@@ -413,12 +442,11 @@ impl ShaderCache {
         compile: &metal2vulkan::device::Device,
         function: &CompiledFunction,
     ) -> u64 {
-        let bytes = function.to_bytes();
         self.store(
             EntryKind::Function,
             function.key().digest(),
             compile,
-            &bytes,
+            function.to_bytes(),
         )
     }
 
@@ -440,12 +468,11 @@ impl ShaderCache {
         compile: &metal2vulkan::device::Device,
         pipeline: &ComputePipeline,
     ) -> u64 {
-        let bytes = pipeline.to_bytes();
         self.store(
             EntryKind::ComputePipeline,
             pipeline.key().digest(),
             compile,
-            &bytes,
+            pipeline.to_bytes(),
         )
     }
 
@@ -467,12 +494,11 @@ impl ShaderCache {
         compile: &metal2vulkan::device::Device,
         pipeline: &RenderPipeline,
     ) -> u64 {
-        let bytes = pipeline.to_bytes();
         self.store(
             EntryKind::RenderPipeline,
             pipeline.key().digest(),
             compile,
-            &bytes,
+            pipeline.to_bytes(),
         )
     }
 
@@ -506,13 +532,14 @@ impl ShaderCache {
         found
     }
 
-    /// Write `bytes` as the entry of `kind` under `key` for `compile`'s profile; their length.
+    /// Give `bytes` to the directory as the entry of `kind` under `key` for `compile`'s profile
+    /// (the cache thread writes it, `worker.rs`); their length.
     fn store(
         &self,
         kind: EntryKind,
         key: &Hash256,
         compile: &metal2vulkan::device::Device,
-        bytes: &[u8],
+        bytes: Vec<u8>,
     ) -> u64 {
         let counters = &self.store.counters;
         let name = entry_name(
@@ -521,14 +548,15 @@ impl ShaderCache {
             key,
             &compile.profile_fingerprint(),
         );
-        match self.store.write(&name, |out| out.write_all(bytes)) {
+        let length = bytes.len() as u64;
+        match self.store.write_soon(&name, bytes) {
             Ok(_) => count(&counters.writes),
             Err(_) => self.store.write_failed(),
         }
         if self.store.over_capacity() {
             self.worker.evict();
         }
-        bytes.len() as u64
+        length
     }
 
     /// The counts so far.
@@ -541,6 +569,10 @@ impl ShaderCache {
             rejected: read(&counters.rejected),
             read_failures: read(&counters.read_failures),
             writes: read(&counters.writes),
+            writes_queued: read(&counters.writes_queued),
+            writes_on_thread: read(&counters.writes_on_thread),
+            written_bytes: read(&counters.written_bytes),
+            queued_hits: read(&counters.queued_hits),
             write_failures: read(&counters.write_failures),
             evictions: read(&counters.evictions),
             driver_loads: read(&counters.driver_loads),

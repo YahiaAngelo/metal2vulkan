@@ -2847,7 +2847,7 @@ impl RenderVariant {
                         .device
                         .shared()
                         .counts
-                        .creation_pipeline_made();
+                        .creation_pipeline_made(crate::work_counts::Predicted::Render);
                 }
                 drop(ticket.settle(made));
             }));
@@ -2881,7 +2881,7 @@ impl RenderVariant {
                 .device
                 .shared()
                 .counts
-                .creation_pipeline_drawn();
+                .creation_pipeline_drawn(crate::work_counts::Predicted::Render);
             self.objects.device.degrade_specialized(
                 &self.objects.specialized,
                 specialization,

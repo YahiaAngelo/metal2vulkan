@@ -48,6 +48,8 @@ mod copy_plan;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod cpu_copy_layouts;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod creation_prediction_kinds;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod deferred_calls;
 mod degradation;
 mod degradation_catalogue;
@@ -212,6 +214,9 @@ mod sampler_cache_live;
 mod sampler_sets;
 mod scheduler;
 mod shader_cache;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod shader_cache_off_thread;
+mod shader_cache_queue;
 mod shadow;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod shadow_host_writes;

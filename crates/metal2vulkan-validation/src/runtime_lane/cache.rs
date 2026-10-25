@@ -34,7 +34,7 @@ use metal2vulkan::library::Library;
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, FunctionDescriptor, Stage, StageSource};
 use metal2vulkan::{Budget, CancelToken};
 use metal2vulkan_runtime::{
-    Error, PipelineOptions, ShaderCacheStatistics, DEFAULT_MEMORY_CAPACITY,
+    Degradation, Error, PipelineOptions, ShaderCacheStatistics, DEFAULT_MEMORY_CAPACITY,
 };
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -557,6 +557,103 @@ fn makings_on_several_threads_each_read_their_own_cache() {
         made,
         cases.len(),
         failed.len()
+    );
+}
+
+/// The kind [`an_entry_that_cannot_be_written_is_announced_and_ends_nothing`] takes: the
+/// directory's build directory is made unwritable after the device opened it, so the entries a
+/// creation hands over cannot be written.
+pub(super) const UNWRITTEN_ENTRY: [Degradation; 1] = [Degradation::ShaderCacheEntryNotWritten];
+
+/// The mode that lets the build directory be read and listed but not written.
+#[cfg(unix)]
+const READ_ONLY_DIR: u32 = 0o500;
+
+/// The build directory under `cache`: `v1/<the one build there>`.
+#[cfg(unix)]
+fn build_dir(cache: &Path) -> PathBuf {
+    let mut builds: Vec<PathBuf> = std::fs::read_dir(cache.join("v1"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.is_dir())
+        .collect();
+    builds.sort();
+    builds.pop().expect("the device made its build's directory")
+}
+
+/// Set `dir`'s permission bits to `mode`.
+#[cfg(unix)]
+fn set_mode(dir: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
+/// An entry the directory will not take is announced once as
+/// [`Degradation::ShaderCacheEntryNotWritten`] and ends nothing: the pipeline state is made, it
+/// runs to the same output as one whose entries were written, and the device counts the failures.
+/// The announcement names the directory and its cap.
+///
+/// The directory is made writable for the device to open (`Directory::open` checks that it takes
+/// a write and fails the creation otherwise, which is the one shader-cache error there is), and
+/// unwritable afterwards, which is the state a full disk or a directory someone else locked down
+/// leaves. Unix only: it turns on the directory's mode bits.
+#[cfg(unix)]
+#[test]
+fn an_entry_that_cannot_be_written_is_announced_and_ends_nothing() {
+    let case = public_case(CASE).unwrap();
+    let writable = ScratchCache::new().unwrap();
+    let expected = cache_run(writable.path(), CASE);
+    let cache = ScratchCache::new().unwrap();
+    let messages = Messages::default();
+    let (statistics, output, notices) = {
+        let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
+        let build = build_dir(cache.path());
+        set_mode(&build, READ_ONLY_DIR);
+        let made = pipeline_state(&device, &case);
+        let state = match made {
+            Ok(state) => state,
+            Err(error) => {
+                set_mode(&build, 0o700);
+                panic!("a creation whose entries cannot be written must still make its state: {error:?}");
+            }
+        };
+        let run = run_with(&device, &case, &state);
+        set_mode(&build, 0o700);
+        let output = run
+            .expect("a run whose entries could not be written")
+            .output;
+        (
+            device.shader_cache_statistics(),
+            output,
+            messages.take_notices(),
+        )
+    };
+    assert_eq!(
+        output, expected.output,
+        "the output of a creation whose entries could not be written"
+    );
+    assert!(
+        statistics.write_failures > 0,
+        "the directory must have refused an entry at all: {statistics:?}"
+    );
+    let kinds: Vec<Degradation> = notices
+        .iter()
+        .filter_map(|notice| notice.degradation.as_ref().map(|d| d.degradation))
+        .collect();
+    assert_eq!(
+        kinds, UNWRITTEN_ENTRY,
+        "the kinds a device whose cache entries could not be written announced"
+    );
+    let notice = notices
+        .iter()
+        .find(|notice| notice.degradation.is_some())
+        .expect("the notice");
+    let root = cache.path().display().to_string();
+    let cap = metal2vulkan_runtime::DEFAULT_CAPACITY.to_string();
+    assert!(
+        notice.text.contains(&root) && notice.text.contains(&cap),
+        "the notice names the directory and its cap: {}",
+        notice.text
     );
 }
 

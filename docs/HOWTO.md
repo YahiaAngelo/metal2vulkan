@@ -85,10 +85,21 @@ second process does not translate it again. It cannot be turned off.
   update starts empty. On drivers that report `pipelineBinaryInternalCacheControl` (NVIDIA's), a
   device the runtime makes turns the driver's own internal cache off; an adopted device keeps what
   its creator chose.
+- **Written in the background.** A creation hands its entries to the device's cache thread and
+  does not wait for the directory: the same bytes under the same name, committed by the same
+  rename, after the call returns. An entry still queued answers that device's own lookups, and the
+  queue is written out before `Device`'s drop returns, so a second process finds everything the
+  first one's creations handed over. A process that ends without dropping its devices loses what
+  is still queued, which costs the next process those translations and nothing else.
+  `Device::shader_cache_statistics` counts the entries queued, those a creation wrote itself past
+  the queue's bound, and the bytes written.
 - **When it fills or a write fails.** Each device says so once, through its `MessageSink` (or on
-  stderr) as a `Warning` whose `id_name` is `metal2vulkan-shader-cache-evicted` or
-  `metal2vulkan-shader-cache-write-failed`. Match on `id_name`, never on the text. Later events are
-  counted in `Device::shader_cache_statistics`.
+  stderr) as a `Warning`: `id_name` `metal2vulkan-shader-cache-evicted` when the directory reaches
+  its cap, and the degrade notice
+  `metal2vulkan-degrade-shader-cache-entry-not-written` (`DebugMessage::degradation`
+  `Degradation::ShaderCacheEntryNotWritten`) when an entry cannot be written. Neither ends any
+  work. Match on `id_name`, never on the text. Later events are counted in
+  `Device::shader_cache_statistics`.
 - **Failures.** Making or adopting a device fails with `Error::ShaderCache` when the directory
   cannot be made or written. After that, a failed read or write only costs a translation.
 - **Cold runs.** To measure with nothing cached, give the device an empty directory, and turn the

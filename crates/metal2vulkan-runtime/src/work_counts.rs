@@ -22,6 +22,19 @@ use std::sync::Mutex;
 /// `shadow_texels_recopied_in_large_surfaces`): 2^20, which a 1920x1080 framebuffer's exceed.
 const LARGE_SURFACE_TEXELS: u64 = 1 << 20;
 
+/// Which of the two predictions a `VkPipeline` a state's creation made belongs to
+/// (`WorkCounts::creation_render_pipelines_made`, `creation_dispatch_pipelines_made`): the render
+/// state's predicted key (`pipeline/predicted.rs`) or the compute state's predicted region
+/// (`pipeline/dispatch_making.rs`). The two are counted apart because their hit rates differ by
+/// orders of magnitude, and the whole count cannot tell them apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Predicted {
+    /// A render state's predicted key.
+    Render,
+    /// A compute state's predicted region.
+    Dispatch,
+}
+
 /// A device's counters (`DeviceShared::counts`), each only ever added to.
 #[derive(Default)]
 pub(crate) struct Counters {
@@ -74,6 +87,10 @@ pub(crate) struct Counters {
     host_step_sampler_sets_made: AtomicU64,
     creation_pipelines_made: AtomicU64,
     creation_pipelines_drawn: AtomicU64,
+    creation_render_pipelines_made: AtomicU64,
+    creation_render_pipelines_drawn: AtomicU64,
+    creation_dispatch_pipelines_made: AtomicU64,
+    creation_dispatch_pipelines_drawn: AtomicU64,
     sampler_sets_made: AtomicU64,
     sampler_sets_shared: AtomicU64,
     sampler_sets_destroyed: AtomicU64,
@@ -945,16 +962,27 @@ impl Counters {
             .fetch_add(1, Ordering::Relaxed);
     }
 
-    /// A state's creation made a `VkPipeline` (`pipeline/predicted.rs`,
-    /// `pipeline/dispatch_making.rs`).
-    pub(crate) fn creation_pipeline_made(&self) {
+    /// A state's creation made a `VkPipeline` of `predicted` (`pipeline/predicted.rs`,
+    /// `pipeline/dispatch_making.rs`): counted in both the whole count and its prediction's.
+    pub(crate) fn creation_pipeline_made(&self, predicted: Predicted) {
         self.creation_pipelines_made.fetch_add(1, Ordering::Relaxed);
+        match predicted {
+            Predicted::Render => &self.creation_render_pipelines_made,
+            Predicted::Dispatch => &self.creation_dispatch_pipelines_made,
+        }
+        .fetch_add(1, Ordering::Relaxed);
     }
 
-    /// A draw or dispatch took a `VkPipeline` a state's creation made, its first use.
-    pub(crate) fn creation_pipeline_drawn(&self) {
+    /// A draw or dispatch took a `VkPipeline` a state's creation made for `predicted`, its first
+    /// use: counted in both the whole count and its prediction's.
+    pub(crate) fn creation_pipeline_drawn(&self, predicted: Predicted) {
         self.creation_pipelines_drawn
             .fetch_add(1, Ordering::Relaxed);
+        match predicted {
+            Predicted::Render => &self.creation_render_pipelines_drawn,
+            Predicted::Dispatch => &self.creation_dispatch_pipelines_drawn,
+        }
+        .fetch_add(1, Ordering::Relaxed);
     }
 
     /// A variant made an immutable sampler set: the device's map's, or a host step's or a pool
@@ -2683,6 +2711,18 @@ pub struct WorkCounts {
     /// Of those, the ones a draw or a dispatch took so far: the rest are makings no command has
     /// used yet, the speculative part of making at creation.
     pub creation_pipelines_drawn: u64,
+    /// Of [`creation_pipelines_made`](Self::creation_pipelines_made), the render states' predicted
+    /// keys (`pipeline/predicted.rs`).
+    pub creation_render_pipelines_made: u64,
+    /// Of [`creation_render_pipelines_made`](Self::creation_render_pipelines_made), the ones a
+    /// draw took so far.
+    pub creation_render_pipelines_drawn: u64,
+    /// Of [`creation_pipelines_made`](Self::creation_pipelines_made), the compute states'
+    /// predicted regions (`pipeline/dispatch_making.rs`).
+    pub creation_dispatch_pipelines_made: u64,
+    /// Of [`creation_dispatch_pipelines_made`](Self::creation_dispatch_pipelines_made), the ones a
+    /// dispatch took so far.
+    pub creation_dispatch_pipelines_drawn: u64,
     /// Immutable sampler sets variants made (the device's map's, and a host step's or a pool
     /// piece's own): none for a variant without immutable samplers.
     pub sampler_sets_made: u64,
@@ -4211,6 +4251,18 @@ impl Device {
                 .load(Ordering::Relaxed),
             creation_pipelines_made: counters.creation_pipelines_made.load(Ordering::Relaxed),
             creation_pipelines_drawn: counters.creation_pipelines_drawn.load(Ordering::Relaxed),
+            creation_render_pipelines_made: counters
+                .creation_render_pipelines_made
+                .load(Ordering::Relaxed),
+            creation_render_pipelines_drawn: counters
+                .creation_render_pipelines_drawn
+                .load(Ordering::Relaxed),
+            creation_dispatch_pipelines_made: counters
+                .creation_dispatch_pipelines_made
+                .load(Ordering::Relaxed),
+            creation_dispatch_pipelines_drawn: counters
+                .creation_dispatch_pipelines_drawn
+                .load(Ordering::Relaxed),
             sampler_sets_made: counters.sampler_sets_made.load(Ordering::Relaxed),
             sampler_sets_shared: counters.sampler_sets_shared.load(Ordering::Relaxed),
             sampler_sets_destroyed: counters.sampler_sets_destroyed.load(Ordering::Relaxed),

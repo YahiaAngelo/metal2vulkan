@@ -197,7 +197,7 @@ impl Variant {
                 .device
                 .shared()
                 .counts
-                .creation_pipeline_drawn();
+                .creation_pipeline_drawn(crate::work_counts::Predicted::Dispatch);
             self.announce(key, formats);
         }
     }
@@ -222,7 +222,10 @@ impl Variant {
             .pipeline(&key, Notices::FirstDraw)
             .map(|made| made.kept_at(&self.objects, kept::Place::Region(key.clone())));
         if made.is_ok() {
-            device.shared().counts.creation_pipeline_made();
+            device
+                .shared()
+                .counts
+                .creation_pipeline_made(crate::work_counts::Predicted::Dispatch);
         }
         drop(ticket.settle(made));
     }

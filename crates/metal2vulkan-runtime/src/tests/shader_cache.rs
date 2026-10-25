@@ -48,12 +48,34 @@ pub(super) const BUILD: [u8; 32] = [7; 32];
 const OTHER_BUILD: [u8; 32] = [8; 32];
 const NO_PROFILE: [u8; 32] = [0; 32];
 
-/// The store of `root` for `build`, with a cap of `capacity` bytes.
+/// The store of `root` for `build`, with a cap of `capacity` bytes and no cache thread, so its
+/// writes are the calling thread's.
 pub(super) fn store(root: &Path, build: [u8; 32], capacity: u64) -> Store {
     Store::new(
         Directory::open(root.to_path_buf(), build, capacity).expect("a usable directory"),
         None,
+        None,
     )
+}
+
+/// [`store`] with the queue `asked`, which nothing drains until a test does
+/// (`tests::shader_cache_queue`).
+pub(super) fn store_with_queue(
+    root: &Path,
+    build: [u8; 32],
+    capacity: u64,
+    asked: std::sync::Arc<crate::shader_cache::worker::Asked>,
+) -> Store {
+    Store::new(
+        Directory::open(root.to_path_buf(), build, capacity).expect("a usable directory"),
+        None,
+        Some(asked),
+    )
+}
+
+/// [`BUILD`] in the hex the directory names it by.
+pub(super) fn hex_build() -> String {
+    crate::shader_cache::store::hex(&BUILD)
 }
 
 /// The identity of a made-up device `n`.
@@ -81,9 +103,7 @@ fn name(build: &[u8; 32], n: u32) -> String {
 /// Write device `n`'s framed `payload` under `name`.
 fn put(store: &Store, name: &str, n: u32, payload: &[u8]) {
     let framed = seal(&identity(n), &data(n, payload));
-    store
-        .write(name, |out| out.write_all(&framed))
-        .expect("a write");
+    store.write_soon(name, framed).expect("a write");
 }
 
 /// Look up device `n`'s entry under `name`.
@@ -267,7 +287,7 @@ fn the_cap_removes_the_least_recently_used_records_with_the_entries() {
         let framed = seal(&identity(n), &data(n, &payload));
         // Even ones are makings' records, odd ones the build's entries.
         let path = if n % 2 == 0 {
-            store.write_record(&wanted, &framed).expect("a write");
+            store.write_record_soon(&wanted, framed).expect("a write");
             store.directory().record_path(&wanted)
         } else {
             put(&store, &wanted, n, &payload);
@@ -311,12 +331,12 @@ fn the_first_eviction_and_the_first_failed_write_are_each_said_once() {
     });
     let directory =
         Directory::open(scratch.path().to_path_buf(), BUILD, capacity).expect("a usable directory");
-    let store = Store::new(directory, Some(sink));
+    let store = Store::new(directory, Some(sink), None);
     for round in 0..2u32 {
         for n in 0..6u32 {
             let wanted = name(&BUILD, 10 * round + n);
             store
-                .write_record(&wanted, &seal(&identity(n), &data(n, &payload)))
+                .write_record_soon(&wanted, seal(&identity(n), &data(n, &payload)))
                 .expect("a write");
         }
         store.evict(&AtomicBool::new(false));
@@ -330,7 +350,7 @@ fn the_first_eviction_and_the_first_failed_write_are_each_said_once() {
         ids,
         [
             "metal2vulkan-shader-cache-evicted",
-            "metal2vulkan-shader-cache-write-failed"
+            crate::Degradation::ShaderCacheEntryNotWritten.code()
         ]
     );
     let root = scratch.path().display().to_string();
@@ -620,7 +640,7 @@ fn a_making_s_record_is_named_by_what_it_reads_and_crosses_builds() {
     let scratch = Scratch::new();
     let one = identity(1);
     store(scratch.path(), BUILD, 1 << 20)
-        .write_record(&base, &seal(&one, &data(1, b"payload")))
+        .write_record_soon(&base, seal(&one, &data(1, b"payload")))
         .expect("a write");
     let other = store(scratch.path(), OTHER_BUILD, 1 << 20);
     let found = other.load_content(&base, |bytes| {
@@ -657,7 +677,7 @@ fn a_record_of_another_device_is_refused_and_removed() {
         seal(&identity(2), &data(2, b"payload")),
         seal(&one, &data(2, b"payload")),
     ] {
-        store.write_record(&name, &framed).expect("a write");
+        store.write_record_soon(&name, framed).expect("a write");
         let found = store.load_content(&name, |bytes| open(&one, &bytes).map(|_| ()));
         assert_eq!(found, Lookup::Rejected);
         assert!(!path.exists(), "the refused record was removed");

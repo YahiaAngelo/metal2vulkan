@@ -24,7 +24,8 @@
 //!   `RenderPipelineReflection::to_bytes`: versions, kind, key, profile and checksum checked); a
 //!   variant's pipeline key is a record of its own name and the key under a SHA-256 checksum. A
 //!   lookup counts in no statistic but a refused or unreadable entry, and a write in none but a
-//!   failed one: they are not translations found, compiled or written.
+//!   failed one: they are not translations found, compiled or written. The write itself is the
+//!   device's cache thread's, as an artifact's is (`store.rs`, `worker.rs`).
 //! - **Bounded.** Each map keeps at most [`ENTRIES`] entries, the least recently used going first
 //!   ([`Lru`]); the directory's entries go as every entry does, past its cap. They hold digests,
 //!   small answers and reflections, and no AIR, library, or Vulkan object.
@@ -108,7 +109,7 @@ impl ShaderCache {
     ) {
         let bytes = answers.to_bytes(key, compile);
         lock(&self.creation.linked).insert(*key, answers, 1);
-        self.keep_answer(EntryKind::LinkedAnswers, key.digest(), compile, &bytes);
+        self.keep_answer(EntryKind::LinkedAnswers, key.digest(), compile, bytes);
     }
 
     /// The key of the pipeline of the render descriptor of `key` on `compile` under `variant`, as
@@ -153,7 +154,7 @@ impl ShaderCache {
             EntryKind::VariantPipeline,
             &name,
             compile,
-            &variant_record(&name, pipeline),
+            variant_record(&name, pipeline),
         );
     }
 
@@ -216,7 +217,7 @@ impl ShaderCache {
     ) -> RenderPipelineReflection {
         let bytes = reflection.to_bytes(key, compile);
         lock(&self.creation.reflections).insert(*key, reflection.clone(), 1);
-        self.keep_answer(EntryKind::RenderReflection, key.digest(), compile, &bytes);
+        self.keep_answer(EntryKind::RenderReflection, key.digest(), compile, bytes);
         reflection
     }
 
@@ -224,14 +225,14 @@ impl ShaderCache {
     /// an artifact is written (the bytes counted against the directory's cap, the least recently
     /// used entries going past it), but counted as no entry written (it is no translation); a
     /// failed write is counted and said as an artifact's is.
-    fn keep_answer(&self, kind: EntryKind, key: &Hash256, compile: &CompileDevice, bytes: &[u8]) {
+    fn keep_answer(&self, kind: EntryKind, key: &Hash256, compile: &CompileDevice, bytes: Vec<u8>) {
         let name = entry_name(
             self.store.directory().build(),
             kind,
             key,
             &compile.profile_fingerprint(),
         );
-        if self.store.write(&name, |out| out.write_all(bytes)).is_err() {
+        if self.store.write_soon(&name, bytes).is_err() {
             self.store.write_failed();
         }
         if self.store.over_capacity() {

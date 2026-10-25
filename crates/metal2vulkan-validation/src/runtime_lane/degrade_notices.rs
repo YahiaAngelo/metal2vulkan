@@ -163,6 +163,7 @@ use super::blits::SYSTEM_MEMORY;
 use super::buffer_texture_blits::{COLLIDING_ROWS, NARROW_ROWS, OVERLAPS};
 use super::buffer_texture_order::USAGE_SHADOWS;
 use super::buffer_texture_renders::MERGES;
+use super::cache::UNWRITTEN_ENTRY;
 use super::clear_reach::DONT_CARE_LOADS;
 use super::color_groups::PER_COLOR_COUNTS;
 use super::color_reformat::KEPT_COLORS;
@@ -596,6 +597,7 @@ fn every_kind_has_a_site_a_lane_test_takes() {
         &XR_RESOLVE,
         &YCBCR_PASSES,
         &MEMORYLESS_TEXEL_BUFFERS,
+        &UNWRITTEN_ENTRY,
     ];
     for kind in lists.into_iter().flatten().copied().chain(stage_kinds) {
         assert!(listed.insert(kind), "{kind:?} is listed twice");

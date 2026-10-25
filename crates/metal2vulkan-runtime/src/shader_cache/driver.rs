@@ -39,9 +39,10 @@
 //!   when the cache is made (`RuntimeDriverDefect::PipelineCacheDataCompiledAtLoad`, MoltenVK)
 //!   compiles from a record the making's own stages alone, which the making converts anyway without
 //!   one; host steps and pool pieces load and save records as the program's threads do.
-//! - **Makings at once.** A record is written to a temporary file renamed over it
-//!   (`Store::write_record`), so a reader reads the whole old record or the whole new one, never a
-//!   mix. Two processes, or two threads, making the same pipeline at once each write that
+//! - **Makings at once.** A record is written to a temporary file renamed over it, by the
+//!   device's cache thread (`Store::write_record_soon`, `worker.rs`), so a reader reads the whole
+//!   old record or the whole new one, never a mix; a making that reads the record of one still
+//!   queued reads the queued bytes. Two processes, or two threads, making the same pipeline at once each write that
 //!   pipeline's data from the same driver under the same name: the same bytes, or either one is
 //!   fine.
 //! - **Cold on purpose.** A program that wants every pipeline compiled (a cold boot measured as
@@ -392,7 +393,7 @@ fn keep(
         store.counters.refused(refusal);
         return;
     }
-    match store.write_record(name, &seal(identity, &data)) {
+    match store.write_record_soon(name, seal(identity, &data)) {
         Ok(_) => count(&store.counters.driver_saves),
         Err(_) => store.write_failed(),
     }
