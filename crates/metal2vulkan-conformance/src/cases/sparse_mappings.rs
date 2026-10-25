@@ -26,6 +26,7 @@
 //! | indirect argument count | 0, 1, several | — | a count past the buffer, which the runtime refuses typed and whose Metal behaviour is a refusal case of its own |
 //! | indirect offset | 0, a nonzero multiple of 4 | — | an offset that is not a multiple of 4, which the runtime documents as read at the multiple below and which belongs to a refusal case |
 //! | move overlap | onto an unmapped tile, onto a mapped one, within a texture, between two | — | — |
+//! | move past the bounds | a source clipped on one axis, a source clipped on two, a destination's row overflowing, and both sides inside | — | a destination run past the level's **last row**, and a region deeper than one image: neither is measured, so no row asserts either |
 //!
 //! # Every swept value changes what is read, and here is which
 //!
@@ -70,10 +71,19 @@
 //!   the rows were written for, so a venue whose tiles are another size records that refusal
 //!   rather than being handed a region past its grid.
 //!
+//! A **move** is the one step whose region may run past that grid, because that is the question
+//! the four move rows are about and plain Metal's answer to one is measured rather than guessed:
+//! eight shapes on an M3 Max, every command buffer completed with no error and no heap's
+//! `usedSize` moved (`probes/sparse_move_past_the_bounds.m`). The relief is the step's kind and
+//! not a row's name, and it is bounded by what was measured — each side's origin inside its
+//! level's own tiles, no axis stating more tiles than the level holds, one image deep — so a
+//! region of 0xffff_ffff tiles is still a test failure.
+//!
 //! A fill and a read name tiles the program mapped and nothing else
-//! (`every_fill_and_read_lies_in_mapped_tiles`): a blit over an unmapped tile is a shape nobody
-//! has measured here, and it stays out of the suite until somebody does — named in this round's
-//! open items rather than guessed at.
+//! (`every_fill_and_read_lies_in_mapped_tiles`), which for the move rows means the tiles the move
+//! itself mapped: the guard applies Metal's own measured rule for which destination tiles a move
+//! takes, so a read of one it did not take is caught as loudly as a read of a tile no step ever
+//! mapped.
 //!
 //! Nothing dispatches, nothing draws, no shader runs, every wait is bounded, and the heap is 4
 //! MiB of which the rows map at most a few dozen pages.
@@ -691,6 +701,256 @@ static MOVES: Row = Row {
     },
 };
 
+/// The byte tile (`x`, `y`) of texture `texture` is filled with, where a row of the move family
+/// needs each tile's provenance read off its own value.
+///
+/// **Each field has its own bits**, so two tiles cannot share a byte: the texture at bit 5, the
+/// row at bits 2 and 3, the column at bits 0 and 1, over a constant that makes every answer
+/// nonzero and none of them `0xff`. Those two readings a texel can have for a reason other than a
+/// fill of ours — an unmapped tile reads 0 through a blit on this oracle, and a freshly mapped
+/// tile reads `0xff` (`probes/sparse_unmapped_blit.m`) — so a marker of either value would be
+/// indistinguishable from a tile nobody wrote.
+///
+/// It is written as fields rather than as a table because the probe this family's move rows came
+/// from got it wrong the other way: its first form OR'd the row into a constant that already held
+/// that bit, so two rows shared a word and a tile's provenance was recoverable only by
+/// elimination. [`tests::every_tiles_marker_is_its_own`] reads every marker of the grid back and
+/// fails on a repeat, so the distinctness is checked rather than argued.
+const fn marker(texture: usize, x: u64, y: u64) -> u8 {
+    0x40 | ((texture as u8) << 5) | ((y as u8) << 2) | (x as u8)
+}
+
+/// The source texture of every move row, and the destination.
+const SOURCE: usize = 0;
+const DESTINATION: usize = 1;
+
+/// The tiles of `rect`, in Metal's own order (x, then y).
+fn tiles_of(rect: &TileRect) -> Vec<[u64; 2]> {
+    let mut out = Vec::new();
+    for down in 0..rect.size[1] {
+        for across in 0..rect.size[0] {
+            out.push([rect.origin[0] + across, rect.origin[1] + down]);
+        }
+    }
+    out
+}
+
+/// The program a move row runs: the tiles `held` names mapped and filled with their own markers
+/// and read back as the control, then `moves`, then the tiles `after` names read back.
+///
+/// Three command buffers, as `probes/sparse_move_past_the_bounds.m` uses three: a mapping is bound
+/// before the encoders after it in the same command buffer, but what a **move** rebound is read
+/// after a commit of its own, so the reading cannot be of a tile whose mapping had not landed.
+///
+/// `held` is read **before** the move as well as filled, and that control is what makes the
+/// reading after it a measurement: four tiles holding four distinct markers say the fills landed
+/// and say which tile each one is, so a later all-zero reading is a tile the move did not reach
+/// rather than a fill that never ran.
+fn moved(
+    held: &[(usize, TileRect)],
+    moves: MappingStep,
+    after: &[(usize, [u64; 2])],
+) -> SparseMappingProgram {
+    let mut steps = Vec::new();
+    for (texture, rect) in held {
+        steps.push(MappingStep::One {
+            texture: *texture,
+            mode: MappingMode::Map,
+            region: *rect,
+            level: 0,
+            slice: 0,
+        });
+    }
+    for (texture, rect) in held {
+        for at in tiles_of(rect) {
+            steps.push(MappingStep::FillRegion {
+                texture: *texture,
+                level: 0,
+                slice: 0,
+                region: TileRect::one(at),
+                value: marker(*texture, at[0], at[1]),
+            });
+        }
+    }
+    // The control: every tile this row filled, read one tile at a time so each answer is one
+    // tile's own bytes rather than four tiles interleaved by texel row.
+    for (texture, rect) in held {
+        for at in tiles_of(rect) {
+            steps.push(MappingStep::ReadRegion {
+                texture: *texture,
+                level: 0,
+                slice: 0,
+                region: TileRect::one(at),
+            });
+        }
+    }
+    steps.push(MappingStep::Commit);
+    steps.push(moves);
+    steps.push(MappingStep::Commit);
+    for (texture, at) in after {
+        steps.push(MappingStep::ReadRegion {
+            texture: *texture,
+            level: 0,
+            slice: 0,
+            region: TileRect::one(*at),
+        });
+    }
+    steps.push(MappingStep::Commit);
+    program(vec![plain(), plain()], Vec::new(), 0, steps)
+}
+
+/// A move of `size` tiles at `from` of level 0 slice 0 of [`SOURCE`] onto `to` of [`DESTINATION`].
+fn move_of(from: [u64; 2], size: [u64; 2], to: [u64; 2]) -> MappingStep {
+    MappingStep::Move {
+        from: SOURCE,
+        from_slice: 0,
+        from_level: 0,
+        from_origin: [from[0], from[1], 0],
+        size: [size[0], size[1], 1],
+        to: DESTINATION,
+        to_slice: 0,
+        to_level: 0,
+        to_origin: [to[0], to[1], 0],
+    }
+}
+
+/// **A move whose two sides both lie inside the level, read off the texels**: the control the
+/// three rows past an edge are read against.
+///
+/// 2 by 2 tiles at (0, 0) onto (1, 1), every tile of both sides inside level 0's four by four.
+/// Metal moved them to the region's own offsets — B(1,1), B(2,1), B(1,2) and B(2,2) holding
+/// A(0,0), A(1,0), A(0,1) and A(1,1) — and this is the row that says so, because
+/// [`moves`] reads `usedSize` alone and a move moves none of it. **A move that cannot be seen to
+/// move anything makes the rows below measurements of nothing**, which is why this row exists
+/// rather than being folded into one of them.
+///
+/// It separates two rules on its own. The destination as the stated **region** reads these four
+/// tiles; the destination as a sequence of pages from the origin would read B(1,1), B(2,0), B(3,0)
+/// and B(2,1). Where the stated destination region fits in the level, Metal's run of tiles is
+/// exactly that region, so the two agree here and the rows past an edge are where the run shows.
+static MOVE_INSIDE_THE_LEVEL: Row = Row {
+    case: "sparse-mapping-move-inside-the-level",
+    notices: &[],
+    program: || {
+        moved(
+            &[(SOURCE, TileRect::new([0, 0], [2, 2]))],
+            move_of([0, 0], [2, 2], [1, 1]),
+            &[
+                (DESTINATION, [1, 1]),
+                (DESTINATION, [2, 1]),
+                (DESTINATION, [1, 2]),
+                (DESTINATION, [2, 2]),
+            ],
+        )
+    },
+};
+
+/// **A destination row that overflows the level, which does not clip**: the reading nobody could
+/// have guessed and the one our own clipping got wrong.
+///
+/// Source (0, 0) of 4 by 1 tiles — every tile inside level 0's four — onto destination origin
+/// (2, 0), where the level has two tiles to the right of the origin and the stated region would
+/// need four. Metal moved **all four** source tiles: B(2,0), B(3,0), B(2,1) and B(3,1) held
+/// A(0,0), A(1,0), A(2,0) and A(3,0), and A's whole row 0 read zero afterwards
+/// (`probes/sparse_move_past_the_bounds.m`, shape `region-dest`, an M3 Max under macOS 27.0.1,
+/// plain Metal, each tile's verdict read off all 4,096 of its texels).
+///
+/// So the destination is a **run of tiles rather than a region**: it starts at the destination
+/// origin, is laid out `sourceSize.width` tiles to a row — clipped only by the tiles to the right
+/// of the origin — and takes the next row when one fills. A clip of the destination region moves
+/// **two**, leaving B(2,1) and B(3,1) unmapped and reading zero, which is what the runtime did
+/// until the rule was measured; this row is what would catch it coming back, and what would catch
+/// another implementation doing it.
+static MOVE_PAST_THE_DESTINATIONS_ROW: Row = Row {
+    case: "sparse-mapping-move-past-the-destinations-row",
+    notices: &[],
+    program: || {
+        moved(
+            &[(SOURCE, TileRect::new([0, 0], [4, 1]))],
+            move_of([0, 0], [4, 1], [2, 0]),
+            &[
+                (DESTINATION, [2, 0]),
+                (DESTINATION, [3, 0]),
+                (DESTINATION, [2, 1]),
+                (DESTINATION, [3, 1]),
+            ],
+        )
+    },
+};
+
+/// **A source region past the level's own tiles**: the part outside moves nowhere, and the
+/// destination tiles the stated region named but the run did not reach keep their own texels.
+///
+/// Source (2, 0) of 4 by 1 tiles where level 0 holds four, so tiles (2,0) and (3,0) are inside and
+/// the two past the edge are not, onto destination origin (0, 0). Metal moved the two:
+/// B(0,0) and B(1,0) held A(2,0) and A(3,0), and A's row 1 was whole
+/// (`probes/sparse_move_past_the_bounds.m`, shape `region-open`). So the overhang does not
+/// **wrap** — a rule that continued into the next row would have put A(0,1) and A(1,1) into
+/// B(2,0) and B(3,0) and left A's row 1 unmapped, and this row reads A(0,1) and A(1,1) after the
+/// move for exactly that reason.
+///
+/// And B(2,0) and B(3,0) are **mapped and filled with their own markers before the move**, which
+/// is the probe's `region-mapped` shape: the stated destination region names them and the run
+/// never reaches them. Metal left both holding what they held, so a rule that zeroed the
+/// destination tiles it named but did not fill reads two markers of ours as zero here. That
+/// separation needs a known **nonzero** byte in those tiles before the move, which an unmapped
+/// tile cannot carry — an unmapped tile reads zero either way — so it is the one place this family
+/// maps a destination tile ahead of a move.
+static MOVE_OF_A_SOURCE_PAST_THE_LEVEL: Row = Row {
+    case: "sparse-mapping-move-of-a-source-past-the-level",
+    notices: &[],
+    program: || {
+        moved(
+            &[
+                // The two source tiles that survive the clip, and the two a wrap would take.
+                (SOURCE, TileRect::new([2, 0], [2, 1])),
+                (SOURCE, TileRect::new([0, 1], [2, 1])),
+                // The destination tiles the stated region names past the run's own two.
+                (DESTINATION, TileRect::new([2, 0], [2, 1])),
+            ],
+            move_of([2, 0], [4, 1], [0, 0]),
+            &[
+                (DESTINATION, [0, 0]),
+                (DESTINATION, [1, 0]),
+                (DESTINATION, [2, 0]),
+                (DESTINATION, [3, 0]),
+                (SOURCE, [0, 1]),
+                (SOURCE, [1, 1]),
+            ],
+        )
+    },
+};
+
+/// **A source clipped on both axes**, which is the shape a pairing by list index gets wrong.
+///
+/// Source (2, 2) of 4 by 4 tiles on a level holding four by four, so 2 by 2 survive, onto
+/// destination origin (1, 1), where three tiles lie to the right. Metal read B(1,1), B(2,1),
+/// B(3,1) and B(1,2) holding A(2,2), A(3,2), A(2,3) and A(3,3)
+/// (`probes/sparse_move_past_the_bounds.m`, shape `src-clip-2d`).
+///
+/// Its third tile at (3, 1) is the whole reading: the run's row is the **stated** width's three
+/// and not the clipped source's two, which would have put it at (1, 2). And pairing two clipped
+/// lists by index is wrong here in a second way — a source clipped to 2 by 2 against a destination
+/// region of 4 by 4 lists four sources against sixteen destinations, and index 2 is the source's
+/// second **row** against the destination's third **column**. Two of the four pairs were wrong in
+/// the runtime and nothing held it; this row is what holds it.
+static MOVE_OF_A_CLIPPED_SOURCE: Row = Row {
+    case: "sparse-mapping-move-of-a-clipped-source",
+    notices: &[],
+    program: || {
+        moved(
+            &[(SOURCE, TileRect::new([2, 2], [2, 2]))],
+            move_of([2, 2], [4, 4], [1, 1]),
+            &[
+                (DESTINATION, [1, 1]),
+                (DESTINATION, [2, 1]),
+                (DESTINATION, [3, 1]),
+                (DESTINATION, [1, 2]),
+            ],
+        )
+    },
+};
+
 /// **`updateFence:` and `waitForFence:` of a resource state encoder**, between two encoders of one
 /// command buffer.
 ///
@@ -771,7 +1031,7 @@ static MAPPED_TEXELS: Row = Row {
 
 /// Every row of the family, in the order the report lists them.
 #[cfg(test)]
-static EVERY_ROW: [&Row; 10] = [
+static EVERY_ROW: [&Row; 14] = [
     &MODES_AND_SIZES,
     &LEVELS_AND_THE_TAIL,
     &A_LEVEL_PAST_THE_TEXTURES,
@@ -780,6 +1040,10 @@ static EVERY_ROW: [&Row; 10] = [
     &PLURAL_UPDATES,
     &INDIRECT_UPDATES,
     &MOVES,
+    &MOVE_INSIDE_THE_LEVEL,
+    &MOVE_PAST_THE_DESTINATIONS_ROW,
+    &MOVE_OF_A_SOURCE_PAST_THE_LEVEL,
+    &MOVE_OF_A_CLIPPED_SOURCE,
     &FENCES,
     &MAPPED_TEXELS,
 ];
@@ -915,6 +1179,35 @@ pub fn moves() -> SparseMappings {
     SparseMappings { row: &MOVES }
 }
 
+/// The case of a move whose two sides both lie inside the level, read off the texels: the control
+/// the three rows past an edge are read against.
+pub fn move_inside_the_level() -> SparseMappings {
+    SparseMappings {
+        row: &MOVE_INSIDE_THE_LEVEL,
+    }
+}
+
+/// The case of a destination row that overflows the level, which Metal does not clip.
+pub fn move_past_the_destinations_row() -> SparseMappings {
+    SparseMappings {
+        row: &MOVE_PAST_THE_DESTINATIONS_ROW,
+    }
+}
+
+/// The case of a source region past the level's own tiles, whose overhang moves nowhere.
+pub fn move_of_a_source_past_the_level() -> SparseMappings {
+    SparseMappings {
+        row: &MOVE_OF_A_SOURCE_PAST_THE_LEVEL,
+    }
+}
+
+/// The case of a source clipped on both axes, which a pairing by list index gets wrong.
+pub fn move_of_a_clipped_source() -> SparseMappings {
+    SparseMappings {
+        row: &MOVE_OF_A_CLIPPED_SOURCE,
+    }
+}
+
 /// The case of a fence between two resource state encoders of one command buffer.
 pub fn mapping_fences() -> SparseMappings {
     SparseMappings { row: &FENCES }
@@ -938,6 +1231,10 @@ pub fn all() -> Vec<Box<dyn Case>> {
         Box::new(plural_updates()),
         Box::new(indirect_updates()),
         Box::new(moves()),
+        Box::new(move_inside_the_level()),
+        Box::new(move_past_the_destinations_row()),
+        Box::new(move_of_a_source_past_the_level()),
+        Box::new(move_of_a_clipped_source()),
         Box::new(mapping_fences()),
         Box::new(mapped_tiles_hold_their_texels()),
     ]
@@ -1003,7 +1300,8 @@ mod tests {
         assert_eq!(digests.len(), EVERY_ROW.len());
     }
 
-    /// **Every region of every row lies inside its level's own tiles.**
+    /// **Every region of every row lies inside its level's own tiles, and a move's runs past them
+    /// only as far as the measurement did.**
     ///
     /// This is the family's safety rule, held by a test rather than by care: a region past a
     /// level's tiles is the one shape here that could fault a device, and no row may grow one by
@@ -1016,14 +1314,38 @@ mod tests {
     /// an update, and the region it names is still bounded by its level's own tiles here — which is
     /// the bound that could fault a device. The slice indexes images and not memory within one, so
     /// a slice one past the texture's cannot reach past a level's grid however the device reads it.
+    ///
+    /// # A move is bounded differently, because Metal's own answer to one is measured
+    ///
+    /// A **move** may state a region past its level's tiles, and the four move rows past an edge
+    /// are the whole point of their existence: what Metal does with one is the rule the runtime
+    /// implements, and the mapping selectors' bound is what the clause above keeps. The relief is
+    /// structural — it is the step's kind and not a row's name — and it is bounded by the
+    /// measurement rather than opened:
+    ///
+    /// - each side's **origin lies inside** its level's own tiles, so neither side starts outside
+    ///   the grid. A move from or onto an origin outside it is one nothing has read, and
+    ///   [`moved_tiles`] answers no pair for one, so a row stating one would assert nothing;
+    /// - the region's size on an axis is **at most the tiles that level holds** on it, which is
+    ///   the largest overhang `probes/sparse_move_past_the_bounds.m` measured (a region of four on
+    ///   a level of four, at an origin of two). So every tile a move's region names lies within
+    ///   one grid of the level, and `size.width` of 0xffff_ffff is not a thing a row can grow into;
+    /// - the depth stays one image, as every other region here does: a region deeper than one is
+    ///   the part of the rule no shape measured.
+    ///
+    /// The last two clauses count what they allowed, because a relief nothing uses is a relief
+    /// that stopped holding anything: the family states moves both inside the bounds and past
+    /// them, and this fails if either disappears.
     #[test]
     fn every_region_lies_inside_its_level() {
+        let (mut inside, mut past) = (0usize, 0usize);
         for row in EVERY_ROW {
             let program = (row.program)();
+            let slices = u64::from(slices_of(&program));
             for (at, step) in program.steps.iter().enumerate() {
+                let moving = matches!(step, MappingStep::Move { .. });
                 for (region, level, slice) in regions_of(step) {
                     let grid = tiles_at(level.min(u64::from(LEVELS) - 1) as u32);
-                    let slices = u64::from(slices_of(&program));
                     assert!(
                         slice < slices
                             || (slice == slices && row.case == A_SLICE_PAST_THE_TEXTURES.case),
@@ -1031,19 +1353,55 @@ mod tests {
                         row.case
                     );
                     for (axis, tiles) in grid.iter().enumerate() {
-                        let past = region.origin[axis] + region.size[axis];
+                        let past_the_grid = region.origin[axis] + region.size[axis];
+                        if !moving {
+                            assert!(
+                                past_the_grid <= *tiles,
+                                "{}: step {at} reaches tile {past_the_grid} of {} on axis {axis} \
+                                 of level {level}",
+                                row.case,
+                                tiles
+                            );
+                            continue;
+                        }
+                        // A move's own bound: the origin inside the level, and no more tiles
+                        // stated than the level holds.
                         assert!(
-                            past <= *tiles,
-                            "{}: step {at} reaches tile {past} of {} on axis {axis} of level \
-                             {level}",
+                            region.origin[axis] < *tiles,
+                            "{}: step {at} moves from or onto tile {} of {} on axis {axis} of \
+                             level {level}, which is outside the level and is a shape nothing has \
+                             measured",
                             row.case,
+                            region.origin[axis],
                             tiles
                         );
+                        assert!(
+                            region.size[axis] <= *tiles,
+                            "{}: step {at} states {} tiles on axis {axis} of a level holding {}, \
+                             which is a larger overhang than any shape measured",
+                            row.case,
+                            region.size[axis],
+                            tiles
+                        );
+                        match past_the_grid <= *tiles {
+                            true => inside += 1,
+                            false => past += 1,
+                        }
                     }
-                    assert_eq!(region.size[2], region.size[2].min(1));
                 }
+                assert!(
+                    regions_of(step)
+                        .iter()
+                        .all(|(region, _, _)| region.size[2] == region.size[2].min(1)),
+                    "{}: step {at} states a region deeper than one image",
+                    row.case
+                );
             }
         }
+        // Neither half of the relief may vanish: the family states moves inside the bounds and
+        // moves past them, and a count of zero either way means this check stopped reading one.
+        assert!(inside > 0, "no row states a move inside its level's tiles");
+        assert!(past > 0, "no row states a move past its level's tiles");
     }
 
     /// The regions a step names, each with the level and the slice it names them in. A step that
@@ -1157,36 +1515,66 @@ mod tests {
         }
     }
 
-    /// **Every fill and every read names tiles the program mapped and has not unmapped.**
+    /// **Every fill and every read names tiles the program mapped and has not unmapped** — a
+    /// move's own mapping included.
     ///
-    /// A blit over an unmapped sparse tile is a shape nobody here has measured, so no row may
-    /// state one. The check walks each program's own steps in order, keeping the tiles mapped so
+    /// A blit over an unmapped sparse tile reads zero on this oracle
+    /// (`probes/sparse_unmapped_blit.m`), so a row that stated one would record a reading that
+    /// says nothing, and the four move rows hang on telling a tile the move reached from one it
+    /// did not. The check walks each program's own steps in order, keeping the tiles mapped so
     /// far, and fails naming the step that reached outside them.
+    ///
+    /// # A move moves a mapping, and this models which
+    ///
+    /// Until the move rows landed the walk treated a move as touching nothing, which was true of
+    /// every row there was and is false of theirs: a move unmaps the source tiles it moved and
+    /// maps the destination tiles they landed on, and the rows read exactly those. So the walk
+    /// applies [`moved_tiles`] — **Metal's own measured rule**, written here rather than asked of
+    /// the runtime, because the runtime is the thing under test — and a read of a tile that rule
+    /// maps is legal while a read of one it does not is caught as loudly as before.
+    ///
+    /// A pair whose **destination is already mapped** moves nothing, which is Metal's own
+    /// documented rule and which [`MOVES`] states a move for, so the clause is exercised rather
+    /// than assumed: the source keeps its mapping and the destination keeps its own texels.
+    /// [`MOVE_OF_A_SOURCE_PAST_THE_LEVEL`] maps two destination tiles ahead of its move for the
+    /// other half of that rule — tiles the stated region names and the **run never reaches**,
+    /// which Metal left holding their own texels rather than zeroing.
+    ///
+    /// The tile keys carry the **texture** as well as the slice, the level and the two axes, which
+    /// they did not before. Every row that fills had one texture, so nothing had noticed that a
+    /// program could map tile (0, 0) of texture 0 and read tile (0, 0) of texture 1 and pass; the
+    /// move rows have two textures and fill both, so the key had to become the tile's own identity.
     #[test]
     fn every_fill_and_read_lies_in_mapped_tiles() {
         let mut fills = 0usize;
+        let mut moved = 0usize;
+        let mut onto_the_mapped = 0usize;
         for row in EVERY_ROW {
             let program = (row.program)();
-            let mut mapped: BTreeSet<(u64, u64, u64, u64)> = BTreeSet::new();
+            let mut mapped: BTreeSet<Tile> = BTreeSet::new();
             for (at, step) in program.steps.iter().enumerate() {
                 match step {
                     MappingStep::One {
+                        texture,
                         mode,
                         region,
                         level,
                         slice,
-                        ..
                     } => {
-                        for tile in tiles_in(region, *level, *slice) {
+                        for tile in tiles_in(*texture, region, *level, *slice) {
                             match mode {
                                 MappingMode::Map => mapped.insert(tile),
                                 MappingMode::Unmap => mapped.remove(&tile),
                             };
                         }
                     }
-                    MappingStep::Many { mode, regions, .. } => {
+                    MappingStep::Many {
+                        texture,
+                        mode,
+                        regions,
+                    } => {
                         for (region, level, slice) in regions {
-                            for tile in tiles_in(region, *level, *slice) {
+                            for tile in tiles_in(*texture, region, *level, *slice) {
                                 match mode {
                                     MappingMode::Map => mapped.insert(tile),
                                     MappingMode::Unmap => mapped.remove(&tile),
@@ -1195,18 +1583,19 @@ mod tests {
                         }
                     }
                     MappingStep::FillRegion {
+                        texture,
                         level,
                         slice,
                         region,
                         ..
                     }
                     | MappingStep::ReadRegion {
+                        texture,
                         level,
                         slice,
                         region,
-                        ..
                     } => {
-                        for tile in tiles_in(region, *level, *slice) {
+                        for tile in tiles_in(*texture, region, *level, *slice) {
                             assert!(
                                 mapped.contains(&tile),
                                 "{}: step {at} reaches the unmapped tile {tile:?}",
@@ -1215,11 +1604,26 @@ mod tests {
                             fills += 1;
                         }
                     }
-                    // A move, an indirect update, a fence, an encoder boundary and a commit touch
-                    // no texel, so a fill after one is still bounded by what was mapped before it.
-                    // No row of this family fills after a move.
-                    MappingStep::Move { .. }
-                    | MappingStep::Indirect { .. }
+                    // A move moves a mapping: the source tiles it moved are unmapped afterwards
+                    // and the destination tiles they landed on are mapped, so a read after one is
+                    // bounded by what the move left rather than by what was mapped before it.
+                    MappingStep::Move { .. } => {
+                        for (source, destination) in moved_tiles(&program, step) {
+                            // Metal moves nothing onto a tile that is already mapped: the source
+                            // keeps its mapping and the destination keeps its own texels.
+                            if mapped.contains(&destination) {
+                                onto_the_mapped += 1;
+                                continue;
+                            }
+                            mapped.remove(&source);
+                            mapped.insert(destination);
+                            moved += 1;
+                        }
+                    }
+                    // An indirect update, a fence, an encoder boundary and a commit touch no
+                    // texel and bind no tile this walk can see, so a fill after one is still
+                    // bounded by what was mapped before it.
+                    MappingStep::Indirect { .. }
                     | MappingStep::UpdateFence { .. }
                     | MappingStep::WaitForFence { .. }
                     | MappingStep::NextEncoder
@@ -1227,18 +1631,38 @@ mod tests {
                 }
             }
         }
-        // And the check is not vacuous: two rows fill and read, so the walk above ran. One tile
-        // filled and one read by `mapped_tiles_hold_their_texels`, and four filled and eight read
-        // (two readings of four tiles) by `a_slice_past_the_textures`.
-        assert_eq!(fills, 2 + 12, "no row fills or reads a tile at all");
+        // And the check is not vacuous: six rows fill and read, so the walk above ran. One tile
+        // filled and one read by `mapped_tiles_hold_their_texels`; four filled and eight read
+        // (two readings of four tiles) by `a_slice_past_the_textures`; four filled and eight read
+        // by each of the three move rows whose reading is of four tiles, and six filled and
+        // twelve read by `move-of-a-source-past-the-level`.
+        assert_eq!(
+            fills,
+            2 + 12 + 3 * 12 + 18,
+            "no row fills or reads a tile at all"
+        );
+        // The move clause moved something, and the already-mapped clause fired. `MOVES` states
+        // four moves of one tile and one of none: two move, one is onto a tile already mapped and
+        // one names no tile. The four move rows move four, four, two (the other two tiles of the
+        // source region lie past the level) and four.
+        assert_eq!(moved, 2 + 4 + 4 + 2 + 4, "the walk modelled no move at all");
+        assert_eq!(
+            onto_the_mapped, 1,
+            "no row moves onto a tile already mapped"
+        );
     }
 
-    /// The tiles `region` of `level` and `slice` holds, as the keys the walk above tracks.
-    fn tiles_in(region: &TileRect, level: u64, slice: u64) -> Vec<(u64, u64, u64, u64)> {
+    /// A tile's own identity: its texture, its slice, its level and its two axes.
+    type Tile = (usize, u64, u64, u64, u64);
+
+    /// The tiles `region` of `level` and `slice` of `texture` holds, as the keys the walk above
+    /// tracks.
+    fn tiles_in(texture: usize, region: &TileRect, level: u64, slice: u64) -> Vec<Tile> {
         let mut out = Vec::new();
         for down in 0..region.size[1] {
             for across in 0..region.size[0] {
                 out.push((
+                    texture,
                     slice,
                     level,
                     region.origin[0] + across,
@@ -1247,6 +1671,259 @@ mod tests {
             }
         }
         out
+    }
+
+    /// **Metal's own rule for which tiles a move moves**, each source tile with the tile it moves
+    /// onto, in Metal's order — written here so the suite's expectation is Metal's rather than the
+    /// runtime's.
+    ///
+    /// Measured off the texels either side of the move on an Apple M3 Max under macOS 27.0.1,
+    /// plain Metal, one shape per process, each tile's verdict read off all 4,096 of its texels
+    /// (`probes/sparse_move_past_the_bounds.m`). Eight shapes and one rule answers all eight:
+    ///
+    /// - the **source region is clipped** to the level's own tiles on each axis, and its surviving
+    ///   tiles move in Metal's order (x, then y). The part outside moves nothing anywhere: it does
+    ///   not wrap and it takes no destination tile. A source level or slice past the texture's own
+    ///   moves nothing at all;
+    /// - the **destination is a run of tiles, not a region**: it starts at the destination origin,
+    ///   is laid out `size.width` tiles to a row — the width **as stated**, clipped only by the
+    ///   tiles the level has to the right of the origin — and takes the next row when one fills,
+    ///   one tile per surviving source tile. The width is clipped and the height is **not**.
+    ///
+    /// Two things are **unmeasured** and this answers no pair for either, so no row can assert
+    /// one: a run that would pass the level's **last row**, and a region deeper than one image.
+    /// The **tail** is a third: at `firstMipmapInTail` a side's units are one each however many
+    /// tiles the region names, which this does not model, so it refuses a move that names a tail
+    /// level rather than answering a pairing nobody measured.
+    fn moved_tiles(program: &SparseMappingProgram, step: &MappingStep) -> Vec<(Tile, Tile)> {
+        let MappingStep::Move {
+            from,
+            from_slice,
+            from_level,
+            from_origin,
+            size,
+            to,
+            to_slice,
+            to_level,
+            to_origin,
+        } = step
+        else {
+            return Vec::new();
+        };
+        for level in [from_level, to_level] {
+            assert!(
+                *level < TAIL_LEVEL,
+                "a move of level {level}, at or past the tail, whose pairing this rule does not \
+                 model"
+            );
+        }
+        let slices = u64::from(slices_of(program));
+        // A level or slice past the texture's own moves nothing at all, on either side.
+        if *from_slice >= slices || *to_slice >= slices {
+            return Vec::new();
+        }
+        let source = tiles_at(*from_level as u32);
+        let destination = tiles_at(*to_level as u32);
+        // An origin outside its level, a size of no tiles, and a region deeper than one image each
+        // move nothing this rule can answer for.
+        if (0..2).any(|axis| {
+            from_origin[axis] >= source[axis]
+                || to_origin[axis] >= destination[axis]
+                || size[axis] == 0
+        }) || size[2] != 1
+        {
+            return Vec::new();
+        }
+        let held: [u64; 2] =
+            std::array::from_fn(|axis| size[axis].min(source[axis] - from_origin[axis]));
+        // The run's row: the width as the move states it, clipped by the tiles to the right of the
+        // destination origin. The stated width and not the clipped source's, which is the reading
+        // `move-of-a-clipped-source` is about.
+        let per_row = size[0].min(destination[0] - to_origin[0]).max(1);
+        let mut pairs = Vec::new();
+        for (at, tile) in tiles_in(
+            *from,
+            &TileRect::new([from_origin[0], from_origin[1]], held),
+            *from_level,
+            *from_slice,
+        )
+        .into_iter()
+        .enumerate()
+        {
+            let at = at as u64;
+            let (x, y) = (to_origin[0] + at % per_row, to_origin[1] + at / per_row);
+            // Past the level's last row the destination is unmeasured, so nothing moves there
+            // rather than moving somewhere nobody has read.
+            if y >= destination[1] {
+                continue;
+            }
+            pairs.push((tile, (*to, *to_slice, *to_level, x, y)));
+        }
+        pairs
+    }
+
+    /// **Every tile's marker is its own**, and none of them is a byte a texel can read for a
+    /// reason other than a fill of ours.
+    ///
+    /// The probe these rows came from got this wrong: its first per-tile word OR'd the row into a
+    /// constant that already held that bit, so rows 0 and 1 shared a word and rows 2 and 3 shared
+    /// one, and a tile's provenance was recoverable only by elimination. A marker table is worth
+    /// nothing unless the markers differ, so this reads every one of them back.
+    #[test]
+    fn every_tiles_marker_is_its_own() {
+        let mut seen: BTreeMap<u8, (usize, u64, u64)> = BTreeMap::new();
+        let [across, down] = tiles_at(0);
+        for texture in [SOURCE, DESTINATION] {
+            for y in 0..down {
+                for x in 0..across {
+                    let byte = marker(texture, x, y);
+                    assert_ne!(
+                        byte, 0,
+                        "texture {texture} tile ({x}, {y}) marks itself zero"
+                    );
+                    assert_ne!(
+                        byte, 0xff,
+                        "texture {texture} tile ({x}, {y}) marks itself 0xff"
+                    );
+                    if let Some(held) = seen.insert(byte, (texture, x, y)) {
+                        panic!("{byte:#04x} marks both {held:?} and ({texture}, {x}, {y})");
+                    }
+                }
+            }
+        }
+        // Two textures of sixteen tiles each, every one with a byte of its own.
+        assert_eq!(seen.len(), 2 * (across * down) as usize);
+        // And each row of a move actually uses distinct markers, which is the property the
+        // readings hang on rather than the table's own.
+        for row in [
+            &MOVE_INSIDE_THE_LEVEL,
+            &MOVE_PAST_THE_DESTINATIONS_ROW,
+            &MOVE_OF_A_SOURCE_PAST_THE_LEVEL,
+            &MOVE_OF_A_CLIPPED_SOURCE,
+        ] {
+            let filled: Vec<u8> = (row.program)()
+                .steps
+                .iter()
+                .filter_map(|step| match step {
+                    MappingStep::FillRegion { value, .. } => Some(*value),
+                    _ => None,
+                })
+                .collect();
+            let distinct: BTreeSet<u8> = filled.iter().copied().collect();
+            assert!(
+                filled.len() >= 4,
+                "{}: too few fills to tell apart",
+                row.case
+            );
+            assert_eq!(
+                distinct.len(),
+                filled.len(),
+                "{}: two tiles share a marker",
+                row.case
+            );
+        }
+    }
+
+    /// **Each move row's pairing is the reading `probes/sparse_move_past_the_bounds.m` took off
+    /// Metal**, asserted against the shape that produced it, with no device at all.
+    ///
+    /// [`moved_tiles`] is what the walk above believes a move does, and what the move rows' reads
+    /// are placed by. Believing it is not the same as checking it: this holds it to Metal's own
+    /// four readings, by tile, so a change to the rule that still let the guard pass fails here
+    /// instead. The runtime has the mirror of this test over the same eight shapes
+    /// (`metal2vulkan-runtime`'s `tests::sparse::a_move_is_metals_run_of_destination_tiles`); this
+    /// one is the suite's, and the two were written from the same probe output rather than from
+    /// each other.
+    #[test]
+    fn every_move_rows_pairing_is_the_probes_own_reading() {
+        // Metal's own reading for each row: the source tile, then the destination tile it landed
+        // on, in Metal's order.
+        /// One of Metal's readings: the source tile, and the destination tile it landed on.
+        type Reading = ([u64; 2], [u64; 2]);
+        let readings: [(&Row, &[Reading]); 4] = [
+            // dest-2d: both sides inside, so the run is exactly the stated region.
+            (
+                &MOVE_INSIDE_THE_LEVEL,
+                &[
+                    ([0, 0], [1, 1]),
+                    ([1, 0], [2, 1]),
+                    ([0, 1], [1, 2]),
+                    ([1, 1], [2, 2]),
+                ],
+            ),
+            // region-dest: all four move, the last two onto the row below.
+            (
+                &MOVE_PAST_THE_DESTINATIONS_ROW,
+                &[
+                    ([0, 0], [2, 0]),
+                    ([1, 0], [3, 0]),
+                    ([2, 0], [2, 1]),
+                    ([3, 0], [3, 1]),
+                ],
+            ),
+            // region-open: the two tiles past the level's edge move nowhere.
+            (
+                &MOVE_OF_A_SOURCE_PAST_THE_LEVEL,
+                &[([2, 0], [0, 0]), ([3, 0], [1, 0])],
+            ),
+            // src-clip-2d: the run's row is the stated width's three, so the third tile is at
+            // (3, 1) and not at (1, 2).
+            (
+                &MOVE_OF_A_CLIPPED_SOURCE,
+                &[
+                    ([2, 2], [1, 1]),
+                    ([3, 2], [2, 1]),
+                    ([2, 3], [3, 1]),
+                    ([3, 3], [1, 2]),
+                ],
+            ),
+        ];
+        for (row, metal) in readings {
+            let program = (row.program)();
+            let moves: Vec<&MappingStep> = program
+                .steps
+                .iter()
+                .filter(|step| matches!(step, MappingStep::Move { .. }))
+                .collect();
+            assert_eq!(moves.len(), 1, "{}: not one move", row.case);
+            let pairs: Vec<Reading> = moved_tiles(&program, moves[0])
+                .into_iter()
+                .map(|(source, destination)| {
+                    assert_eq!(
+                        source.0, SOURCE,
+                        "{}: a source of another texture",
+                        row.case
+                    );
+                    assert_eq!(
+                        destination.0, DESTINATION,
+                        "{}: a destination of another texture",
+                        row.case
+                    );
+                    ([source.3, source.4], [destination.3, destination.4])
+                })
+                .collect();
+            assert_eq!(pairs, metal.to_vec(), "{}", row.case);
+            // And the row reads **every** destination tile Metal's reading names, so a pairing
+            // that moved a tile the row never looks at cannot pass unnoticed.
+            let read: BTreeSet<[u64; 2]> = program
+                .steps
+                .iter()
+                .skip_while(|step| !matches!(step, MappingStep::Move { .. }))
+                .filter_map(|step| match step {
+                    MappingStep::ReadRegion {
+                        texture, region, ..
+                    } if *texture == DESTINATION => Some([region.origin[0], region.origin[1]]),
+                    _ => None,
+                })
+                .collect();
+            for (_, destination) in metal {
+                assert!(
+                    read.contains(destination),
+                    "{}: nothing reads the destination tile {destination:?} Metal moved onto",
+                    row.case
+                );
+            }
+        }
     }
 
     /// **Every row ends on a commit, and reads exactly what its steps asked for.**
@@ -1336,6 +2013,48 @@ mod tests {
         for tiles in [0, 1, tiles_at(0)[0] * tiles_at(0)[1]] {
             assert!(sizes.contains_key(&tiles), "no row states {tiles} tiles");
         }
+        // And the move shapes the table claims: a source clipped on one axis, a source clipped on
+        // two, a destination run that overflows its row, and a move with both sides inside. Each
+        // is read off its own program rather than off a row's name, so a row edited into another
+        // shape takes its claim with it.
+        let mut shapes: BTreeSet<&'static str> = BTreeSet::new();
+        for row in EVERY_ROW {
+            let program = (row.program)();
+            for step in &program.steps {
+                let MappingStep::Move {
+                    from_origin,
+                    size,
+                    to_origin,
+                    ..
+                } = step
+                else {
+                    continue;
+                };
+                if size[0] == 0 || size[1] == 0 {
+                    continue;
+                }
+                let source = tiles_at(0);
+                let clipped = (0..2)
+                    .filter(|axis| from_origin[*axis] + size[*axis] > source[*axis])
+                    .count();
+                let overflows = to_origin[0] + size[0] > source[0];
+                shapes.insert(match (clipped, overflows) {
+                    (0, false) => "both sides inside",
+                    (0, true) => "the destination's row overflows",
+                    (1, _) => "the source is clipped on one axis",
+                    _ => "the source is clipped on two axes",
+                });
+            }
+        }
+        assert_eq!(
+            shapes,
+            BTreeSet::from([
+                "both sides inside",
+                "the destination's row overflows",
+                "the source is clipped on one axis",
+                "the source is clipped on two axes",
+            ])
+        );
     }
 
     /// The tile grid the rows are written for is the one the module's prose names, and the levels

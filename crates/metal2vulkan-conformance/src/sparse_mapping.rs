@@ -31,10 +31,18 @@
 //!   ([`SparseMappingProgram::tile`]). A venue whose tiles are another size records that refusal
 //!   rather than being handed a region past its grid.
 //! - A guard over the case's own rows checks every region against that stated grid with no device
-//!   at all, so a row that grew past it fails in the test suite rather than on a GPU.
+//!   at all, so a row that grew past it fails in the test suite rather than on a GPU. A
+//!   [`MappingStep::Move`] is the one step whose region may run past the grid, and only as far as
+//!   the measurement did — each side's origin inside its level's tiles, no axis stating more tiles
+//!   than the level holds, one image deep — because what plain Metal does with such a move is
+//!   measured off the texels either side of it rather than guessed
+//!   (`probes/sparse_move_past_the_bounds.m`: eight shapes, every command buffer completed with no
+//!   error and no heap's `usedSize` moved).
 //! - A fill or a read names a region of tiles the program **mapped** and nothing else, which a
-//!   guard also holds: a blit over an unmapped tile is a shape nobody here has measured, and it
-//!   stays out until somebody does.
+//!   guard also holds — a move's own destination tiles included, by Metal's measured rule for
+//!   which tiles a move takes. A blit over an unmapped tile reads zero on this oracle
+//!   (`probes/sparse_unmapped_blit.m`), so a row stating one would record a reading that says
+//!   nothing, and it stays out.
 //!
 //! Nothing dispatches, nothing draws, no shader runs, every wait is bounded and the heap is a few
 //! mebibytes. Nothing here reads a device name, a vendor or an environment variable: a venue that
@@ -234,6 +242,12 @@ pub enum MappingStep {
     },
     /// `moveTextureMappingsFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:
     /// destinationSlice:destinationLevel:destinationOrigin:`.
+    ///
+    /// The one step whose region may run **past** its level's own tiles: Metal clips the source
+    /// region and lays the destination out as a run of `size.width` tiles to a row from the
+    /// destination origin, which is measured off the texels rather than off a counter a move never
+    /// moves (`probes/sparse_move_past_the_bounds.m`). A case's own guard bounds the overhang by
+    /// what that measurement reached.
     Move {
         from: usize,
         from_slice: u64,

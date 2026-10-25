@@ -6592,16 +6592,21 @@ fn every_case_carries_a_cost_recording() {
     /// Four are the degenerate screen extent crossed with the descriptor's construction
     /// routes ([`crate::cases::rate_map_degenerate_forms`] and `rate-map-degenerate-form-sweep`),
     /// two are the shared creator crossed with the storage mode
-    /// ([`crate::cases::shared_creator_formats`]) and one is the sparse mapping update of a slice
-    /// past the texture's slices ([`crate::cases::sparse_mappings::a_slice_past_the_textures`]),
+    /// ([`crate::cases::shared_creator_formats`]), one is the sparse mapping update of a slice
+    /// past the texture's slices ([`crate::cases::sparse_mappings::a_slice_past_the_textures`])
+    /// and four are the sparse mapping moves read off the texels -- one with both sides inside
+    /// the level and three past an edge
+    /// ([`crate::cases::sparse_mappings::move_inside_the_level`] and its three siblings) --
     /// all authored after the last whole-set
     /// `cost --write`. A cost record needs the whole set measured
     /// in both shapes -- a case's counts depend on what ran before it in the same process -- so a
-    /// selection cannot pay it and the next whole-set run empties these seven lines again.
+    /// selection cannot pay it and the next whole-set run empties these eighteen lines again.
     ///
+    /// Six are the device's read-write tier and the rows that sweep it
+    /// (`device-read-write-tiers` and the five `read-write-tier-*`), and
     /// `texture-round-trip-44` is `BGRA4Unorm`'s row of `cases::textures`, authored the day its
     /// texels became Metal's own bytes, and later than the last whole-set `cost --write` too.
-    const AFTER_THE_LAST_RUN: [&str; 14] = [
+    const AFTER_THE_LAST_RUN: [&str; 18] = [
         "device-read-write-tiers",
         "rate-map-degenerate-form-sweep",
         "rate-map-zero-width-layers-subscript",
@@ -6615,6 +6620,10 @@ fn every_case_carries_a_cost_recording() {
         "shared-creator-extended-range-samples",
         "shared-creator-padded-format-storage",
         "sparse-mapping-a-slice-past-the-textures",
+        "sparse-mapping-move-inside-the-level",
+        "sparse-mapping-move-of-a-clipped-source",
+        "sparse-mapping-move-of-a-source-past-the-level",
+        "sparse-mapping-move-past-the-destinations-row",
         "texture-round-trip-44",
     ];
 

@@ -1050,8 +1050,11 @@ impl MetalSide {
                 let source = Retained::from(self.held_texture(texture_at(*from)?)?);
                 let destination = Retained::from(self.held_texture(texture_at(*to)?)?);
                 let encoder = self.open_state(command_buffer, open)?;
-                // SAFETY: both regions lie inside their level's own tiles, which the case's guard
-                // holds, and the encoder outlives the call.
+                // SAFETY: each side's origin lies inside its level's own tiles and neither
+                // states more tiles than that level holds, which the case's guard holds; a
+                // region past the level's tiles is a shape plain Metal is measured to take
+                // cleanly (`probes/sparse_move_past_the_bounds.m`, eight shapes, every command
+                // buffer completed with no error), and the encoder outlives the call.
                 unsafe {
                     encoder.moveTextureMappingsFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
                         &source,
