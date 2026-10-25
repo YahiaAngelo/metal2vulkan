@@ -2584,10 +2584,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-unmeasured-fetch-blend` (precision). `PrecisionNote::UnmeasuredFetchBlend`:
   A fragment function reads a color attachment the pipeline blends, on a device that orders
   framebuffer fetch only through the pixel interlock (MoltenVK, RADV, ANV), of a format whose Metal
-  blend arithmetic is not built: a format whose channels read as floats but a 16-bit float, an
-  sRGB and an extended-range one (a 32-bit float, 16-bit normalized, 8-bit signed normalized,
+  blend arithmetic is not built: a format whose channels read as floats but a 16-bit float, a
+  32-bit float, an sRGB and an extended-range one (a 16-bit normalized, 8-bit signed normalized,
   10-bit, packed float or `A8Unorm` format, among others), an 8-bit unorm one written by an
-  output of fewer than four lanes, or a 16-bit float or 8-bit unorm one under a blend of the second
+  output of fewer than four lanes, a 32-bit float one (`R32Float`, `RG32Float`, `RGBA32Float`)
+  written by an output of fewer than four lanes, by a module without fast math, or under a blend
+  state Metal's own measured arithmetic there does not fit (a one-channel attachment's
+  `SourceColor` over `DestinationColor`, and every state whose factors read the blend color), or a
+  16-bit float or 8-bit unorm one under a blend of the second
   source or beside a second (index 1) output. No Vulkan blend applies to the storage write, so the
   shader
   computes the pipeline's blend in `float`: each factor, product and sum rounded to nearest even,
@@ -2877,9 +2881,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   that stores some channel (its write mask names one of its format's channels;
   `StageIo::half_fast_colors`, which the pipeline's stage reads, or the interlocked storage form's
   write), where `PrecisionNote::HalfOutputPrecision`'s conditions hold; or
-  computes the blend of a 16-bit float attachment it fetches in the interlocked storage form (no
-  Vulkan blend applies to a storage write) where Metal's compiler may fold the output's own
-  arithmetic into that blend or regroup a sum of it: within 2 `half` units in the last place of
+  computes the blend of a 16-bit or 32-bit float attachment it fetches in the interlocked storage
+  form (no Vulkan blend applies to a storage write) where Metal's compiler may fold the output's
+  own arithmetic into that blend or regroup a sum of it: within 2 `half` units in the last place of
   Metal's at the operands' magnitude, 16 at the stored value's under cancellation. Where the output
   is opaque to the blend and its form fits every measured state, the function's blend is Metal's
   and records nothing; so does the blend of a fetched 8-bit unorm attachment it computes there

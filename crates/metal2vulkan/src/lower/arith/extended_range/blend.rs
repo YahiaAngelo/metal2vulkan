@@ -93,6 +93,11 @@
 //! term alone, rounded to `half` first): beyond them the table's rows differ, 7 of its `half4`
 //! rows (each reading `OneMinusBlendColor`) and 76 of its `float4` ones ([`fast_narrow_only`]).
 //!
+//! **A 32-bit float attachment's blend** ([`Blend::float32`]) is these fast forms evaluated in
+//! `float` rather than in `half`, measured over the committed recordings of
+//! `half-output-blends-r32f`, `-rg32f` and `-rgba32f` ([`MEASURED_THIRTY_TWO`]). It is planned
+//! under fast math alone, and no blend color's difference is a fitted form there.
+//!
 //! **Not built** ([`ExtendedRangeBlend`]) under fast math: a factor of the second source (under a `float4`
 //! output's model, in any of the four factors); the color channels' `BlendColor` with
 //! `OneMinusBlendColor` under `Subtract` or `ReverseSubtract` (Metal's result there follows
@@ -270,10 +275,14 @@ pub struct Blend {
     /// product subtracted alone by one minus a source value Metal computes with the factor negated
     /// ([`Blend::half_float`]).
     negates_one_minus: bool,
-    /// A 16-bit float attachment's blend of a state measured word for word against Metal's own
-    /// stored codes ([`MEASURED_SIXTEEN`]), whose forms are Metal's whether or not the sweeps fit
-    /// them in every state ([`Blend::fitted`]).
+    /// A blend of a state measured word for word against Metal's own stored codes
+    /// ([`MEASURED_SIXTEEN`], [`MEASURED_THIRTY_TWO`]), whose forms are Metal's whether or not the
+    /// sweeps fit them in every state ([`Blend::fitted`]).
     measured: bool,
+    /// A 32-bit float attachment's blend ([`Blend::float32`]), whose fast forms were measured over
+    /// one sweep of states rather than the 16-bit family's many: a blend color's difference is no
+    /// fitted form there ([`Blend::fitted`]).
+    wide: bool,
 }
 
 /// The range Metal clamps a `float4` output's color lanes to before blending into an attachment
@@ -333,13 +342,42 @@ const MEASURED_SIXTEEN: [(BlendFactor, BlendFactor); 2] = [
     ),
 ];
 
-/// Whether the 16-bit float blend `eq` is one of the measured states ([`MEASURED_SIXTEEN`]): its
-/// color and its alpha factors the one pair, added, as each measured state's are.
-fn measured_sixteen(eq: &BlendEquation) -> bool {
+/// The blend states a 32-bit float attachment's fast-math blend was measured in word for word
+/// against Metal's own stored codes, color and alpha factors alike, whose forms [`Blend::fitted`]
+/// holds for an attachment of two or more channels ([`Blend::float32`]): the same two pairs
+/// [`MEASURED_SIXTEEN`] names, under `Add`.
+///
+/// Measured against the committed recordings of plain Metal on an Apple M3 Max (macOS 27.0.1) of
+/// `half-output-blends-r32f`, `-rg32f` and `-rgba32f` ("conformance"): every word of every one of
+/// those cases' twenty-one states, 5,376 between them, the destinations each case's own generator
+/// draws (multiples of `2^-20` in `[0, 1)`) and the sources its sweep. Of the seventeen states
+/// whose factors read no blend color, every word of `RG32Float` and of `RGBA32Float` is Metal's
+/// under these forms, `RGBA32Float`'s `da-1mda` alpha included, where ten of the seventeen take a
+/// form [`Blend::fitted`] holds without a measurement (no term, one term, one fused multiply-add,
+/// a minimum or maximum) and these two need one.
+///
+/// **One channel is out.** `SourceColor` over `DestinationColor` into `R32Float` differs at 18 of
+/// its 256 words, by a code, where Metal rounds the **destination's** product first: the device's
+/// own blend is Metal's there and keeps it, as `half-output-blends-r32f`'s `sc-dc` site records.
+/// So a one-channel attachment's state is not measured here, which is why the form that holds at
+/// two and four channels is not taken at one. The width-dependence is the 16-bit family's too
+/// ([`MEASURED_SIXTEEN`]'s `SourceAlphaSaturated` note).
+///
+/// A state whose factors read the blend color is out of this list and of [`Blend::fitted`]: a
+/// 32-bit float attachment's blend color difference is not measured, and two of those states do
+/// differ from Metal under these forms (`BlendAlpha` over `OneMinusBlendAlpha` into `R32Float` at
+/// 77 of 256 words, `BlendColor` over `OneMinusSourceAlpha` into `RGBA32Float` at 10 of 1,024), so
+/// the device blends them and the pipeline announces `PrecisionNote::HalfOutputFastMathBlend`.
+const MEASURED_THIRTY_TWO: [(BlendFactor, BlendFactor); 2] = MEASURED_SIXTEEN;
+
+/// Whether the blend `eq` is one of the measured states `states` ([`MEASURED_SIXTEEN`],
+/// [`MEASURED_THIRTY_TWO`]): its color and its alpha factors the one pair, added, as each measured
+/// state's are.
+fn measured_state(eq: &BlendEquation, states: &[(BlendFactor, BlendFactor)]) -> bool {
     let added = eq.rgb_operation == BlendOperation::Add
         && eq.alpha_operation == BlendOperation::Add
         && (eq.source_rgb, eq.destination_rgb) == (eq.source_alpha, eq.destination_alpha);
-    added && MEASURED_SIXTEEN.contains(&(eq.source_rgb, eq.destination_rgb))
+    added && states.contains(&(eq.source_rgb, eq.destination_rgb))
 }
 
 fn refused(gap: ExtendedRangeBlend) -> Error {
@@ -695,7 +733,8 @@ fn plan(
                 // (`half-output-blends-rgba16f`'s `da-1mda` and `dc-1mdc`, whose alpha factors are
                 // both the destination alpha and its one minus: every one of the 512 words of the
                 // two sites, against the committed Metal recordings, where the lerp holds 480).
-                let no_destination_lerp = unorm8 || family == Family::HalfFloat;
+                let no_destination_lerp =
+                    unorm8 || matches!(family, Family::HalfFloat | Family::Float32);
                 if no_destination_lerp && alpha && za == Atom::Da && (y == Node::Atom(za) || both) {
                     continue;
                 }
@@ -911,8 +950,13 @@ fn fast_narrow_only(form: ExtendedRange) -> bool {
 /// an 8-bit unorm one's in the arithmetic of the output's type ([`Blend::unorm8`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Family {
-    Extended { narrow_only: bool },
+    Extended {
+        narrow_only: bool,
+    },
     HalfFloat,
+    /// A 32-bit float attachment's ([`Blend::float32`]), which plans as a 16-bit float one's: the
+    /// forms the measurement fitted are the same, computed in `float` rather than in `half`.
+    Float32,
     Unorm8(BlendArith),
 }
 
@@ -929,7 +973,8 @@ fn planned_for(
     let narrow_only = family == Family::Extended { narrow_only: true };
     let sixteen = !matches!(family, Family::Extended { .. });
     let unorm8 = matches!(family, Family::Unorm8(_));
-    // A zero factor keeps its product without fast math in a 16-bit float attachment's blend.
+    // A zero factor keeps its product without fast math in a 16-bit float attachment's blend;
+    // a 32-bit float one's is planned under fast math alone ([`Blend::float32`]).
     let keep_zero = family == Family::HalfFloat;
     let colors = [
         ColorWriteMask::RED,
@@ -1068,6 +1113,7 @@ fn planned_for(
         math,
         negates_one_minus: false,
         measured: false,
+        wide: false,
     })
 }
 
@@ -1195,7 +1241,64 @@ impl Blend {
         )?;
         let b = Blend {
             negates_one_minus: channels > 1 && math == BlendMath::Fast,
-            measured: math == BlendMath::Fast && !b.masked && measured_sixteen(eq),
+            measured: math == BlendMath::Fast && !b.masked && measured_state(eq, &MEASURED_SIXTEEN),
+            ..b
+        };
+        match b.reads_second() {
+            true => Err(refused(ExtendedRangeBlend::DualSource)),
+            false => Ok(b),
+        }
+    }
+
+    /// Metal's blend `eq` of a `half` or `float` output of a module **with** fast math (or naming
+    /// no math mode) into a 32-bit float attachment of format `pf` (`R32Float`, `RG32Float`,
+    /// `RGBA32Float`) storing the channels `written` of four (a channel the format lacks counts as
+    /// written: the store drops it), in `float` arithmetic throughout, computed by
+    /// [`blend_float32`]. `R32Float` and `RG32Float` have no alpha: their destination alpha is
+    /// one, so `DestinationAlpha` is a factor of one and `OneMinusDestinationAlpha` of zero.
+    ///
+    /// The forms are a 16-bit float attachment's fast forms ([`Blend::half_float`],
+    /// [`Family::Float32`]) evaluated in `float`: each factor, each product rounded to `float`
+    /// nearest even, and, of an added pair the factors' ranks contract, the source's product
+    /// rounded to the attachment and the destination's carried into the sum unrounded,
+    /// `f(f(Sf · S) + Df · D)` ([`Arith::Contracted`] under [`BlendArith::Float`], one fused
+    /// multiply-add on the destination term), where a device's own blend is the mirror image. The
+    /// states whose forms were measured word for word are [`MEASURED_THIRTY_TWO`]; the rest hold
+    /// only where [`Blend::fitted`] says so without one.
+    ///
+    /// A zero factor drops its term, as it does under a 16-bit float attachment's fast math: the
+    /// four zero-factor states of those cases (`one-zero`, `zero-1msa`, `dc-zero`, `1mbc-zero`)
+    /// are Metal's at every word here, but their sweep draws no NaN, infinite or denormal source,
+    /// so the sign and NaN of a dropped term rest on the 16-bit family's measurement of the same
+    /// fold ([`Blend::half_float`]'s probes) and not on this width's.
+    ///
+    /// Only fast math: a module without fast math (`air.compile.fast_math_disable`) is not
+    /// planned here, Metal's arithmetic for a 32-bit float attachment there having been measured
+    /// in no state, and its blend stays the generic one ([`Blend::generic`], whose rounded forms
+    /// are a fixed-function blend's) with its note. A factor of the second source is no form here
+    /// (`Feature::ExtendedRangeBlend` `DualSource`): its output is not planned beside the storage
+    /// form's write.
+    pub fn float32(
+        eq: &BlendEquation,
+        pf: PixelFormat,
+        written: ColorWriteMask,
+    ) -> Result<Blend, Error> {
+        let channels = match pf {
+            PixelFormat::R32Float => 1,
+            PixelFormat::RG32Float => 2,
+            _ => 4,
+        };
+        let b = planned_for(
+            eq,
+            (channels == 4, Family::Float32),
+            written,
+            (false, BlendMath::Fast),
+        )?;
+        let b = Blend {
+            // A one-channel attachment's `SourceColor` over `DestinationColor` is Metal's in the
+            // other order, so no state of one channel is measured ([`MEASURED_THIRTY_TWO`]).
+            measured: channels > 1 && !b.masked && measured_state(eq, &MEASURED_THIRTY_TWO),
+            wide: true,
             ..b
         };
         match b.reads_second() {
@@ -1388,10 +1491,11 @@ impl Blend {
     /// Whether every class the blend stores takes a form the 16-bit float sweeps fit in every state
     /// ([`Blend::half_float`]): the rounded forms without fast math; under fast math no term, one
     /// term, one fused multiply-add, a minimum or maximum, or a blend constant's difference
-    /// ([`constant_difference`]), and every form of a state measured word for word against Metal's
-    /// stored codes ([`MEASURED_SIXTEEN`]). A fast-math blend of another form (a sum regrouped by a
-    /// lerp or a common factor, or another product rounded beside a fused one) fits most states but
-    /// not every one, so it is a near-equivalent.
+    /// ([`constant_difference`], a 16-bit float attachment's alone), and every form of a state
+    /// measured word for word against Metal's stored codes ([`MEASURED_SIXTEEN`],
+    /// [`MEASURED_THIRTY_TWO`]). A fast-math blend of another form (a sum regrouped by a lerp or a
+    /// common factor, or another product rounded beside a fused one) fits most states but not every
+    /// one, so it is a near-equivalent.
     pub fn fitted(&self) -> bool {
         let fits = |a: &Arith| match self.math {
             BlendMath::Rounded => true,
@@ -1404,7 +1508,7 @@ impl Blend {
                             | Arith::Fused { .. }
                             | Arith::MinMax { .. }
                     )
-                    || constant_difference(a)
+                    || (!self.wide && constant_difference(a))
             }
         };
         [&self.color, &self.alpha].into_iter().flatten().all(fits)
@@ -2258,6 +2362,28 @@ pub fn blend_half_float(
         negates_one_minus: b.negates_one_minus,
     };
     lanes(fb, b, &inputs)
+}
+
+/// Metal's blend `b` ([`Blend::float32`]) of a four-lane output `s` (a `vec4` of `f32`: a `half4`
+/// output's `half`s, or a `float4` one's) over `d`, the 32-bit float attachment's texel as the
+/// storage image reads it (a `vec4` of `f32`; a channel the format lacks reads 0, alpha 1), in
+/// `float` arithmetic: a `vec4` of `f32` holding each blended lane, the `float` the attachment
+/// stores. Nothing is clamped, as nothing is for a 16-bit float attachment: the source is the
+/// value the function returns.
+///
+/// The same arithmetic as [`blend_half_float`] in [`BlendArith::Float`], which is what a 32-bit
+/// float attachment's blend is: every rounding of the forms is to `float`, so `color`, the
+/// encoder's blend color (a `uvec4` of its `f32`s' bits, `PushField::HalfBlendColor`, where `b`
+/// reads it, [`Blend::reads_constant`]), is what `BlendColor` reads unrounded and
+/// `OneMinusBlendColor` its `f(1 - c)`. A `float` multiply-add is correctly rounded where no part
+/// of it underflows (`fma::float_fma_exact`).
+pub fn blend_float32(
+    fb: &mut FunctionBuilder<'_>,
+    b: &Blend,
+    (s, d): (Value, Value),
+    color: Option<Value>,
+) -> BResult<Value> {
+    blend_half_float(fb, b, BlendArith::Float, (s, d), color)
 }
 
 /// Metal's blend `b` ([`Blend::unorm8`]) of a four-lane output `s` (a `vec4` of `f32`: a `half4`

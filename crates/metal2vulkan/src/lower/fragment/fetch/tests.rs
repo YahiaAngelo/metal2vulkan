@@ -156,7 +156,9 @@ fn a_clean_state_takes_the_storage_form() {
 /// attachment only, a signed normalized format under a write mask
 /// that keeps some of its channels, alpha to coverage, a returned sample mask at one sample, and a
 /// depth or stencil attachment without early fragment tests, but where each draw's plan checks its
-/// tests. Another format's blend is the generic one ([`StorageView::generic_blend`]).
+/// tests. Another format's blend is the generic one ([`StorageView::generic_blend`]): a 32-bit
+/// float attachment's under a blend color, which Metal's own measured arithmetic there does not
+/// fit.
 #[test]
 fn unmodelled_states_are_not_implemented() {
     let p = profile("moltenvk-m3", &[]);
@@ -165,9 +167,12 @@ fn unmodelled_states_are_not_implemented() {
     let mut amplified = r32.clone();
     amplified.amplified = true;
     assert_eq!(form(&amplified, false, READS, &p), ni);
+    // A blend color's lerp, which is no fitted form of a 32-bit float attachment at any channel
+    // count: the generic blend.
     let generic = state(PixelFormat::R32Float, |c| {
         c.blending_enabled = true;
-        c.destination_rgb_blend_factor = crate::metal::BlendFactor::One;
+        c.source_rgb_blend_factor = crate::metal::BlendFactor::BlendColor;
+        c.destination_rgb_blend_factor = crate::metal::BlendFactor::OneMinusBlendColor;
     });
     let view = form(&generic, false, WRITES, &p).expect("the generic blend");
     assert!(view.generic_blend && view.blend.is_some(), "{view:?}");
@@ -634,7 +639,10 @@ fn an_a8_unorm_attachment_is_fetched_without_a_format_by_its_own_bit() {
 /// A blend of one and zero, added, for color and alpha stores the source as no blend does, so a
 /// written attachment under it takes the storage form unblended, but for a signed normalized format
 /// (its NaN stores another code under the blend), whose blend the shader computes, the generic
-/// one; one and zero for color alone is a blend, the generic one of `R32Float`. A write whose
+/// one; one and zero for color alone is a blend, and of `R32Float` under fast math it is Metal's
+/// own (`extended_range::Blend::float32`: a lone term, which the measurement fits), where a state
+/// it does not fit -- a one-channel `SourceColor` over `DestinationColor`, whose destination
+/// product Metal rounds first -- keeps the generic blend. A write whose
 /// mask covers none of the format's channels stores nothing: no blend, alpha to coverage, one
 /// sample's returned mask, or late depth test bears on it, but an `Unspecialized` mask stays
 /// refused.
@@ -657,16 +665,41 @@ fn a_replacing_blend_and_a_write_that_stores_nothing_take_the_storage_form() {
     };
     assert!(generic(&replacing(PixelFormat::RG8Snorm)));
     assert!(!generic(&replacing(PixelFormat::R32Float)));
+    // Metal's own blend of a 32-bit float attachment, which the shader computes where the
+    // measurement fits the state and no write mask keeps a channel.
+    let metals = |inputs: &FramebufferFetchInputs| {
+        let view = form(inputs, false, WRITES, &p).expect("the storage form");
+        !view.generic_blend && view.blend.is_some()
+    };
     let alpha_adds = state(PixelFormat::R32Float, |c| {
         c.blending_enabled = true;
         c.destination_alpha_blend_factor = BlendFactor::One;
     });
-    assert!(generic(&alpha_adds));
+    assert!(metals(&alpha_adds));
     let subtracts = state(PixelFormat::R32Float, |c| {
         c.blending_enabled = true;
         c.rgb_blend_operation = BlendOperation::Subtract;
     });
-    assert!(generic(&subtracts));
+    assert!(metals(&subtracts));
+    // The one-channel state the measurement does not fit keeps the generic blend, as does any
+    // state of a module without fast math.
+    let source_by_destination = |pf| {
+        state(pf, |c| {
+            c.blending_enabled = true;
+            c.source_rgb_blend_factor = BlendFactor::SourceColor;
+            c.destination_rgb_blend_factor = BlendFactor::DestinationColor;
+            c.source_alpha_blend_factor = BlendFactor::SourceColor;
+            c.destination_alpha_blend_factor = BlendFactor::DestinationColor;
+        })
+    };
+    assert!(generic(&source_by_destination(PixelFormat::R32Float)));
+    assert!(metals(&source_by_destination(PixelFormat::RG32Float)));
+    let safe = ColorUse {
+        math: BlendMath::Rounded,
+        ..WRITES
+    };
+    let rounded = form(&alpha_adds, false, safe, &p).expect("the storage form");
+    assert!(rounded.generic_blend && rounded.blend.is_some());
     // A write that stores nothing, under each state that refuses a store.
     let none = |edit: fn(&mut ColorAttachmentDescriptor)| {
         state(PixelFormat::RG16Float, |c| {
