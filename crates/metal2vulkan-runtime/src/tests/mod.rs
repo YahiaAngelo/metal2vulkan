@@ -51,6 +51,7 @@ mod cpu_copy_layouts;
 mod deferred_calls;
 mod degradation;
 mod degradation_catalogue;
+mod degradation_sites;
 mod depth_copy;
 mod depth_ranges;
 mod depth_stencil_resolve;

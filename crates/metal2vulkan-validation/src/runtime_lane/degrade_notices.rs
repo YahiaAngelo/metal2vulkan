@@ -461,6 +461,14 @@ pub(super) fn on_device_with(
 /// Every kind is taken by a lane test's site: listed above, or a stage's precision note or
 /// reconvergence; no kind is in two lists, and no list names a kind twice. `misplaced-notice`
 /// ([`MISPLACED`]) is taken by the runtime's own tests instead, as no lane can meet it.
+///
+/// This module compiles only under the device cfgs, so a kind that lands with no site leaves this
+/// test red where the ordinary gate cannot read it. The runtime crate's
+/// `tests::degradation_sites::every_declared_kind_is_named_by_a_lane_site` holds the same closure
+/// with no device, reading `lists` below and each site's `const` off the lane's sources, and names
+/// the siteless kind in the ordinary gate on any machine. Keep the two in step: a renamed site
+/// const, or a `lists` entry written otherwise than `&NAME` or `&NAME[..]` on its own line, fails
+/// there with what it could not read.
 #[test]
 fn every_kind_has_a_site_a_lane_test_takes() {
     let stage_kinds = Degradation::ALL.iter().copied().filter(|kind| {
