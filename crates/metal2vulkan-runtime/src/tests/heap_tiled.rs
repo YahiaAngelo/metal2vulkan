@@ -9,8 +9,8 @@ use crate::copy_plan::block_bytes;
 use crate::metal_level::MetalLevel;
 use crate::texture::heap_tiled::{
     fresh_pattern, level_bytes, lossless_answer, metal_compresses, metal_heap_layout,
-    pattern_levels, sample_grid, shadow_tiles, BlockPlacement, Elements, FreshDepth, FreshPattern,
-    GpuRows, HeapLayout, TiledLayout, Untiled,
+    own_heap_layout, pattern_levels, sample_grid, shadow_tiles, BlockPlacement, Elements,
+    FreshDepth, FreshPattern, GpuRows, HeapLayout, TiledLayout, Untiled,
 };
 use crate::texture_descriptor::TextureLayout;
 use metal2vulkan::metal::format::byte_format;
@@ -1416,5 +1416,72 @@ fn pattern_levels_are_the_levels_of_16_or_more() {
         let grid = sample_grid(samples, [w, h]).unwrap();
         let got = pattern_levels(true, rt, true, grid, 1);
         assert_eq!(got, levels, "{samples}x {w}x{h}");
+    }
+}
+
+/// The per-texture notice of a heap texture whose bytes the runtime holds Metal's layout of
+/// itself (`own_heap_layout`, `texture/heap.rs`): a multisample texture whose samples Metal lays
+/// out in the heap's bytes announces nothing where its image is a shadow of those tiles, and
+/// `heap-texture-untiled-layout` where it lies in memory of its own apart from them, which holds
+/// none of them; the uncompressed tiles of a texture Metal keeps losslessly compressed announce
+/// `heap-texture-lossless-layout`, by its sample count; a layout that is not Metal's carries its
+/// own kind; and a route of its own that is measured announces nothing.
+#[test]
+fn a_multisample_heap_texture_apart_from_metal_s_tiles_is_announced_untiled() {
+    use crate::degradation::Degradation as D;
+    const M4: MetalLevel = MetalLevel::MacOS27_0_1;
+    let read = TextureUsage::SHADER_READ;
+    let format = Format::R8G8B8A8_UNORM;
+    // A 4-sample texture of a sample grid of 8 x 8, under the 16 Metal compresses from: Metal
+    // keeps it uncompressed and lays its samples out in the heap's bytes.
+    let ms = texture(
+        T::Type2DMultisample,
+        PixelFormat::RGBA8Unorm,
+        [4, 4, 1],
+        (1, 1, 4),
+    );
+    assert_eq!(sample_grid(4, [4, 4]), Some([8, 8]));
+    let metal = metal_heap_layout(&ms, read, true, format, M4);
+    assert!(matches!(metal.layout, HeapLayout::Tiled(_)));
+    // A shadow of Metal's own tiles holds the texture as Metal lays it out: no notice.
+    assert_eq!(own_heap_layout(&metal.layout, 4, false), None);
+    // Its image in memory of its own holds none of them: announced, as the layout Metal's tiles
+    // are not measured against is (`multisample_heap_layout`'s).
+    let untiled = own_heap_layout(&metal.layout, 4, true);
+    assert_eq!(untiled, Some(Untiled::SAMPLES_APART));
+    assert_eq!(
+        untiled.map(|untiled| untiled.kind),
+        Some(D::HeapTextureUntiledLayout)
+    );
+    // A layout that is not Metal's carries its own kind, wherever the image lies.
+    assert_eq!(
+        own_heap_layout(&HeapLayout::Untiled(Untiled::DRIVER), 4, false),
+        Some(Untiled::DRIVER)
+    );
+    // A texture Metal keeps losslessly compressed: the uncompressed tiles a shadow holds it in,
+    // announced lossless by its sample count, wherever its image lies.
+    let big = texture(
+        T::Type2DMultisample,
+        PixelFormat::RGBA8Unorm,
+        [64, 64, 1],
+        (1, 1, 4),
+    );
+    let compressed = metal_heap_layout(&big, read, true, format, M4);
+    let HeapLayout::Untiled(lossless) = compressed.layout else {
+        panic!("Metal keeps a 64 x 64 4-sample texture compressed");
+    };
+    assert_eq!(lossless, Untiled::LOSSLESS_MULTISAMPLE);
+    let tiles = shadow_tiles(&big, format, M4, &HeapLayout::Untiled(lossless))
+        .expect("a compressed multisample texture has a shadow's uncompressed tiles");
+    assert!(matches!(tiles, HeapLayout::Uncompressed(_)));
+    for apart in [false, true] {
+        assert_eq!(
+            own_heap_layout(&tiles, 4, apart),
+            Some(Untiled::LOSSLESS_SAMPLES)
+        );
+        assert_eq!(own_heap_layout(&tiles, 1, apart), Some(Untiled::LOSSLESS));
+        // A route of its own that is measured (a 4:2:2 texture's rows, a two-plane texture's
+        // planes) lays the texture out as Metal does: nothing to announce.
+        assert_eq!(own_heap_layout(&HeapLayout::Measured, 4, apart), None);
     }
 }

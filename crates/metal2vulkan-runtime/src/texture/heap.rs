@@ -207,8 +207,8 @@
 
 use super::first_move::FirstMove;
 use super::heap_tiled::{
-    footprint_size, metal_compresses_layout, metal_heap_layout, modelled_size, shadow_tiles,
-    HeapLayout, HeapTiledCopies, TiledTexture, Untiled,
+    footprint_size, metal_compresses_layout, metal_heap_layout, modelled_size, own_heap_layout,
+    shadow_tiles, HeapLayout, HeapTiledCopies, TiledTexture, Untiled,
 };
 use super::heap_two_planes::{HeapPlaneCopies, TwoPlaneHeapLayout};
 use super::stand_in::StandIn;
@@ -3390,21 +3390,12 @@ impl Device {
                 self.degrade_heap_layout(untiled, texture.object_id());
             }
         } else {
-            match metal_layout {
-                HeapLayout::Tiled(_) if route == AliasRoute::Tiled => {
-                    self.shared().counts.heap_texture_tiled();
-                }
-                HeapLayout::Uncompressed(_) => {
-                    let lossless = match p.layout.samples {
-                        1 => Untiled::LOSSLESS,
-                        _ => Untiled::LOSSLESS_SAMPLES,
-                    };
-                    self.degrade_heap_layout(lossless, texture.object_id());
-                }
-                HeapLayout::Untiled(untiled) => {
-                    self.degrade_heap_layout(untiled, texture.object_id());
-                }
-                HeapLayout::Tiled(_) | HeapLayout::Measured => {}
+            if route == AliasRoute::Tiled && matches!(metal_layout, HeapLayout::Tiled(_)) {
+                self.shared().counts.heap_texture_tiled();
+            }
+            let apart = route == AliasRoute::Lossless;
+            if let Some(untiled) = own_heap_layout(&metal_layout, p.layout.samples, apart) {
+                self.degrade_heap_layout(untiled, texture.object_id());
             }
         }
         Ok(texture)

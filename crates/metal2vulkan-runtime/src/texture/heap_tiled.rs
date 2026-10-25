@@ -982,6 +982,15 @@ impl Untiled {
          multisample texture's samples out in its tiles, which no driver fact measures as Metal's \
          for it (DriverFact::MultisampleColorImagesLieAsMetalHeapTextures, of a colour one)",
     );
+    /// A multisample texture Metal keeps uncompressed, whose samples it lays out in the heap's
+    /// bytes, held in memory of its own apart from them (`AliasRoute::Lossless`, `heap.rs`): its
+    /// image holds other bytes than Metal's samples, the device cannot move them to and from the
+    /// heap's bytes, or their layout is not measured (`heap-texture-untiled-layout`).
+    pub(crate) const SAMPLES_APART: Untiled = Untiled::other(
+        "Metal lays the multisample texture's samples out in the heap's bytes, which its image, \
+         in memory of its own, does not hold: it holds other bytes than Metal's samples, the \
+         device cannot move them to and from the heap's bytes, or their layout is not measured",
+    );
     /// A block-compressed texture whose placement the device's Metal level does not measure
     /// (`heap-texture-block-compressed-layout`).
     const BLOCK_COMPRESSED: Untiled = Untiled {
@@ -1003,16 +1012,6 @@ impl Untiled {
 
 /// The reason of a texture whose format's layout in Metal's heaps is not measured.
 pub(crate) const UNMEASURED_FORMAT: &str = "its format's layout in Metal's heaps is not measured";
-
-/// The reason of a multisample texture Metal keeps uncompressed whose image lies in memory of
-/// its own apart from the heap's bytes (`heap.rs`): its image holds other bytes than Metal's
-/// samples, the device cannot move them to and from the heap's bytes, or their layout is not
-/// measured.
-const MULTISAMPLE_SAMPLES: &str = "Metal lays the multisample texture's samples out in the heap's \
-                                   bytes, which its image, in memory of its own, does not hold: \
-                                   it holds other bytes than Metal's samples, the device cannot \
-                                   move them to and from the heap's bytes, or their layout is \
-                                   not measured";
 
 /// A texture's elements in Metal's tiles: one layout of all of them ([`TiledTexture::one`]), or a
 /// `Depth32Float_Stencil8` texture's two planes, each one aspect's elements laid out as a texture
@@ -1080,6 +1079,27 @@ impl HeapLayout {
             HeapLayout::Tiled(tiled) | HeapLayout::Uncompressed(tiled) => Some(tiled),
             HeapLayout::Untiled(_) | HeapLayout::Measured => None,
         }
+    }
+}
+
+/// The per-texture notice of a heap texture whose bytes the runtime holds Metal's layout of
+/// itself (`heap.rs`): one in a heap over host pages, one whose image is a shadow of Metal's tiles
+/// in the heap's bytes, and a multisample one whose image lies in memory of its own apart from
+/// them (`apart`, `AliasRoute::Lossless`), where Metal lays it out as `metal` and it has `samples`
+/// samples. `None` where its bytes are Metal's layout of its elements: a shadow of Metal's own
+/// tiles, and a texture laid out by a measured route of its own ([`HeapLayout::Measured`]).
+pub(crate) fn own_heap_layout(metal: &HeapLayout, samples: u32, apart: bool) -> Option<Untiled> {
+    match metal {
+        // Its image holds the uncompressed tiles of a texture Metal keeps losslessly compressed.
+        HeapLayout::Uncompressed(_) => Some(match samples {
+            1 => Untiled::LOSSLESS,
+            _ => Untiled::LOSSLESS_SAMPLES,
+        }),
+        HeapLayout::Untiled(untiled) => Some(*untiled),
+        // Metal lays its samples out in the heap's bytes, which its image, in memory of its own,
+        // does not hold: the heap's bytes keep what they held.
+        HeapLayout::Tiled(_) if apart => Some(Untiled::SAMPLES_APART),
+        HeapLayout::Tiled(_) | HeapLayout::Measured => None,
     }
 }
 
@@ -1399,7 +1419,7 @@ fn multisample_heap_layout(
     let samples = layout.samples;
     let apart = |answer| MetalHeapLayout {
         answer,
-        layout: HeapLayout::Untiled(Untiled::other(MULTISAMPLE_SAMPLES)),
+        layout: HeapLayout::Untiled(Untiled::SAMPLES_APART),
     };
     let Some(grid) = sample_grid(samples, [width, height]) else {
         return apart(None);
