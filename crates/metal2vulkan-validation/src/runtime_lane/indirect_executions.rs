@@ -21,9 +21,10 @@
 use super::degrade_notices::counts;
 use super::host_memory::{host_page, no_copy, not_importable, Mapping};
 use super::{
-    bound_buffers, compute_descriptor, encode_case, in_shard, public_case, public_cases,
-    read_buffer, validated_device, validated_device_with, wait_for_device, CaseResources,
-    DeviceWait, Messages, PublicCase, ScratchCache, WAIT,
+    bound_buffers, compute_descriptor, encode_case, in_shard, layer_reported_nothing,
+    layer_reported_nothing_at_all, public_case, public_cases, read_buffer, validated_device,
+    validated_device_with, wait_for_device, CaseResources, DeviceWait, Messages, PublicCase,
+    ScratchCache, WAIT,
 };
 use crate::air_library::AirLibrary;
 use crate::candidate::engine::{ComputeCase, ComputeOutput};
@@ -79,11 +80,7 @@ fn on_device_with(adjust: impl FnOnce(&mut DeviceOptions), test: impl FnOnce(&De
         let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), adjust).unwrap();
         test(&device, &messages);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// `case`'s pipeline state, made with `supportIndirectCommandBuffers` (as the oracle's
@@ -633,6 +630,10 @@ fn every_case_of_buffers_alone_runs_from_a_command_as_its_dispatch(shard: usize)
         "failed:\n{}\ntimed out:\n{}\nat device destruction: {leaked:#?}",
         failed.join("\n"),
         timed_out.join("\n")
+    );
+    layer_reported_nothing(
+        &messages,
+        "every case's commands were valid and left nothing behind",
     );
     assert!(!alike.is_empty(), "no case ran alike");
 }
@@ -1709,11 +1710,7 @@ fn a_segment_runs_between_the_encoder_s_commands() {
             encoder.end_encoding().unwrap();
             assert_eq!(command_buffer.executions().len(), 2);
             complete(&command_buffer);
-            let reported = messages.take();
-            assert!(
-                reported.is_empty(),
-                "{dispatch_type:?}: the validation layer reported: {reported:#?}"
-            );
+            layer_reported_nothing(messages, &format!("{dispatch_type:?}"));
             for (step, expected) in expected.iter().enumerate() {
                 let written = read_buffer(&chain[step + 1], 0, length).unwrap();
                 assert_eq!(&written, expected, "{dispatch_type:?} step {step}");

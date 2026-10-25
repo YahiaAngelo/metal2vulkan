@@ -20,7 +20,10 @@
 //! compared with its bytes.
 
 use super::degrade_notices::assert_once;
-use super::{validated_device, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    layer_reported_nothing_at_all, validated_device, validated_device_with, Messages, ScratchCache,
+    WAIT,
+};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::{MipmapFilterChain, MipmapRule};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
@@ -303,11 +306,7 @@ fn mipmaps_of_the_16_bit_fixed_formats_on_halving_chains_are_metal_s() {
             "the M3 Max's passes, no blit chain: {announced:?}"
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The boxes an Apple M4 measured (probe 10), each the first level of a texture of the box: exact
@@ -375,11 +374,7 @@ fn the_boxes_metal_measured_mipmap_as_it_measured_them() {
             "{announced:?}"
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// At macOS 26.7 (`MetalLevel::MacOS26_7`, the M3 Max's passes), `mipmaps-as-apple-m4` is
@@ -471,11 +466,7 @@ fn the_m3_note_is_announced_exactly_where_an_m3_differs() {
         generate(&queue, &t);
         assert_once(&messages.take_notices(), &M3_MIPMAPS);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Every format the filter computes, from random bytes (every bit pattern: NaNs, infinities,
@@ -577,11 +568,7 @@ fn every_format_the_filter_computes_is_its_filter_level_by_level() {
             "no blit chain: {announced:?}"
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// At macOS 26.7 (`MetalLevel::MacOS26_7`), the Apple M3 Max's passes past its tail's extent, from
@@ -656,11 +643,7 @@ fn mipmaps_past_65_texels_take_the_m3_max_s_passes() {
         assert!(unknown, "a compressed pass past PASS_ASPECT");
         assert_once(&messages.take_notices(), &M3_MIPMAPS);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The kind a chain takes where a level may take a rounding the chain does not fit, every venue,
@@ -736,11 +719,7 @@ fn mipmaps_near_ties_are_announced_where_the_rounding_is_not_fit() {
         &[(PixelFormat::RGBA16Float, [16, 16, 1], 3)],
         Some("RGBA16Float"),
     );
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// At macOS 27.0.1 (`MetalLevel::MacOS27_0_1`), where the Apple M3 Max makes every level by its
@@ -808,11 +787,7 @@ fn mipmaps_at_macos_27_0_1_are_the_m3_max_s_filter() {
         assert_eq!(ties, (false, true), "an 8-bit sRGB chain");
         assert_once(&messages.take_notices(), &TIE_MIPMAPS);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Plain Metal's integer mipmap of a level from the level above (`above`, of `above_extent`),
@@ -1017,11 +992,7 @@ fn integer_mipmaps_pick_the_texels_plain_metal_picks() {
         let announced = assert_once(&messages.take_notices(), &[]);
         assert!(announced.is_empty(), "{announced:?}");
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The first level read in place recovers every code: for every format the filter computes, a 2D
@@ -1122,9 +1093,5 @@ fn a_first_level_read_in_place_recovers_every_code() {
             "the extended-range formats' integer carriers are read in place on every device"
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

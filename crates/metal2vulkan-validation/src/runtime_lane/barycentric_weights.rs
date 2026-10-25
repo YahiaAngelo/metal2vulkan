@@ -25,7 +25,9 @@
 //! with neither way, such as the `vk12-floor` profile's, refuses the functions as needing either
 //! `fragmentShaderBarycentric` or `geometryShader`.
 
-use super::{buffer_with, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::candidate::LaneRestriction;
 use crate::gpu::TEST_DEVICE;
@@ -377,11 +379,7 @@ fn on_lane(adjust: impl FnOnce(&mut DeviceOptions), check: impl FnOnce(&Lane)) {
     let lane = Lane::with(&messages, &cache, adjust);
     check(&lane);
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// `check` on the lane device of `path`.
@@ -667,11 +665,7 @@ fn a_pipeline_with_a_geometry_stage_announces_it_and_one_without_does_not() {
             }
         );
         drop(lane);
-        let reported = messages.take();
-        assert!(
-            reported.is_empty(),
-            "the validation layer reported: {reported:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }
 

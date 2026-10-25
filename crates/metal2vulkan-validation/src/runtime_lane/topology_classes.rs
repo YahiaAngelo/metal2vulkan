@@ -19,7 +19,10 @@
 
 use super::degrade_notices::counts;
 use super::render_state::{texels, texture};
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{
@@ -209,11 +212,7 @@ fn a_draw_outside_the_pipeline_s_class_draws_as_plain_metal() {
     }
     eprintln!("draws outside their pipeline's class on {name}: Metal's");
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// `unsized-points`, asked for at every occurrence, is announced where each draw of points the
@@ -302,9 +301,5 @@ fn unsized_points_are_announced_at_the_draw_the_commit_and_the_host_step() {
         "CBF-MARK {name}: unsized points were announced at the draw, the commit and the host \
          step, and drew nothing"
     );
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

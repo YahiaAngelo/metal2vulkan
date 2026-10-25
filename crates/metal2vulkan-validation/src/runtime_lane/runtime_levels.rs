@@ -32,7 +32,10 @@
 
 use super::mip_levels::{half, levels, texture, FILTERED, LEVELS};
 use super::nearest_positions::{metal_texel, multiplied_first};
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -275,7 +278,7 @@ fn runtime_samplers_levels_read_metals_levels() {
         }
         assert!(wrong.is_empty(), "{name}: {} samples differ", wrong.len());
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The positions texture: level `L` of `max(13 >> L, 1)` by `max(11 >> L, 1)` texels, texel
@@ -435,5 +438,5 @@ fn runtime_nearest_samples_read_metals_texel_at_their_level() {
         }
         assert!(wrong.is_empty(), "{name}: {} lanes differ", wrong.len());
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

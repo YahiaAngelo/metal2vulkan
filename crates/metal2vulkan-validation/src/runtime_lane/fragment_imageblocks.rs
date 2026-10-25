@@ -24,7 +24,9 @@
 use super::degrade_notices::assert_once;
 use super::shared_kinds;
 use super::tile_states::descriptor as tile_descriptor;
-use super::{buffer_with, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device, Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureUsage};
@@ -260,7 +262,7 @@ fn a_pass_keeps_its_imageblock_across_draws_and_a_split() {
             }
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
     assert_once(&messages.take_notices(), &kinds);
 }
 
@@ -333,7 +335,7 @@ fn imageblock_draws_are_refused_where_metal_or_the_runtime_refuses_them() {
             );
         });
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// What a step of [`commands_reach_the_pass_s_imageblock`] draws: the encoder's own draw of a
@@ -450,7 +452,7 @@ fn commands_reach_the_pass_s_imageblock() {
         }
         drop(held);
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
     let notices = messages.take_notices();
     let storage = notices
         .iter()

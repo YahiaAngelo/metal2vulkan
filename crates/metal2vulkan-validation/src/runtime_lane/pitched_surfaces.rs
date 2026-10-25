@@ -70,7 +70,10 @@ use super::draw_work::pushes;
 use super::host_memory::{counting, no_copy, not_importable, Mapping, GUEST_PAGE};
 use super::memoryless::memoryless_options;
 use super::no_copy_textures::{blending, blending_beside_scratch, floats, rects_beside, staged};
-use super::{validated_device, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    layer_reported_nothing, layer_reported_nothing_at_all, validated_device, validated_device_with,
+    Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -730,11 +733,7 @@ fn reads_writes_and_renders_as_metal(layout: Layout) {
         check("the last blit", &expected);
         surface.report(&device, &messages);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A texture of `layout` over a no-copy buffer whose first use reads it (a fragment function's
@@ -760,12 +759,7 @@ fn first_use_reads_the_bytes(device: &Device, messages: &Messages, layout: Layou
         surface.check(&layout, "its first use", &surface.pages);
         surface.report(device, messages);
     }
-    assert_eq!(
-        messages.take(),
-        Vec::new(),
-        "{}: the validation layer reported",
-        layout.name
-    );
+    layer_reported_nothing(messages, layout.name);
 }
 
 /// [`first_use_reads_the_bytes`] over each of [`LAYOUTS`], on one device.
@@ -869,11 +863,7 @@ fn first_use_over_read_only_pages(
         "{what}: the read-only pages changed: {}",
         padding_changes(&layout, &now, &pages)
     );
-    assert_eq!(
-        messages.take(),
-        Vec::new(),
-        "{what}: the validation layer reported"
-    );
+    layer_reported_nothing(messages, &what);
     drop((texture, buffer));
     drop(mapping);
     Some(())
@@ -977,11 +967,7 @@ fn a_padded_texture_s_shadow_names_what_may_write_its_padding() {
             );
             drop((texture, buffer));
         }
-        let messages = messages.take();
-        assert!(
-            messages.is_empty(),
-            "the validation layer reported: {messages:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -1041,11 +1027,7 @@ fn a_pass_that_draws_nothing_copies_no_shadow() {
         );
         drop((texture, buffer));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A pass that loads a shadowed texture (the browser's padded tile over an ordinary buffer, a
@@ -1258,11 +1240,7 @@ fn a_pass_copies_in_and_back_only_the_texels_its_scissors_reach() {
         );
         drop((texture, buffer, private));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A pass that loads a shadowed texture (the browser's padded tile over an ordinary buffer) over
@@ -1340,11 +1318,7 @@ fn a_shadowed_color_beside_a_memoryless_scratch_blends_over_part_of_it() {
         assert!(now == expected, "the bytes between the rows changed");
         drop((texture, buffer, private, scratch));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A pass's copies in share their barriers (`encoder.rs`'s `ShadowRun`): a pass that loads a
@@ -1453,11 +1427,7 @@ fn a_pass_s_copies_in_share_their_barriers() {
         );
         drop((read, loaded, buffer));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A pass that loads a shadowed texture and draws under a scissor beside a depth attachment it
@@ -1572,11 +1542,7 @@ fn a_loaded_color_beside_a_cleared_depth_copies_inside_its_scissor(past: u64) {
         assert!(now == expected, "the bytes between the rows changed");
         drop((texture, buffer, private, depth));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// [`a_loaded_color_beside_a_cleared_depth_copies_inside_its_scissor`] beside a depth of the
@@ -1812,11 +1778,7 @@ fn merged_writes_match_metal(layout: Layout) {
             surface.report(&device, &messages);
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 #[test]
@@ -1865,11 +1827,7 @@ fn writes_as_metal(layout: Layout) {
         surface.check(&layout, "a fragment function's writes", &expected);
         surface.report(&device, &messages);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// One test a layout, each its own process: `$name` runs [`LAYOUTS`]`[$index]`.
@@ -1983,11 +1941,7 @@ fn on_shared_device(test: impl FnOnce(&Device, &Messages)) {
         .unwrap();
         test(&device, &messages);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// `boxed` (rows of `bw` texels) laid into `expected` at texel (`bx`, `by`) of `layout`'s rows.
@@ -2141,12 +2095,7 @@ fn reads_and_blits_as_metal(device: &Device, messages: &Messages, layout: Layout
         check("the last read", &expected);
         surface.report(device, messages);
     }
-    assert_eq!(
-        messages.take(),
-        Vec::new(),
-        "{}: the validation layer reported",
-        layout.name
-    );
+    layer_reported_nothing(messages, layout.name);
     Some(())
 }
 
@@ -2202,11 +2151,7 @@ fn a_padded_texture_that_only_reads_is_a_shadow() {
             assert!(copied > 0, "{what}: a shadow its uses copied nothing into");
             surface.check(&layout, "its uses", &surface.pages);
             surface.report(device, messages);
-            assert_eq!(
-                messages.take(),
-                Vec::new(),
-                "{what}: the validation layer reported"
-            );
+            layer_reported_nothing(messages, &what);
         }
     });
 }
@@ -2246,12 +2191,7 @@ fn a_padded_texture_that_renders_or_writes_is_a_shadow() {
             );
             messages.take_notices();
             drop((texture, buffer));
-            assert_eq!(
-                messages.take(),
-                Vec::new(),
-                "{} ({usage:?}): the validation layer reported",
-                layout.name
-            );
+            layer_reported_nothing(messages, &format!("{} ({usage:?})", layout.name));
         }
     });
 }
@@ -2329,11 +2269,7 @@ fn a_padded_texture_that_only_reads_over_an_ordinary_buffer_keeps_its_bytes() {
                 device.name(),
             );
             drop((texture, buffer));
-            assert_eq!(
-                messages.take(),
-                Vec::new(),
-                "{what}: the validation layer reported"
-            );
+            layer_reported_nothing(messages, &what);
         }
     });
 }

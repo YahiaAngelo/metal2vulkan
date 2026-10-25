@@ -30,7 +30,9 @@
 //! reads flat inputs too, which the rotated-weights variant takes back to Metal's order but for
 //! rounding, are checked. The work counts show which path ran.
 
-use super::{buffer_with, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::VkFeature;
@@ -886,11 +888,7 @@ fn run(withheld: bool, weights: Weights) {
         assert!(found.covered > 10_000, "{found:?}");
         assert!(found.told_apart > 1_000, "{found:?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Every case draws Metal's mode 1 through the device's last provoking vertex where it has one
@@ -981,11 +979,7 @@ fn the_third_way_is_drawn_as_mode_1_announced_where_metal_differs() {
                 "{cases:?} on {name}: announced"
             );
         }
-        let reported = messages.take();
-        assert!(
-            reported.is_empty(),
-            "the validation layer reported: {reported:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -1045,11 +1039,7 @@ fn draws_of_no_primitive_announce_nothing() {
                 .collect();
             assert!(kinds.is_empty(), "{name} (withheld {withheld}): {kinds:?}");
         }
-        let reported = messages.take();
-        assert!(
-            reported.is_empty(),
-            "the validation layer reported: {reported:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -1116,11 +1106,7 @@ fn executions_take_the_first_vertex() {
         }
         eprintln!("{name}: {executed_draws} executions at mode 1 drew mode 0's draws");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The model's strip: an odd triangle's order at mode 1 is `(j + 1, j, j + 2)`, at mode 0

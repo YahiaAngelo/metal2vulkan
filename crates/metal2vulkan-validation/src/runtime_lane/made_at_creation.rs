@@ -9,7 +9,10 @@
 //! vertices through a vertex descriptor (`LAYOUT_FUNCTIONS`).
 
 use super::degrade_notices::{counts, on_device};
-use super::{dynamic_input_assembly, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    dynamic_input_assembly, layer_reported_nothing_at_all, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -320,7 +323,7 @@ fn a_pipeline_made_at_creation_announces_at_its_first_draw() {
             "a second draw announced again"
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A state's creation predicts the draw that binds no texture: nothing it sees names a texture a

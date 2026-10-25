@@ -28,7 +28,7 @@ use super::argument_linear_samples::kernel;
 use super::degrade_notices::counts;
 use super::depth_compares::{pipeline_of, run_held, Held, Through};
 use super::extended_range_targets::half_bits;
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
 use metal2vulkan::device::VkProperty;
@@ -578,11 +578,7 @@ fn pixel_samplers_answer_metal_s_texels() {
         eprintln!("pixel samplers on {}", device.name());
         (compare(&device), metal_sampler(&device))
     };
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     let announced: BTreeSet<Degradation> = counts(&messages.take_notices()).into_keys().collect();
     eprintln!("announced: {announced:?}");
     let converted = announced.contains(&Degradation::FloatSampleFilter);
@@ -699,9 +695,5 @@ fn the_argument_buffer_note_waits_for_a_filtering_pixel_state() {
         );
         drop(linear);
     }
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

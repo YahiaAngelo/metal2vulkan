@@ -65,7 +65,7 @@
 //! `validation/fixtures/public/examples/runtime_examples.ll`. The tests print the driver's data and
 //! each device's counts (`PIPELINE-RECORDS`).
 
-use super::{validated_device_with, Messages, ScratchCache, WAIT};
+use super::{layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use ash::vk;
@@ -733,7 +733,7 @@ fn a_later_device_makes_every_pipeline_an_earlier_one_made_from_its_records() {
             assert!(now.is_empty(), "a record of a driver that keeps nothing");
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A state's line pipeline, made at its first line draw after the state's creation made its
@@ -799,7 +799,7 @@ fn a_line_pipeline_is_made_from_its_triangle_sibling_s_record() {
             }
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 #[test]
@@ -826,7 +826,7 @@ fn a_record_holding_another_pipeline_s_data_is_written_again() {
             "a record of a driver that keeps nothing"
         );
         println!("PIPELINE-RECORDS: the driver's data is not whole; nothing to write again");
-        assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+        layer_reported_nothing_at_all(&messages);
         return;
     }
     let foreign: Vec<Vec<u8>> = foreign.into_values().collect();
@@ -948,7 +948,7 @@ fn a_record_holding_another_pipeline_s_data_is_written_again() {
             target
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The processes [`two_processes_making_one_pipeline_leave_one_whole_record`] runs at once.
@@ -1032,7 +1032,7 @@ fn two_processes_making_one_pipeline_leave_one_whole_record() {
         "the draw took the creation's pipeline"
     );
     assert_eq!(records(cache.path()), before_draw, "the draw wrote nothing");
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// One of [`two_processes_making_one_pipeline_leave_one_whole_record`]'s processes: the
@@ -1051,5 +1051,5 @@ fn record_maker_process() {
         "\n{MAKER_REPORT} loads={} saves={} truncated={}",
         made.driver_loads, made.driver_saves, made.driver_data_truncated
     );
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

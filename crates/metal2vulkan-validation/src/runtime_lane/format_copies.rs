@@ -27,7 +27,7 @@
 //! (`texture_blits` measures that).
 
 use super::degrade_notices::assert_once;
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
 use metal2vulkan_runtime::{
@@ -260,7 +260,7 @@ fn depth_and_stencil_copy_their_bytes_with_colour_formats_of_their_unit() {
             );
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Probes 8, 8b and 8c: the stencil view `X32Stencil8` of a `Depth32FloatStencil8` texture copies
@@ -396,7 +396,7 @@ fn the_stencil_view_of_a_combined_texture_copies_its_stencil() {
             "a combined texture into another on {name}"
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The CPU's copies through the stencil view `X32Stencil8` of a `Shared` `Depth32FloatStencil8`
@@ -470,7 +470,7 @@ fn the_cpu_copies_through_the_stencil_view_move_the_stencil() {
         texture.get_bytes(&mut held, 16, 32, region, 0, 0).unwrap();
         assert_eq!(held.to_vec(), depth, "the depth kept again on {name}");
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Probes 7, 7b and 8b: a region copied onto itself keeps its texels, the whole texture or a
@@ -613,7 +613,7 @@ fn a_copy_onto_its_own_texels_keeps_them_and_another_overlap_moves_as_memmove() 
         let notices = assert_once(&messages.take_notices(), &MEMMOVES);
         assert_eq!(notices.len(), 1, "{notices:?} on {name}");
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A unit's bytes: `tag`, its index `i`, then bytes that count up, `n` in all.
@@ -741,5 +741,5 @@ fn compressed_blocks_copy_into_texels_of_their_bytes_and_back() {
             );
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

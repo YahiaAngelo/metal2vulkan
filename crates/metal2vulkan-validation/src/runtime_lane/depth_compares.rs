@@ -31,7 +31,10 @@
 //! the eight functions. (A sampler that filters leaves a heap texture's comparison to the device,
 //! which the module records, so it is not asked here.)
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -809,5 +812,5 @@ fn depth_comparisons_compare_as_metal_does() {
             wrong.join("\n")
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

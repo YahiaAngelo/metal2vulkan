@@ -12,7 +12,10 @@
 //! sums must be the correctly rounded ones and `converted`'s integers the truncated differences
 //! too.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -387,9 +390,5 @@ fn a_sum_left_as_written_gives_its_settled_twin_s_words() {
         }
         assert!(failures.is_empty(), "{failures:#?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

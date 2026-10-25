@@ -1791,11 +1791,7 @@ fn a_heap_texture_over_dma_buf_pages_takes_its_shadow_where_the_source_fails() {
         );
         drop((texture, heap));
     }
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "{TEST}: the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing(&messages, TEST);
 }
 
 /// A placement heap of `view`'s length over its pages of `ram`, with `ram`'s source noting in

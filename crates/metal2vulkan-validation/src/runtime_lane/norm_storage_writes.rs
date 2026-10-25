@@ -25,6 +25,7 @@
 use super::color_writes::{field, metal, round_product, Channel, Output, CASES};
 use super::degrade_notices::on_device;
 use super::half_storage_writes::{written, written_texels, Form};
+use super::layer_reported_nothing;
 use metal2vulkan::metal::PixelFormat;
 
 /// Metal's stored code of `x` in `channel` (the module docs); `None` for a channel of another
@@ -63,11 +64,7 @@ fn kernel_writes_store_metals_normalized_codes() {
             for form in Form::ALL {
                 let label = format!("{:?} by {}", case.pf, form.kernel());
                 let stored = written(device, form, case.pf, case.bytes, &values);
-                assert_eq!(
-                    messages.take(),
-                    Vec::new(),
-                    "{label}: the validation layer reported"
-                );
+                layer_reported_nothing(messages, &label);
                 let Some(stored) = stored else {
                     eprintln!("NORM-STORAGE-WRITE {label} on {name}: refused");
                     continue;
@@ -141,11 +138,7 @@ fn kernel_writes_store_each_channel_in_its_field() {
             for form in Form::ALL {
                 let label = format!("{pf:?} by {}", form.kernel());
                 let stored = written_texels(device, form, pf, 4, &texels);
-                assert_eq!(
-                    messages.take(),
-                    Vec::new(),
-                    "{label}: the validation layer reported"
-                );
+                layer_reported_nothing(messages, &label);
                 let Some(stored) = stored else {
                     eprintln!("NORM-STORAGE-FIELDS {label} on {name}: refused");
                     continue;

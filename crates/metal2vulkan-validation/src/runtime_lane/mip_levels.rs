@@ -26,7 +26,10 @@
 //! `L + 1/2` in steps of `1/4096`, every `1/1024` from 1 to 2, the `half` ties around `L + k/64`
 //! with their `f32` neighbours, and past the last level, the infinities and a NaN.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, TextureType};
@@ -380,5 +383,5 @@ fn explicit_levels_read_metals_levels() {
             wrong.join("\n")
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

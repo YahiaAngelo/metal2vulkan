@@ -7,8 +7,9 @@
 
 use super::degrade_notices::{assert_once, counts};
 use super::{
-    buffer_with, buffer_with_options, encode_case, pipeline_state, public_case, read_buffer,
-    validated_device, CaseResources, Messages, ScratchCache,
+    buffer_with, buffer_with_options, encode_case, layer_reported_nothing,
+    layer_reported_nothing_at_all, pipeline_state, public_case, read_buffer, validated_device,
+    CaseResources, Messages, ScratchCache,
 };
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan_runtime::{
@@ -102,11 +103,7 @@ fn on_device_with(test: impl FnOnce(&Device, &Messages)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device, &messages);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Copies and fills of any offsets and sizes land exactly where Metal puts them, within one
@@ -743,11 +740,7 @@ fn compute_blit_compute_chains_read_what_was_written() {
                     command_buffer.wait_until_completed_for(WAIT).unwrap();
                     assert_eq!(command_buffer.error(), None, "{leg}");
                 }
-                let reported = messages.take();
-                assert!(
-                    reported.is_empty(),
-                    "{leg}: the validation layer reported: {reported:#?}"
-                );
+                layer_reported_nothing(messages, &leg);
                 for (chain, (first, second)) in chains.iter().enumerate() {
                     let written = read_buffer(&first[&1], 0, output).unwrap();
                     assert_eq!(written, case.metal_output, "{leg}, chain {chain}: first");

@@ -13,12 +13,14 @@
 //!   which the fetching draws' storage view of them takes.
 //!
 //! A device test: compiled only under the validation crate's GPU safety cfgs (`m2v_gpu`,
-//! `m2v_cpu_icd`), on the kind of device the cfg selects, under the validation layer where the
-//! loader lists it: a view the image does not take, or a view whose usage its format lacks, is a
-//! failing message.
+//! `m2v_cpu_icd`), on the kind of device the cfg selects, asking for the validation layer: a view
+//! the image does not take, or a view whose usage its format lacks, is a failing message. What the
+//! claim of the layer's silence holds is what the device's instance enabled of the layer it asked
+//! for (`tests/layer_claim.rs`), so a host the loader can give it no layer says so rather than
+//! passing on an empty message list.
 
+use super::layer_claim::Watched;
 use crate::attachment_stand_in::stand_in;
-use crate::device::lock;
 use crate::framebuffer_fetch::{
     storage_view_format, stores_samples, through_multisampled_storage, through_planes, views_in,
 };
@@ -27,15 +29,13 @@ use crate::render_pass::Target;
 use crate::render_target::{color_view, storage_view_in};
 use crate::sample_planes::Planes;
 use crate::{
-    DebugMessage, Device, DeviceKind, DeviceOptions, MessageSeverity, MessageSink, ResourceOptions,
-    ShaderCacheOptions, Texture, TextureDescriptor,
+    Device, DeviceKind, DeviceOptions, ResourceOptions, ShaderCacheOptions, Texture,
+    TextureDescriptor,
 };
 use metal2vulkan::device::FormatUsage;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::{Format, ImageCreateFlags, ImageUsageFlags};
-use std::ffi::CString;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 /// The attachments' side, and the multisampled one's samples.
 const SIDE: u32 = 16;
@@ -65,30 +65,12 @@ impl Drop for Scratch {
     }
 }
 
-/// The validation layer's name, where the loader lists it.
-fn validation_layer() -> Option<CString> {
-    let name = c"VK_LAYER_KHRONOS_validation";
-    let entry = crate::device::create::open_loader(None).ok()?;
-    // SAFETY: the loader is open; listing its layers needs nothing else.
-    let layers = unsafe { entry.enumerate_instance_layer_properties() }.ok()?;
-    layers
-        .iter()
-        .any(|layer| layer.layer_name_as_c_str().is_ok_and(|n| n == name))
-        .then(|| name.to_owned())
-}
-
-/// The device the cfg selects, its shader cache in `cache`, under the validation layer where the
-/// loader lists it, and the failing messages it reports.
-fn watched(cache: &Path) -> (Device, Arc<Mutex<Vec<String>>>) {
-    let failures = Arc::new(Mutex::new(Vec::new()));
-    let reported = Arc::clone(&failures);
-    let sink = MessageSink::new(move |message: &DebugMessage| {
-        let fails = message.severity == MessageSeverity::Error
-            || (message.severity == MessageSeverity::Warning && message.kind.validation);
-        if fails && message.degradation.is_none() {
-            lock(&reported).push(format!("{}: {}", message.id_name, message.text));
-        }
-    });
+/// The device the cfg selects, its shader cache in `cache`, asking for the validation layer, and
+/// what its instance had the layer report ([`Watched::layer_reported_nothing`] says what a claim
+/// of its silence holds; the instance's own answer, never the loader's listing).
+fn watched(cache: &Path) -> (Device, Watched) {
+    let watched = Watched::default();
+    let sink = watched.sink(|_| {});
     let options = DeviceOptions {
         kinds: match cfg!(m2v_cpu_icd) {
             true => vec![DeviceKind::Cpu],
@@ -102,12 +84,12 @@ fn watched(cache: &Path) -> (Device, Arc<Mutex<Vec<String>>>) {
             directory: Some(cache.to_owned()),
             ..ShaderCacheOptions::default()
         },
-        layers: validation_layer().into_iter().collect(),
+        layers: watched.layers(),
         messages: Some(sink),
         ..DeviceOptions::default()
     };
     let device = Device::system_default_with(&options).unwrap();
-    (device, failures)
+    (device, watched)
 }
 
 /// A private 2D texture of `pf`, `SIDE` square, of `samples` and `usage`.
@@ -155,7 +137,7 @@ fn mutable_to(plan: &ImagePlan, format: Format, view: Format) -> bool {
 #[test]
 fn an_srgb_attachment_is_fetched_through_its_unsigned_integer_view() {
     let cache = Scratch::new();
-    let (device, failures) = watched(&cache.0);
+    let (device, watched) = watched(&cache.0);
     // The command buffer whose encoder would make the scratch images.
     let queue = device.new_command_queue().unwrap();
     let maker = queue.command_buffer().unwrap();
@@ -236,6 +218,5 @@ fn an_srgb_attachment_is_fetched_through_its_unsigned_integer_view() {
          {planes} sample planes"
     );
     drop((maker, queue, device));
-    let failures = lock(&failures);
-    assert!(failures.is_empty(), "failing messages: {:#?}", *failures);
+    watched.layer_reported_nothing("every fetch image's commands were valid and nothing leaked");
 }

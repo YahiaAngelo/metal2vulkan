@@ -14,7 +14,10 @@
 //! `RGBA32Float` target, where the linear filter weighs one texel).
 
 use super::depth_compares::pipeline_of;
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -398,9 +401,5 @@ fn a_depth_texture_read_as_a_color_reads_metals_texel() {
         );
         assert!(wrong.is_empty(), "{name}: {wrong:#?}");
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

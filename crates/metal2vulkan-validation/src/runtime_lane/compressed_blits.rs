@@ -15,7 +15,7 @@
 //!   the image of a texture a CPU copy reaches is uncompressed, in the space of Metal's compressed
 //!   size).
 
-use super::{validated_device_with, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::CompressedBlit;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
@@ -389,5 +389,5 @@ fn blits_through_a_compressed_texture_write_metal_s_texels() {
             }
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

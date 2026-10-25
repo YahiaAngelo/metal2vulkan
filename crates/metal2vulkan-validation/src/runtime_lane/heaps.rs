@@ -12,8 +12,9 @@ use super::host_memory::{
 };
 use super::no_copy_heaps::{no_copy_heap, HEAP};
 use super::{
-    bound_buffers, encode_case, pipeline_state, public_case, read_buffer, run_case,
-    validated_device, CaseResources, Messages, PublicCase, ScratchCache, WAIT,
+    bound_buffers, encode_case, layer_reported_nothing_at_all, pipeline_state, public_case,
+    read_buffer, run_case, validated_device, CaseResources, Messages, PublicCase, ScratchCache,
+    WAIT,
 };
 use crate::candidate::device_facts::DeviceFacts;
 use crate::candidate::engine::guards::{GuardCount, GuardReach};
@@ -1187,7 +1188,7 @@ fn a_kernel_reaches_buffers_placed_in_heaps_it_uses() {
             );
             encoder.end_encoding().unwrap();
         }
-        assert!(messages.take().is_empty());
+        layer_reported_nothing_at_all(&messages);
     });
 }
 
@@ -1657,7 +1658,7 @@ fn a_resident_set_past_the_old_search_reaches_every_live_buffer() {
         );
         drop(live);
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The counts of buffers of their own [`the_resident_set_s_cost`] adds, in turn.

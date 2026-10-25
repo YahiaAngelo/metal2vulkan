@@ -3,7 +3,10 @@
 //! levels, slices and formats, a view of another component layout read in a kernel, and Metal's
 //! refusals, under the validation layer.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::candidate::runtime_samples::encode_through;
 use crate::candidate::runtime_samples::SampleFill;
 use crate::case::{TextureFormat as CaseFormat, TextureType as CaseType};
@@ -141,11 +144,7 @@ fn padded_formats_are_made_in_memory_of_their_own() {
             assert_eq!(texture.pixel_format(), pf);
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A padded 10-bit texture in memory of its own reads zero when new and round-trips its words
@@ -224,11 +223,7 @@ fn padded_textures_of_their_own_memory_round_trip_their_words() {
             }
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A 2D texture of `pf` and `extent`, read by shaders, with `levels` levels.
@@ -339,11 +334,7 @@ fn every_format_makes_a_texture_or_is_refused_typed() {
         );
         assert!(made > 50 && round_trips > 40, "{made} {round_trips}");
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Levels, slices and 3D images copy where Metal puts them; views present their texture's levels
@@ -673,11 +664,7 @@ fn textures_copy_levels_slices_and_views() {
             ))
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A view of another component layout presents its texture's bits, as Metal's does: a 4x
@@ -749,11 +736,7 @@ fn a_view_of_another_component_layout_reads_the_textures_bits() {
             device.name()
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Labels and purgeable states of textures as Metal answered them (an Apple M3 Max and an M4): each
@@ -876,9 +859,5 @@ fn texture_labels_and_purgeable_states_answer_as_metal() {
         in_heap.set_label("in a heap");
         assert_eq!(in_heap.label().as_deref(), Some("in a heap"));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

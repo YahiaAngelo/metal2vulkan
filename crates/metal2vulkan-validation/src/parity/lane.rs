@@ -8,6 +8,7 @@ use super::api::Observation;
 use super::record::{compare, read_lines, Value};
 use super::runtime::RuntimeApi;
 use super::{fingerprint, records_path, scenarios, Scenario, SCENARIOS};
+use crate::candidate::runtime_case::layer_reported_nothing;
 use crate::runtime_lane::METAL_ENVIRONMENT;
 
 /// Run every case of `scenario` on the runtime, each on a device of its own, and compare the
@@ -34,7 +35,9 @@ fn matches_metal(name: &str) {
     );
 }
 
-/// One case's records on a runtime device, which reported no validation message.
+/// One case's records on a runtime device, which reported no validation message
+/// ([`layer_reported_nothing`], so a device the loader could not give the layer to says in the
+/// test's output that the claim was not exercised there).
 fn run_on_runtime(scenario: &Scenario, case: &'static str) -> Result<Vec<(String, Value)>, String> {
     let api = RuntimeApi::open()?;
     let mut observation = Observation::new(case, false);
@@ -42,15 +45,8 @@ fn run_on_runtime(scenario: &Scenario, case: &'static str) -> Result<Vec<(String
     let records = observation.finish(scenario.name);
     let messages = api.messages.clone();
     drop(api);
-    let messages = messages.take();
-    if messages.is_empty() {
-        Ok(records)
-    } else {
-        Err(format!(
-            "{}/{case}: the validation layer reported: {messages:#?}",
-            scenario.name
-        ))
-    }
+    layer_reported_nothing(&messages, &format!("{}/{case}", scenario.name));
+    Ok(records)
 }
 
 #[test]

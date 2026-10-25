@@ -11,7 +11,10 @@
 //! texture at a slot, and the module converts a heap depth texture's texel by the class its
 //! handle carries.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use crate::hash::sha256_bytes;
@@ -255,9 +258,5 @@ fn a_depth16_texel_reads_and_samples_as_metal_s_code_over_65535() {
             assert_eq!(sha256_bytes(got), METAL, "{what}: Metal's digest");
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

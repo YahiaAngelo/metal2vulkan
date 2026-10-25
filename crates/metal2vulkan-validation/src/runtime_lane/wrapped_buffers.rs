@@ -19,7 +19,8 @@
 use super::host_bytes::{buffer_output, dispatch, over, SAMPLER, TEXTURE_WRITER};
 use super::vertex_strides::pipeline;
 use super::{
-    buffer_with, public_case, read_buffer, run_case, validated_device, Messages, ScratchCache, WAIT,
+    buffer_with, layer_reported_nothing_at_all, public_case, read_buffer, run_case,
+    validated_device, Messages, ScratchCache, WAIT,
 };
 use crate::gpu::TEST_DEVICE;
 use ash::vk;
@@ -316,7 +317,7 @@ fn a_callers_shared_buffer_is_a_metal_buffer() {
         // SAFETY: the runtime's buffer is gone, and every command buffer completed.
         unsafe { made.destroy(&device) };
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A `Private` buffer in device memory takes a copy in and gives it back; a buffer the runtime
@@ -397,5 +398,5 @@ fn a_callers_private_buffer_copies_and_contradictions_are_refused() {
             made.destroy(&device);
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

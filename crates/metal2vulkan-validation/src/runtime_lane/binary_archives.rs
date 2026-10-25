@@ -17,7 +17,8 @@
 use super::degrade_notices::assert_once;
 use super::render_state::{library, Probe, PASS};
 use super::{
-    compute_descriptor, pipeline_state, public_case, validated_device, Messages, ScratchCache,
+    compute_descriptor, layer_reported_nothing_at_all, pipeline_state, public_case,
+    validated_device, Messages, ScratchCache,
 };
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -257,9 +258,5 @@ fn an_archive_serves_a_fresh_device_and_fails_where_metal_misses() {
             )))
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

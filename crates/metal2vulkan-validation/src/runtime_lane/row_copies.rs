@@ -36,8 +36,8 @@
 
 use super::host_memory::{no_copy, on_device, Mapping, GUEST_PAGE};
 use super::{
-    buffer_with, loader, open_device, read_buffer, validated_device, ycbcr_textures, Messages,
-    ScratchCache,
+    buffer_with, layer_reported_nothing_at_all, loader, open_device, read_buffer, validated_device,
+    ycbcr_textures, Messages, ScratchCache,
 };
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -419,11 +419,7 @@ fn rows_between_buffers_copy_metals_bytes() {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         row_copies(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Blits between buffers of one region each whose sizes a driver may record slowly as one region
@@ -467,11 +463,7 @@ fn long_copies_of_any_size_copy_metals_bytes() {
             assert_eq!(split, 1, "a copy of {size} bytes: its region split");
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A texture of 16-byte texels over a no-copy buffer 4 bytes past a page, which Vulkan copies

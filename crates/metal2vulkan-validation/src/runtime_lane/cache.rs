@@ -22,8 +22,9 @@
 //!   cache data"): every making's data is read, nothing fails, and nothing is reported.
 
 use super::{
-    needs_later_steps, pipeline_state, public_case, public_case_names, public_cases, run_case,
-    run_with, validated_device, validated_device_with, Messages, PublicCase, ScratchCache,
+    layer_reported_nothing_at_all, needs_later_steps, pipeline_state, public_case,
+    public_case_names, public_cases, run_case, run_with, validated_device, validated_device_with,
+    Messages, PublicCase, ScratchCache,
 };
 use crate::air_library::AirLibrary;
 use crate::case::ExecutionSafety;
@@ -112,11 +113,7 @@ fn cache_run(cache: &Path, case: &str) -> CacheRun {
             run,
         }
     };
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     run
 }
 
@@ -405,11 +402,7 @@ fn a_state_made_again_takes_the_memos_translations() {
             );
             assert_eq!(run_with(&device, &case, &again).unwrap().output, output);
         }
-        let messages = messages.take();
-        assert!(
-            messages.is_empty(),
-            "the validation layer reported: {messages:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -468,11 +461,7 @@ fn a_cancelled_or_late_creation_refuses_until_its_translation_is_cached() {
             "nothing compiled again"
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The makings a device's statistics count by what became of the driver's pipeline cache data:
@@ -540,11 +529,7 @@ fn makings_on_several_threads_each_read_their_own_cache() {
         });
         (device.shader_cache_statistics(), failed)
     };
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     let made = cases.len() - failed.len();
     assert_eq!(
         (statistics.write_failures, statistics.read_failures),

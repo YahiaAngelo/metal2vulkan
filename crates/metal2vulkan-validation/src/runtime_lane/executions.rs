@@ -4,8 +4,8 @@
 
 use super::renders::{is_public_render, render_cases_where, run_render};
 use super::{
-    bound_buffers, encode_case, in_shard, pipeline_state, public_case, run_case,
-    validated_device_with, CaseResources, Messages, ScratchCache, WAIT,
+    bound_buffers, encode_case, in_shard, layer_reported_nothing_at_all, pipeline_state,
+    public_case, run_case, validated_device_with, CaseResources, Messages, ScratchCache, WAIT,
 };
 use crate::budgets::creation_within_ceiling;
 use crate::candidate::engine::compute_shape;
@@ -30,11 +30,7 @@ pub(super) fn on_device_with(adjust: impl FnOnce(&mut DeviceOptions), test: impl
         let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), adjust).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The kernel case's run records one execution: the compiled compute pipeline its dispatch ran,

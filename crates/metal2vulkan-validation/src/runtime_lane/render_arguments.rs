@@ -12,7 +12,8 @@
 
 use super::renders::{public_render, refusal, PublicRender};
 use super::{
-    buffer_with, read_buffer, texture_with, validated_device, Messages, ScratchCache, WAIT,
+    buffer_with, layer_reported_nothing_at_all, read_buffer, texture_with, validated_device,
+    Messages, ScratchCache, WAIT,
 };
 use crate::air_library::AirLibrary;
 use crate::candidate::engine::graphics::{Assembly, RenderFunction, RenderOutput};
@@ -50,11 +51,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// What a draw of a case reaches through its fragment function's argument buffers: the owners
@@ -377,7 +374,7 @@ fn another_devices_resources_are_refused() {
         drop(command_buffer);
         drop(foreign);
         drop(other);
-        assert!(messages.take().is_empty());
+        layer_reported_nothing_at_all(&messages);
     });
 }
 

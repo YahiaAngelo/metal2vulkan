@@ -26,7 +26,10 @@ use super::degrade_notices::assert_once;
 use super::kernel_textures::census;
 use super::shared_kinds;
 use super::tile_states::{descriptor, on_device};
-use super::{public_cases, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    layer_reported_nothing_at_all, public_cases, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::case::Stage;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
@@ -379,7 +382,7 @@ fn a_tile_dispatch_announces_its_scratch_and_split_once() {
             });
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
     let notices = messages.take_notices();
     assert_once(&notices, &kinds);
     let split = notices

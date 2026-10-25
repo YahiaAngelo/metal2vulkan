@@ -12,7 +12,7 @@
 //! [`WAIT`].
 
 use super::host_memory::Mapping;
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan_runtime::{
     BufferContents, BufferDescriptor, CommandBuffer, CommandQueue, DeadlockCause, Deallocator,
@@ -47,11 +47,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A make of `queue`'s next command buffer on a thread of its own; its answer comes on the
@@ -437,9 +433,5 @@ fn a_presenting_queue_s_lock_holds_no_other_queue_where_the_device_reserved_one(
         release.send(()).unwrap();
         holder.join().unwrap();
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

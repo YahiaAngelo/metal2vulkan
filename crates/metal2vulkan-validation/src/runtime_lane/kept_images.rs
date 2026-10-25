@@ -19,7 +19,10 @@
 //! and the bytes are the same.
 
 use super::no_copy_textures::{blending, floats, staged};
-use super::{validated_device, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    layer_reported_nothing_at_all, validated_device, validated_device_with, Messages, ScratchCache,
+    WAIT,
+};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::{CompletionPolicy, DriverFact};
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureUsage};
@@ -278,11 +281,7 @@ fn on_device(completion: Option<CompletionPolicy>, test: impl FnOnce(&Device)) {
         .unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The module docs' first case: [`COMMAND_BUFFERS`] passes into one texture a round, each in a

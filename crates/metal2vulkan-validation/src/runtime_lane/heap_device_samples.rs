@@ -4,7 +4,7 @@
 
 use super::heap_textures::{sample_round_trip, SampleAspect};
 use super::host_memory::{gpu_fill, gpu_read, run};
-use super::{buffer_with, validated_device, Messages, ScratchCache};
+use super::{buffer_with, layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::DriverFact;
 use metal2vulkan::error::Feature;
@@ -159,9 +159,5 @@ fn device_heap_multisample_colour_textures_lie_where_announced() {
         reasons[0]
     );
     drop((texture, heap));
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

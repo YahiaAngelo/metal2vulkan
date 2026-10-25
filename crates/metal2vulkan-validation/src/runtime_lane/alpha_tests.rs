@@ -14,7 +14,10 @@
 //! draw's texels and count as the same draw's without the test, a failing draw's as the clear's
 //! and 0.
 
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureUsage};
@@ -229,9 +232,5 @@ fn the_alpha_test_keeps_the_fragments_metal_keeps() {
     );
     eprintln!("{name}: {checked} alpha-tested draws keep Metal's fragments");
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

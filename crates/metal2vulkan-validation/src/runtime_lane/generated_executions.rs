@@ -28,7 +28,7 @@ use super::indirect_host_steps::{
     complete, param, state, wait, Setup, COMMANDS, HOST_STEPS, THREADS,
 };
 use super::shared_kinds;
-use super::{validated_device_with, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::ReplayFaults;
@@ -89,7 +89,7 @@ fn on_device(withheld: bool, test: impl FnOnce(&Device, &Messages, bool)) {
         }
         test(&device, &messages, generated);
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Whether `command_buffer` ran the flat kernel's flat variant: the GPU-alone path's execution

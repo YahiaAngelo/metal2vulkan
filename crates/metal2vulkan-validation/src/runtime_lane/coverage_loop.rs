@@ -23,7 +23,10 @@
 //!   Metal's error on every device.
 
 use super::raster_sample_counts::refusal;
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::DriverWorkaround;
@@ -196,11 +199,7 @@ fn the_loop_runs_what_fits_and_refuses_the_rest_by_its_reason() {
         }
         eprintln!("coverage loop on {name}: {}", answers.join("; "));
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The standard sample positions at 2 and 4 samples (Vulkan's "Standard sample locations",
@@ -320,9 +319,5 @@ fn the_loop_reads_each_sample_qualified_varying_at_its_sample() {
         }
         eprintln!("sample-qualified varying on {name}: {}", answers.join("; "));
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

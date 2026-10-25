@@ -11,7 +11,10 @@
 
 use super::degrade_notices::{assert_made_once, forced, shared_in_system_memory};
 use super::host_memory::{no_copy, not_importable, Mapping};
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::gpu::TEST_DEVICE;
 use ash::vk;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
@@ -376,11 +379,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The rows a Metal probe recorded (M4 and M3 Max alike) for its overlapping copies at 32-byte
@@ -909,11 +908,7 @@ fn an_overlapping_texel_copy_is_announced_once() {
         ]);
         assert_made_once(&messages, &OVERLAPS, &first);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The kind [`iosurface_planes_lie_where_metal_puts_them`] takes: a texture of an IOSurface plane
@@ -1002,11 +997,7 @@ fn iosurface_planes_lie_where_metal_puts_them() {
         ]);
         assert_made_once(&messages, &NARROW_ROWS, &first);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A depth or stencil texture over a plane of a surface with planes, which Metal makes and
@@ -1143,11 +1134,7 @@ fn a_planar_surface_s_depth_or_stencil_texture_reads_and_stores_the_plane() {
             }
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Where Metal's pass puts element `(x, y)` of a `w`x`h` depth or stencil texture of `unit`-byte
@@ -1402,11 +1389,7 @@ fn a_planar_surface_s_depth_or_stencil_texture_s_passes_write_metal_s_elements_a
             }
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The rows of a `w`x`h` plane `row` bytes wide, from `offset`, `pitch` bytes apart.
@@ -1621,11 +1604,7 @@ fn four_two_two_iosurface_planes_move_the_surface_s_rows() {
             }
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The consumer's '420v' backing over a new buffer of `kind` ([`iosurface_planes_lie_where_metal_puts_them`]):

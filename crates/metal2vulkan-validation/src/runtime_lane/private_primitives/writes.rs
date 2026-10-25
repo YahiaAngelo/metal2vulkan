@@ -19,7 +19,10 @@
 //! Each check draws a private type in one form and asks every slot's count, vertex ID and base
 //! vertex to be Metal's, and the draw's pipeline to carry the form (`RuntimeFact::PrivateList`).
 
-use super::super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use super::{metal_list, Form, PRIVATE};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -292,9 +295,5 @@ fn vertex_functions_that_write_memory_run_once_a_list_vertex() {
             cases.len()
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

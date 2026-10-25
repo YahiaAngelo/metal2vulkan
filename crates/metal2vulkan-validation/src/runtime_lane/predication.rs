@@ -28,7 +28,8 @@
 //!   Metal reads memory unrelated to the buffer.
 
 use super::{
-    buffer_with, read_buffer, validated_device, validated_device_with, Messages, ScratchCache, WAIT,
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device,
+    validated_device_with, Messages, ScratchCache, WAIT,
 };
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -233,7 +234,7 @@ fn on_device_at(level: MetalLevel, test: impl FnOnce(&Device)) {
         println!("PRD device {} at {level}", device.name());
         test(&device);
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Run `test` on a validated device, then, where it has device addresses, on one made without
@@ -254,7 +255,7 @@ fn on_device_noted(test: impl Fn(&Device, &Messages)) {
         test(&device, &messages);
         form == PredicationStepForm::Addressed
     };
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
     if !addressed {
         return;
     }
@@ -269,7 +270,7 @@ fn on_device_noted(test: impl Fn(&Device, &Messages)) {
         println!("PRD device {} {form:?}", device.name());
         test(&device, &messages);
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// What [`run`] runs streams with: the marking kernel's state, the log, the condition words

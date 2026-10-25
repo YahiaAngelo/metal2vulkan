@@ -15,7 +15,7 @@
 //! scheduled handler starts, and Metal's wait for the scheduling returns only once every
 //! scheduled handler returned.
 
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan_runtime::{
     Buffer, CommandBuffer, CommandBufferStatus, CommandQueue, CommitFailure, DeadlockCause, Device,
@@ -42,11 +42,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A command buffer of `queue` filling `buffer` with `value`, not committed; `wait` leads it with

@@ -17,7 +17,7 @@
 
 use super::degrade_notices::counts;
 use super::extended_range_targets::half_value;
-use super::{validated_device_with, Messages, ScratchCache, WAIT};
+use super::{layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{
@@ -209,11 +209,7 @@ fn coverage_alpha_stores_the_nearest_even_half_under_mode_two() {
         "{name}: {noted:?}"
     );
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Alphas whose rounding to the nearest-even half crosses a coverage level's edge: for each edge
@@ -295,9 +291,5 @@ fn an_unstored_coverage_alpha_keeps_metal_s_coverage_under_mode_two() {
         "{name}: {noted:?}"
     );
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

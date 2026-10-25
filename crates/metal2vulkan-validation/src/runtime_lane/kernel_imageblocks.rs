@@ -12,8 +12,8 @@
 
 use super::kernel_textures::census;
 use super::{
-    bound_buffers, encode_case, pipeline_state, public_case, public_cases, validated_device,
-    CaseResources, Messages, PublicCase, ScratchCache, WAIT,
+    bound_buffers, encode_case, layer_reported_nothing_at_all, pipeline_state, public_case,
+    public_cases, validated_device, CaseResources, Messages, PublicCase, ScratchCache, WAIT,
 };
 use crate::candidate::runtime_case::Committed;
 use crate::case::Stage;
@@ -39,11 +39,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Every committed public kernel case with an explicit imageblock, and no tile pass, passes the

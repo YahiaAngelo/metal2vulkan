@@ -32,7 +32,8 @@ use super::degrade_notices::{
     assert_made_once, assert_once, forced, made_render_kinds, shared_in_system_memory,
 };
 use super::{
-    buffer_with, read_buffer, validated_device, validated_device_with, Messages, ScratchCache, WAIT,
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device,
+    validated_device_with, Messages, ScratchCache, WAIT,
 };
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -647,11 +648,7 @@ impl Drawn {
                 }
             }
         }
-        let reported = messages.take();
-        assert!(
-            reported.is_empty(),
-            "the validation layer reported: {reported:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -1287,11 +1284,7 @@ fn a_visibility_result_counts_every_amplification() {
             .unwrap_or_else(|e| panic!("{} on {name}: {e}", after.name));
         assert_eq!(stored.color, colors([0x100, 0x101, E, E]).color, "{name}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// What Metal's validation stops and plain Metal's answer does not settle is `Invalid` (a Metal
@@ -1393,11 +1386,7 @@ fn an_amplified_draw_is_refused_as_typed() {
             .unwrap_or_else(|e| panic!("amp0 on {name}: {e}"));
         assert_eq!(stored, colors([C, C, E, E]), "amp0 on {name}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// On a device without `multiViewport` (withheld here, with `shaderOutputViewportIndex`) a draw has
@@ -1453,11 +1442,7 @@ fn with_one_viewport_an_amplification_s_viewport_offset_draws_through_it() {
         first.extend(lane.made(&PLAIN));
         assert_made_once(&messages, &AMPLIFICATION, &first);
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A device without `shaderOutputLayer` (withheld here: no committed real GPU lacks it) draws an
@@ -1560,9 +1545,5 @@ fn a_device_without_shader_output_layer_draws_or_refuses_typed() {
         first.extend(lane.made(&PLAIN));
         assert_made_once(&messages, &AMPLIFICATION, &first);
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

@@ -14,7 +14,10 @@
 //! Metal's codes). Each sample is read by a kernel through `texture2d_ms`, decoded through Metal's
 //! table, so equal codes read equal values.
 
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::format::WordAttachment;
@@ -217,9 +220,5 @@ fn a_partly_masked_draw_merges_each_samples_own_word() {
     );
     assert!(mixed > 0, "{name}: no texel's samples differ");
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

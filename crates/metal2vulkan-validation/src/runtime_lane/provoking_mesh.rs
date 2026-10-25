@@ -27,7 +27,7 @@
 //! alone draws Metal's, unannounced, on every path.
 
 use super::provoking::PROVOKING;
-use super::{validated_device_with, Messages, ScratchCache, WAIT};
+use super::{layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::{VkExtension, VkFeature};
@@ -406,11 +406,7 @@ fn run(withheld: bool, emulated: bool) {
         }
         assert_eq!(announced, expected, "{name} ({path:?})");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Every mesh draw draws Metal's mode 1 on the device as it is made.

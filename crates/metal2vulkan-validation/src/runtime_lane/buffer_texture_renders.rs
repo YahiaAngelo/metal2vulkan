@@ -29,7 +29,10 @@
 
 use super::buffer_texture_blits::{hex_rows, texel, texels, Held, Kind, OFF};
 use super::degrade_notices::counts;
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -341,11 +344,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Run `cases` over each kind of buffer the device makes.
@@ -940,11 +939,7 @@ fn a_command_writing_a_buffers_bytes_two_ways_keeps_both_writes() {
             device.name()
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 fn two_ways(lane: &Lane, kind: Kind) {

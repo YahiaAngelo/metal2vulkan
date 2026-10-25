@@ -30,7 +30,10 @@
 //! and each is compared with Metal's lines.
 
 use super::render_state::{texels, texture};
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{BarrierScope, PixelFormat, RenderStages};
@@ -342,9 +345,5 @@ fn readers_behind_a_barrier_read_the_writers_words() {
             }
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

@@ -24,7 +24,10 @@ use super::degrade_notices::{assert_made_once, assert_once, clamps_depth_uploads
 use super::degrade_notices::{
     draws_depth_copies, forced, loses_depth_denormals, signs_depth_tests,
 };
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
@@ -267,11 +270,7 @@ fn a_new_texture_a_blit_wrote_whole_reads_its_texels_unannounced() {
         let control = assert_once(&messages.take_notices(), &[Degradation::FreshPatternZeroed]);
         println!("FRESH-WRITE {name} control, read unwritten: announced {control:?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Writes of parts, a resolve, separate attachments and a view's write, each of a new texture
@@ -445,11 +444,7 @@ fn a_new_texture_written_in_parts_or_by_a_pass_reads_its_texels_unannounced() {
         let noted = counts.contains_key(&Degradation::FreshPatternZeroed);
         println!("FRESH-WRITE {name} a new single-sample Depth32Float is noted: {noted}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A clear the pass renders through a scratch and does not store writes nothing of the texture:
@@ -503,9 +498,5 @@ fn a_clear_through_a_scratch_the_pass_does_not_store_writes_nothing() {
             );
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

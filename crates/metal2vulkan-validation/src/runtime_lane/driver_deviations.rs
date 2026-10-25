@@ -104,8 +104,9 @@
 
 use super::degrade_notices::{counts as notice_counts, on_device};
 use super::{
-    buffer_with, public_case, read_buffer, run_case, validated_device, validated_device_with,
-    CaseResources, Messages, PublicCase, ScratchCache, METAL_ENVIRONMENT, WAIT,
+    buffer_with, layer_reported_nothing_at_all, public_case, read_buffer, run_case,
+    validated_device, validated_device_with, CaseResources, Messages, PublicCase, ScratchCache,
+    METAL_ENVIRONMENT, WAIT,
 };
 use crate::air_library::AirLibrary;
 use crate::case::{AuthoredCase, OutputSelection, Primitive};
@@ -314,11 +315,7 @@ fn threadgroup_words_only_lockstep_orders_answer_as_metal() {
             );
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -422,11 +419,7 @@ fn float_functions_the_device_answers_are_metals() {
             }
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -616,11 +609,7 @@ fn cube_gradients_through_an_anisotropic_sampler_answer_as_metal() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -702,11 +691,7 @@ fn half_fused_multiply_adds_the_device_answers_are_metals() {
             }
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -836,11 +821,7 @@ fn float_denormals_read_as_metal_reads_them() {
         }
         assert!(failures.is_empty(), "{failures:#?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// a probe cases ([`HALF_FMA_CASES`]): every word, `fma(a, b, c)`, `a * b + c`, the two `half`
@@ -875,11 +856,7 @@ fn fused_pairs_answer_metals_nans_and_denormals() {
         }
         assert!(failures.is_empty(), "{failures:#?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The NaN model's cases whose words round a `float` near 65520 to `half`: the narrowing, the
@@ -968,11 +945,7 @@ fn half_quantize_rounds_as_metal_at_the_edge() {
         }
         assert!(failures.is_empty(), "{failures:#?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The owned denormal fixtures (`dfl_float_denormals`, `dfl_float_denormals_fast`): 256 threads of
@@ -1141,11 +1114,7 @@ fn owned_float_fixtures_answer_metal() {
         }
         assert!(failures.is_empty(), "{failures:#?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1202,11 +1171,7 @@ fn owned_dot_fixtures_answer_metal() {
         }
         assert!(failures.is_empty(), "{failures:#?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1268,11 +1233,7 @@ fn minimums_and_maximums_answer_as_metal() {
         }
         assert!(failures.is_empty(), "{failures:#?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1333,11 +1294,7 @@ fn half_arithmetic_answers_as_metal() {
         }
         assert!(failures.is_empty(), "{failures:#?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1531,11 +1488,7 @@ fn half_loads_the_device_widens_answer_as_metal() {
         }
         assert!(failures.is_empty(), "{failures:#?}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1926,11 +1879,7 @@ fn fragment_simdgroup_lanes_are_metal_s() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -18,8 +18,9 @@
 //! of their cases' own formats.
 
 use super::{
-    buffer_with, encode_case, in_shard, pipeline_state, public_case, public_cases, read_buffer,
-    run_case, validated_device, CaseResources, Messages, NamedCase, PublicCase, ScratchCache, WAIT,
+    buffer_with, encode_case, in_shard, layer_reported_nothing, layer_reported_nothing_at_all,
+    pipeline_state, public_case, public_cases, read_buffer, run_case, validated_device,
+    CaseResources, Messages, NamedCase, PublicCase, ScratchCache, WAIT,
 };
 use crate::candidate::engine::variants::compile_compute_for_shape;
 use crate::candidate::engine::{compute_shape, ENGINE_EXECUTOR_ABI};
@@ -231,6 +232,10 @@ pub(super) fn census(label: &str, cases: &[NamedCase]) {
         "failed:\n{}\nat device destruction: {leaked:#?}",
         failed.join("\n")
     );
+    layer_reported_nothing(
+        &messages,
+        "every case's commands were valid and left nothing behind",
+    );
     assert!(matched > 0, "no case ran");
 }
 
@@ -341,11 +346,7 @@ fn on_device(test: impl FnOnce(&Device, &Messages)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device, &messages);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A state the device can make is made, those Metal's validation stops among them, as plain

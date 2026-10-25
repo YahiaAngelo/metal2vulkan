@@ -31,9 +31,9 @@ use super::host_memory::{gpu_fill, gpu_read, on_device, run};
 use super::presenting::Adopted;
 use super::textures::{no_texture_alone, pattern, texel_bytes};
 use super::{
-    bound_buffers, buffer_with, encode_case, pipeline_state, public_case, read_buffer, run_case,
-    texture_descriptor, validated_device, validated_device_with, CaseResources, Messages,
-    PublicCase, ScratchCache,
+    bound_buffers, buffer_with, encode_case, layer_reported_nothing_at_all, pipeline_state,
+    public_case, read_buffer, run_case, texture_descriptor, validated_device,
+    validated_device_with, CaseResources, Messages, PublicCase, ScratchCache,
 };
 use crate::air_library::AirLibrary;
 use crate::candidate::engine::ComputeOutput;
@@ -445,7 +445,7 @@ fn heap_textures_answer_and_place_as_metal_s_do() {
         placement_rules(device);
         automatic_rules(device);
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A placement heap's textures: at every multiple of the alignment, refused off it and past the
@@ -790,11 +790,7 @@ fn a_buffer_write_shows_in_an_overlapping_texture() {
     );
     assert_eq!(hidden, 0);
     assert_eq!(transfer + linear, usize::from(hides && made));
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Under the default `HeapCompressionPolicy::Compressed`, where the device's driver may keep a
@@ -872,11 +868,7 @@ fn a_heap_texture_metal_compresses_keeps_the_driver_s_compression_by_default() {
     assert_eq!(compressed, usize::from(hides && compressed_made));
     assert_eq!(hidden, 0);
     assert_eq!(transfer + linear, usize::from(hides && uncompressed_made));
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// What a 2048x2048 `RGBA8Unorm` render target in a `Private` placement heap costs the GPU under
@@ -1112,11 +1104,7 @@ fn a_multisample_depth_texture_without_optimized_contents_is_announced_where_it_
     let notices = counts(&messages.take_notices());
     let announced = notices.get(&OPTIMIZED[0]).copied().unwrap_or(0);
     assert_eq!(announced, usize::from(optimized));
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The kinds a heap's colour texture announces on a driver whose compressed images hide writes
@@ -1716,11 +1704,7 @@ fn heap_depth_textures_keep_their_bytes_with_their_twins() {
         eprintln!("HEAPTEX depth: the Shared heap's texture is a shadow of the heap's bytes");
     }
     assert_eq!(shadowed, usize::from((apart && made) || shared_shadow));
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A heap's single-sample depth and stencil textures keep their texels where Metal's tiles place
@@ -1982,11 +1966,7 @@ fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
         assert_eq!(count(OPTIMIZED[0]), 0);
         assert_eq!(count(APART[0]), 0);
     }
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// One aspect of one slice of a multisample texture a lane moves ([`sample_round_trip`]): its
@@ -2299,11 +2279,7 @@ fn heap_multisample_textures_keep_their_samples_in_metal_s_tiles() {
         assert_eq!(count(Degradation::HeapTextureLosslessLayout), 1);
         assert_eq!(count(APART[0]), 0);
     }
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A heap's colour textures that Metal keeps uncompressed, in a `Private` placement heap over the
@@ -2417,11 +2393,7 @@ fn device_heap_textures_lie_in_metal_s_tiles() {
         true => assert_eq!((layouts.len(), counted), (0, 0)),
         false => assert_eq!((layouts, counted), (vec![(&untiled, &1)], 7)),
     }
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// One aspect of a `side`-square depth or stencil texture, read back through a blit with

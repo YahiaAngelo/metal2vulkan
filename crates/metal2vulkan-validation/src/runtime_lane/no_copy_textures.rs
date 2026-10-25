@@ -40,7 +40,10 @@
 
 use super::degrade_notices::counts;
 use super::host_memory::{counting, no_copy, not_importable, Mapping, GUEST_PAGE};
-use super::{validated_device, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    layer_reported_nothing_at_all, validated_device, validated_device_with, Messages, ScratchCache,
+    WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{
@@ -423,11 +426,7 @@ fn read_and_write_the_caller_s_pages(pf: PixelFormat, texel: u64, pad: u64) {
             drop(mapping);
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 per_format! {
@@ -600,11 +599,7 @@ fn two_slice_arrays_over_no_copy_buffers_read_and_write_the_caller_s_pages() {
         drop((texture, buffer, queue, device));
         drop(mapping);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The `shadowed-texture` notice's reason among the notices delivered so far (removed), as
@@ -1031,11 +1026,7 @@ fn passes_blend_load_and_store_as_private_textures(pf: PixelFormat, texel: u64, 
         drop((texture, private, buffer));
         drop(mapping);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 per_format! {

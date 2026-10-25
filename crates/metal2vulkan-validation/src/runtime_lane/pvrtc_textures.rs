@@ -47,8 +47,8 @@ use super::degrade_notices::{assert_made_once, counts, shared_in_system_memory};
 use super::host_memory::Mapping;
 use super::no_copy_heaps::{no_copy_heap, shared, HEAP};
 use super::{
-    bound_buffers, encode_case, pipeline_state, public_case, read_buffer, validated_device,
-    CaseResources, Messages, PublicCase, ScratchCache, WAIT,
+    bound_buffers, encode_case, layer_reported_nothing_at_all, pipeline_state, public_case,
+    read_buffer, validated_device, CaseResources, Messages, PublicCase, ScratchCache, WAIT,
 };
 use crate::candidate::engine::ComputeOutput;
 use crate::gpu::TEST_DEVICE;
@@ -128,11 +128,7 @@ fn on_device(test: impl FnOnce(&Lane)) {
             messages: messages.clone(),
         });
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 impl Lane {

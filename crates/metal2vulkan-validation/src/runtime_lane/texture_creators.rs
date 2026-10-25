@@ -18,7 +18,7 @@
 //!   buffer creators (the runtime's gap, `NotImplemented(WriteSwizzle)`) and stopped by the
 //!   shared creator; the heap size query answers. Without the property every creator stops it.
 
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{
     PixelFormat, TextureSwizzle, TextureSwizzleChannels, TextureType, TextureUsage,
@@ -204,9 +204,5 @@ fn each_creator_answers_as_metals() {
         assert_eq!(shared, Some(invalid("new_shared_texture", stop)));
         assert_eq!(sized, Some(invalid("heap_texture_size_and_align", stop)));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

@@ -223,8 +223,9 @@ use super::wide_points::POINT_GUARD_BAND;
 use super::ycbcr_passes::YCBCR_PASSES;
 use super::ycbcr_textures::YCBCR_FILTERS;
 use super::{
-    case_making_kinds, creation_heard_checked, made_lane_device, pipeline_state, public_case,
-    run_case, run_with, shared_kinds, validated_device_with, Messages, PublicCase, ScratchCache,
+    case_making_kinds, creation_heard_checked, layer_reported_nothing_at_all, made_lane_device,
+    pipeline_state, public_case, run_case, run_with, shared_kinds, validated_device_with, Messages,
+    PublicCase, ScratchCache,
 };
 use crate::air_library::AirLibrary;
 use crate::candidate::engine::compute_shape;
@@ -452,7 +453,7 @@ pub(super) fn on_device_with(
         let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), adjust).unwrap();
         test(&device, &messages);
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Every kind is taken by a lane test's site: listed above, or a stage's precision note or
@@ -639,7 +640,7 @@ fn moltenvk_argument_buffers_are_announced_where_unread_and_refused_off() {
         }
         moltenvk
     };
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
     if !moltenvk {
         return;
     }
@@ -819,7 +820,7 @@ fn a_metal_level_below_the_host_release_is_announced_once() {
         }
         assert!(made.is_empty(), "announced past the creation: {made:?}");
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The kind an anisotropy past the device's largest takes

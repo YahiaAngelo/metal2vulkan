@@ -27,7 +27,10 @@
 //! with `xcrun metal -S -emit-llvm -O2` and written with opaque pointers, its alias metadata
 //! dropped.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureType, TextureUsage};
@@ -742,5 +745,5 @@ fn a_varying_alike_at_every_vertex_reads_metal_s_words() {
             differs.len()
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

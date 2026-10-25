@@ -33,7 +33,7 @@
 //! color of another group. A pipeline of four colors in the five-color pass, which the device
 //! draws in groups, is refused `NotImplemented(ColorAttachmentGroups)`.
 
-use super::{validated_device_with, Messages, ScratchCache, WAIT};
+use super::{layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use crate::observation::PROFILES_LAYER;
@@ -487,11 +487,7 @@ fn scenes(width: Width) {
     }
     assert_eq!(announced, expected, "on {}", lane.device.name());
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The depth scene (the module docs).

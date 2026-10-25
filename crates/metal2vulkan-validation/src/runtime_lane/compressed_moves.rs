@@ -33,7 +33,7 @@
 //! through the view; and an interior `replaceRegion` to the edges. Plain Metal answered the same
 //! 336 steps as the model ([`METAL_TRANSCRIPT_2`]).
 
-use super::{validated_device_with, Messages, ScratchCache};
+use super::{layer_reported_nothing, validated_device_with, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
@@ -686,11 +686,7 @@ fn compressed_blocks_move_as_metal_moves_them() {
         transcript, METAL_TRANSCRIPT,
         "the model no longer moves blocks as plain Metal on an Apple M4 moved them"
     );
-    assert_eq!(
-        messages.take(),
-        Vec::new(),
-        "the validation layer reported on {name}"
-    );
+    layer_reported_nothing(&messages, &format!("on {name}"));
 }
 
 // ---- The second lane: views, interior regions and a large texture ----
@@ -938,9 +934,5 @@ fn views_regions_and_large_levels_move_as_metal_s() {
         transcript, METAL_TRANSCRIPT_2,
         "the model no longer moves blocks as plain Metal on an Apple M4 moved them"
     );
-    assert_eq!(
-        messages.take(),
-        Vec::new(),
-        "the validation layer reported on {name}"
-    );
+    layer_reported_nothing(&messages, &format!("on {name}"));
 }

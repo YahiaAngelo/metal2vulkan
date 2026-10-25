@@ -20,7 +20,10 @@
 //! The object stage's form runs `mesh_draws`' object cases (`mesh_draws.rs`).
 
 use super::vertex_strides::{drawn, pipeline, read_at};
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::error::BindError;
@@ -173,7 +176,7 @@ fn kernels_read_each_calls_inline_bytes() {
             }
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A vertex attribute reads inline bytes as its vertex buffer: at the layout's stride, and under
@@ -222,7 +225,7 @@ fn vertex_attributes_read_inline_bytes() {
             "MTLAttributeStrideStatic"
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A fragment function reads inline bytes through a `const device` pointer and a `constant`
@@ -283,5 +286,5 @@ fn fragments_read_inline_bytes() {
             .collect();
         assert_eq!(read_buffer(&o, 0, 64).unwrap(), want);
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

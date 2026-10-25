@@ -33,7 +33,9 @@
 //! waited.
 
 use super::indirect_host_steps::Setup;
-use super::{run_queue_waits, validated_device, Messages, ScratchCache};
+use super::{
+    layer_reported_nothing_at_all, run_queue_waits, validated_device, Messages, ScratchCache,
+};
 use crate::gpu::{DeviceType, TEST_DEVICE};
 use metal2vulkan_runtime::{
     Buffer, CommandBuffer, CommandBufferStatus, CommandQueue, Deallocator, Device, DeviceKind,
@@ -1155,11 +1157,7 @@ fn a_dropped_command_buffer_completes_once_its_event_is_signalled() {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Devices made again in a long-lived process register the exit hook no more while what they
@@ -1197,9 +1195,5 @@ fn devices_made_again_register_the_exit_hook_no_more() {
         );
         drop(held);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

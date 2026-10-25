@@ -84,9 +84,15 @@ METAL2VULKAN_LANE_VALIDATION=sync RUSTFLAGS='--cfg m2v_cpu_icd' cargo nextest ru
 A lane device opens whether or not the loader can provide the layer it asks for: the runtime drops
 a layer the loader answers `VK_ERROR_LAYER_NOT_PRESENT` for and says so as the device is made. A
 claim of what the layer reported therefore states what it holds, against the layers the instance
-enabled and nothing else (`runtime_lane::layer_reported_nothing`): where the layer was dropped the
-claim is not exercised, and the test prints `LANE-LAYER-ABSENT <test>: ...` and a count per message
-list instead of passing on an empty list. A host whose layer manifest names its library by a bare
+enabled and nothing else: where the layer was dropped the claim is not exercised, and the test
+prints `LANE-LAYER-ABSENT <test>: ...` and a count per message list instead of passing on an empty
+list. Three forms state it, and no lane test reads a message list for emptiness any other way:
+
+| Form | The claim |
+|---|---|
+| `layer_reported_nothing_at_all(&messages)` | The widest claim, and the one the lane states oftenest: whatever the layer checked of the work so far, it reported nothing of it |
+| `layer_reported_nothing(&messages, claim)` | The same, of the narrower `claim` the test names, which leads the failure and the `LANE-LAYER-ABSENT` line |
+| `nothing_reported_without_the_layer(&messages, claim)` | A device the test made without the validation layer, to time something: the claim is the driver's own messages and the runtime's, so the layer's absence takes nothing from it. It fails where such a device did ask for the layer after all | A host whose layer manifest names its library by a bare
 filename (which the loader looks for on the system library search path) provides no layer at all,
 and a lane run there is evidence for everything but the layer's checks. The executor's own Vulkan
 context refuses to open without the layer instead (`candidate::platform::device`).

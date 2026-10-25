@@ -15,7 +15,7 @@
 use super::buffer_texture_blits::linear_rows_differ;
 use super::degrade_notices::{assert_made_once, forced, shared_in_system_memory};
 use super::presenting::Adopted;
-use super::{validated_device_with, Messages, ScratchCache};
+use super::{layer_reported_nothing, validated_device_with, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::error::Feature;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
@@ -670,10 +670,6 @@ fn a_shadowed_view_answers_as_a_view_of_the_image_does() {
                 device.name()
             );
         }
-        let reported = messages.take();
-        assert!(
-            reported.is_empty(),
-            "withheld {withheld}: the validation layer reported: {reported:#?}"
-        );
+        layer_reported_nothing(&messages, &format!("withheld {withheld}"));
     }
 }

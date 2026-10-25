@@ -26,7 +26,7 @@
 
 use super::heap_layouts::tiled_offset;
 use super::host_memory::{gpu_fill, gpu_read, host_page, not_importable, run, Mapping};
-use super::{read_buffer, validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, read_buffer, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::format::is_depth_stencil;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
@@ -156,11 +156,7 @@ fn on_device(kind: Degradation, test: impl FnOnce(&Device)) -> usize {
                 .is_some_and(|notice| notice.degradation == kind)
         })
         .count();
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     notices
 }
 

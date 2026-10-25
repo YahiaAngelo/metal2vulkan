@@ -22,7 +22,10 @@
 //! blit wrote earlier in the command buffer, culled windings, the call's lifetime, and a last
 //! 16-bit index alone in its word (an odd count, or an offset 2 bytes past a multiple of 4).
 
-use super::{buffer_with, dynamic_input_assembly, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, dynamic_input_assembly, layer_reported_nothing_at_all, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::DriverFact;
@@ -287,11 +290,7 @@ fn indexed_strips_restart_as_metal() {
             assert_eq!(counts, case.metal(), "{} on {name}: the counts", case.name);
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A strip, a list of its class and the strip again, drawn back to back in one encoder through
@@ -363,11 +362,7 @@ fn a_strip_and_a_list_of_one_class_restart_as_metal_in_one_encoder() {
              driver measured to warn of it {warns})"
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Whether `device`'s physical device, as its instance sees it, has both extended dynamic states:
@@ -923,11 +918,7 @@ fn strips_restart_at_the_called_index_as_metal() {
             assert_eq!(counts, expected, "{} on {name}: the counts", case.name);
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The call lasts from where it is made, before the pipeline state or after, until the encoder
@@ -1017,11 +1008,7 @@ fn the_restart_call_lasts_until_its_encoder_ends() {
             assert_eq!(&counts, expected, "{sequence} on {name}: the counts");
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// An indirect strip of 90,000 positions restarting at 7 every 1000 of them, whose list (3 ·
@@ -1070,11 +1057,7 @@ fn a_restarted_list_past_the_old_index_pool_draws_as_metal() {
              index pool, completed with Metal's counts"
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A strip of a million positions, a restart every 1000 of them, counts what Metal's answer drawn
@@ -1128,9 +1111,5 @@ fn a_million_position_strip_restarts_as_metal() {
              the pass), {without_pass:.3} ms for the strip at the all-ones index (no pass)"
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

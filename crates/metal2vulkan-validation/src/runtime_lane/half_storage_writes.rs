@@ -29,7 +29,7 @@ use super::color_writes::{
     half, half_toward_zero, specials, unsigned_float, unsigned_float_toward_zero,
 };
 use super::degrade_notices::{on_device, on_device_with};
-use super::{buffer_with, read_buffer, Messages, WAIT};
+use super::{buffer_with, layer_reported_nothing, read_buffer, Messages, WAIT};
 use crate::air_library::AirLibrary;
 use metal2vulkan::metal::{PixelFormat, ResourceUsage, TextureUsage};
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
@@ -260,12 +260,7 @@ fn kernel_writes_store_metals_halves() {
                     if let Some(d) = judge(device, messages, (form, pf, channels), &values) {
                         differ.push(d);
                     }
-                    assert_eq!(
-                        messages.take(),
-                        Vec::new(),
-                        "{pf:?} by {}: the validation layer reported",
-                        form.kernel()
-                    );
+                    layer_reported_nothing(messages, &format!("{pf:?} by {}", form.kernel()));
                 }
             }
         },

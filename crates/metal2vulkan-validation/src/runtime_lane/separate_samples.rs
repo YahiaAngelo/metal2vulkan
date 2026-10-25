@@ -14,7 +14,9 @@
 
 use super::degrade_notices::counts;
 use super::render_state::stencil;
-use super::{buffer_with, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device, Messages, ScratchCache, WAIT,
+};
 use crate::candidate::runtime_samples::{encode, library, shape, SampleFill};
 use crate::case::TextureFormat;
 use crate::executor_contract::multisample::SampleRead;
@@ -299,11 +301,7 @@ fn separate_multisampled_depth_and_stencil_keep_every_sample() {
             );
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// How [`three_passes`] ended.
@@ -498,11 +496,7 @@ fn a_separate_multisampled_stencil_keeps_every_sample() {
             );
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The two passes of [`a_separate_multisampled_stencil_keeps_every_sample`] at `extent` on
@@ -747,11 +741,7 @@ fn fragment_depth_stores_depth_values_unchanged() {
             );
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The 16-bit depth tests' extent: its 4 samples a pixel hold each of the 65536 codes once.
@@ -873,11 +863,7 @@ fn fragment_depth_keeps_every_16_bit_code() {
         probe_16_bit_codes(&device);
         messages.take_notices();
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// [`fragment_depth_keeps_every_16_bit_code`] on `device`.
@@ -955,11 +941,7 @@ fn a_separate_multisampled_16_bit_depth_keeps_every_code() {
         separate_16_bit_codes(&device);
         messages.take_notices();
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// [`a_separate_multisampled_16_bit_depth_keeps_every_code`] on `device`.

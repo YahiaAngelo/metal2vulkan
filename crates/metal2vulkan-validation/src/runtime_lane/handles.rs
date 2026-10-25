@@ -1,7 +1,7 @@
 //! Device tests of the raw-handle accessors on the device the cfg selects: each handle the runtime
 //! lends names the object it says, read back through Vulkan itself.
 
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::wait::{self, SubmissionBackend};
 use crate::gpu::TEST_DEVICE;
 use ash::vk;
@@ -133,9 +133,5 @@ fn the_raw_handles_name_the_runtimes_objects() {
         // SAFETY: the test's fence; its submission completed.
         unsafe { vk_device.destroy_fence(fence, None) };
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

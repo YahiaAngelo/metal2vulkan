@@ -20,7 +20,7 @@
 //! filter's two levels' comparisons (`compared::blended`).
 
 use super::depth_compares::{argument_kernel, pipeline_of, run_held, Held, Through};
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
 use metal2vulkan::metal::{CompareFunction, PixelFormat, SamplerMipFilter};
@@ -375,5 +375,5 @@ fn comparisons_read_the_level_metal_reads() {
                 .join("\n")
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

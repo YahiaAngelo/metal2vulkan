@@ -6,8 +6,9 @@
 //! ordering against other uses of the bytes is `buffer_texture_order.rs`'s.
 
 use super::{
-    bound_buffers, buffer_with, encode_case, pipeline_state, public_case, read_buffer, run_case,
-    texture_descriptor, validated_device, CaseResources, Messages, ScratchCache, WAIT,
+    bound_buffers, buffer_with, encode_case, layer_reported_nothing_at_all, pipeline_state,
+    public_case, read_buffer, run_case, texture_descriptor, validated_device, CaseResources,
+    Messages, ScratchCache, WAIT,
 };
 use crate::candidate::engine::ComputeOutput;
 use crate::gpu::TEST_DEVICE;
@@ -34,11 +35,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 fn invalid(call: &'static str, problem: BufferTextureProblem) -> Error {

@@ -31,7 +31,10 @@
 
 use super::degrade_notices::made_render_kinds;
 use super::viewport_ranges::{depth_ranges_refused, native_depth_range};
-use super::{buffer_with, validated_device_with, LaneChecks, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device_with, LaneChecks, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::VkFeature;
@@ -478,11 +481,7 @@ fn validated_adjusted(adjust: impl FnOnce(&mut DeviceOptions)) -> (Messages, Scr
 
 pub(super) fn quiet(probe: Probe, messages: &Messages) {
     drop(probe);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(messages);
 }
 
 /// Each probe draw stores the texels Metal stored (the module docs). Every draw runs, and the

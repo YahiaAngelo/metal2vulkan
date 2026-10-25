@@ -7,7 +7,10 @@
 //! device keeps for its sample count (`runtime/attachmentless.rs`); MoltenVK rasterized one sample
 //! in a pass made per encoder.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::PrimitiveType;
@@ -121,11 +124,7 @@ fn a_pass_without_attachments_rasterizes_its_default_sample_count() {
         }
         eprintln!("attachmentless passes on {name}: {}", answers.join("; "));
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// What one command buffer on `queue` leaves: a blit filling mark 0 with `0x11`, a signal of
@@ -270,11 +269,7 @@ fn a_pass_without_attachments_past_16384_fails_its_command_buffer() {
             assert_eq!(events, [1, 0], "{size:?}: the signal before the pass alone");
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A pass without attachments at a default raster sample count other than 1, 2 and 4 is Metal's
@@ -352,9 +347,5 @@ fn a_pass_without_attachments_takes_metal_s_default_sample_counts() {
             device.name()
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

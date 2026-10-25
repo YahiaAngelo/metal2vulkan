@@ -16,7 +16,8 @@
 //! error, and stops the loop as it does; one of another code does not.
 
 use super::{
-    buffer_with, one, read_buffer, validated_device, Draw, Lane, Messages, ScratchCache, WAIT,
+    buffer_with, layer_reported_nothing_at_all, one, read_buffer, validated_device, Draw, Lane,
+    Messages, ScratchCache, WAIT,
 };
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -212,11 +213,7 @@ fn a_running_loop_stops_at_the_gpu_s_recovery_as_metal_s_does() {
         let again = lane.device.work_counts().predicated_loop_runs_again - before;
         assert!(again > 0, "{name}: the loop of 200 ran its laying again");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A command buffer committed as failed on another queue with Metal's code of a page fault (3)
@@ -271,9 +268,5 @@ fn an_injected_fault_or_hang_stops_a_running_loop_as_the_error_it_stands_for() {
         assert_eq!(words(&log)[2], 0, "{name}: the mark after the loop ran");
         println!("{name}: injected codes 3 and 2 stopped the loop; code 1 left it running");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

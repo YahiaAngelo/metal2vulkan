@@ -19,7 +19,10 @@
 //! own), never one per format.
 
 use super::argument_linear_samples::{alike, device_filters};
-use super::{pipeline_state, public_cases, run_with, validated_device, Messages, ScratchCache};
+use super::{
+    layer_reported_nothing_at_all, pipeline_state, public_cases, run_with, validated_device,
+    Messages, ScratchCache,
+};
 use crate::candidate::engine::resources::pixel_format;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan_runtime::ExecutedPipeline;
@@ -163,5 +166,5 @@ fn one_pipeline_per_sampler_answers_every_bound_format_as_metal() {
          variant, whatever the bound format",
         variants.len()
     );
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

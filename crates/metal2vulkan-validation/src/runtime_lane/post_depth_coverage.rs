@@ -11,7 +11,9 @@
 //! `VK_EXT_post_depth_coverage` refuses `pdc_after` by that need; a device whose driver splits a
 //! clipped triangle's pixel-rate fragments (lavapipe) may refuse it for that first.
 
-use super::{buffer_with, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device, Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::{DriverWorkaround, VkExtension};
@@ -201,9 +203,5 @@ fn the_coverage_after_the_depth_test_reads_as_metal_s() {
         );
         eprintln!("post-depth coverage on {name}: Metal's, {partial} pixels partly covered");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

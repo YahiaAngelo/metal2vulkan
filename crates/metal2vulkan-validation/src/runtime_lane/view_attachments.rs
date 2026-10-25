@@ -24,7 +24,8 @@
 
 use super::buffer_texture_blits::{Held, Kind, OFF};
 use super::{
-    buffer_with, read_buffer, validated_device, validated_device_with, Messages, ScratchCache, WAIT,
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device,
+    validated_device_with, Messages, ScratchCache, WAIT,
 };
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -322,11 +323,7 @@ fn on_device(test: impl FnOnce(&Lane)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&Lane::new(&device));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A view of another format renders in that format's encoding into its texture's bytes: the
@@ -1053,11 +1050,7 @@ fn an_attachment_in_a_format_the_level_describes_none_of_stops_the_pipeline() {
             }
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 #[test]

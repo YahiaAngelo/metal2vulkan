@@ -20,7 +20,10 @@
 //! - A 32-bit integer format read into a float attribute refuses the pipeline,
 //!   `InvalidDescriptor(VertexAttribute)`, where Metal refuses it too.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -297,7 +300,7 @@ fn integer_formats_read_into_float_attributes_take_metal_s_values() {
         );
         assert!(wrong.is_empty(), "{} rows differ", wrong.len());
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A 32-bit integer format read into a float attribute refuses the pipeline, as on Metal.
@@ -333,7 +336,7 @@ fn a_32_bit_integer_format_into_a_float_attribute_is_refused() {
             }
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The label pipeline, its `UShort2` attribute read as `float2`, draws Metal's pixels.
@@ -508,5 +511,5 @@ fn the_label_pipeline_draws_metal_s_pixels() {
             "the label's pixels"
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

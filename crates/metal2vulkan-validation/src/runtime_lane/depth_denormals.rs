@@ -79,7 +79,10 @@ use super::degrade_notices::{counts, signs_depth_tests};
 use super::degrade_notices::{made_compute_kinds, made_render_kinds, shared_in_system_memory};
 use super::depth_compares::run;
 use super::render_state::library;
-use super::{buffer_with, read_buffer, validated_device, validated_device_with};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device,
+    validated_device_with,
+};
 use super::{Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -696,11 +699,7 @@ fn depth_images_hold_denormals_as_their_drivers_claim() {
              tests {tests})"
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Whether Metal's depth test passes a fragment at depth `z` under `compare` against the stored
@@ -1145,11 +1144,7 @@ fn a_stored_depth_tests_reads_samples_and_compares_as_metal_s() {
             "{name}: signed-depth-test for the merge where the target takes the stand-in"
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A target that takes no magnitude stand-in, or whose pass renders it through another image,
@@ -1254,11 +1249,7 @@ fn a_target_without_a_stand_in_stores_its_words_without_their_signs() {
             "{name}: signed-depth-test for the tests of the targets without a stand-in"
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A NaN clear depth stores and tests as Metal's (our probe `nanclear`, the M3 Max under macOS
@@ -1352,11 +1343,7 @@ fn a_nan_clear_depth_stores_and_tests_as_metal_s() {
         }
         messages.take_notices();
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The side of [`fresh_target`]'s textures, which Metal compresses: each texel reads its pattern.
@@ -1628,11 +1615,7 @@ fn a_new_target_s_pattern_loaded_unwritten_tests_and_stores_as_metal_s() {
             "{name}: a cleared target announces nothing: {announced:?}"
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The depth of an ordinary pass, which never stores a value whose stand-in is not itself, loads
@@ -1679,9 +1662,5 @@ fn an_ordinary_depth_loads_in_place() {
         assert_eq!(strips, 0, "{name}: sign strips");
         messages.take_notices();
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

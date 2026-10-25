@@ -47,7 +47,10 @@
 
 use super::degrade_notices::{assert_made_once, assert_once};
 use super::shared_kinds;
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::candidate::engine::guards::GuardReach;
 use crate::candidate::runtime_case::guarded_buffer;
@@ -336,7 +339,7 @@ fn index_positions_past_the_buffer_draw_index_zero_plus_the_base_vertex() {
                 );
             }
         }
-        assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -440,7 +443,7 @@ fn a_run_of_bounded_indirect_draws_draws_each_draws_metal_vertices() {
             RUN.len()
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The positions of [`an_indirect_draw_past_the_old_index_pool_draws_metals_vertices`]'s draw:
@@ -493,5 +496,5 @@ fn an_indirect_draw_past_the_old_index_pool_draws_metals_vertices() {
             u64::from(PAST_OLD_POOL) * 4
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

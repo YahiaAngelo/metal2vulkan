@@ -1,7 +1,7 @@
 //! Device test of the GPU-family audit on the device the cfg selects: every family's
 //! `supportsFamily:` answer and the rows that block it, printed as the venue's burn-down.
 
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::TextureUsage;
 use metal2vulkan_runtime::{
@@ -88,9 +88,5 @@ fn every_family_answers_with_its_blocking_rows() {
             .and_then(|heap| heap.new_texture(&texture));
         assert_eq!(sparse, made.is_ok(), "{made:?}");
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

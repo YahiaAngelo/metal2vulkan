@@ -62,7 +62,9 @@
 use super::commit_work::orders_by_ends;
 use super::degrade_notices::{assert_once, counts, FROM_HOST, GPU_TIMES, UNTIMED};
 use super::presenting::Adopted;
-use super::{validated_device, validated_device_with, Messages, ScratchCache};
+use super::{
+    layer_reported_nothing_at_all, validated_device, validated_device_with, Messages, ScratchCache,
+};
 use crate::gpu::TEST_DEVICE;
 use ash::vk;
 use metal2vulkan::device::{BatchOrderPolicy, DriverFact};
@@ -390,11 +392,7 @@ fn command_buffers_are_timed_in_the_hosts_time_base() {
             assert_once(&notices, &GPU_TIMES);
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// On a `device` that calibrates: the calibration pairs that placed its command buffers' times,
@@ -513,11 +511,7 @@ fn command_buffers_one_after_another_are_each_timed_on_their_own() {
             assert!(reused > 0, "no kept stamped command buffer taken again");
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// [`BEHIND_ROUNDS`] pairs of fills of the same [`BEHIND_LENGTH`] bytes on one queue, the first
@@ -648,11 +642,7 @@ fn start_behind_work(batch_order: BatchOrderPolicy) {
             ),
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// On a device the test made and the runtime adopts without calibrated timestamps: the three
@@ -720,11 +710,7 @@ fn more_command_buffers_in_flight_than_metal_keeps_sample_buffers_are_timed() {
             );
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Command buffers each waiting for one shared event are committed before it is signaled, so all
@@ -856,11 +842,7 @@ fn command_buffers_past_a_pool_s_slots_are_timed_by_pools_made_as_needed() {
             );
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Command buffers with no encoder answer where their queue reached them as both GPU times and
@@ -944,11 +926,7 @@ fn a_command_buffer_with_no_encoder_answers_where_its_queue_reached_it() {
             );
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// On a device made with `gpu_times_from_host`: the three command buffers' times hold the module
@@ -1025,11 +1003,7 @@ fn a_device_answering_gpu_times_from_the_host_writes_no_timestamps() {
             "runtime gpu times: {IN_FLIGHT} command buffers on one queue, answered from the host"
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The command buffers each queue of [`host_clock_gpu_times_keep_metal_s_rules`] commits, in a
@@ -1357,9 +1331,5 @@ fn host_clock_gpu_times_keep_metal_s_rules() {
             }
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

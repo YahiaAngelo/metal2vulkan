@@ -25,7 +25,10 @@
 //! `rotated_surface_frame_costs` times frames at the consumer's surface size, 1920x1080, rotated
 //! and not, and prints them (`ROTATION-COST`).
 
-use super::{validated_device, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    layer_reported_nothing_at_all, validated_device, validated_device_with, Messages, ScratchCache,
+    WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{ColorWriteMask, PixelFormat, PrimitiveType, TextureType, TextureUsage};
@@ -266,11 +269,7 @@ fn bytes_of(buffer: &Buffer) -> Vec<u8> {
 
 /// Check the validation layer reported nothing.
 fn quiet(messages: &Messages) {
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(messages);
 }
 
 /// Where Metal stores the pass texel `(x, y)` of a `w x h` texture of `rotation` (the module

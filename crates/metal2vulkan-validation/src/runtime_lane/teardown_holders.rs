@@ -18,7 +18,7 @@
 //! The pipelines are the owned fixture `validation/fixtures/public/examples/runtime_examples.ll`.
 
 use super::indirect_host_steps;
-use super::{validated_device_with, Messages, ScratchCache, WAIT};
+use super::{layer_reported_nothing, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{
@@ -185,10 +185,9 @@ fn in_every_order(holders: usize, make: impl Fn(&Device) -> Vec<Box<dyn Any>>) {
             messages.unshared_within(WAIT),
             "dropped in order {order:?}: the device's teardown did not end"
         );
-        assert_eq!(
-            messages.take(),
-            Vec::new(),
-            "dropped in order {order:?} (the device is {holders}): the validation layer reported"
+        layer_reported_nothing(
+            &messages,
+            &format!("dropped in order {order:?} (the device is {holders})"),
         );
     }
 }

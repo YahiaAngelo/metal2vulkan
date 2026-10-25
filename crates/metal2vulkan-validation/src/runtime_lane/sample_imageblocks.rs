@@ -16,7 +16,9 @@
 //!   shader's image writes there). An add that discards column 7, failing with 2 and passing with
 //!   4, leaves 5 but 1 in column 7.
 
-use super::{buffer_with, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device, Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::error::{Feature, Needs};
@@ -323,9 +325,5 @@ fn an_imageblock_is_per_sample_and_tested_as_metal_s() {
         }
         eprintln!("sample imageblocks on {name}: {}", answers.join("; "));
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

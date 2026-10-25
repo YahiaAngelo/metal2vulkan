@@ -24,7 +24,9 @@
 //! each read at its address. Its strip and a vertex function that writes memory are refused
 //! (`NotImplemented(PrimitiveId)`).
 
-use super::{buffer_with, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::VkFeature;
@@ -417,11 +419,7 @@ fn on_path(path: Path, check: impl FnOnce(&Lane)) {
     };
     check(&lane);
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 fn withhold(path: Path, options: &mut DeviceOptions) {

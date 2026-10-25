@@ -27,7 +27,8 @@
 //! 27.0.1 for its texels).
 
 use super::{
-    buffer_with, read_buffer, validated_device, validated_device_with, Messages, ScratchCache, WAIT,
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device,
+    validated_device_with, Messages, ScratchCache, WAIT,
 };
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -607,11 +608,7 @@ fn layered_passes(withheld: &[VkFeature]) {
             lane.geometry_stages(2)
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// An index at or past the pass's length renders the pass's first layer, and the fragment function
@@ -829,11 +826,7 @@ fn index_past_the_length(withheld: &[VkFeature]) {
             lane.geometry_stages(2)
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// `rt6_layered_weights` reads the slice and the tag, the primitive ID and the barycentric weights
@@ -976,11 +969,7 @@ fn weights_passes(withheld: &[VkFeature]) {
             lane.geometry_stages(1)
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// What Metal's validation stops in a layered pass is refused typed before anything runs (Metal
@@ -1050,11 +1039,7 @@ fn a_layered_pass_is_refused_as_metal_refuses_it() {
             );
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A resolve lane texel (RGBA8): white where a draw covered the pixel, the clear (zero) where none
@@ -1909,11 +1894,7 @@ fn a_layered_pass_resolves_each_layer_as_metal() {
             }
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// One separate depth and stencil case: its name, the arrays' slices, the attachments' slice,
@@ -1992,11 +1973,7 @@ fn separate_depth_and_stencil_render_each_layer_as_metal() {
             assert_eq!(stencils, stencil, "{case} on {name}");
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A layered pass over separate multisampled depth and stencil textures tests and stores each
@@ -2146,11 +2123,7 @@ fn separate_multisampled_depth_and_stencil_render_each_layer_as_metal() {
         }
         differ
     };
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     assert!(differ.is_empty(), "{differ:#?}");
 }
 
@@ -2209,11 +2182,7 @@ fn a_depth_and_stencil_resolve_reads_and_writes_their_own_slices() {
             }
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A layered pass resolves its depth and stencil from its first layer alone, into slice
@@ -2270,9 +2239,5 @@ fn a_layered_pass_resolves_its_depth_and_stencil_from_its_first_layer() {
             }
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

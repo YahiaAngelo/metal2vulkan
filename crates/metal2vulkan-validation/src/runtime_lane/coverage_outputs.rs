@@ -18,7 +18,10 @@
 //! triangle's fragments (lavapipe), says so and draws nothing.
 
 use super::degrade_notices::counts;
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::error::Feature;
@@ -258,9 +261,5 @@ fn coverage_reading_color_writers_write_the_samples_metal_writes() {
         assert!(whole > 0 && partial > 0, "{whole} whole, {partial} partial");
     }
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

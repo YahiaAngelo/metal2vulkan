@@ -15,8 +15,9 @@
 
 use super::kernel_textures::{absent_read_only, fresh_candidate, refusal};
 use super::{
-    bound_buffers, buffer_with, encode_case, pipeline_state, public_case, public_cases,
-    read_buffer, run_case, validated_device, CaseResources, Messages, ScratchCache,
+    bound_buffers, buffer_with, encode_case, layer_reported_nothing, layer_reported_nothing_at_all,
+    pipeline_state, public_case, public_cases, read_buffer, run_case, validated_device,
+    CaseResources, Messages, ScratchCache,
 };
 use crate::candidate::engine::ComputeOutput;
 use crate::case::{AuthoredCase, Stage};
@@ -49,11 +50,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Every committed public kernel case whose argument buffers hold buffers runs through the
@@ -159,6 +156,10 @@ fn census(what: &str, select: impl Fn(&AuthoredCase) -> bool) -> Census {
         failed.is_empty() && leaked.is_empty(),
         "failed:\n{}\nat device destruction: {leaked:#?}",
         failed.join("\n")
+    );
+    layer_reported_nothing(
+        &messages,
+        "every case's commands were valid and left nothing behind",
     );
     Census {
         matched: matched.len(),

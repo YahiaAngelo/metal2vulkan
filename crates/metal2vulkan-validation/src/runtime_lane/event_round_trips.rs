@@ -24,7 +24,10 @@
 //! event it waits for there or of another head's (no head waits for the GPU's signal once the
 //! host met its wait).
 
-use super::{loader, open_device, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    layer_reported_nothing_at_all, loader, open_device, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::CompletionPolicy;
 use metal2vulkan::vk::DriverId;
@@ -290,11 +293,7 @@ fn a_checked_head_waits_for_another_queue_s_signal_on_the_gpu() {
             );
         }
     }
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Where the scheduler's thread waits on the GPU for a signal a long command buffer gives at its
@@ -430,9 +429,5 @@ fn a_host_signal_wakes_the_scheduler_from_its_wait_on_the_gpu() {
             }
         }
     }
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

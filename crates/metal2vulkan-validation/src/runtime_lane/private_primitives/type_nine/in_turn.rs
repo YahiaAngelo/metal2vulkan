@@ -17,7 +17,10 @@
 //!
 //! The runtime runs nothing from the first failing pass on, as for one failure.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache,
+};
 use super::{targets, Answer, Lane, Tracked, FAULT, HANG, SCHEDULED};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::IndexType;
@@ -207,11 +210,7 @@ fn fails_in_turn(cases: &[(&[Nine], Expected)]) {
             );
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A fault, then later faults or a hang, in one command buffer: it fails with `PageFault`, reads

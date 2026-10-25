@@ -15,7 +15,9 @@
 //! `[0, 1]` (`degrade_notices::clamps_depth_uploads`).
 
 use super::degrade_notices::{clamps_depth_uploads, counts};
-use super::{buffer_with, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -252,9 +254,5 @@ fn the_depth_compare_clamp_mask_clamps_metal_s_references() {
         "{name}: restricted-depth-range announced"
     );
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

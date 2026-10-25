@@ -12,8 +12,8 @@
 use super::degrade_notices::{assert_made_once, WRAPPED};
 use super::shared_kinds;
 use super::{
-    loader, read_buffer, validated_device, validated_device_with, Messages, ScratchCache,
-    VALIDATION_LAYER,
+    layer_reported_nothing_at_all, loader, read_buffer, validated_device, validated_device_with,
+    Messages, ScratchCache, VALIDATION_LAYER,
 };
 use crate::candidate::LoaderWord;
 use crate::gpu::wait::{self, SubmissionBackend};
@@ -1160,11 +1160,7 @@ fn wrapped_images_order_across_queues() {
             raw.device.free_memory(image_memory, None);
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 fn invalid(call: &'static str, problem: Problem) -> Error {
@@ -1387,11 +1383,7 @@ fn interop_refusals_and_shared_textures() {
             invalid("new_shared_texture_with_handle", Problem::ForeignObject)
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A device made with the presenting extensions whose feature structures the runtime knows
@@ -1519,9 +1511,5 @@ fn listed_presenting_extensions_are_made_with_their_features() {
             }
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

@@ -50,7 +50,10 @@ use super::degrade_notices::{assert_made_once, made_mesh_kinds};
 use super::gpu_times::read_kinds;
 use super::render_state::{texels, texture};
 use super::shared_kinds;
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::{VkExtension, VkFeature};
@@ -486,11 +489,7 @@ fn mesh_draws_store_metals_words() {
             }
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Each object case draws the words Metal drew (the module docs), but those that leave a partial
@@ -564,11 +563,7 @@ fn object_draws_store_metals_words() {
         };
         assert_made_once(&messages, emulated, &made);
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// One case of Metal probe 5 over the owned fixture `mesh_object_grid`: the draw's object
@@ -928,11 +923,7 @@ fn object_grids_run_as_metal_runs_them() {
             assert_eq!(tail, !direct, "{what}: the encoder after the draw's");
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The pixels Metal draws for `cases` drawn in order in one pass, as case `name`: each case's
@@ -1003,11 +994,7 @@ fn draws_of_both_pipelines_in_one_pass_store_metals_words() {
         );
         assert_eq!(lines, metals, "on {name}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// What Metal's validation stops draws as plain Metal does (a probe): more than 1024 threads in a
@@ -1062,9 +1049,5 @@ fn mesh_draws_answer_as_plain_metal_and_refuse_the_rest() {
             .unwrap();
         assert_eq!(lines, ["RESULT refused drawn=0"], "on {name}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

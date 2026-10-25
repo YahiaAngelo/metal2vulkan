@@ -20,7 +20,10 @@
 //! its format's sRGB twin, which keeps its own encoding, as plain Metal's.
 
 use super::degrade_notices::assert_once;
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::DriverFact;
@@ -70,11 +73,7 @@ pub(super) fn lane_with(adjust: impl FnOnce(&mut DeviceOptions)) -> (Messages, S
 
 pub(super) fn quiet(lane: Lane, messages: &Messages) {
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(messages);
 }
 
 /// The per-sample color fragment of the probe's `f_samples`: red s/3, green 1 on sample 3, blue

@@ -29,7 +29,10 @@
 //! Metal's does (the same probe's texture buffers, swizzled ones among them, and argument buffers).
 
 use super::degrade_notices::resolve_kind;
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -802,7 +805,7 @@ fn a8_without_a8_unorm_writes_and_reads_alpha_as_metal() {
     assert!(got.iter().all(|&v| v == alpha), "a8r_read_write: {got:?}");
     every("a8r_read_write", &lane.bytes(&t), 178);
     drop(lane);
-    assert!(messages.take().is_empty(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// An `A8Unorm` storage texture's reads on the device made without
@@ -823,7 +826,7 @@ fn a8_storage_reads_without_the_feature_go_by_the_format_s_bit() {
     if lane.in_red() {
         println!("A8-FORMATLESS {name}: no A8_UNORM, its own format not checked");
         drop(lane);
-        assert!(messages.take().is_empty(), "the validation layer reported");
+        layer_reported_nothing_at_all(&messages);
         return;
     }
     let profile = lane.device.compile_device().profile();
@@ -852,7 +855,7 @@ fn a8_storage_reads_without_the_feature_go_by_the_format_s_bit() {
             );
         }
         drop(lane);
-        assert!(messages.take().is_empty(), "the validation layer reported");
+        layer_reported_nothing_at_all(&messages);
         return;
     }
     let usage = TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE;
@@ -868,7 +871,7 @@ fn a8_storage_reads_without_the_feature_go_by_the_format_s_bit() {
     }
     println!("A8-FORMATLESS {name}: read by A8_UNORM's own bit, as Metal's");
     drop(lane);
-    assert!(messages.take().is_empty(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A render stores the fragment's alpha, a clear the color's, only the alpha bit of a write mask
@@ -928,7 +931,7 @@ fn a8_without_a8_unorm_renders_masks_clears_and_blends_as_metal() {
         }
     }
     drop(lane);
-    assert!(messages.take().is_empty(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
     // The same blends into the device's own `A8_UNORM` texture, where it has the format.
     let own = Lane::new(&messages, &cache, false);
     let mut unlike = Vec::new();
@@ -945,7 +948,7 @@ fn a8_without_a8_unorm_renders_masks_clears_and_blends_as_metal() {
         }
     }
     drop(own);
-    assert!(messages.take().is_empty(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
     for line in wrong.iter().chain(&unlike) {
         println!("A8-IN-RED-DIFFERS {name}: {line}");
     }
@@ -982,7 +985,7 @@ fn a8_resolves_as_r8_unorm() {
         let form = if withheld { "R8_UNORM" } else { "A8_UNORM" };
         a8_resolve_leg(&lane, &format!("{name} {form}"));
         drop(lane);
-        assert!(messages.take().is_empty(), "the validation layer reported");
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -1122,7 +1125,7 @@ fn a8_color_input_reads_alpha_as_metal() {
         );
         println!("A8-FETCH {name} {form}: as Metal's, at four samples {planes}");
         drop(lane);
-        assert!(messages.take().is_empty(), "the validation layer reported");
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -1151,7 +1154,7 @@ fn a8_color_input_through_sample_planes_reads_alpha_as_metal() {
             lane.reads_planes()
         );
         drop(lane);
-        assert!(messages.take().is_empty(), "the validation layer reported");
+        layer_reported_nothing_at_all(&messages);
         return;
     }
     let pipeline = lane
@@ -1176,7 +1179,7 @@ fn a8_color_input_through_sample_planes_reads_alpha_as_metal() {
     every(&format!("{name}: the resolve"), &lane.bytes(&one), STORED);
     println!("A8-PLANES {name}: as Metal's, through A8_UNORM sample planes");
     drop(lane);
-    assert!(messages.take().is_empty(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Alpha-to-coverage through an `A8Unorm` attachment 0 at four samples covers by the output's
@@ -1253,7 +1256,7 @@ fn a8_alpha_to_coverage_covers_as_rgba8() {
         }
         println!("A8-COVERAGE {name} {form}: as RGBA8Unorm's at 33 alphas, within {codes} codes");
         drop(lane);
-        assert!(messages.take().is_empty(), "the validation layer reported");
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -1360,7 +1363,7 @@ fn a8_texture_buffer_reads_and_writes_alpha_as_metal() {
         );
         println!("A8-BUFFER {name} {form}: as Metal's");
         drop(lane);
-        assert!(messages.take().is_empty(), "the validation layer reported");
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -1409,7 +1412,7 @@ fn a8_argument_buffer_storage_reads_and_writes_alpha_as_metal() {
             );
             println!("A8-HELD {name} {form}: refused without {feature:?}: {refused}");
             drop(lane);
-            assert!(messages.take().is_empty(), "the validation layer reported");
+            layer_reported_nothing_at_all(&messages);
             continue;
         }
         let usage = TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE;
@@ -1444,6 +1447,6 @@ fn a8_argument_buffer_storage_reads_and_writes_alpha_as_metal() {
         );
         println!("A8-HELD {name} {form}: as Metal's");
         drop(lane);
-        assert!(messages.take().is_empty(), "the validation layer reported");
+        layer_reported_nothing_at_all(&messages);
     }
 }

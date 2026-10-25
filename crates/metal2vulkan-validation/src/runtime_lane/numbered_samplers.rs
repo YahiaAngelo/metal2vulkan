@@ -6,7 +6,7 @@
 //! `label=ID` between steps that make and drop the objects, each state kept to the test's end
 //! (plain allocation hands each the lowest free ID).
 
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -185,11 +185,7 @@ fn on_device(row: impl FnOnce(&mut Row)) -> String {
         row(&mut r);
         r.answers()
     };
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     answers
 }
 

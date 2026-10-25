@@ -15,7 +15,10 @@
 //! (`render/tessellation_scan.rs`): the same marks, and the emulation announced once
 //! ([`EMULATED_TESSELLATION`]).
 
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::VkFeature;
@@ -103,11 +106,7 @@ pub(super) fn on_path(path: Path, check: impl FnOnce(Device, &str)) {
     } else {
         assert!(order <= 1, "the triangle order announced {order} times");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// `error`, a refusal of the fixture's pipeline, which only the native path may answer (on a

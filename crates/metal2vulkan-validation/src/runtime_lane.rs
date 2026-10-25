@@ -19,9 +19,10 @@ use crate::air_library::AirLibrary;
 use crate::candidate::engine::{compute_case, ComputeCase};
 pub use crate::candidate::runtime_case::{
     argument_texture_usage, bound_buffers, buffer_with, buffer_with_options, commit_case,
-    compute_descriptor, encode_case, layer_reported_nothing, loader, open_device, open_devices,
-    read_buffer, read_texture, texture_descriptor, texture_usage, texture_with, CaseResources,
-    EnabledLayers, LayerClaim, Messages, ScratchCache, LAYERS_DROPPED, VALIDATION_LAYER,
+    compute_descriptor, encode_case, layer_reported_nothing, layer_reported_nothing_at_all, loader,
+    nothing_reported_without_the_layer, open_device, open_devices, read_buffer, read_texture,
+    texture_descriptor, texture_usage, texture_with, CaseResources, EnabledLayers, LayerClaim,
+    Messages, ScratchCache, LAYERS_DROPPED, VALIDATION_LAYER,
 };
 use crate::candidate::runtime_case::{
     encoded_tile, report_each_message, tile_descriptor, Committed,

@@ -17,9 +17,9 @@ use super::degrade_notices::{
 use super::host_memory::{no_copy, not_importable, Mapping, GUEST_PAGE};
 use super::sparse_textures::{lacks_sparse, SparseFacts};
 use super::{
-    bound_buffers, buffer_with, case_making_kinds, creation_checked, encode_case, made_lane_device,
-    pipeline_state, public_case, read_buffer, texture_descriptor, validated_device_with,
-    CaseResources, Messages, PublicCase, ScratchCache,
+    bound_buffers, buffer_with, case_making_kinds, creation_checked, encode_case,
+    layer_reported_nothing_at_all, made_lane_device, pipeline_state, public_case, read_buffer,
+    texture_descriptor, validated_device_with, CaseResources, Messages, PublicCase, ScratchCache,
 };
 use crate::candidate::engine::resources::argument_sampler_descriptor;
 use crate::candidate::engine::ComputeOutput;
@@ -184,11 +184,7 @@ fn on_device_with(adjust: impl FnOnce(&mut DeviceOptions), test: impl FnOnce(&De
         let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), adjust).unwrap();
         test(&device, &messages);
     }
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// [`HANDLE_SAMPLER`] (or another case of its shape: a 2-by-2 texture and a sampler state in its

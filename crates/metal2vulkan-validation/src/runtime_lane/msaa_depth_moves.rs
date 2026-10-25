@@ -17,7 +17,10 @@
 //! argument buffer the encoder makes resident with `use_resource` ([`READ_DMS`]), or through a
 //! blit's copy into a buffer.
 
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::candidate::runtime_samples::encode;
 use crate::executor_contract::multisample::SampleRead;
@@ -355,11 +358,7 @@ fn run(name: &str, expected: Expect, case: impl FnOnce(&Device, &Kit)) {
     }
     drop(kit);
     drop(device);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "{name}: the validation layer reported on {device_name}: {reported:#?}"
-    );
+    layer_reported_nothing(&messages, &format!("{name} on {device_name}"));
 }
 
 /// Three passes, each its own command buffer and each read back by a compute function after it:

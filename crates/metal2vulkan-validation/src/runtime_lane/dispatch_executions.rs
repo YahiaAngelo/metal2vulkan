@@ -44,7 +44,7 @@ use super::indirect_host_steps::{self, HOST_STEPS};
 use super::rebind_reach::{buffer_len, buffer_over, pages};
 use super::rebinds::rebind;
 use super::shared_kinds;
-use super::{validated_device_with, Messages, ScratchCache, WAIT};
+use super::{layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::candidate::runtime_case::{buffer_with, read_buffer};
 use crate::gpu::TEST_DEVICE;
@@ -343,7 +343,7 @@ fn on_device(test: impl FnOnce(&Device, &Messages)) {
         assert!(device.compile_device().generated_commands().is_none());
         test(&device, &messages);
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The indirect dispatches `device` replayed so far.

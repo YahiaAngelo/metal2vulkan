@@ -20,7 +20,7 @@
 //!   `NotImplemented(RateMapRegions(LayeredPipeline))`, the slices unknown to the encoder.
 
 use super::rate_maps::descriptor;
-use super::{validated_device, Messages, ScratchCache, WAIT};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{
@@ -293,5 +293,5 @@ fn each_slice_of_a_rate_mapped_pass_is_shaded_by_its_layer() {
             "layer_differ on {name}"
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

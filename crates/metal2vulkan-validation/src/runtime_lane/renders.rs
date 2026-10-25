@@ -34,8 +34,8 @@
 //!   texels (measured).
 
 use super::{
-    buffer_with, metal_output, read_buffer, texture_usage, validated_device, Messages, RuntimeRun,
-    ScratchCache, WAIT,
+    buffer_with, layer_reported_nothing, layer_reported_nothing_at_all, metal_output, read_buffer,
+    texture_usage, validated_device, Messages, RuntimeRun, ScratchCache, WAIT,
 };
 use crate::air::reflect::FragmentImageblock;
 use crate::candidate::engine::graphics::{render_case, RenderCase};
@@ -412,17 +412,17 @@ fn public_render_cases_match_metal() {
         "failed:\n{}\nat device destruction: {leaked:#?}",
         failed.join("\n")
     );
+    layer_reported_nothing(
+        &messages,
+        "every case's draw was valid and left nothing behind",
+    );
     assert!(matched > 0, "no case ran");
 }
 
 /// Destroy `device`, then check the validation layer reported nothing, leaks included.
 fn quiet(device: Device, messages: &Messages) {
     drop(device);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(messages);
 }
 
 fn invalid(call: &'static str, problem: Problem) -> Error {

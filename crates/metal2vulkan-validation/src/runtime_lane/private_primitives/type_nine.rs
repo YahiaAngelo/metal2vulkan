@@ -44,7 +44,10 @@
 //! the second's, and the host the third's only once the others completed. Last, it commits one
 //! more that marks.
 
-use super::super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use super::{Lane, FORMATS, SIDE};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{IndexType, TextureUsage};
@@ -440,11 +443,7 @@ fn answers_as_metal_does(draws: &[Draw], expected: Expected) {
             );
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Check `outcome` against Metal's answer `expected` (the module docs).
@@ -748,11 +747,7 @@ fn revokes_after(draws: &[(Draw, CommandBufferError)], revoked_from: Option<usiz
         );
         assert!(marked && event == 1, "a new queue's command buffer ran");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A queue's second command buffer that faulted revokes it, as Metal's does: every command buffer

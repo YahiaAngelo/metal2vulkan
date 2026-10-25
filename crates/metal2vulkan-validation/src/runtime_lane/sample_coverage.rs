@@ -24,7 +24,10 @@
 //! fragments of their own), refused with `Feature::PixelCoverage`. One sample is never refused,
 //! so every device draws that count's cases.
 
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::error::Feature;
@@ -359,11 +362,7 @@ fn the_sample_coverage_keeps_the_samples_metal_keeps() {
         cases.len() - drawn
     );
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Under the coverage the fragment function still runs for every rasterized sample and reads the
@@ -429,9 +428,5 @@ fn the_sample_coverage_applies_after_the_fragment_function() {
     assert!(drawn >= 3, "{name}: {drawn} draws");
     eprintln!("{name}: {drawn} of 9 coverage draws are Metal's");
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

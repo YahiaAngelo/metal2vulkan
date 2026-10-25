@@ -17,7 +17,10 @@
 //! - `ob1_texel_buffer` writes the red channel of the `uint` texel of its slot-0 texture buffer
 //!   at the index each thread is given, past the texture buffer for half of them.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{
@@ -349,7 +352,7 @@ fn swizzled_texture_buffers_read_metals_swizzled_texels() {
         }
         assert!(wrong.is_empty(), "{name}: {} reads differ", wrong.len());
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A view of a texture buffer made with a swizzle reads its own swizzle, replacing its
@@ -388,5 +391,5 @@ fn a_swizzled_view_of_a_texture_buffer_reads_its_own_swizzle() {
             }
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

@@ -35,7 +35,10 @@
 //!
 //! Type 9's draws, which fail their command buffers as Metal's GPU does: [`type_nine`].
 
-use super::{buffer_with, validated_device, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::VkFeature;
@@ -776,11 +779,7 @@ fn draws_metal_s_lists(cases: &[Case], weights: Weights) {
             cases.len()
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Every direct draw without indices draws Metal's list, from the CPU's.
@@ -851,11 +850,7 @@ fn other_fragments_draw_metal_s_lists_and_strips_differ() {
             }
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Quads and a quad strip count one `[[primitive_id]]` a quad, read by a fragment function with
@@ -900,11 +895,7 @@ fn quads_count_one_primitive_id_a_quad() {
             }
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// With `geometryShader` and `tessellationShader` withheld, a fragment function reads
@@ -967,9 +958,5 @@ fn with_the_primitive_id_varying_private_draws_are_metal_s_lists() {
             "{name}: {drawn} private draws through the primitive ID's varying equal Metal's lists"
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

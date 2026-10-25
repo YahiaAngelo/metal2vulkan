@@ -11,8 +11,9 @@
 
 use super::degrade_notices::counts;
 use super::{
-    buffer_with, encode_case, pipeline_state, public_case, read_buffer, run_case,
-    texture_descriptor, validated_device, CaseResources, Messages, PublicCase, ScratchCache, WAIT,
+    buffer_with, encode_case, layer_reported_nothing_at_all, pipeline_state, public_case,
+    read_buffer, run_case, texture_descriptor, validated_device, CaseResources, Messages,
+    PublicCase, ScratchCache, WAIT,
 };
 use crate::candidate::engine::ComputeOutput;
 use crate::case::TextureType;
@@ -51,11 +52,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A binding of a case: its texture or buffer at a slot.
@@ -462,11 +459,7 @@ fn textures_over_buffers_alias_where_the_device_lays_them_as_metal_does() {
         }
         let shadowed = counts(&messages.take_notices()).contains_key(&Degradation::ShadowedTexture);
         forms.push((width, row, if shadowed { "shadowed" } else { "aliased" }));
-        let messages = messages.take();
-        assert!(
-            messages.is_empty(),
-            "the validation layer reported: {messages:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
     eprintln!("textures over buffers on {name}: {forms:?}");
     assert_eq!(
@@ -547,11 +540,7 @@ fn with_undeclared_usage(name: &str, usage: TextureUsage, width: u64, pad: u64) 
     let notices = counts(&messages.take_notices());
     let shadowed = notices.contains_key(&Degradation::ShadowedTexture)
         || notices.contains_key(&Degradation::UndeclaredUsageShadow);
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     shadowed
 }
 
@@ -682,11 +671,7 @@ fn beyond_usage(name: &str, usage: TextureUsage) -> (Vec<u8>, Vec<u8>, bool) {
     };
     let shadowed =
         counts(&messages.take_notices()).contains_key(&Degradation::UndeclaredUsageShadow);
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     (ran.0, ran.1, shadowed)
 }
 

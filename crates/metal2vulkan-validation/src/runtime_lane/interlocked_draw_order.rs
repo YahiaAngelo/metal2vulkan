@@ -24,7 +24,10 @@
 //! hold its band's composition; the wrong ones are counted and printed per pass, with the GPU time
 //! of each pass and whether the device records the barrier.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::DriverFact;
@@ -270,9 +273,5 @@ fn consecutive_fetching_draws_read_each_others_writes() {
         device.name()
     );
     drop(device);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

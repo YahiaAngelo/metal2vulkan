@@ -4,7 +4,7 @@
 //! holds, and the consumer's surface, whose it may not.
 
 use super::host_memory::run;
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::error::Feature;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
@@ -179,9 +179,5 @@ fn a_large_heap_multisample_texture_s_moves() {
         drop(kept);
         print(&format!("{shape}: both gone"));
     }
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

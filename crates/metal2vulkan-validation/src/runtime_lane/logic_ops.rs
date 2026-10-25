@@ -13,7 +13,9 @@
 //! operation. Copy and no-op draw on every device; the others where the device has `logicOp`,
 //! and are refused naming it elsewhere (MoltenVK).
 
-use super::{buffer_with, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::VkFeature;
@@ -305,9 +307,5 @@ fn the_logic_operation_stores_metal_s_codes() {
     );
     eprintln!("{name}: {checked} logic-operated draws store Metal's texels, {refused} refused");
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

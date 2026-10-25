@@ -12,7 +12,10 @@
 
 use super::degrade_notices::{assert_once, counts};
 use super::kernel_textures::census;
-use super::{public_cases, read_buffer, validated_device, Messages, ScratchCache};
+use super::{
+    layer_reported_nothing, layer_reported_nothing_at_all, public_cases, read_buffer,
+    validated_device, Messages, ScratchCache,
+};
 use crate::case::Stage;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::{
@@ -57,11 +60,7 @@ fn on_device(test: impl FnOnce(&Device, &Messages)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device, &messages);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A descriptor of `width` by `height` screen pixels and these layers, each one sample per axis.
@@ -331,8 +330,7 @@ fn parameter_data_copies_where_the_cpu_reaches() {
             .unwrap();
         assert_eq!(copy(&foreign, 0), invalid(Problem::ForeignObject));
         drop((foreign, other));
-        let reported = messages.take();
-        assert!(reported.is_empty(), "the second device: {reported:#?}");
+        layer_reported_nothing(&messages, "the second device");
     });
 }
 

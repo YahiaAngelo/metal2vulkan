@@ -27,7 +27,10 @@
 //!   or its texture.
 
 use super::tile_states::descriptor as tile_descriptor;
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::{ArgumentDescriptor, ArgumentLayoutError, SamplerDescriptor};
@@ -60,11 +63,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The library of reflection fixture `stem` on `device`.

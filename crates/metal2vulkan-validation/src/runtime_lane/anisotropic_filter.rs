@@ -26,7 +26,10 @@
 //! and mean difference in codes and the share of channels a code or more off.
 
 use super::degrade_notices::counts;
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -505,11 +508,7 @@ fn within_bounds(
             .collect();
         (name, metal_sampler, outcomes)
     };
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     let announced: BTreeSet<Degradation> = counts(&messages.take_notices()).into_keys().collect();
     println!("ANISOTROPIC {name}: announced {announced:?}");
     let mut wrong = Vec::new();

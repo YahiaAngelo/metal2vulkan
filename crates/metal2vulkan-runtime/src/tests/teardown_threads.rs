@@ -5,8 +5,9 @@
 //! gates the test opens, never a timing: the program drops every handle while the runtime holds the
 //! device through one path, the device is checked to be still alive, the gate opens, and the
 //! teardown must end, on the thread the path lets go on, with no message (the validation layer,
-//! where the loader lists it, reports a destroyed object used, an object destroyed twice, or one
-//! the teardown left).
+//! which the device asks for, reports a destroyed object used, an object destroyed twice, or one
+//! the teardown left; what the claim of its silence holds is what the instance enabled of it,
+//! `tests/layer_claim.rs`).
 //!
 //! - **Not a pool thread**: a draw's making held waiting in the pool (`pool::held`) holds nothing
 //!   of the device, whose last handle goes on the program's thread; one held while it runs
@@ -52,6 +53,7 @@
 
 use super::dispatch_pending as pending;
 use super::freed_memory::{unused, Host, Runs};
+use super::layer_claim::Watched;
 use crate::device::lock;
 use crate::device::prime::SHADER;
 use crate::exit_guard;
@@ -59,14 +61,12 @@ use crate::pipeline::objects::{shader_module, words_digest};
 use crate::pipeline::pool::held;
 use crate::trails::blocked;
 use crate::{
-    Buffer, ClearColor, CommandBufferStatus, DebugMessage, Device, DeviceKind, DeviceOptions,
-    LoadAction, MessageSeverity, MessageSink, PipelineOptions, RenderPassDescriptor,
-    RenderPipelineState, ResourceOptions, ShaderCacheOptions, Size, StoreAction, Submission,
-    TextureDescriptor,
+    Buffer, ClearColor, CommandBufferStatus, Device, DeviceKind, DeviceOptions, LoadAction,
+    PipelineOptions, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
+    ShaderCacheOptions, Size, StoreAction, Submission, TextureDescriptor,
 };
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureUsage};
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
-use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, TryRecvError};
@@ -119,10 +119,11 @@ impl Drop for Ended {
     }
 }
 
-/// A watched device's teardown: the thread it ends on, and the failing messages it reported.
+/// A watched device's teardown: the thread it ends on, and what its instance had the validation
+/// layer report ([`Watched`], which says what a claim of its silence holds).
 struct Ending {
     thread: mpsc::Receiver<String>,
-    failures: Arc<Mutex<Vec<String>>>,
+    watched: Watched,
 }
 
 impl Ending {
@@ -143,8 +144,8 @@ impl Ending {
             Ok(program_thread()),
             "the device was not torn down on this thread before its last drop returned"
         );
-        let failures = lock(&self.failures);
-        assert!(failures.is_empty(), "failing messages: {:#?}", *failures);
+        self.watched
+            .layer_reported_nothing("the teardown that ended here left no object and used none");
     }
 
     /// The teardown ends, on one of `threads`, and nothing failed meanwhile.
@@ -157,38 +158,22 @@ impl Ending {
             threads.contains(&thread.as_str()),
             "the device's teardown ended on {thread}, not on one of {threads:?}"
         );
-        let failures = lock(&self.failures);
-        assert!(failures.is_empty(), "failing messages: {:#?}", *failures);
+        self.watched.layer_reported_nothing(&format!(
+            "the teardown that ended on {thread} left no object and used none"
+        ));
     }
 }
 
-/// The validation layer's name, where the loader lists it.
-fn validation_layer() -> Option<CString> {
-    let name = c"VK_LAYER_KHRONOS_validation";
-    let entry = crate::device::create::open_loader(None).ok()?;
-    // SAFETY: the loader is open; listing its layers needs nothing else.
-    let layers = unsafe { entry.enumerate_instance_layer_properties() }.ok()?;
-    layers
-        .iter()
-        .any(|layer| layer.layer_name_as_c_str().is_ok_and(|n| n == name))
-        .then(|| name.to_owned())
-}
-
-/// The device the cfg selects, its shader cache in `cache`, under the validation layer where the
-/// loader lists it, reporting to a sink that sees its teardown end.
+/// The device the cfg selects, its shader cache in `cache`, asking for the validation layer, and
+/// reporting to a sink that sees its teardown end. What a claim of the layer's silence holds is
+/// the instance's own answer ([`Watched::layer_reported_nothing`]), never the loader's listing.
 fn watched(cache: &Path) -> (Device, Ending) {
     let (sender, thread) = mpsc::channel();
     let ended = Ended(sender);
-    let failures = Arc::new(Mutex::new(Vec::new()));
-    let reported = Arc::clone(&failures);
-    let sink = MessageSink::new(move |message: &DebugMessage| {
+    let watched = Watched::default();
+    let sink = watched.sink(move |_| {
         // The sink owns the sentinel, which goes with its last share, the instance's.
         let _ = &ended;
-        let fails = message.severity == MessageSeverity::Error
-            || (message.severity == MessageSeverity::Warning && message.kind.validation);
-        if fails && message.degradation.is_none() {
-            lock(&reported).push(format!("{}: {}", message.id_name, message.text));
-        }
     });
     let options = DeviceOptions {
         kinds: match cfg!(m2v_cpu_icd) {
@@ -203,13 +188,13 @@ fn watched(cache: &Path) -> (Device, Ending) {
             directory: Some(cache.to_owned()),
             ..ShaderCacheOptions::default()
         },
-        layers: validation_layer().into_iter().collect(),
+        layers: watched.layers(),
         messages: Some(sink),
         ..DeviceOptions::default()
     };
     // The options' share of the sink goes as this returns: the instance's is the last.
     let device = Device::system_default_with(&options).unwrap();
-    (device, Ending { thread, failures })
+    (device, Ending { thread, watched })
 }
 
 /// The fixture's render pipeline state: `colored_vertex` and `colored_fragment`, one
@@ -513,8 +498,9 @@ fn the_watch_of_the_program_s_marks_leaves_the_device_to_the_program_s_thread() 
         Ok(program_thread()),
         "the device was not torn down on this thread before its last drop returned"
     );
-    let failures = lock(&ending.failures);
-    assert!(failures.is_empty(), "failing messages: {:#?}", *failures);
+    ending
+        .watched
+        .layer_reported_nothing("the teardown that ended here left no object and used none");
 }
 
 /// A released host import's block waits for the program's mark, which only the held watch sees;
@@ -564,7 +550,8 @@ fn a_release_of_freed_memory_leaves_the_device_to_the_program_s_thread() {
         1,
         "the teardown freed the block and ran its deallocator"
     );
-    let failures = lock(&ending.failures);
-    assert!(failures.is_empty(), "failing messages: {:#?}", *failures);
+    ending
+        .watched
+        .layer_reported_nothing("the teardown that freed the block left no object and used none");
     drop(host);
 }

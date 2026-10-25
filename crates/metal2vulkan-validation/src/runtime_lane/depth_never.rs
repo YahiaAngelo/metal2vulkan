@@ -27,7 +27,10 @@
 //! `NotImplemented(DepthNeverWithoutAttachment)` (printed).
 
 use super::render_state::{texels, texture};
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::error::Feature;
@@ -249,11 +252,7 @@ impl Lane {
 /// The lane dropped, nothing the validation layer reported.
 fn quiet(lane: Lane, messages: &Messages) {
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(messages);
 }
 
 /// `color` 16 times.

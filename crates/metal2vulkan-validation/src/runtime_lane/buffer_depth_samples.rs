@@ -41,7 +41,10 @@
 
 use super::degrade_notices::{assert_made_once, forced, loses_depth_denormals, signs_depth_tests};
 use super::degrade_notices::{made_compute_kinds, shared_in_system_memory};
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::candidate::runtime_samples::{encode, read_function};
 use crate::executor_contract::multisample::SampleRead;
 use crate::gpu::TEST_DEVICE;
@@ -542,9 +545,5 @@ fn a_buffer_copies_every_sample_of_a_multisampled_depth_or_stencil_both_ways() {
              {announced:?}"
         );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

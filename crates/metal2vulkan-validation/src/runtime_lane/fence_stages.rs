@@ -16,7 +16,10 @@
 //!   one of the two. The validation layer is off there: the vertex function's read races the fill
 //!   by Metal's rule, which synchronization validation reports as a hazard.
 
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::state::DepthStencilDescriptor;
@@ -166,11 +169,7 @@ fn a_wait_before_the_vertex_stage_orders_the_vertex_function() {
         "texels after the fill and before it on {name}"
     );
     drop(device);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported on {name}: {reported:#?}"
-    );
+    layer_reported_nothing(&messages, &format!("on {name}"));
 }
 
 /// The module docs' wait before the fragment stage: either answer, counted.

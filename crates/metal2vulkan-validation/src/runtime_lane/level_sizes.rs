@@ -3,7 +3,10 @@
 //! (`lower::texture::emit::level_extent`).
 
 use super::host_memory::run;
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
@@ -130,9 +133,5 @@ fn size_queries_at_a_level_answer_metal_s_extent() {
         eprintln!("LEVELSIZES storage 100x40/3 level {l}: {got:?}, Metal's {want:?}");
         assert_eq!(got, want, "storage, level {l}");
     }
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

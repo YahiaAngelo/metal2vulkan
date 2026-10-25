@@ -9,8 +9,9 @@
 //! The races are harmless to the device: both accesses write or read the same few bytes.
 
 use super::{
-    buffer_with, buffer_with_options, encode_case, pipeline_state, public_case, read_buffer,
-    validated_device_with, CaseResources, LaneChecks, Messages, PublicCase, ScratchCache,
+    buffer_with, buffer_with_options, encode_case, layer_reported_nothing_at_all, pipeline_state,
+    public_case, read_buffer, validated_device_with, CaseResources, LaneChecks, LayerClaim,
+    Messages, PublicCase, ScratchCache,
 };
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::DispatchType;
@@ -91,6 +92,73 @@ fn case_buffers(device: &Device, case: &PublicCase) -> BTreeMap<u32, Buffer> {
             )
         })
         .collect()
+}
+
+/// The lane's claim that the validation layer reported nothing ([`layer_reported_nothing_at_all`],
+/// stated at 300-odd lane sites) is no vacuous one: stated over a run whose hazard the layer did
+/// report, it fails, naming what the layer said; stated again once those messages are gone, it
+/// holds. The claim's other direction, a device the loader could not give the layer to, is stated
+/// device-free (`candidate/runtime_case/layer_claim.rs`).
+///
+/// The failing statement is caught here, so the run's output carries one expected panic of its
+/// own, marked `SYNC-COVERAGE`. Where the device's instance could not enable the layer there is
+/// no hazard to report, and the control says it did not run rather than hold anything.
+#[test]
+fn the_lane_s_claim_fails_where_the_layer_reported_a_hazard() {
+    const TEST: &str = "the_lane_s_claim_fails_where_the_layer_reported_a_hazard";
+    let cache = ScratchCache::new().unwrap();
+    let messages = Messages::default();
+    {
+        let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), |options| {
+            LaneChecks {
+                synchronization: true,
+                ..LaneChecks::default()
+            }
+            .apply(options)
+        })
+        .unwrap();
+        let opened = layer_reported_nothing_at_all(&messages);
+        if !opened.exercised() {
+            eprintln!(
+                "SYNC-COVERAGE {TEST}: {opened:?}, so the layer can report no hazard here; the \
+                 control did not run"
+            );
+            return;
+        }
+        let queue = device.new_command_queue().unwrap();
+        let buffer = device.new_buffer(256, untracked()).unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        for value in [1, 2] {
+            let mut blit = command_buffer.blit_command_encoder().unwrap();
+            blit.fill_buffer(&buffer, 0..256, value).unwrap();
+            blit.end_encoding().unwrap();
+        }
+        run(&command_buffer);
+        eprintln!("SYNC-COVERAGE {TEST}: the panic that follows is the control's own");
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            layer_reported_nothing_at_all(&messages)
+        }))
+        .expect_err("the claim held over a run whose write after write the layer reported");
+        let said = failure
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| {
+                failure
+                    .downcast_ref::<&str>()
+                    .map(|text| (*text).to_owned())
+            })
+            .unwrap_or_default();
+        assert!(
+            said.contains("SYNC-HAZARD-WRITE-AFTER-WRITE"),
+            "the failing claim named something other than the hazard: {said}"
+        );
+        assert_eq!(
+            layer_reported_nothing_at_all(&messages),
+            LayerClaim::Held,
+            "the claim holds once the hazard's messages are gone"
+        );
+    }
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Two blit encoders of one command buffer fill one untracked buffer: the layer sees transfer

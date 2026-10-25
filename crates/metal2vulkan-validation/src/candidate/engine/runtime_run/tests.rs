@@ -1,6 +1,8 @@
 //! The runtime path's routing, device-free, over the committed public cases.
 
 use super::*;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+use crate::candidate::runtime_case::layer_reported_nothing_at_all;
 use crate::check::admission::{admit, ExecutionRequest};
 use crate::gpu::DeviceType;
 use crate::store::CorpusStore;
@@ -966,11 +968,7 @@ fn the_runtime_path_calls_the_functions_its_tables_hold() {
         };
         assert!(matches!(unlinked, CaseError::Case(_)), "{unlinked}");
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The engine's candidate draws each owned object and mesh case through the runtime's mesh path

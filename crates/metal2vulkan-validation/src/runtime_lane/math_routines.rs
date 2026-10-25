@@ -10,7 +10,10 @@
 //! and `INT_MIN`; an infinity `(x, 0)` and `INT_MAX`; a NaN `(x, 0)` and `INT_MIN`; anything else
 //! `((u & 0x807fffff) | 0x3f000000, E - 126)` and `E - 127`.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
@@ -194,9 +197,5 @@ fn frexp_and_ilogb_answer_as_metals_routines() {
             );
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

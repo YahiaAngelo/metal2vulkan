@@ -29,7 +29,9 @@ use super::degrade_notices::{
 };
 use super::rate_maps::descriptor;
 use super::renders::map_render;
-use super::{buffer_with, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device, Messages, ScratchCache, WAIT,
+};
 use crate::candidate::runtime_case::{render_pipeline_descriptor, render_pipeline_state};
 use crate::gpu::TEST_DEVICE;
 use crate::store::CorpusStore;
@@ -347,7 +349,7 @@ fn a_rate_mapped_pass_shades_its_physical_pixels_region_by_region() {
     fixture.draw_in(&layered, |_| {}).unwrap();
     assert_eq!(shaded_in(&target, 0), whole, "slice 0 past the map's layer");
     assert_eq!(shaded_in(&target, 1).0, 0, "slice 1 past the map's layer");
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The kind [`a_pass_over_a_map_of_no_layers_draws_nothing`] takes: a draw over a map of no
@@ -364,7 +366,7 @@ fn fresh(test: impl FnOnce(&Fixture, &Messages)) {
     let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
     let fixture = Fixture::new(&device);
     test(&fixture, &messages);
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Whether the device announced [`ZERO_LAYER_AFTER_RELEASE`] since `messages` was last read.
@@ -1017,5 +1019,5 @@ fn rate_mapped_passes_are_refused_where_metal_or_the_runtime_refuses_them() {
             RegionRefusal::Scissor
         )))
     );
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

@@ -126,15 +126,70 @@ impl LayerClaim {
 /// alone ([`EnabledLayers`]): [`LayerClaim::Held`] where the layer was enabled, else a claim that
 /// was not exercised, printed on stderr with the test's name.
 ///
+/// For a claim no narrower than the layer's own silence, [`layer_reported_nothing_at_all`].
+///
 /// # Panics
 ///
 /// Where the layer reported anything that fails a run.
 pub fn layer_reported_nothing(messages: &Messages, claim: &str) -> LayerClaim {
+    stated(messages, claim, &format!("{claim}: "), LAYER)
+}
+
+/// What a lane states where it names no claim narrower than the layer's own silence: that the
+/// validation layer reported nothing at all of the work the test did up to here. Named in the line
+/// a layerless device prints, where the test's own name says the rest ([`LayerFacts::claim`]).
+const NOTHING_AT_ALL: &str = "the validation layer reported nothing of the work so far";
+
+/// Require that the validation layer reported nothing at all of the work the devices reporting to
+/// `messages` did, and say what that holds ([`layer_reported_nothing`] of the lane's widest
+/// claim).
+///
+/// The claim the lane states oftenest, and exactly what `assert!(messages.take().is_empty())`
+/// stated: whatever the layer checked of the work so far, it reported nothing of it. A test that
+/// holds something narrower names it ([`layer_reported_nothing`]); the claim's words change
+/// nothing of what fails, every message failing either way, and say which claim a layerless
+/// device could not exercise.
+///
+/// # Panics
+///
+/// Where the layer reported anything that fails a run.
+pub fn layer_reported_nothing_at_all(messages: &Messages) -> LayerClaim {
+    stated(messages, NOTHING_AT_ALL, "", LAYER)
+}
+
+/// Require that the devices reporting to `messages` reported nothing of `claim` that fails, where
+/// they asked for no validation layer: a device a test makes without it, so that what reaches the
+/// list is the driver's own and the runtime's. The layer's absence takes nothing from such a
+/// claim, and the claim is [`LayerClaim::NoLayerAsked`].
+///
+/// # Panics
+///
+/// Where anything reported fails a run, and where such a device did ask for the validation layer:
+/// then the claim is the layer's after all, and [`layer_reported_nothing`] is how it is stated.
+pub fn nothing_reported_without_the_layer(messages: &Messages, claim: &str) -> LayerClaim {
+    let asked = messages.enabled_layers();
+    assert!(
+        !asked
+            .asked()
+            .iter()
+            .any(|name| name.as_c_str() == super::VALIDATION_LAYER),
+        "{claim}: the device asked for the validation layer, so the claim is the layer's"
+    );
+    stated(messages, claim, &format!("{claim}: "), "the device")
+}
+
+/// What a claim names as having reported nothing, where the validation layer is what would have.
+const LAYER: &str = "the validation layer";
+
+/// Take what the devices reporting to `messages` reported, state `claim` against what their
+/// instance enabled, and fail on anything reported, the failure led by `lead` and naming
+/// `reporter` as what reported.
+fn stated(messages: &Messages, claim: &str, lead: &str, reporter: &str) -> LayerClaim {
     let reported = messages.take();
     let stated = messages.state_layer_claim(claim);
     assert!(
         reported.is_empty(),
-        "{claim}: the validation layer reported\n{reported:#?}"
+        "{lead}{reporter} reported\n{reported:#?}"
     );
     stated
 }
@@ -291,7 +346,10 @@ impl LayerFacts {
 
 #[cfg(test)]
 mod tests {
-    use super::{layer_reported_nothing, LayerClaim, LAYERS_DROPPED};
+    use super::{
+        layer_reported_nothing, layer_reported_nothing_at_all, nothing_reported_without_the_layer,
+        LayerClaim, LAYERS_DROPPED,
+    };
     use crate::candidate::runtime_case::{Messages, VALIDATION_LAYER};
     use std::ffi::CString;
 
@@ -362,6 +420,63 @@ mod tests {
         let claim = layer_reported_nothing(&messages, "no Vulkan object leaked");
         assert_eq!(claim, LayerClaim::Held);
         assert!(claim.exercised());
+    }
+
+    /// The widest claim, which no test names ([`layer_reported_nothing_at_all`], the one the lane
+    /// states oftenest), is not exercised either where the layer was dropped: so the 300-odd lane
+    /// sites that asserted `messages.take()` was empty and said no more now say so instead of
+    /// passing on a list that could report nothing at all.
+    #[test]
+    fn the_widest_claim_is_not_exercised_where_the_layer_was_dropped() {
+        let messages = layerless();
+        assert_eq!(
+            messages.take(),
+            Vec::new(),
+            "the layerless list reports nothing at all"
+        );
+        assert_eq!(
+            layer_reported_nothing_at_all(&messages),
+            LayerClaim::NotExercised {
+                dropped: vec![VALIDATION_LAYER.to_string_lossy().into_owned()],
+            },
+            "the widest claim with no layer present must say it was not exercised"
+        );
+        assert!(!layer_reported_nothing_at_all(&messages).exercised());
+    }
+
+    /// The same claim on a list whose device enabled the layer holds.
+    #[test]
+    fn the_widest_claim_holds_where_the_layer_was_enabled() {
+        let messages = Messages::default();
+        messages.device_asked_layers(&[VALIDATION_LAYER.to_owned()]);
+        let claim = layer_reported_nothing_at_all(&messages);
+        assert_eq!(claim, LayerClaim::Held);
+        assert!(claim.exercised());
+    }
+
+    /// A claim a test states of a device it made without the validation layer
+    /// ([`nothing_reported_without_the_layer`]: the driver's own messages and the runtime's) is
+    /// none of the layer's, and the layer's absence takes nothing from it.
+    #[test]
+    fn a_claim_of_what_a_layerless_device_reported_is_none_of_the_layer_s() {
+        let messages = Messages::default();
+        messages.device_asked_layers(&[]);
+        assert_eq!(
+            nothing_reported_without_the_layer(&messages, "nothing the driver said fails"),
+            LayerClaim::NoLayerAsked
+        );
+    }
+
+    /// The same claim on a device that did ask for the validation layer fails: then what reaches
+    /// the list is the layer's, and the claim is the layer's to state
+    /// ([`layer_reported_nothing`]), so a test that stops clearing its device's layers cannot
+    /// keep the weaker statement.
+    #[test]
+    #[should_panic(expected = "the device asked for the validation layer")]
+    fn a_layerless_claim_on_a_device_that_asked_for_the_layer_fails() {
+        let messages = Messages::default();
+        messages.device_asked_layers(&[VALIDATION_LAYER.to_owned()]);
+        nothing_reported_without_the_layer(&messages, "nothing the driver said fails");
     }
 
     /// A device a test makes with no layer at all, to time it, states no claim of the layer's.

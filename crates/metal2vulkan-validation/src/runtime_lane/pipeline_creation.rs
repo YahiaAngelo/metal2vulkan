@@ -46,8 +46,8 @@
 
 use super::executions::KERNEL;
 use super::{
-    buffer_with, pipeline_state, public_case, read_buffer, validated_device, validated_device_with,
-    Messages, ScratchCache, WAIT,
+    buffer_with, layer_reported_nothing_at_all, pipeline_state, public_case, read_buffer,
+    validated_device, validated_device_with, Messages, ScratchCache, WAIT,
 };
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -965,8 +965,7 @@ fn draws_made_on_the_pool_draw_as_made_ones() {
     assert!(pooled.1 > 0, "the draws counted samples");
     assert_eq!(pooled.1, made.1, "the same samples counted");
     assert!(pooled.0 == made.0, "the same bytes rendered");
-    let reported = messages.take();
-    assert!(reported.is_empty(), "{reported:#?}");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Pipeline states compare by identity, as Metal's objects do, so a program finds the state a
@@ -996,6 +995,5 @@ fn pipeline_states_equal_only_their_own_clones() {
     );
     assert!(first == first.clone());
     assert!(first != second, "two states of one kernel are two states");
-    let reported = messages.take();
-    assert!(reported.is_empty(), "{reported:#?}");
+    layer_reported_nothing_at_all(&messages);
 }

@@ -9,7 +9,10 @@
 //! itself, as MoltenVK would. A swapchain needs a headless surface that the device's primary
 //! queue family presents to; a venue without one prints its gap and only loads.
 
-use super::{validated_device, validated_device_with, Messages, ScratchCache};
+use super::{
+    layer_reported_nothing_at_all, nothing_reported_without_the_layer, validated_device,
+    validated_device_with, Messages, ScratchCache,
+};
 use crate::gpu::wait::{self, SubmissionBackend};
 use crate::gpu::TEST_DEVICE;
 use ash::vk::{self, Handle};
@@ -206,8 +209,7 @@ fn a_device_is_made_and_used_while_moltenvk_names_it_in_each_message() {
         overwrite(&device, true);
         overwrite(&device, true);
     }
-    let messages = messages.take();
-    assert!(messages.is_empty(), "the device reported: {messages:#?}");
+    nothing_reported_without_the_layer(&messages, "nothing MoltenVK said fails");
 }
 
 /// The caller's swapchain commands load through `Device::device_proc_addr` after the device's
@@ -234,11 +236,7 @@ fn the_caller_s_commands_load_and_make_a_swapchain_after_moltenvk_overwrote_the_
             );
             caller_s_commands(&device, moltenvk, headless, layered);
         }
-        let messages = messages.take();
-        assert!(
-            messages.is_empty(),
-            "the validation layer reported: {messages:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }
 

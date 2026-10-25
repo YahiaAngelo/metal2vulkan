@@ -10,8 +10,8 @@
 //! last handle returns.
 
 use super::{
-    open_device, open_devices, pipeline_state, public_case, run_with, validated_device,
-    validated_options, Messages, ScratchCache,
+    layer_reported_nothing_at_all, open_device, open_devices, pipeline_state, public_case,
+    run_with, validated_device, validated_options, Messages, ScratchCache,
 };
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
@@ -55,11 +55,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Wait for `command_buffer` and check it completed without error.
@@ -669,7 +665,7 @@ fn shared_event_handles_open_the_same_event() {
                 Err(invalid("encode_signal_event", Problem::ForeignObject))
             );
         }
-        assert!(messages.take().is_empty());
+        layer_reported_nothing_at_all(&messages);
     });
 }
 
@@ -728,11 +724,7 @@ fn equal_options_make_one_device() {
         completed(&command_buffer);
         assert_eq!(event.signaled_value(), 2);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Event waits and signals are refused where Metal stops them: with an encoder open (Metal
@@ -1028,11 +1020,7 @@ fn a_device_dropped_after_a_wait_is_gone_when_the_drop_returns() {
         }
         let next = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         drop(next);
-        let messages = messages.take();
-        assert!(
-            messages.is_empty(),
-            "the validation layer reported: {messages:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
     after_handler.sort_by(f64::total_cmp);
     eprintln!(

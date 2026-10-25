@@ -18,7 +18,10 @@
 //! 64 coordinates per query.
 
 use super::mip_levels::{half, texture, LEVELS, SIDE};
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -279,7 +282,7 @@ fn kernel_lod_queries_answer_metals_level() {
         }
         assert!(wrong.is_empty(), "{name}: {} queries differ", wrong.len());
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The rule's own arithmetic at the measured points: a nearest mip filter's half-way point, the

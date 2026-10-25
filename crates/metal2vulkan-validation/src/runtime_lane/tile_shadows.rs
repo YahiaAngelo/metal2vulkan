@@ -28,7 +28,10 @@
 use super::buffer_texture_blits::{texel, Held, Kind, OFF};
 use super::buffer_texture_renders::MERGES;
 use super::degrade_notices::counts;
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, RenderStages, ResourceUsage, TextureUsage};
@@ -250,11 +253,7 @@ fn each_kind(test: impl Fn(&Lane, Kind)) {
 
 /// Fail on any validation message.
 fn quiet(messages: &Messages) {
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(messages);
 }
 
 /// Probe 3's `copy` and `copy_held`: a dispatch copies a texture bound in the tile table, and

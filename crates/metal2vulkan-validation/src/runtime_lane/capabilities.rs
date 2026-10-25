@@ -3,7 +3,7 @@
 //! and the Apple-only calls answered typed on a live command buffer and its compute and blit
 //! encoders.
 
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::{VkFeature, VkProperty};
 use metal2vulkan::error::{Capability, Feature, Unsupported};
@@ -212,11 +212,7 @@ fn a_runtime_device_answers_its_queries_and_the_apple_only_calls() {
         assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
         assert_eq!(command_buffer.error(), None);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A private 4² texture of `pf` with `samples` samples, a render target read by shaders: 2D for
@@ -429,11 +425,7 @@ fn textures_are_made_as_the_texture_queries_answer() {
         assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
         assert_eq!(command_buffer.error(), None);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The device's own numbers, printed per venue (`GPU-CORES`): `gpuCoreCount` is the count its

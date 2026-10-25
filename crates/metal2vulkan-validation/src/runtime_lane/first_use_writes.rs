@@ -20,7 +20,7 @@
 use super::host_memory::{counting, no_copy, not_importable, Mapping, GUEST_PAGE};
 use super::no_copy_textures::{floats, staged};
 use super::pitched_surfaces::reading;
-use super::{validated_device, Messages, ScratchCache, WAIT};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache, WAIT};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureUsage};
 use metal2vulkan_runtime::{
@@ -239,11 +239,7 @@ fn a_cpu_write_to_bytes_a_first_use_does_not_read_stays() {
             }
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     assert!(
         lapses.is_empty(),
         "a first use undid a CPU write, or changed or misread bytes:\n{}",

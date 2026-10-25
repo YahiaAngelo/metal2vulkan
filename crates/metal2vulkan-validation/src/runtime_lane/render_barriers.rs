@@ -33,8 +33,8 @@ use super::degrade_notices::assert_once;
 use super::memoryless::{memoryless, memoryless_msaa};
 use super::resolves::{color_pass, lane, quiet, repeat, FULL, MASKED, ONE, SAMPLES, SIZE, WHITE};
 use super::{
-    buffer_with, buffer_with_options, read_buffer, validated_device, validated_device_with,
-    Messages, ScratchCache, WAIT,
+    buffer_with, buffer_with_options, layer_reported_nothing_at_all, read_buffer, validated_device,
+    validated_device_with, Messages, ScratchCache, WAIT,
 };
 use crate::air_library::AirLibrary;
 use crate::candidate::runtime_case::executor_layer_settings;
@@ -248,7 +248,7 @@ fn a_memory_barrier_orders_a_render_encoders_draws() {
         });
         assert_eq!(words, TWO_DRAWS, "the resource barrier's pass");
     });
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
     let notices = messages.take_notices();
     assert_once(&notices, &[Degradation::RenderPassSplit]);
     let split = notices
@@ -287,7 +287,7 @@ fn a_fence_orders_render_encoders() {
         run(&command_buffer);
         assert_eq!(read(&words), TWO_DRAWS);
     });
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A barrier over the render targets alone, from the fragment stage to the fragment or the
@@ -723,5 +723,5 @@ fn a_render_target_barrier_stays_inside_a_multiview_pass() {
             );
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

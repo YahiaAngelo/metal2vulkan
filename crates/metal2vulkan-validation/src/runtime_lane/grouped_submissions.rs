@@ -42,7 +42,10 @@
 //! handler's start on the host's clock, over [`DELAY_ROUNDS`] rounds after [`DELAY_WARM`].
 
 use super::degrade_notices::counts;
-use super::{loader, open_device, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    layer_reported_nothing_at_all, loader, open_device, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::{CompletionPolicy, DeviceDescription, DriverFact};
 use metal2vulkan_runtime::{
@@ -184,11 +187,7 @@ fn run(completion: CompletionPolicy, checked: bool) -> (u64, u64, u64, usize, bo
     };
     let notices = counts(&messages.take_notices());
     let [heard] = GROUPED.map(|kind| notices.get(&kind).copied().unwrap_or(0));
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     eprintln!(
         "GROUPED {completion:?}, checked {checked}: {grouped} vkQueueSubmit calls held {batches} batches together, \
          of {submissions} calls in all; groups by what sent them {ends:?}; {heard} \
@@ -322,11 +321,7 @@ fn completions_wake_the_scheduler_only_once_a_head_may_go() {
             after.scheduler_wakes_completion - before.scheduler_wakes_completion,
         )
     };
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     eprintln!("GROUPED-COMPLETION-WAKES: the check saw {seen:?}; {wakes} wakings by completions");
     assert_eq!(seen, Some(1), "the event's value the check saw");
     assert!(wakes <= 1, "{wakes} wakings by completions");
@@ -474,11 +469,7 @@ fn event_scenario(completion: CompletionPolicy, steps: &[Step], last: u64) -> Sc
             met: after.event_waits_met - before.event_waits_met,
         }
     };
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     eprintln!(
         "GROUPED-EVENTS {completion:?}: {} vkQueueSubmit calls held {} batches together; groups \
          by what sent them {:?}; event waits met as taken {}; the driver merges: {}",
@@ -981,11 +972,7 @@ fn behind_running_work(completion: CompletionPolicy, stretch: usize, carried: Ca
             checks: checks.load(std::sync::atomic::Ordering::SeqCst),
         }
     };
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     eprintln!("GROUPED-BEHIND {completion:?} {carried:?}: {seen:#?}");
     seen
 }

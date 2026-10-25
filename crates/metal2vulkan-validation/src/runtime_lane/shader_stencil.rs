@@ -44,7 +44,10 @@
 
 use super::degrade_notices::shared_in_system_memory;
 use super::degrade_notices::{assert_made_once, forced, made_compute_kinds, made_render_kinds};
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::candidate::runtime_samples;
 use crate::executor_contract::multisample::SampleRead;
@@ -773,11 +776,7 @@ fn a_stencil_output_tests_and_writes_the_stencil_as_metal() {
             eprintln!("stencil outputs on {name}: {}", answers.join("; "));
             drop(lane);
         }
-        let reported = messages.take();
-        assert!(
-            reported.is_empty(),
-            "the validation layer reported: {reported:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -861,11 +860,7 @@ fn executed_commands_test_and_write_the_stencil_as_metal() {
             eprintln!("executed stencil outputs on {name}: {}", answers.join("; "));
             drop(lane);
         }
-        let reported = messages.take();
-        assert!(
-            reported.is_empty(),
-            "the validation layer reported: {reported:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -927,11 +922,7 @@ fn a_host_step_s_draw_whose_stencil_output_reaches_no_attachment_binds_the_neutr
             );
             drop(lane);
         }
-        let reported = messages.take();
-        assert!(
-            reported.is_empty(),
-            "the validation layer reported: {reported:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }
 
@@ -993,10 +984,6 @@ fn a_host_step_s_run_of_another_shape_makes_its_objects_and_draws() {
             assert_made_once(&messages, &super::indirect_host_steps::HOST_STEPS, &first);
             drop(lane);
         }
-        let reported = messages.take();
-        assert!(
-            reported.is_empty(),
-            "the validation layer reported: {reported:#?}"
-        );
+        layer_reported_nothing_at_all(&messages);
     }
 }

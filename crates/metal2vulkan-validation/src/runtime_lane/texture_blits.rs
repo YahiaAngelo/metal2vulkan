@@ -9,7 +9,7 @@
 use super::degrade_notices::{assert_made_once, assert_once, forced, loses_depth_denormals};
 use super::degrade_notices::{decodes_blocks_its_way, shared_in_system_memory};
 use super::degrade_notices::{twins_blocks, twins_carried, twins_depth};
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::{MipmapFilterChain, MipmapRule};
 use metal2vulkan::device::VkExtension;
@@ -407,11 +407,7 @@ fn texture_blits_copy_where_metal_puts_them() {
         blit.end_encoding().unwrap();
         run(&command_buffer);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A 1D texture made after a small 2D one keeps what a command buffer writing both writes into
@@ -480,11 +476,7 @@ fn a_texture_beside_a_compressed_one_keeps_its_texels() {
         assert_eq!(level_bytes(&line, 0, 0, 4, 1, 4), counted(64, 16));
         assert_eq!(level_bytes(&after, 0, 0, 4, 1, 4), counted(128, 16));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A size of 0 copies what plain Metal copies (an M4): on an axis a texture of the copy lacks, one
@@ -587,11 +579,7 @@ fn empty_sizes_copy_what_plain_metal_copies() {
             .unwrap();
         assert_eq!(read, vec![0x77; 64]);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A 4x4 `RGBA8Unorm` texture's bytes when each row was copied from `rows` of a
@@ -775,11 +763,7 @@ fn copies_off_metals_rules_land_where_plain_metal_puts_them() {
             .unwrap();
         assert_eq!(level_bytes(&host, 0, 0, 4, 4, 4), rows_from([64; 4]));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Block `i` of `level` of a `BC3_RGBA` texture of [`seeded_bc3`] `seed` (below 4): 16 bytes, each
@@ -938,11 +922,7 @@ fn whole_blocks_of_levels_smaller_than_a_block_copy_whole() {
         assert_eq!(bc3_blocks(&source, small, 4), written);
         assert_eq!(bc3_blocks(&source, small, 3), seeded(0, small, 3));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Copies through the encoder's scratch buffer each start where Vulkan takes a depth aspect's
@@ -984,11 +964,7 @@ fn depth_copies_through_the_scratch_buffer_start_at_multiples_of_four() {
         assert_eq!(level_bytes(&colour, 0, 0, 3, 3, 2), counted(0, 18));
         assert_eq!(level_bytes(&colour, 1, 0, 1, 1, 2), counted(32, 2));
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// Copies between textures of different sizes copy what plain Metal copies (an M4 under macOS
@@ -1076,11 +1052,7 @@ fn copies_between_textures_of_different_sizes_copy_what_metal_copies() {
             Err(invalid("copy_texture", Problem::Copy(CopyProblem::Size)))
         );
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// `generate_mipmaps` leaves a texture of one level, of any format, and a depth or stencil
@@ -1168,11 +1140,7 @@ fn mipmaps_leave_single_levels_and_depth_as_they_are() {
         assert_eq!(level_bytes(&one, 0, 0, 4, 4, 4), counted(0, 64));
         assert_eq!(with_bytes(&back, |b| b.to_vec()), values);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The kind [`depth_outside_the_unit_range_uploads_as_metal_holds_it`] takes when it makes a
@@ -1404,11 +1372,7 @@ fn depth_outside_the_unit_range_uploads_as_metal_holds_it() {
             );
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// What `device`'s depth images keep, as the runtime plans them: whether it enabled
@@ -1517,11 +1481,7 @@ fn depth_images_keep_what_their_drivers_claim() {
         }
         messages.take_notices();
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 fn verdict(v: MipmapVerdict) -> &'static str {
@@ -1670,9 +1630,5 @@ fn mipmaps_of_every_format_run_or_are_refused_typed() {
             );
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

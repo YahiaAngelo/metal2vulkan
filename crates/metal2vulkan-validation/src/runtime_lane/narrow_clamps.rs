@@ -14,7 +14,10 @@
 //! difference clamped by `air.clamp.s.i32`, each truncated to its width and zero-extended. Every
 //! device answers each word zero-extended.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
@@ -196,5 +199,5 @@ fn a_narrow_sum_clamped_signed_and_truncated_is_zero_extended() {
             wrong.join("\n")
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

@@ -19,7 +19,10 @@ use super::degrade_notices::{
     assert_once, counts, made_render_kinds, shared_in_system_memory, POSITIONED,
 };
 use super::presenting::{image_info, made_image, shared_among};
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::candidate::runtime_samples::encode;
 use crate::executor_contract::multisample::{ReadbackView, SampleRead};
@@ -241,11 +244,7 @@ fn lane() -> (Messages, ScratchCache, Lane) {
 
 fn quiet(lane: Lane, messages: &Messages) {
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(messages);
 }
 
 /// Each sample lands where Metal put it: the device's own positions (4x: two of the four left
@@ -1005,11 +1004,7 @@ fn depth_lane() -> (Messages, ScratchCache, Depths) {
 
 fn depths_quiet(lane: Depths, messages: &Messages) {
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(messages);
 }
 
 /// A depth attachment takes the pass's custom positions (`dz_*`): each sample stores the plane's

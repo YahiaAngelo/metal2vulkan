@@ -15,7 +15,10 @@
 //!   layout refuses the commit (`UnstridedBuffer`): Metal reads it at stride 2^32 - 1, past
 //!   vertex 0 whatever memory lies 4 GiB on.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{
@@ -192,7 +195,7 @@ fn vertex_buffers_bind_the_strides_a_dynamic_layout_reads() {
             "the offset form with a stride of 2^63 + 12"
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// The words each vertex wrote after an indirect render command drew `pipeline` (made with
@@ -280,7 +283,7 @@ fn an_executed_command_s_unstrided_vertex_buffer_is_refused() {
             "the stride form"
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A buffer of `length` bytes, more than `2^32`, for a fetch past 4 GiB: on macOS a no-copy
@@ -480,5 +483,5 @@ fn vertex_fetches_past_4_gib_of_a_buffer_are_refused() {
         );
         drop((command_buffer, icb, large));
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

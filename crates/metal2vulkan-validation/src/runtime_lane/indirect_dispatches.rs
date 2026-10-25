@@ -40,7 +40,7 @@ use super::degrade_notices::{
     assert_made_once, counts, forced, on_device, shared_in_system_memory,
 };
 use super::indirect_host_steps::state;
-use super::{buffer_with, read_buffer, WAIT};
+use super::{buffer_with, layer_reported_nothing_at_all, read_buffer, WAIT};
 use crate::air_library::AirLibrary;
 use metal2vulkan::bind::StatusReport;
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, RuntimeFact, StageSource};
@@ -348,7 +348,7 @@ fn indirect_dispatches_are_refused_where_metal_refuses_them() {
         complete(&command_buffer, "refused dispatches");
         assert_eq!(fixture.out(), vec![0; SLOTS as usize]);
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// An offset that is not a multiple of 4 reads the arguments at the multiple below, as plain

@@ -16,7 +16,10 @@
 //! `Feature::RasterSampleCount`, is skipped with a printed line, and the other counts are checked.
 
 use super::degrade_notices::{assert_once, forced, shared_in_system_memory};
-use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device_with, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::error::Feature;
@@ -422,9 +425,5 @@ fn extended_range_resolves_are_metals_or_within_a_code() {
     )]));
     assert_once(&messages.take_notices(), &kinds);
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

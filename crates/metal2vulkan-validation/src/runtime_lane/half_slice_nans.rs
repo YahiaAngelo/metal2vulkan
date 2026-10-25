@@ -29,7 +29,7 @@
 //! alpha 1.
 
 use super::degrade_notices::{counts, on_device_with};
-use super::{buffer_with_options, read_buffer, WAIT};
+use super::{buffer_with_options, layer_reported_nothing, read_buffer, WAIT};
 use crate::air_library::AirLibrary;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
@@ -534,11 +534,7 @@ fn half_nans_written_through_the_blur_keep_their_bits() {
                                 if read_announced { " (announced)" } else { "" }
                             ));
                         }
-                        assert_eq!(
-                            messages.take(),
-                            Vec::new(),
-                            "{what}: the validation layer reported"
-                        );
+                        layer_reported_nothing(messages, &what);
                     }
                 }
             }

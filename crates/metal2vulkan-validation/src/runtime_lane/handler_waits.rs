@@ -11,7 +11,7 @@
 //! one that would leave the device's handler threads with none free (`HandlerThreadCap`). No wait here can hang: every wait in a handler is answered at once or
 //! is for work that other threads do, and every wait of the test's own thread is bounded.
 
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan_runtime::{
     Buffer, CommandBuffer, CommandBufferStatus, CommandQueue, DeadlockCause, Device, Error,
@@ -51,11 +51,7 @@ fn on_device(test: impl FnOnce(&Device)) {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         test(&device);
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A command buffer of `queue` filling the first 64 bytes of `buffer` with `value`, not

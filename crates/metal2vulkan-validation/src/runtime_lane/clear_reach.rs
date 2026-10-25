@@ -19,7 +19,10 @@
 use super::degrade_notices::{assert_made_once, forced, made_render_kinds};
 use super::degrade_notices::{shared_in_system_memory, twins_depth};
 use super::hidden_depth::replayed_but_unrun;
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
@@ -380,11 +383,7 @@ pub(super) fn lane() -> (Messages, ScratchCache, Lane) {
 
 pub(super) fn quiet(lane: Lane, messages: &Messages) {
     drop(lane);
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(messages);
 }
 
 /// A case of `a_clear_reaches_past_the_render_area_as_metal_s`: its name, the render area, the

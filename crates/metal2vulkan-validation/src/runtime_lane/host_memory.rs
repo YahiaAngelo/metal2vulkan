@@ -10,8 +10,8 @@
 //! are Metal's, as measured on an Apple M3 Max and an M4.
 
 use super::{
-    buffer_with, encode_case, pipeline_state, public_case, read_buffer, validated_device,
-    validated_device_with, CaseResources, Messages, ScratchCache,
+    buffer_with, encode_case, layer_reported_nothing, pipeline_state, public_case, read_buffer,
+    validated_device, validated_device_with, CaseResources, Messages, ScratchCache,
 };
 use crate::candidate::engine::ComputeOutput;
 use crate::gpu::TEST_DEVICE;
@@ -1709,8 +1709,7 @@ fn a_lost_device_s_command_buffers_let_go_of_their_pools_after_the_driver_s_comp
         );
         drop((read_only, texture, filled, queue, device));
         drop(memory);
-        let left = messages.take();
-        assert!(left.is_empty(), "round {round}: {left:#?}");
+        layer_reported_nothing(&messages, &format!("round {round}, after the teardown"));
     }
 }
 
@@ -1893,8 +1892,7 @@ fn a_gpu_fault_fails_its_command_buffer_and_the_queue_runs_on() {
             faulting, victim, read_only, texture, after, beside, queue, device,
         ));
         drop(memory);
-        let left = messages.take();
-        assert!(left.is_empty(), "{resume:?}: {left:#?}");
+        layer_reported_nothing(&messages, &format!("{resume:?}, after the teardown"));
     }
 }
 

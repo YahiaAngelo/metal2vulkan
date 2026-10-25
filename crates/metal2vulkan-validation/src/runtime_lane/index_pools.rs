@@ -19,7 +19,9 @@
 //!   `vkDestroyBuffer` waited for the lock that making holds, so the handler ran as the making
 //!   ended, 20 to 27 ms after the command buffer completed.
 
-use super::{buffer_with, validated_device_with, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device_with, Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::coverage::ROBUSTNESS_FEATURES;
 use crate::gpu::TEST_DEVICE;
@@ -167,7 +169,7 @@ fn command_buffers_of_one_queue_share_one_pool_block() {
             "two command buffers held the block at once at most"
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A second queue's command buffer makes a block of its own, which goes as the queue goes; the
@@ -199,7 +201,7 @@ fn a_second_queue_takes_its_own_pool_block() {
             "the second queue's block went with it"
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A queue's block that no command buffer held for the quiet period goes as another queue's
@@ -223,7 +225,7 @@ fn a_pool_block_no_command_buffer_held_goes_after_the_quiet_period() {
         lane.drawn(&idle);
         assert_eq!(lane.blocks(), (3, 1), "the idle queue makes one again");
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// A command buffer's completed handler runs while another queue's first command buffer makes
@@ -281,5 +283,5 @@ fn a_completed_handler_waits_for_no_pool_block_made_meanwhile() {
             );
         }
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

@@ -33,7 +33,9 @@
 use super::argument_linear_samples::kernel;
 use super::degrade_notices::counts;
 use super::depth_compares::{pipeline_of, run_held, Held, Through};
-use super::{buffer_with, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, validated_device, Messages, ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -626,11 +628,7 @@ fn a_pixel_sampler_downscale_answers_metal_s_texels() {
             .collect();
         (outcomes, metal_sampler(&device))
     };
-    let failing = messages.take();
-    assert!(
-        failing.is_empty(),
-        "the validation layer reported: {failing:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
     let announced: BTreeSet<Degradation> = counts(&messages.take_notices()).into_keys().collect();
     eprintln!("announced: {announced:?}");
     let mut wrong = Vec::new();

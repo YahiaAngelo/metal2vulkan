@@ -21,7 +21,7 @@
 //! their `0x11` bytes.
 
 use super::degrade_notices::{counts, on_device_with};
-use super::{buffer_with, read_buffer, WAIT};
+use super::{buffer_with, layer_reported_nothing, read_buffer, WAIT};
 use crate::air_library::AirLibrary;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
@@ -269,11 +269,7 @@ fn writes_at_every_level_store_whatever_the_usage() {
                             if shadowed { "shadowed" } else { "own image" },
                         ));
                     }
-                    assert_eq!(
-                        messages.take(),
-                        Vec::new(),
-                        "{what}: the validation layer reported"
-                    );
+                    layer_reported_nothing(messages, &what);
                 }
             }
         },

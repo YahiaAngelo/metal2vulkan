@@ -16,7 +16,10 @@
 //! (Metal's probe kernel wrote it alone, so its words are compared plus 0x100), and
 //! `stage_in_region_pair` writes `(a << 16) | b`, `a` stepping by x and `b` by y.
 
-use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
+use super::{
+    buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
+    ScratchCache, WAIT,
+};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{AttributeFormat, IndexType, StepFunction};
@@ -483,9 +486,5 @@ fn a_thread_past_the_stage_in_region_reads_as_metal() {
             assert_eq!(dispatched(&device, case), metal, "{}", case.name);
         }
     }
-    let messages = messages.take();
-    assert!(
-        messages.is_empty(),
-        "the validation layer reported: {messages:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }

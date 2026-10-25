@@ -24,7 +24,7 @@
 //! by its class and a heap texture's not.
 
 use super::depth_compares::{pipeline_of, run_held, Held, Through};
-use super::{validated_device, Messages, ScratchCache};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache};
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::SamplerDescriptor;
 use metal2vulkan::error::DriverDeviation;
@@ -510,5 +510,5 @@ fn heap_linear_samples_answer_as_slot_samples() {
             groups.join("\n")
         );
     }
-    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    layer_reported_nothing_at_all(&messages);
 }

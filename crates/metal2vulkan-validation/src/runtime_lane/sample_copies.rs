@@ -19,7 +19,7 @@ use super::degrade_notices::shared_in_system_memory;
 use super::degrade_notices::signs_depth_tests;
 use super::degrade_notices::{assert_made_once, clamps_depth_uploads, forced};
 use super::degrade_notices::{loses_depth_denormals, made_compute_kinds, made_render_kinds};
-use super::{validated_device, Messages, ScratchCache, WAIT};
+use super::{layer_reported_nothing_at_all, validated_device, Messages, ScratchCache, WAIT};
 use crate::candidate::runtime_samples::SampleFill;
 use crate::candidate::runtime_samples::{encode, fill_descriptor, read_function, read_view};
 use crate::case::TextureFormat;
@@ -460,9 +460,5 @@ fn multisampled_depth_and_stencil_copy_every_sample_with_colour() {
             );
         }
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
+    layer_reported_nothing_at_all(&messages);
 }
