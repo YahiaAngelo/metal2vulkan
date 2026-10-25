@@ -499,10 +499,16 @@ pub enum Problem {
     /// An encoder of this command buffer is open: one encoder at a time. Plain Metal asserts too
     /// ("A command encoder is already encoding to this command buffer", "commit command buffer with
     /// uncommitted encoder", "encodeSignalEvent:value: with uncommitted encoder"; an M4).
+    ///
+    /// Basis: metal-measured (an M4: plain Metal asserts "A command encoder is already encoding to
+    /// this command buffer").
     EncoderOpen,
     /// A compute or render encoder made, or a blit encoder's first command (`call` names the
     /// blit encoder), under protection options 1, 3 or 7 (`CommandBuffer::set_protection_options`),
     /// where Metal's process ends (SIGABRT, measured by a consumer on an M3 Max, macOS 26.7).
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 26.7: Metal's process ends, SIGABRT, as the consumer
+    /// measured).
     ProtectedEncoder {
         /// The protection options set.
         options: u64,
@@ -510,32 +516,52 @@ pub enum Problem {
     /// An encoder of this command buffer was dropped without `end_encoding`: its commands are
     /// lost, so the command buffer can never be committed. Plain Metal asserts as the encoder
     /// goes ("Command encoder released without endEncoding").
+    ///
+    /// Basis: metal-documented (Metal asserts "Command encoder released without endEncoding").
     EncoderAbandoned,
     /// The command buffer was already committed. Plain Metal asserts too ("commit an already
     /// committed command buffer", and a new encoder's `_status <
     /// MTLCommandBufferStatusCommitted`).
+    ///
+    /// Basis: metal-documented (Metal asserts "commit an already committed command buffer").
     AlreadyCommitted,
     /// A scheduled signal encoded once the command buffer completed, or failed (status `Error`)
     /// (`CommandBuffer::encode_signal_event_scheduled`): Metal's process ends there (a
     /// segmentation fault, as the consumer measured; in 10 of 15 runs on an M3 Max under macOS
     /// 27.0.1, the others setting nothing). Encoded after the commit and before the completion,
     /// it does nothing, as Metal's.
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 27.0.1: a segmentation fault in 10 of 15 runs, as
+    /// the consumer measured).
     ScheduledSignalAfterCompletion,
     /// An object made by another device.
+    ///
+    /// Basis: unknown (Metal's answer for an object another device made is unmeasured).
     ForeignObject,
     /// Dma-bufs a `DmaBufSource` returned (a runtime extension: Metal has none,
     /// `HostMemory::with_dma_buf`) that break its contract: chunks that do not cover the pages
     /// asked for, split off the granule, or of lengths off the host page, and a descriptor that
     /// is no dma-buf or holds fewer bytes than its chunk.
+    ///
+    /// Basis: ours (a runtime extension's own contract: Metal imports no dma-buf).
     DmaBuf,
     /// An image the caller made that cannot be wrapped as a texture of the descriptor
     /// (`new_texture_with_vk_image`).
+    ///
+    /// Basis: ours (a runtime extension: Metal wraps no Vulkan image).
     WrappedImage(WrappedImageProblem),
     /// A handle of a texture that is not shareable, for which Metal answers nil, an [`Error::Nil`].
+    ///
+    /// Basis: unknown (Metal's nil for a texture that is not shareable is unmeasured).
     NotShareable,
     /// A semaphore that cannot be one of the caller's binary semaphores.
+    ///
+    /// Basis: ours (a runtime extension: Metal has no binary semaphores).
     Semaphore(SemaphoreProblem),
     /// No pipeline state is set (plain Metal faults at a compute dispatch without one).
+    ///
+    /// Basis: unknown (plain Metal is held to fault at a dispatch with no pipeline state, on no
+    /// measurement recorded here).
     NoPipelineState,
     /// A run of compute encoders' first indirect dispatch (`dispatch_threadgroups_indirect`,
     /// `dispatch_threads_indirect`) in an encoder whose dispatch type is not the run's first
@@ -545,9 +571,14 @@ pub enum Problem {
     /// and no event signal or wait between; its first encoder's type counts though it dispatches
     /// nothing, and once one indirect dispatch of the run went through, every later one does.
     /// macOS 27.0.1 runs it.
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 26.7: a segmentation fault, as the consumer
+    /// measured; 27.0.1 runs it).
     IndirectDispatchOfAnotherType,
     /// An argument-table index past Metal's table (plain Metal writes past its own table: a
     /// compute texture at index 128 faulted the dispatch on an M4).
+    ///
+    /// Basis: metal-measured (an M4: a compute texture at index 128 faulted the dispatch).
     IndexOutOfRange {
         /// The index given.
         index: u32,
@@ -556,6 +587,10 @@ pub enum Problem {
     },
     /// An offset past the end of the buffer: at the bind in a render stage's table, and at a
     /// compute dispatch whose kernel reads a slot bound so, where Metal's read is past the buffer.
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: setVertexBuffer at offset 512 of a buffer
+    /// of 256 bytes returns, the encoder ends and the pass completes; Metal's API validation alone
+    /// refuses it).
     OffsetOutOfRange {
         /// The offset given.
         offset: u64,
@@ -565,11 +600,18 @@ pub enum Problem {
     /// `set_buffer_offset` at an index with no buffer bound: a render stage's form (a compute
     /// form at an index with nothing bound changes nothing, as plain Metal's; any form at an index
     /// holding a visible-function table makes it read as the null table).
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: setVertexBufferOffset:16 atIndex:0 with
+    /// no buffer bound returns, the encoder ends and the pass completes).
     NoBufferBound {
         /// The argument-table index.
         index: u32,
     },
     /// `set_bytes` (or a stage's form) of more bytes than Metal's limit for inline bytes.
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: setBytes:length:8192 returns and the
+    /// kernel reads all 8192 bytes; Metal's API validation alone says "length(8192) must be <=
+    /// 4096").
     InlineBytesLength {
         /// The bytes given.
         length: u64,
@@ -581,6 +623,9 @@ pub enum Problem {
     /// 1 there with its cells reading 0, or is unmeasured); and a width or height that is not a
     /// power of two, or more than 1024 cells, at an indirect command's execution (as Metal's API
     /// validation refuses it).
+    ///
+    /// Basis: unknown (plain Metal is held to run the compute form, and the indirect form rests on
+    /// Metal's API validation; neither measured on a named device).
     ImageblockSize {
         /// The width given, in pixels.
         width: u64,
@@ -589,18 +634,29 @@ pub enum Problem {
     },
     /// A tile dispatch's threadgroup with no threads along an axis (a compute dispatch of one
     /// runs nothing, as plain Metal's).
+    ///
+    /// Basis: unknown (Metal's answer for a tile dispatch of no threads along an axis is
+    /// unmeasured).
     EmptyThreadgroup,
     /// A size past what the call can state: a tile dispatch's or mesh draw's axis past 32 bits
     /// (compute sizes and per-bind attribute strides past 32 bits are taken modulo `2^32`, as
     /// plain Metal takes them).
+    ///
+    /// Basis: unknown (Metal's answer for a tile dispatch's or mesh draw's axis past 32 bits is
+    /// unmeasured).
     SizeOutOfRange,
     /// A buffer of no bytes, or more than the device can hold in one: plain Metal answers nil
     /// (`Nil`), from the device, with bytes or over the caller's, and from either type of heap.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max: newBufferWithLength:0 answers nil).
     BufferLength {
         /// The length asked for, in bytes.
         length: u64,
     },
     /// A raw value Metal does not define for this type.
+    ///
+    /// Basis: metal-takes (an Apple M3 Max: setPurgeableState:99, a value MTLPurgeableState does
+    /// not define, answers 2, and neither plain Metal nor its API validation refuses it).
     UndefinedValue {
         /// The Metal type's name (`MTLPurgeableState`, for one).
         ty: &'static str,
@@ -610,11 +666,18 @@ pub enum Problem {
     /// A storage mode this call does not take (`Memoryless` for a buffer, for one): Metal stops
     /// it (`Invalid`), but a shared texture's other than `Private`, which plain Metal answers nil
     /// for (`Nil`).
+    ///
+    /// Basis: metal-measured (an Apple M3 Max: a buffer of the Memoryless mode asserts "Invalid
+    /// storageMode", the API validation layer off).
     StorageMode,
     /// A handler added after the command buffer was committed. Plain Metal asserts too
     /// ("Completed handler provided after commit call").
+    ///
+    /// Basis: metal-documented (Metal asserts "Completed handler provided after commit call").
     HandlerAfterCommit,
     /// The given slices' lengths differ.
+    ///
+    /// Basis: ours (this crate's paired slices: Metal's calls take a count).
     LengthMismatch,
     /// A texture buffer's fill given a pattern of more than 32752 bytes
     /// (`fillTexture:...:bytes:length:`): Metal's process ends in the call, in the blit's
@@ -622,12 +685,17 @@ pub enum Problem {
     /// macOS 27.0.1: `R8Uint`, `R32Uint` and `RGBA32Uint` texture buffers; 32752 bytes are
     /// filled). A fill of any other texture takes a pattern of any length, of which it reads 16
     /// bytes at most.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max, macOS 27.0.1: Metal's process ends in the call).
     LongTextureBufferFillPattern {
         /// The pattern's bytes.
         length: u64,
     },
     /// `offset..offset + size` runs past a resource of `length` bytes: Metal stops it
     /// (`Invalid`). A resource placed past its heap's end is [`HeapProblem::PastEnd`].
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: didModifyRange of 0+512 and of 240+64 on
+    /// a buffer of 256 bytes both return; Metal's API validation alone refuses them).
     RangeOutOfBounds {
         /// The range's first byte.
         offset: u64,
@@ -638,30 +706,52 @@ pub enum Problem {
     },
     /// A shader cache capacity, on disk or in memory, of zero: neither cache can be turned
     /// off.
+    ///
+    /// Basis: ours (this crate's shader caches: Metal exposes no capacity).
     ShaderCacheCapacity,
     /// A command queue's `maxCommandBufferCount` of zero: Metal's command queue creation
     /// validation stops it, with or without API validation.
+    ///
+    /// Basis: metal-measured (an Apple M3 Max: Metal's command queue creation asserts "invalid
+    /// descriptor.maxCommandBufferCount value 0", with and without API validation).
     MaxCommandBufferCount,
     /// A texture descriptor Metal stops (`Invalid`), or plain Metal answers nil for (`Nil`):
     /// [`TextureProblem`] says which.
+    ///
+    /// Basis: delegated(TextureProblem).
     Texture(TextureProblem),
     /// A texture view Metal stops, or a use of a texture its usage does not allow.
+    ///
+    /// Basis: delegated(ViewProblem).
     TextureView(ViewProblem),
     /// A texture copy Metal stops: `replace_region`, `get_bytes`, and the blit encoder's.
+    ///
+    /// Basis: delegated(CopyProblem).
     Copy(CopyProblem),
     /// A `generate_mipmaps` Metal stops.
+    ///
+    /// Basis: delegated(MipmapProblem).
     Mipmap(MipmapProblem),
     /// A texture over a buffer plain Metal itself refuses: [`BufferTextureProblem`] says
     /// which, and whether Metal asserts or answers nil.
+    ///
+    /// Basis: delegated(BufferTextureProblem).
     BufferTexture(BufferTextureProblem),
     /// A render pass descriptor, or a render encoder's late store action, Metal stops.
+    ///
+    /// Basis: delegated(RenderPassProblem).
     RenderPass(RenderPassProblem),
     /// A draw, or render encoder state, Metal stops.
+    ///
+    /// Basis: delegated(DrawProblem).
     Draw(DrawProblem),
     /// `new_render_pipeline_state`: the vertex function writes `[[point_size]]` and the input
     /// primitive topology class is line or triangle. Metal's pipeline creation answers an error
     /// here, with or without API validation ("Vertex shader writes point size but
     /// inputPrimitiveTopology is ..."; measured on an M3 Max and an M4).
+    ///
+    /// Basis: metal-measured (an M3 Max and an M4: Metal's pipeline creation answers an error, with
+    /// and without API validation).
     PointSizeTopology,
     /// `new_render_pipeline_state`: a tessellation pipeline made with
     /// `supportIndirectCommandBuffers` whose factor scale is enabled. Plain Metal ends its process
@@ -673,28 +763,45 @@ pub enum Problem {
     /// `tessellationFactorScaleEnabled` alone, and asserts for a pipeline of no tessellation state
     /// too; the runtime's descriptor keeps that flag inside its `tessellation`, so a caller cannot
     /// ask for that pair.
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 27.0.1: plain Metal ends its process, the API
+    /// validation layer off).
     IndirectScaledTessellation,
     /// `new_compute_pipeline_state`: a kernel the compile layer already compiled
     /// (`StageSource::Compiled`). Metal's descriptor takes a function, and a state compiles its
     /// kernel again for each variant a dispatch needs.
+    ///
+    /// Basis: ours (this crate's already-compiled stage: Metal's descriptor takes a function).
     CompiledKernel,
     /// `new_compute_pipeline_state`: the kernel's linked `functions`, or its `binary_functions`,
     /// list this name twice, or both lists hold it for two different functions. Metal's API
     /// validation stops every repeat ("All linked functions must have unique names"); plain
     /// Metal's creation fails on a name `functions` repeats and takes one function listed in both
     /// lists, as the runtime takes it (measured on an M3 Max and an M4).
+    ///
+    /// Basis: metal-measured (an M3 Max and an M4: plain Metal's creation fails on a name the
+    /// linked functions repeat).
     DuplicateLinkedFunction {
         /// The function's name.
         name: String,
     },
     /// A viewport, scissor rectangle or other render encoder state Metal stops at its setter.
+    ///
+    /// Basis: delegated(RenderStateProblem).
     RenderState(RenderStateProblem),
     /// A `set_visibility_result_mode` Metal stops.
+    ///
+    /// Basis: delegated(VisibilityProblem).
     Visibility(VisibilityProblem),
     /// A heap, or a resource placed in one, Metal stops (`new_heap` and the heap's calls).
+    ///
+    /// Basis: delegated(HeapProblem).
     Heap(HeapProblem),
     /// A resource ID, placed or reserved, of `limit` or more: Metal ends the process for one
     /// (`resource_ids.rs`). A pipeline state's is its placement's low 32 bits, which Metal keeps.
+    ///
+    /// Basis: metal-measured (an M4 and an M3 Max, macOS 27.0.1: the IDs at which Metal ends the
+    /// process, recorded in `resource_ids.rs`).
     ResourceId {
         /// The resource ID asked for.
         id: u64,
@@ -705,6 +812,9 @@ pub enum Problem {
     /// (`Device::reserve_resource_ids`): Metal's call never returns there, its pool spinning
     /// (an M3 Max, macOS 27.0.1), so nothing is reserved. A caller matching Metal treats this as
     /// that hang, not as an invalid argument.
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 27.0.1: Metal's call never returns, its pool
+    /// spinning).
     ReservationHangs {
         /// The first such ID in the call.
         id: u64,
@@ -715,22 +825,35 @@ pub enum Problem {
     /// `Device::new_texture` makes: a sampler state, a pipeline state, an indirect command
     /// buffer, a view, or a heap's, a buffer's, a shared or a caller's texture. A runtime
     /// extension's misuse: Metal has no such placement.
+    ///
+    /// Basis: ours (a runtime extension's misuse: Metal has no such placement).
     OutsidePlacement,
     /// A visible-function table call, or a table or buffer binding a dispatch reads as the other,
     /// Metal stops.
+    ///
+    /// Basis: delegated(FunctionTableProblem).
     FunctionTable(FunctionTableProblem),
     /// An indirect command buffer call plain Metal itself refuses, ending its process or
     /// failing the call: [`IndirectCommandBufferProblem`] says which.
+    ///
+    /// Basis: delegated(IndirectCommandBufferProblem).
     IndirectCommandBuffer(IndirectCommandBufferProblem),
     /// A rasterization-rate map's descriptor Metal stops (`new_rasterization_rate_map`).
+    ///
+    /// Basis: delegated(RateMapProblem).
     RateMap(RateMapProblem),
     /// An argument encoder call Metal stops, raises for, or answers nil for.
+    ///
+    /// Basis: delegated(ArgumentEncoderProblem).
     ArgumentEncoder(ArgumentEncoderProblem),
     /// An indirect dispatch's `bytes` of arguments at `offset` that run past its buffer's
     /// `length` (Metal's API validation: "(indirectBufferOffset +
     /// sizeof(MTLDispatchThreadsIndirectArguments))(72) must be <= \[indirectBuffer length\](64)";
     /// what plain Metal reads there is memory). An offset that is not a multiple of 4 is read at
     /// the multiple below, as plain Metal reads it, and checked from there.
+    ///
+    /// Basis: metal-takes (an Apple M3 Max: an indirect dispatch whose 12 bytes of arguments run
+    /// past its buffer of 8 bytes runs and counts right; Metal's API validation alone refuses it).
     IndirectDispatchRange {
         /// The offset the arguments are read at: the offset given, rounded down to a multiple
         /// of 4.
@@ -741,9 +864,13 @@ pub enum Problem {
         length: u64,
     },
     /// A sparse heap's or texture's call Metal stops, or answers nil for.
+    ///
+    /// Basis: delegated(SparseProblem).
     Sparse(SparseProblem),
     /// A buffer the caller made that cannot be wrapped as a Metal buffer of the length and
     /// storage (`new_buffer_with_vk_buffer`).
+    ///
+    /// Basis: ours (a runtime extension: Metal wraps no Vulkan buffer).
     WrappedBuffer(WrappedBufferProblem),
     /// A tile function's threadgroup argument of `length` bytes at byte `offset` of its tile's
     /// threadgroup memory, which the pass makes `tile_length` bytes (its
@@ -756,6 +883,10 @@ pub enum Problem {
     /// a multiple of 4 bytes, reading zero from the tile's memory's end on. So the runtime takes
     /// every length and every argument that ends past the tile's memory too
     /// (`metal2vulkan::error::BindError::TileThreadgroupArgument` carries the whole measurement).
+    ///
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal takes every length and offset
+    /// tried, 4, 17, 0 and 2^32 among them, and the pass completes, so the offsets this problem
+    /// still refuses are among the ones Metal took).
     TileThreadgroupArgument {
         /// The argument's length, in bytes.
         length: u64,
@@ -770,20 +901,32 @@ pub enum Problem {
     /// release measured ("Obtaining the resourceID of a DepthStencilState object requires support
     /// for MTLGPUFamilyApple10"), which is not what plain Metal does: macOS 27.0.1's plain call
     /// answers 0 (our probe on an M3 Max), and so does the runtime at that level.
+    ///
+    /// Basis: metal-measured (an M3 Max, macOS 26.7: plain Metal raises, as the consumer measured;
+    /// 27.0.1's plain call answers 0, and so does the runtime there).
     DepthStencilResourceId,
     /// A pipeline's `requiredThreadsPerThreadgroup` that Metal refuses at creation, or a dispatch
     /// whose threadgroup size is not it.
+    ///
+    /// Basis: delegated(RequiredThreadsProblem).
     RequiredThreads(RequiredThreadsProblem),
     /// A pipeline's binary functions that Metal refuses: not precompiled, of another stage, or
     /// added to a pipeline created without support for adding them.
+    ///
+    /// Basis: delegated(BinaryFunctionProblem).
     BinaryFunctions(BinaryFunctionProblem),
     /// A function made by name from a dynamic library (`newFunctionWithName:` and its forms):
     /// Metal stops at an assertion ("type is not a valid MTLFunctionType") for every name, a
     /// kernel the library holds among them (a probe, an M3 Max and an M4, plain and under API
     /// validation).
+    ///
+    /// Basis: metal-measured (an M3 Max and an M4, plain and under API validation: Metal asserts
+    /// "type is not a valid MTLFunctionType").
     DynamicLibraryFunction,
     /// `rebind_bytes_no_copy` of a buffer or heap the runtime cannot rebind as asked (a runtime
     /// extension; `rebind.rs`).
+    ///
+    /// Basis: ours (a runtime extension: Metal rebinds no bytes under a buffer).
     Rebind(RebindProblem),
     /// `new_render_pipeline_state`, `new_mesh_render_pipeline_state` or
     /// `new_compute_pipeline_state` of a descriptor with `supportIndirectCommandBuffers` whose
@@ -797,6 +940,9 @@ pub enum Problem {
     /// shader", "Object shader", "Compute function" alike), `userInfo` holding that alone, and
     /// the domain of Metal's GPU driver class, which follows the device: `AGXMetalG15X_M1` on the
     /// M3 Max, which the runtime answers, and `AGXMetalG16G_B0` on the M4.
+    ///
+    /// Basis: metal-measured (an M3 Max under macOS 26.7 and an M4 under 27.0.1: plain Metal
+    /// answers nil with an NSError).
     IndirectCommandsDirectArgument {
         /// The function's stage: `Vertex`, `Fragment`, `Mesh`, `Object`, or `Kernel` (a compute
         /// state's).
@@ -809,6 +955,8 @@ pub enum Problem {
     /// function's too. Its error: code 3, `localizedDescription` "RasterizationEnabled is false but
     /// the vertex shader's return type is not void", `userInfo` holding that alone, and the domain
     /// of Metal's GPU driver class, as [`Problem::IndirectCommandsDirectArgument`]'s.
+    ///
+    /// Basis: metal-measured (an M4, macOS 27.0.1: plain Metal answers nil with an NSError).
     UnrasterizedVertexReturn,
     /// `new_render_pipeline_state` (a render or mesh state) of a descriptor with
     /// `supportIndirectCommandBuffers` whose function of `stage`, the first in the order Metal
@@ -817,6 +965,9 @@ pub enum Problem {
     /// ([`Error::Unproven`]). Metal may make the state, or refuse it as
     /// [`Problem::IndirectCommandsDirectArgument`]; every use a measured rule keeps is that problem
     /// instead.
+    ///
+    /// Basis: unknown (Metal's answer for a use only this rule keeps is unmeasured, so the state is
+    /// refused as unproven).
     IndirectCommandsDirectArgumentUnproven {
         /// The function's stage: `Vertex`, `Mesh` or `Fragment`.
         stage: Stage,
@@ -832,6 +983,9 @@ pub enum Problem {
     /// whose reflection Metal's answer has not been measured for no longer refuses it). Metal may
     /// make the state, or refuse it as [`Problem::IndirectCommandsDirectArgument`]; the runtime
     /// makes no state it cannot decide that for.
+    ///
+    /// Basis: ours (the compile layer will not say whether the functions use one, so no state is
+    /// made).
     IndirectCommandsDirectArgumentUndecided {
         /// The compile layer's refusal.
         refusal: Box<CompileError>,
@@ -844,6 +998,8 @@ pub enum Problem {
     /// `localizedDescription` "depthAttachmentPixelFormat is not valid and shader writes to depth",
     /// and the domain of Metal's GPU driver class, as
     /// [`Problem::IndirectCommandsDirectArgument`]'s.
+    ///
+    /// Basis: metal-measured (an M4, macOS 27.0.1: plain Metal answers nil with an NSError).
     DepthWrittenWithoutAttachment,
     /// `new_render_pipeline_state` of a descriptor whose fragment function's stage inputs
     /// `inputs` (their MSL member names, in declaration order), which its linking keeps, are
@@ -854,12 +1010,16 @@ pub enum Problem {
     /// joined by commas, and the domain of Metal's GPU driver class. A post-tessellation vertex
     /// function's alike, and `new_mesh_render_pipeline_state`'s where the mesh function writes no
     /// per-vertex or per-primitive data of them, its text naming the "mesh shader".
+    ///
+    /// Basis: metal-measured (an M4, macOS 27.0.1: plain Metal answers nil with an NSError).
     UnwrittenFragmentInputs {
         /// The inputs' names.
         inputs: Box<[String]>,
     },
     /// [`Problem::UnwrittenFragmentInputs`] where only a rule kept beyond Metal keeps such an
     /// input (`reason`): Metal may make the state ([`Error::Unproven`]).
+    ///
+    /// Basis: unknown (Metal may make the state; the input is kept by a rule beyond Metal).
     UnwrittenFragmentInputsUnproven {
         /// The inputs' names, as every rule keeps them.
         inputs: Box<[String]>,
@@ -871,6 +1031,8 @@ pub enum Problem {
     /// [`MetalLevel`](crate::MetalLevel) ([`Error::Unproven`]): an older Metal's answers are
     /// unmeasured, and a newer one's would answer above the host. Naming a level in the options
     /// makes the device answer at it.
+    ///
+    /// Basis: unknown (no measured Metal level describes the host's release).
     HostReleaseUnmeasured {
         /// The host's macOS version, where it reads.
         macos: Option<[u32; 3]>,
@@ -885,6 +1047,9 @@ pub enum Problem {
     /// on an Apple M4 under 27.0.1, the consumer's run on an M3 Max under 26.7),
     /// blended or not, before anything else; the first such attachment is named (the colors by
     /// index, then depth, then stencil).
+    ///
+    /// Basis: metal-measured (an Apple M4 under macOS 27.0.1, and the consumer's run on an M3 Max
+    /// under 26.7: Metal's descriptor validation stops it).
     AttachmentNotAFormat {
         /// The attachment.
         attachment: Attachment,
@@ -897,6 +1062,9 @@ pub enum Problem {
     /// device."; on an Apple M4 under 27.0.1, with and without API validation), an
     /// [`Error::MetalError`]. A device whose Vulkan driver rasterizes more
     /// samples makes no such state either.
+    ///
+    /// Basis: metal-measured (an Apple M4, macOS 27.0.1: plain Metal answers nil with an NSError,
+    /// with and without API validation).
     RasterSampleCount {
         /// The `rasterSampleCount` given.
         count: u32,

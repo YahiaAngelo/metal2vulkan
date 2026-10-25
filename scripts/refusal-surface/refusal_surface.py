@@ -15,17 +15,30 @@ The refusal surface is read from the construction sites of the typed refusals, o
 - the rasterization-rate maps the compile layer does not compile (`UnpinnedCompile`, the
   runtime's `Error::RateMap`);
 - the translation deadline (`BudgetExceeded`, `Error::Budget`; the runtime's
-  `Error::Compile(Budget)`).
+  `Error::Compile(Budget)`);
+- what a call did wrong (the runtime's `Problem`, carried by `Error::Metal`): each of these is a
+  claim that Metal itself refuses an input, so each carries a declared basis.
 
 Each refusal is one row per variant, with what it blocks (the variant's doc comment), the device
 condition (from the constructor: every device, or the capabilities, driver defects or families
-its sites name), its sites, and a reach mark, which is the one hand-kept column (`reach.tsv` beside this script).
+its sites name), its sites, its basis, and a reach mark, which is the one hand-kept column
+(`reach.tsv` beside this script).
 
-    scripts/refusal-surface/refusal_surface.py           # write docs/REFUSALS.md
-    scripts/refusal-surface/refusal_surface.py --check   # fail when a variant, its condition
-                                                          # or reach mark is stale (the site lists
-                                                          # may drift)
-    scripts/refusal-surface/refusal_surface.py --table   # print the plain table only
+The basis says where the belief that this input must be refused comes from. It is derived from the
+construction site wherever the site states it, and declared in the refusal's own doc comment, as a
+last line `Basis: <value> (the evidence)`, wherever the claim is about Metal itself, which no site
+can state. `--check` requires one of every `Problem`: a refusal that asserts Metal stops an input
+cannot be added with nothing behind it, and one whose basis is not settled says
+`Basis: unknown (why)` rather than nothing.
+
+    scripts/refusal-surface/refusal_surface.py                 # write docs/REFUSALS.md
+    scripts/refusal-surface/refusal_surface.py --check         # fail when a variant, its
+                                                               # condition, basis or reach mark is
+                                                               # stale (the site lists may drift)
+    scripts/refusal-surface/refusal_surface.py --table         # print the plain table only
+    scripts/refusal-surface/refusal_surface.py --missing-basis # list refusals whose basis is
+                                                               # absent or malformed
+    scripts/refusal-surface/refusal_surface.py --selftest      # the basis marker's own cases
 
 It reads source text only (no build), so it runs anywhere.
 """
@@ -81,6 +94,114 @@ REACH_MARKS = OrderedDict(
         ("none", "no public API path: malformed or non-Metal input, Apple-private calls, or a cap no valid program of ordinary size meets"),
     ]
 )
+
+# The basis of a refusal: where the belief that this input must be refused comes from. One
+# vocabulary for the whole surface.
+#
+# Where the construction site already says it, it is **derived** from the site and nothing is kept
+# by hand: a capability a device lacks, a piece not built, a cap of this crate's. Where the claim
+# is about Metal itself, no site can say it, so it is **declared** in the refusal's own doc comment
+# as a last line, `Basis: <value> (the evidence)`, and `--check` requires one of every variant of
+# `Problem` (section `invalid`), which is nothing but such claims.
+BASIS = OrderedDict(
+    [
+        (
+            "metal-measured",
+            "Metal itself refuses the input, and a run of ours on a named device or release says so",
+        ),
+        (
+            "metal-documented",
+            "Metal itself refuses it, and Apple's own words say so: a quoted assertion, `NSError` "
+            "or validation message, a header, or Apple's documentation",
+        ),
+        (
+            "metal-takes",
+            "measured: plain Metal **takes** this input, so the refusal reaches past Metal. An open "
+            "defect, recorded here rather than left unsaid",
+        ),
+        (
+            "device",
+            "the mechanism is absent: from this Vulkan device, from its driver, or from every "
+            "Vulkan device",
+        ),
+        (
+            "ours",
+            "this crate's own gap, cap or deadline, or the misuse of a runtime extension Metal has "
+            "no counterpart for",
+        ),
+        (
+            "unknown",
+            "not established: the refusal stands, and why Metal is believed to refuse this has not "
+            "been settled",
+        ),
+    ]
+)
+
+# A basis that claims something about Metal's own behaviour carries its evidence with it.
+CITED_BASIS = ("metal-measured", "metal-documented", "metal-takes")
+# A measurement names the device or the release it ran on.
+NAMES_A_DEVICE = re.compile(r"\bM\d\b|\bApple M|\bmacOS\b|\b2[0-9]\.[0-9]")
+# An aggregate variant carries no basis of its own: it forwards to another problem enum, whose
+# variants hold the claims. `delegated(ThatEnum)` says so, and is held to the variant's payload.
+DELEGATED = "delegated"
+
+
+def split_basis(doc):
+    """(prose, marker): the doc without its trailing `Basis:` line, and that line's text.
+
+    The marker is the last thing in the doc comment, so one `rfind` finds it wherever the prose
+    above it goes; a `Basis:` left in the prose makes the tail unparsable, which `--check` reports
+    rather than passing over.
+    """
+    i = doc.rfind("Basis:")
+    if i < 0:
+        return doc, None
+    return doc[:i].rstrip(), doc[i + len("Basis:") :].strip()
+
+
+BASIS_MARKER = re.compile(r"([a-z][a-z-]*)\s*(?:\((.*)\))?\.?")
+
+
+def parse_basis(marker, payload=""):
+    """(value, citation, complaint) of one `Basis:` marker; `value` is None where it is malformed.
+
+    `payload` is the variant's payload type, which a `delegated` marker must name.
+    """
+    m = BASIS_MARKER.fullmatch(marker.strip())
+    if not m:
+        return None, "", "is not `Basis: <value>` or `Basis: <value> (the evidence)`"
+    value, cite = m.group(1), (m.group(2) or "").strip()
+    if value == DELEGATED:
+        if not cite:
+            return None, "", "`delegated` names no enum: write `Basis: delegated(TheProblem)`"
+        if cite != payload.strip():
+            return None, "", f"`delegated({cite})` is not this variant's payload (`{payload.strip() or 'none'}`)"
+        return DELEGATED, cite, ""
+    if value not in BASIS:
+        return None, "", f"`{value}` is no basis: " + ", ".join(BASIS)
+    if value in CITED_BASIS and not cite:
+        return None, "", f"`{value}` claims something about Metal and cites no evidence"
+    if value in ("metal-measured", "metal-takes") and not NAMES_A_DEVICE.search(cite):
+        return None, "", f"`{value}` cites a run that names no device or release: `{cite}`"
+    return value, cite, ""
+
+
+# How each section's basis follows from the construction site, where it does. `None` is a section
+# whose basis no site states: each variant's doc comment declares it.
+def derived_basis(section, kinds):
+    if section == "feature":
+        if not kinds:
+            return ""
+        # A site that refuses on every device because the lowering is not built settles the basis
+        # whatever the other sites need of a device.
+        return "ours" if "NotImplemented" in kinds else "device"
+    if section == "gap":
+        return "ours"
+    if section == "bind":
+        return "device"
+    if section in ("limit", "budget"):
+        return "ours"
+    return ""
 
 
 def lex(text):
@@ -277,7 +398,7 @@ def is_pattern(text, start, end):
 
 def scan():
     """Rows keyed by (section, variant): conditions, sites."""
-    rows = defaultdict(lambda: {"conds": set(), "sites": [], "indirect": []})
+    rows = defaultdict(lambda: {"conds": set(), "kinds": set(), "sites": [], "indirect": []})
     feature_refs = defaultdict(list)
     for tree, rel, text in source_files():
         spans = fn_spans(text)
@@ -306,6 +427,7 @@ def scan():
             else:
                 key = ("feature", name)
             rows[key]["conds"] |= conditions(kind, needs_text)
+            rows[key]["kinds"].add(kind)
             rows[key]["sites"].append(site(m.start()))
         # Unsupported { feature: .., needs: .. } literals.
         for m in re.finditer(r"\bUnsupported\s*\{", text):
@@ -324,6 +446,7 @@ def scan():
             kind = nm.group(1) if nm else "computed"
             needs_text = body[nm.start() :] if nm else ""
             rows[("feature", name)]["conds"] |= conditions(kind, needs_text)
+            rows[("feature", name)]["kinds"].add(kind)
             rows[("feature", name)]["sites"].append(site(m.start()))
         # Indirect feature references (a feature handed to a helper that builds the refusal).
         for m in re.finditer(r"\bFeature::([A-Za-z0-9_]+)", text):
@@ -331,6 +454,13 @@ def scan():
                 continue
             feature_refs[m.group(1)].append(site(m.start()))
         if tree == "runtime":
+            # `Problem`: what a call did wrong. `Problem::` is a suffix of every other problem
+            # enum's name (`CopyProblem::`), so the match requires a boundary the word `\b` does
+            # not give between two letters.
+            for m in re.finditer(r"(?<![A-Za-z0-9_])Problem::([A-Z][A-Za-z0-9_]*)", text):
+                if rel.endswith("metal2vulkan-runtime/src/error.rs") or is_pattern(text, m.start(), m.end()):
+                    continue
+                rows[("invalid", m.group(1))]["sites"].append(site(m.start()))
             gap_alias = ["RuntimeGap"]
             am = re.search(r"\bRuntimeGap\s+as\s+(\w+)", text)
             if am:
@@ -365,6 +495,43 @@ def scan():
                     continue
                 rows[(section, m.group(1))]["sites"].append(site(m.start()))
     return rows, feature_refs
+
+
+def problem_arms(path):
+    """(variant, doc, payload) of `pub enum Problem`, in order.
+
+    Every one of these is a claim that Metal itself refuses an input, so every one carries a
+    declared basis. The payload is read too: an aggregate variant's `delegated` marker must name
+    it, so the marker cannot be used where a variant does not forward.
+    """
+    lines = path.read_text().split("\n")
+    out, doc, inside, depth = [], [], False, 0
+    for line in lines:
+        if not inside:
+            if line.startswith("pub enum Problem {"):
+                inside = True
+            continue
+        if depth == 0 and line.startswith("}"):
+            break
+        if depth:
+            depth += line.count("{") - line.count("}")
+            continue
+        s = line.strip()
+        if s.startswith("///"):
+            doc.append(s[3:].strip())
+            continue
+        m = re.match(r"^    ([A-Z][A-Za-z0-9_]*)\s*(\(|\{|,)", line)
+        if m:
+            payload = ""
+            if m.group(2) == "(" and ")" in line:
+                payload = line[line.index("(") + 1 : line.rindex(")")]
+            elif m.group(2) == "{":
+                depth = 1
+            out.append((m.group(1), " ".join(doc), payload))
+            doc = []
+        elif s and not s.startswith("//") and not s.startswith("#"):
+            doc = []
+    return out
 
 
 def enum_variants(path, enum):
@@ -476,8 +643,11 @@ def build():
     for n, refs in feature_refs.items():
         if n in fdocs and not rows[("feature", n)]["sites"]:
             rows[("feature", n)]["indirect"] = refs
+    pdocs = problem_arms(CRATES / "metal2vulkan-runtime" / "src" / "error.rs")
+    payloads = {n: pay for n, _, pay in pdocs}
     tables = OrderedDict()
     missing_reach = []
+    basis_faults = []
     sections = [
         ("feature", fdocs, "Translator and front-end refusals (`Unsupported`: a `Feature` and its `Needs`)"),
         ("gap", gdocs, "Runtime gaps (`Error::NotImplemented(RuntimeGap)`)"),
@@ -490,6 +660,11 @@ def build():
             "Rate maps the compile layer does not compile (`Error::RateMap(UnpinnedCompile)`)",
         ),
         ("budget", tdocs, "The translation deadline (`Error::Budget`; the runtime's `Error::Compile(Budget)`)"),
+        (
+            "invalid",
+            OrderedDict((n, d) for n, d, _ in pdocs),
+            "What a call did wrong (`Error::Metal(MetalError)`: a `Problem`)",
+        ),
     ]
     for section, docs, title in sections:
         out = []
@@ -513,6 +688,8 @@ def build():
                 conds = ["every device (this crate's bound: Apple's compile unmeasured or crashing there)"]
             elif section == "budget":
                 conds = ["every device (the attempt's deadline, 20 seconds by default)"]
+            elif section == "invalid":
+                conds = ["every device (a public call's own check of its arguments)"]
             if not sites and not indirect and not (fam and fam["sites"]):
                 state = "no site"
             elif not sites and indirect:
@@ -520,10 +697,26 @@ def build():
             else:
                 state = "direct"
             notsched = " (not scheduled)" if "not scheduled" in doc.lower() else ""
-            rm = reach.get((section, name))
-            if rm is None:
-                missing_reach.append((section, name))
-                rm = ("?", "")
+            if section == "invalid":
+                # Reach is not marked here: every one of these is an argument of a public call,
+                # so a reach mark would say `app` 68 times.
+                rm = ("-", "")
+            else:
+                rm = reach.get((section, name))
+                if rm is None:
+                    missing_reach.append((section, name))
+                    rm = ("?", "")
+            prose, marker = split_basis(doc)
+            if marker is None:
+                basis, cite = derived_basis(section, (r["kinds"] if r else set())), ""
+                if section == "invalid":
+                    basis_faults.append((section, name, "carries no `Basis:` line"))
+            else:
+                basis, cite, complaint = parse_basis(marker, payloads.get(name, ""))
+                if basis is None:
+                    basis_faults.append((section, name, complaint))
+                    basis = ""
+                doc = prose
             if sites:
                 sc = sites_cell(sites)
             elif indirect:
@@ -541,12 +734,14 @@ def build():
                     "state": state,
                     "reach": rm[0],
                     "why": rm[1].replace("|", "\\|"),
+                    "basis": basis or "-",
+                    "cite": cite.replace("|", "\\|"),
                     "size": "",
                     "all": sorted(set(sites or indirect or (fam["sites"] if fam else []))),
                 }
             )
         tables[section] = (title, out)
-    return tables, missing_reach
+    return tables, missing_reach, basis_faults
 
 
 def render(tables):
@@ -556,10 +751,11 @@ def render(tables):
     lines.append(
         "Every refusal of something Metal accepts, read from the code: the construction sites of the "
         "typed refusals outside tests (`scripts/refusal-surface/refusal_surface.py`, which writes this "
-        "file; edit its `reach.tsv`, never the tables). Metal's own validation errors (`Invalid`, "
-        "`InvalidDescriptor`, malformed input) are misuse, not refusals, and are not listed. "
-        "[`METAL-COVERAGE.md`](METAL-COVERAGE.md) lists the Metal API the runtime has no counterpart "
-        "for at all."
+        "file; edit its `reach.tsv` and the refusals' own doc comments, never the tables). Section 8 "
+        "is the other half: what a call did wrong, each row a claim that Metal itself refuses an "
+        "input, with the basis of that claim. Malformed input of no Metal call at all is misuse and "
+        "is not listed. [`METAL-COVERAGE.md`](METAL-COVERAGE.md) lists the Metal API the runtime has "
+        "no counterpart for at all."
     )
     lines.append("")
     lines.append("Columns:")
@@ -581,10 +777,27 @@ def render(tables):
         "no call refuses, only `supportsFamily:`'s audit (the API is missing: see the coverage map); "
         "0 is a variant nothing builds today."
     )
+    lines.append(
+        "- **Basis**: where the belief that this input must be refused comes from. Derived from the "
+        "construction site where the site says it (`device`, `ours`), declared as a last `Basis:` "
+        "line in the refusal's own doc comment where the claim is about Metal itself, and `-` where "
+        "neither says it yet:"
+    )
+    for k, v in BASIS.items():
+        lines.append(f"  - `{k}`: {v};")
+    lines.append(
+        "  - `delegated`: the variant forwards to another problem enum, whose own variants carry the "
+        "claims; those enums are not read here yet, so a `delegated` row is a gap in this column, not "
+        "an answer."
+    )
     lines.append("- **Reach** (hand-kept, `reach.tsv`):")
     for k, v in REACH_MARKS.items():
         lines.append(f"  - `{k}`: {v};")
     lines.append("  - `?`: not assessed yet.")
+    lines.append(
+        "  Metal's own refusals (section 8) carry no reach mark: every one of them is an argument of "
+        "a public call."
+    )
     lines.append("")
     # totals
     lines.append("## Totals")
@@ -600,15 +813,27 @@ def render(tables):
             f"| {title.split(' (')[0]} | {len(rows)} | {live} | {c['system']} | {c['app']} | {c['rare']} | {c['none']} | {c['?']} |"
         )
     lines.append("")
+    lines.append("## Totals by basis")
+    lines.append("")
+    cols = list(BASIS) + ["delegated", "-"]
+    lines.append("| Kind | " + " | ".join(f"`{k}`" for k in cols) + " |")
+    lines.append("|---" * (len(cols) + 1) + "|")
+    for section, (title, rows) in tables.items():
+        c = defaultdict(int)
+        for r in rows:
+            c[r["basis"]] += 1
+        lines.append(f"| {title.split(' (')[0]} | " + " | ".join(str(c[k]) for k in cols) + " |")
+    lines.append("")
     for i, (section, (title, rows)) in enumerate(tables.items(), 1):
         lines.append(f"## {i}. {title}")
         lines.append("")
-        lines.append("| Variant | What it blocks | Where | Sites | Reach |")
-        lines.append("|---|---|---|---|---|")
+        lines.append("| Variant | What it blocks | Where | Basis | Sites | Reach |")
+        lines.append("|---|---|---|---|---|---|")
         for r in rows:
             reach = f"`{r['reach']}`" + (f": {r['why']}" if r["why"] else "")
+            basis = f"`{r['basis']}`" + (f": {r['cite']}" if r["cite"] else "")
             lines.append(
-                f"| `{r['name']}` | {r['what']} | {r['cond']} | {r['sites']} | {reach} |"
+                f"| `{r['name']}` | {r['what']} | {r['cond']} | {basis} | {r['sites']} | {reach} |"
             )
         lines.append("")
     lines.append("## Appendix: every site")
@@ -651,8 +876,10 @@ def plain_table(tables):
         "",
         "Reach: " + "; ".join(f"{k} = {v}" for k, v in REACH_MARKS.items()) + ".",
         "",
-        "| Reach | Kind | Refusal | Blocks | Where | Sites |",
-        "|---|---|---|---|---|---|",
+        "Basis: " + "; ".join(f"{k} = {v}" for k, v in BASIS.items()) + ".",
+        "",
+        "| Reach | Basis | Kind | Refusal | Blocks | Where | Sites |",
+        "|---|---|---|---|---|---|---|",
     ]
     for _, sec, x in rows:
         n = x["sites"].split(" ")[0].rstrip(":")
@@ -661,7 +888,7 @@ def plain_table(tables):
         if x["sites"].startswith("family"):
             n = "family audit only"
         what = x["what"] if len(x["what"]) < 110 else x["what"][:107] + "..."
-        out.append(f"| {x['reach']} | {sec} | {x['name']} | {what} | {short(x['cond'])} | {n} |")
+        out.append(f"| {x['reach']} | {x['basis']} | {sec} | {x['name']} | {what} | {short(x['cond'])} | {n} |")
     return "\n".join(out) + "\n"
 
 
@@ -683,16 +910,83 @@ def apple_only_gaps(path):
     return gaps
 
 
+def selftest():
+    """The basis marker's parse, over markers written here, both ways.
+
+    The column is worth no more than this parse: a marker shape it stops recognising takes a claim
+    out of the table, and a smaller table then reads like the truth. So each case asserts both that
+    a good marker is read as what it says and that a bad one is named, and `--check` cannot pass a
+    tree whose `Problem` carries no marker at all.
+    """
+    good = [
+        ("metal-measured (an Apple M3 Max, macOS 27.0.1: the call asserts)", "", "metal-measured"),
+        ("metal-documented (Metal asserts \"commit an already committed command buffer\")", "", "metal-documented"),
+        ("metal-takes (an M3 Max: plain Metal returns and the pass completes)", "", "metal-takes"),
+        ("device", "", "device"),
+        ("ours", "", "ours"),
+        ("unknown (Metal's answer here is unmeasured)", "", "unknown"),
+        ("unknown", "", "unknown"),
+        ("delegated(TextureProblem)", "TextureProblem", "delegated"),
+        ("metal-measured (an M4).", "", "metal-measured"),
+    ]
+    bad = [
+        ("", "", "an empty marker"),
+        ("measured on an M4", "", "a value outside the vocabulary"),
+        ("metal-meausred (an M4)", "", "a misspelled value"),
+        ("metal-measured", "", "a measurement with no evidence"),
+        ("metal-takes", "", "a plain-Metal claim with no evidence"),
+        ("metal-documented", "", "a documented refusal with no citation"),
+        ("metal-measured (the call asserts)", "", "a measurement that names no device or release"),
+        ("metal-takes (plain Metal returns)", "", "a plain-Metal claim that names no device"),
+        ("delegated", "TextureProblem", "`delegated` naming no enum"),
+        ("delegated(ViewProblem)", "TextureProblem", "`delegated` naming another enum"),
+        ("delegated(TextureProblem)", "", "`delegated` on a variant that forwards nothing"),
+        ("Device", "", "a value of the wrong case"),
+    ]
+    bad_news = []
+    for marker, payload, want in good:
+        value, _, complaint = parse_basis(marker, payload)
+        if value != want:
+            bad_news.append(f"`Basis: {marker}` read as {value!r} ({complaint}), not {want!r}")
+    for marker, payload, what in bad:
+        value, _, complaint = parse_basis(marker, payload)
+        if value is not None:
+            bad_news.append(f"`Basis: {marker}` ({what}) was taken as {value!r}")
+        elif not complaint:
+            bad_news.append(f"`Basis: {marker}` ({what}) was refused without saying why")
+    # The marker is the doc comment's last line, and the prose above it is left alone.
+    prose, marker = split_basis("A thing Metal refuses. Basis: ours")
+    if (prose, marker) != ("A thing Metal refuses.", "ours"):
+        bad_news.append(f"split_basis read {(prose, marker)!r}")
+    if split_basis("No marker here.") != ("No marker here.", None):
+        bad_news.append("split_basis invented a marker")
+    for line in bad_news:
+        print("selftest:", line, file=sys.stderr)
+    if bad_news:
+        print(f"{len(bad_news)} basis cases failed", file=sys.stderr)
+        return 1
+    print(f"basis parse: {len(good)} markers read, {len(bad)} refused", file=sys.stderr)
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="fail when docs/REFUSALS.md is stale")
     ap.add_argument("--table", action="store_true", help="print one plain Markdown table, most reachable first")
     ap.add_argument("--missing-reach", action="store_true", help="list variants without a reach mark")
+    ap.add_argument("--missing-basis", action="store_true", help="list refusals whose basis is absent or malformed")
+    ap.add_argument("--selftest", action="store_true", help="run the basis marker's own cases")
     a = ap.parse_args()
-    tables, missing = build()
+    if a.selftest:
+        return selftest()
+    tables, missing, faults = build()
     if a.missing_reach:
         for s, n in missing:
             print(f"{s}\t{n}")
+        return 0
+    if a.missing_basis:
+        for s, n, why in faults:
+            print(f"{s}\t{n}\t{why}")
         return 0
     if a.table:
         sys.stdout.write(plain_table(tables))
@@ -705,8 +999,8 @@ def main():
             out = []
             for line in t.split("\n"):
                 f = line.split(" | ")
-                if line.startswith("| `") and len(f) == 5:
-                    out.append((f[0], f[1], f[2], f[4]))
+                if line.startswith("| `") and len(f) == 6:
+                    out.append((f[0], f[1], f[2], f[3], f[5]))
             return out
 
         old = OUT.read_text() if OUT.exists() else ""
@@ -719,9 +1013,24 @@ def main():
         if missing:
             print(f"{len(missing)} variants without a reach mark (--missing-reach)", file=sys.stderr)
             return 1
+        if faults:
+            for s, n, why in faults[:20]:
+                print(f"{s}::{n}: its `Basis:` {why}", file=sys.stderr)
+            print(
+                f"{len(faults)} refusals whose basis is absent or malformed (--missing-basis). Every "
+                "variant of `Problem` carries a last doc-comment line `Basis: <value> (the "
+                "evidence)`; a refusal whose basis is not settled says `Basis: unknown (why)` rather "
+                "than nothing.",
+                file=sys.stderr,
+            )
+            return 1
         return 0
     OUT.write_text(text)
-    print(f"wrote {OUT.relative_to(ROOT)}; {len(missing)} variants without a reach mark", file=sys.stderr)
+    print(
+        f"wrote {OUT.relative_to(ROOT)}; {len(missing)} variants without a reach mark, "
+        f"{len(faults)} without a basis",
+        file=sys.stderr,
+    )
     return 0
 
 

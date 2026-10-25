@@ -135,7 +135,7 @@ Edit the source, then regenerate:
 
 | Doc | Generator | Source |
 |---|---|---|
-| `docs/REFUSALS.md` | `python3 scripts/refusal-surface/refusal_surface.py` (`--check` to verify) | the code's refusal types; `reach.tsv` beside the script |
+| `docs/REFUSALS.md` | `python3 scripts/refusal-surface/refusal_surface.py` (`--check` to verify, `--missing-basis` and `--missing-reach` to list the gaps, `--selftest` for the basis parse's own cases) | the code's refusal types, the `Basis:` line each refusal's doc comment ends with; `reach.tsv` beside the script |
 | `docs/METAL-COVERAGE.md` | `python3 scripts/metal-coverage/coverage.py` (`--check` to verify) | `scripts/metal-coverage/coverage.tsv` |
 | `docs/CONFORMANCE-COVERAGE.md` | `python3 scripts/conformance-coverage/coverage.py` (`--check` to verify, `--selftest` for the option-space axis's own tests) | the suite's sources, its committed recordings, `scripts/metal-coverage/coverage.tsv`, `objc2_metal.tsv`, and the generated Metal enum tables |
 | `crates/metal2vulkan/src/spv.rs`, `crates/metal2vulkan/src/spirv_binary/table.rs` | `scripts/regen-spirv-grammar/regen-spirv-grammar.sh` | Khronos SPIRV-Headers' grammar JSON, and `items.txt` beside the script |
@@ -147,8 +147,12 @@ surface of the three published crates, by `python3 scripts/api-signatures/signat
 alone. `crates/metal2vulkan/tests/api_signatures.rs` says what it pins, what it cannot see, and
 what blessing it asserts; a removed or changed line is a breaking change of a published crate.
 
-Three docs are checked by tests: `docs/FAST-PATHS.md` must name every `DevicePolicy` accuracy
-choice and the notes it records (`tests::fast_paths`); `docs/API.md` must list every degrade code
+Four docs are checked by tests. `docs/REFUSALS.md` must be the surface the sources state, and
+every variant of the runtime's `Problem` must end its doc comment with a `Basis:` line that says
+where the belief that Metal refuses that input comes from and cites its evidence
+(`crates/metal2vulkan/tests/refusal_surface.rs`, which says what it cannot see; a basis that is
+not settled is `Basis: unknown (why)`, never nothing). `docs/FAST-PATHS.md` must name every
+`DevicePolicy` accuracy choice and the notes it records (`tests::fast_paths`); `docs/API.md` must list every degrade code
 with its category and quote `examples/api_preview.rs` verbatim in its `rust` blocks; and
 `docs/METAL-COVERAGE.md` must carry the coverage table's totals. A new degrade code also goes in
 `crates/metal2vulkan-runtime/src/tests/degradation_codes.txt`, every code ever issued, which a test
