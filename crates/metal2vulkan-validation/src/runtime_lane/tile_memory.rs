@@ -14,11 +14,11 @@
 //! - Each argument sits at the byte offset the encoder set: `shift` with argument 1 at byte 16
 //!   writes words 4 to 19, which argument 0 reads back, and `dump` with argument 0 at byte 64
 //!   reads words 16 on, past `shift`'s still zero.
-//! - The setter takes every length, and an argument that ends past the tile's memory, as plain
-//!   Metal does (an M3 Max under macOS 27.0.1: every length and offset tried took, the pass
-//!   completing, reading zero from the tile's memory's end on); it is refused for an offset that is
-//!   not a multiple of 16 or past the tile's memory, which Metal floors to a multiple of 4 and
-//!   reads as zero respectively — measurements `Problem::TileThreadgroupArgument` names. A
+//! - The setter takes every length and every offset, as plain Metal does (an M3 Max under macOS
+//!   27.0.1: every length and offset tried took, the pass completing). An argument begins at its
+//!   offset floored to a multiple of 4, and one at or past the tile's memory reads zero throughout
+//!   and has its stores dropped, as an argument that ends past it does from that end on —
+//!   measurements `RenderCommandEncoder::set_threadgroup_memory_length` names. A
 //!   dispatch of a function whose argument the encoder never set is the binder's
 //!   `MissingThreadgroupMemory`: plain Metal runs it with the argument at a driver-chosen offset
 //!   (byte 120 of 256 on an M3 Max, our probe), which no rule gives.
@@ -44,6 +44,10 @@ const THREADS: u32 = 16;
 
 /// The pass's `threadgroupMemoryLength`.
 const LENGTH: u64 = 128;
+
+/// Where a tile threadgroup argument's offset wraps: plain Metal truncates it to 32 bits, so byte
+/// `WRAP` begins where byte 0 does (`RenderCommandEncoder::set_threadgroup_memory_length`).
+const WRAP: u64 = u32::MAX as u64 + 1;
 
 /// The fixture's tile functions' states, each in a tile pipeline of one `R32Uint` attachment.
 struct States {
@@ -229,6 +233,92 @@ fn each_pass_starts_its_tiles_threadgroup_memory_at_zero() {
     });
 }
 
+/// An argument begins at its offset truncated to 32 bits and floored to a multiple of 4, and one
+/// at or past the tile's memory reads zero throughout and has its stores dropped, as plain Metal
+/// answers (the module docs). `add` fills words 0 to 15 of each tile's memory with
+/// `1000 * tile + t + 1`, a value no unwritten word and no other word holds, and `dump` through an
+/// argument at `offset` then reads the memory from the word that offset begins at. Offsets 0 and 4
+/// are the differentiated control: they read words 0 and 1 on, so a reading that did not move
+/// between them would mean the offset never reached the shader. 4, 8 and 20 are also what
+/// separates a floor to 4 from a floor to 16, which 17 alone cannot (both place it at byte 16),
+/// and 2^32 and 2^32 + 4 are what separates truncating the offset from saturating it, which would
+/// read zero instead of the memory's first words.
+#[test]
+fn a_tile_threadgroup_argument_begins_at_its_offset_floored_to_four() {
+    on_device(|device| {
+        let states = States::new(device);
+        let target = target(device);
+        let queue = device.new_command_queue().unwrap();
+        // One pass an offset: a tile's memory starts at zero with each pass, so each reading is
+        // the pass's own `add` alone.
+        for (offset, first) in [
+            (0, 0),
+            (2, 0),
+            (4, 1),
+            (8, 2),
+            (17, 4),
+            (20, 5),
+            (WRAP, 0),
+            (WRAP + 4, 1),
+            (WRAP + 20, 5),
+            (2 * WRAP + 8, 2),
+        ] {
+            let out = out(device);
+            run(
+                &queue,
+                &target,
+                &[&|encoder| {
+                    encoder.set_threadgroup_memory_length(64, 0, 0).unwrap();
+                    dispatch(encoder, &states.add);
+                    encoder
+                        .set_threadgroup_memory_length(64, offset, 0)
+                        .unwrap();
+                    encoder.set_tile_buffer(Some(&out), 0, 0).unwrap();
+                    dispatch(encoder, &states.dump);
+                }],
+            );
+            assert_eq!(
+                words(&out),
+                by_tile(|tile, t| match first + t {
+                    word if word < THREADS => added(tile, word, 1),
+                    _ => 0,
+                }),
+                "argument 0 at byte {offset}, which begins at word {first}"
+            );
+        }
+        // At or past the tile's memory: every read is zero and every store is dropped, so neither
+        // the `add` through such an argument nor the `dump` through it sees a word.
+        for offset in [LENGTH, LENGTH + 16, 1 << 20, WRAP + LENGTH] {
+            let outs = [out(device), out(device)];
+            run(
+                &queue,
+                &target,
+                &[&|encoder| {
+                    encoder
+                        .set_threadgroup_memory_length(64, offset, 0)
+                        .unwrap();
+                    dispatch(encoder, &states.add);
+                    encoder.set_tile_buffer(Some(&outs[0]), 0, 0).unwrap();
+                    dispatch(encoder, &states.dump);
+                    encoder.set_threadgroup_memory_length(64, 0, 0).unwrap();
+                    encoder.set_tile_buffer(Some(&outs[1]), 0, 0).unwrap();
+                    dispatch(encoder, &states.dump);
+                }],
+            );
+            assert_eq!(
+                words(&outs[0]),
+                by_tile(|_, _| 0),
+                "a dump through an argument at byte {offset}"
+            );
+            assert_eq!(
+                words(&outs[1]),
+                by_tile(|_, _| 0),
+                "the memory after an add through an argument at byte {offset}"
+            );
+        }
+    });
+}
+
 #[test]
 fn tile_threadgroup_arguments_answer_as_plain_metal_does() {
     on_device(|device| {
@@ -238,55 +328,57 @@ fn tile_threadgroup_arguments_answer_as_plain_metal_does() {
         run(
             &queue,
             &target,
-            &[&|encoder| {
-                let invalid = |problem| {
-                    Err(Error::Invalid(Invalid::new(
-                        "set_threadgroup_memory_length",
-                        problem,
-                    )))
-                };
-                let argument = |length, offset| {
-                    invalid(Problem::TileThreadgroupArgument {
-                        length,
-                        offset,
-                        tile_length: LENGTH,
-                    })
-                };
-                assert_eq!(
-                    encoder.set_threadgroup_memory_length(64, 0, 31),
-                    invalid(Problem::IndexOutOfRange {
-                        index: 31,
-                        limit: 31
-                    })
-                );
-                // Every length is taken, a multiple of 16 or not, and so is an argument that
-                // ends past the tile's memory: plain Metal takes either.
-                for (length, offset) in [(8, 0), (0, 0), (1, 16), (64, 112), (u64::MAX, 32)] {
+            &[
+                &|encoder| {
+                    let invalid = |problem| {
+                        Err(Error::Invalid(Invalid::new(
+                            "set_threadgroup_memory_length",
+                            problem,
+                        )))
+                    };
                     assert_eq!(
-                        encoder.set_threadgroup_memory_length(length, offset, 0),
-                        Ok(()),
-                        "{length} at {offset}"
+                        encoder.set_threadgroup_memory_length(64, 0, 31),
+                        invalid(Problem::IndexOutOfRange {
+                            index: 31,
+                            limit: 31
+                        })
                     );
-                }
-                // An offset that is not a multiple of 16, or past the tile's memory, is refused.
-                assert_eq!(
-                    encoder.set_threadgroup_memory_length(64, 8, 0),
-                    argument(64, 8)
-                );
-                assert_eq!(
-                    encoder.set_threadgroup_memory_length(64, 144, 0),
-                    argument(64, 144)
-                );
-                encoder.set_render_pipeline_state(&states.add).unwrap();
-                assert_eq!(
-                    encoder.dispatch_threads_per_tile(Size::new(4, 4, 1)),
-                    Err(Error::Bind(BindError::MissingThreadgroupMemory {
-                        index: 0
-                    }))
-                );
-                // The whole tile's memory, the setter's last byte.
-                assert_eq!(encoder.set_threadgroup_memory_length(LENGTH, 0, 0), Ok(()));
-            }],
+                    // Every length and every offset is taken: a multiple of 16 or not, an argument
+                    // that ends past the tile's memory, an offset at or past that memory, and an
+                    // offset past a `u32`. Plain Metal takes each.
+                    for (length, offset) in [
+                        (8, 0),
+                        (0, 0),
+                        (1, 16),
+                        (64, 112),
+                        (u64::MAX, 32),
+                        (64, 8),
+                        (64, 17),
+                        (64, 144),
+                        (64, u64::from(u32::MAX) + 1),
+                    ] {
+                        assert_eq!(
+                            encoder.set_threadgroup_memory_length(length, offset, 0),
+                            Ok(()),
+                            "{length} at {offset}"
+                        );
+                    }
+                    // The whole tile's memory, the setter's last byte.
+                    assert_eq!(encoder.set_threadgroup_memory_length(LENGTH, 0, 0), Ok(()));
+                },
+                // A dispatch of a function whose argument the encoder never set, which needs a pass of
+                // its own: once any call above has set argument 0 the encoder has it, so the claim
+                // only holds on an encoder that has set nothing.
+                &|encoder| {
+                    encoder.set_render_pipeline_state(&states.add).unwrap();
+                    assert_eq!(
+                        encoder.dispatch_threads_per_tile(Size::new(4, 4, 1)),
+                        Err(Error::Bind(BindError::MissingThreadgroupMemory {
+                            index: 0
+                        }))
+                    );
+                },
+            ],
         );
     });
 }

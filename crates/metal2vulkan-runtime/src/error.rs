@@ -891,29 +891,6 @@ pub enum Problem {
     ///
     /// Basis: ours (a runtime extension: Metal wraps no Vulkan buffer).
     WrappedBuffer(WrappedBufferProblem),
-    /// A tile function's threadgroup argument of `length` bytes at byte `offset` of its tile's
-    /// threadgroup memory, which the pass makes `tile_length` bytes (its
-    /// `threadgroupMemoryLength`): an `offset` that is not a multiple of 16, past the tile's
-    /// memory, or past a `u32` (`set_threadgroup_memory_length` of a render encoder). Metal's own
-    /// API validation refuses the setter for those and for a length that is not a multiple of 16
-    /// or an argument that ends past the tile's memory, which is not what plain Metal does: on an
-    /// Apple M3 Max under macOS 27.0.1 plain Metal takes every length and offset tried (4, 17, 0
-    /// and 2^32 among them), the pass completes, and the argument begins at its offset floored to
-    /// a multiple of 4 bytes, reading zero from the tile's memory's end on. So the runtime takes
-    /// every length and every argument that ends past the tile's memory too
-    /// (`metal2vulkan::error::BindError::TileThreadgroupArgument` carries the whole measurement).
-    ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal takes every length and offset
-    /// tried, 4, 17, 0 and 2^32 among them, and the pass completes, so the offsets this problem
-    /// still refuses are among the ones Metal took).
-    TileThreadgroupArgument {
-        /// The argument's length, in bytes.
-        length: u64,
-        /// The argument's offset in the tile's threadgroup memory.
-        offset: u64,
-        /// The tile's threadgroup memory, in bytes.
-        tile_length: u64,
-    },
     /// A depth/stencil state's `gpu_resource_id` on a device that does not claim Apple10, at a
     /// [`MetalLevel`](crate::MetalLevel) whose plain Metal raises there (macOS 26.7, the
     /// consumer's measurement on an M3 Max). Metal's API validation stops the call at every

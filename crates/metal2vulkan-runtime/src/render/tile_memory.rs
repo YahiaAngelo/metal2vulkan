@@ -10,11 +10,13 @@
 //! - **One table for every stage**: an argument set at `offset` has its word 0 at that byte of the
 //!   tile's memory, so arguments placed at overlapping offsets alias (Metal's validation says
 //!   "there is an overlap"; Metal runs it as written).
-//! - **The setter's checks** (which stops each in Metal's validation):
-//!   an index below 31, a length and an offset that are multiples of 16, and an argument that ends
-//!   inside the pass's `threadgroupMemoryLength`. Each is refused here (`Invalid`), and a
-//!   dispatch of a function whose argument the encoder never set is the binder's
-//!   `MissingThreadgroupMemory`, where Metal's validation stops the dispatch.
+//! - **The setter's checks** are Metal's API validation's, not plain Metal's: an index below 31, a
+//!   length and an offset that are multiples of 16, and an argument that ends inside the pass's
+//!   `threadgroupMemoryLength`. Only the index is refused here (`IndexOutOfRange`, which Metal
+//!   itself raises); plain Metal takes every length and every offset, so the setter does too
+//!   ([`RenderCommandEncoder::set_threadgroup_memory_length`] carries the measurement and the
+//!   layer's own words), and a dispatch of a function whose argument the encoder never set is the
+//!   binder's `MissingThreadgroupMemory`, where Metal's validation stops the dispatch.
 //!
 //! Measured on an M4 for a fragment function's threadgroup arguments: they
 //! are the same memory of the fragment's tile, which every fragment of the tile shares, a tile
@@ -51,7 +53,7 @@ use super::RenderCommandEncoder;
 use super::RenderLowering;
 use crate::argument_table::{check_index, BUFFER_SLOTS};
 use crate::buffer::Buffer;
-use crate::error::{internal, invalid, Error, Problem};
+use crate::error::{internal, Error};
 use crate::values::{CpuCacheMode, HazardTrackingMode, ResourceOptions, StorageMode};
 use crate::Device;
 use metal2vulkan::bind::{TileThreadgroupArgument, TileThreadgroupMemory};
@@ -131,27 +133,15 @@ impl RenderLowering {
         self.log(|_| RenderCall::ThreadgroupMemoryLength(length, offset, index));
         const CALL: &str = "set_threadgroup_memory_length";
         check_index(CALL, index, BUFFER_SLOTS)?;
-        let tile_length = self.layout.tile.threadgroup_memory_length;
         // A length takes no part in the layout and bounds no access, as plain Metal's does not, so
-        // any length a `u32` holds is planned; an argument that ends past the tile's memory has
-        // its accesses contained there, reading zero as Metal's do.
-        let argument = match (u32::try_from(length).ok(), u32::try_from(offset).ok()) {
-            (Some(length32), Some(offset32))
-                if offset32.is_multiple_of(16) && u64::from(offset32) <= tile_length =>
-            {
-                TileThreadgroupArgument::new(length32, offset32)
-            }
-            _ => {
-                return Err(invalid(
-                    CALL,
-                    Problem::TileThreadgroupArgument {
-                        length,
-                        offset,
-                        tile_length,
-                    },
-                ))
-            }
-        };
+        // any length is planned; it saturates at `u32::MAX`, which no access reads. Every offset is
+        // planned too, truncated to 32 bits, which is what plain Metal does with it: byte 2^32
+        // begins where byte 0 does and byte 2^32 + 4 where byte 4 does, measured. The binder then
+        // places it where plain Metal begins the argument (`bind::plan`).
+        let argument = TileThreadgroupArgument::new(
+            u32::try_from(length).unwrap_or(u32::MAX),
+            (offset % (u64::from(u32::MAX) + 1)) as u32,
+        );
         self.tile_memory.arguments.insert(index, argument);
         Ok(())
     }
@@ -160,12 +150,34 @@ impl RenderLowering {
 impl RenderCommandEncoder {
     /// `setThreadgroupMemoryLength:offset:atIndex:`: a tile or fragment function's threadgroup
     /// argument `index` is `length` bytes at byte `offset` of its tile's threadgroup memory, for
-    /// the encoder's later tile dispatches and draws (the module docs). Every length is taken, and
-    /// an argument that ends past the pass's `threadgroupMemoryLength` reads zero from its end on,
-    /// as plain Metal does (`Problem::TileThreadgroupArgument` names the measurement). Refused
-    /// (`Invalid`): an index past the table (`IndexOutOfRange`), and an offset that is not a
-    /// multiple of 16 bytes, past the pass's `threadgroupMemoryLength`, or past a `u32`
-    /// (`TileThreadgroupArgument`).
+    /// the encoder's later tile dispatches and draws (the module docs).
+    ///
+    /// Every length and every offset is taken, as plain Metal takes them. Measured on an Apple M3
+    /// Max under macOS 27.0.1, eighteen offsets each in its own process with Metal's API validation
+    /// off, over a tile memory of 128 bytes a seeding dispatch had filled with values nothing else
+    /// could write: the setter took every one, every pass completed with no error, and
+    ///
+    /// - the argument begins at its offset **floored to a multiple of 4** bytes: bytes 0, 2, 4, 8,
+    ///   16, 17, 20 and 32 began at words 0, 0, 1, 2, 4, 4, 5 and 8, so the floor is to 4 and not
+    ///   to 16;
+    /// - an offset **at or past** the pass's `threadgroupMemoryLength` reads zero and drops its
+    ///   stores (bytes 128 and 144 of that 128-byte memory read zero throughout), as an argument
+    ///   that ends past it does from that end on;
+    /// - the offset is **truncated to 32 bits**: bytes 2^32, 2^32 + 4, 2^32 + 16, 2^33 and 2^33 + 8
+    ///   began where bytes 0, 4, 16, 0 and 8 did, and 2^32 + 128 read zero as byte 128 did;
+    /// - the address arithmetic **wraps at 2^32** rather than reading zero for ever: an argument at
+    ///   `u64::MAX`, byte `0xfffffffc` once truncated, read zero and then the memory's words 0, 1
+    ///   and 2 as its reads carried past 2^32.
+    ///
+    /// Metal's API validation refuses the call where plain Metal takes it, and says so in these
+    /// words: `offset(4) must be a multiple of 16 bytes.` for an offset that is not, and
+    /// `offset + length(144) must be <= threadgroupMemoryLength(128).` for an argument that ends
+    /// past the pass's memory. So a consumer running under the validation layer gets a message
+    /// where this call runs, and under `MTL_DEBUG_LAYER_ERROR_MODE=assert` the layer ends the
+    /// program there (measured: SIGABRT). Under `=nslog` the layer logs and the run continues, and
+    /// every reading above was the same with the layer on as with it off.
+    ///
+    /// Refused (`Invalid`): an index past the table (`IndexOutOfRange`), which Metal itself raises.
     pub fn set_threadgroup_memory_length(
         &mut self,
         length: u64,

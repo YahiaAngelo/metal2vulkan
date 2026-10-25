@@ -40,9 +40,10 @@
 //!   (`SpecKey::TileThreadgroupLength`, the pass's length rounded up to 16) and the tiles across
 //!   the render area (`SpecKey::TileGridWidth`), and binds the pass's tile memory
 //!   (`WriteSource::TileMemory`, every tile's bytes). An argument the encoder did not set is
-//!   `BindError::MissingThreadgroupMemory`; one whose offset is past the tile's memory or not
-//!   16-byte aligned `BindError::TileThreadgroupArgument`. An argument's length bounds nothing, as
-//!   plain Metal's does not. The tile's bytes start the threadgroup total.
+//!   `BindError::MissingThreadgroupMemory`. Every offset is placed, as plain Metal takes every
+//!   offset, at the offset floored to a multiple of 4, which is where plain Metal begins the
+//!   argument ([`tile_argument_offset`] carries the measurement). An argument's length bounds
+//!   nothing, as plain Metal's does not. The tile's bytes start the threadgroup total.
 //! - **Kept imageblock bytes** (`RuntimeFact::TileImageblock`). A tile function whose explicit
 //!   imageblock stands alone, in a pass that keeps fewer bytes of its cells than its data
 //!   (`BindShape::kept_imageblock_bytes`), asks for `VariantKey::kept_imageblock_bytes`: plain
@@ -90,6 +91,10 @@ use std::collections::BTreeMap;
 
 /// Metal rounds every threadgroup-memory length to 16 bytes.
 const TG_ALIGN: u64 = 16;
+
+/// What plain Metal floors a tile threadgroup argument's offset to, in bytes
+/// ([`tile_argument_offset`] carries the measurement).
+const TG_FLOOR: u32 = 4;
 
 pub(crate) fn internal(detail: impl Into<String>) -> BindError {
     BindError::Internal(InternalError::new(InternalKind::Invariant, detail))
@@ -174,15 +179,47 @@ impl TileMemoryPlan {
     }
 }
 
+/// Where an argument the encoder set at byte `offset` of its tile's threadgroup memory begins in
+/// the threadgroup arena: `offset` floored to a multiple of 4, which is where plain Metal begins
+/// it.
+///
+/// Plain Metal takes every offset and places it by this one rule, measured on an Apple M3 Max
+/// under macOS 27.0.1 over eighteen offsets, each in its own process with Metal's API validation
+/// off: with a tile memory of 128 bytes whose word `t` held a value only a seeding dispatch could
+/// have written, an argument at byte 0, 2, 4, 8, 16, 17, 20 and 32 began at word 0, 0, 1, 2, 4, 4,
+/// 5 and 8. So the floor is to 4 and not to 16, which byte 17 alone cannot tell apart (both place
+/// it at byte 16) but bytes 4, 8 and 20 do.
+///
+/// Nothing is clamped. An offset at or past the tile's memory needs no clamp: every access from it
+/// fails the arena's containment, which reads zero and drops the store (`memory::contain`), and
+/// bytes 128 and 144 of that 128-byte memory read zero throughout. Nor may it be clamped, because
+/// plain Metal's own address arithmetic wraps at 2^32 rather than reading zero from the memory's
+/// end on for ever: an argument at `u64::MAX`, which is byte `0xfffffffc` after the truncation the
+/// encoder applies, read zero and then the memory's words 0, 1 and 2 as its reads carried past
+/// 2^32. The arena's offsets are `u32` and add with wrapping, so such accesses wrap where Metal's
+/// do.
+///
+/// With containment off (`Containment::UnsafeOff`, never a default) a base past the arena is
+/// outside its array, as the end of an argument that ends past the tile's memory already is: that
+/// switch gives up Metal's answer for every out-of-range access, not this one alone.
+///
+/// A 4-byte-aligned base is exact here because the threadgroup arena has no 16-byte unit
+/// (`memory::arena::ArenaMem` declares no `Units`), so a 16-byte access takes `Path::Vec4`'s
+/// fallback to four words at `off / 4` rather than a `uvec4` index at `off / 16`
+/// (`memory::leaf`): no access to the arena claims an alignment the base does not hold.
+fn tile_argument_offset(offset: u32) -> u32 {
+    offset - offset % TG_FLOOR
+}
+
 /// The tile threadgroup memory of a pipeline of `dependencies` as `shape` places it on `device`;
 /// `None` for a pipeline that reads no threadgroup argument (`RuntimeFact::TileThreadgroupMemory`:
 /// a tile function's, or a fragment function's). An argument the encoder did not set is
 /// `BindError::MissingThreadgroupMemory`. An argument's length takes no part in the layout and
-/// bounds no access, as plain Metal's does not; one whose offset is not a multiple of 16, or past
-/// the tile's memory, is `BindError::TileThreadgroupArgument` (both doc comments name what plain
-/// Metal answers there). A shape without a render area or a tile is `InvalidRenderArea` or
-/// `InvalidImageblockSize`. A buffer of every tile's memory past the device's
-/// `maxStorageBufferRange`, which one descriptor binds at most, is `Unsupported`.
+/// bounds no access, and every offset is placed where plain Metal begins the argument
+/// ([`tile_argument_offset`]), as plain Metal takes every length and every offset. A shape without
+/// a render area or a tile is `InvalidRenderArea` or `InvalidImageblockSize`. A buffer of every
+/// tile's memory past the device's `maxStorageBufferRange`, which one descriptor binds at most, is
+/// `Unsupported`.
 pub(crate) fn tile_memory(
     dependencies: &[RuntimeDependency],
     device: &Device,
@@ -198,19 +235,7 @@ pub(crate) fn tile_memory(
             .arguments
             .get(&index)
             .ok_or(BindError::MissingThreadgroupMemory { index })?;
-        // The length bounds nothing: an access past the tile's memory is contained against
-        // `SpecKey::TileThreadgroupLength` and reads zero, which is what plain Metal reads past
-        // the pass's `threadgroupMemoryLength` (`BindError::TileThreadgroupArgument`).
-        let aligned = u64::from(argument.offset).is_multiple_of(TG_ALIGN);
-        if !aligned || argument.offset > memory.length {
-            return Err(BindError::TileThreadgroupArgument {
-                index,
-                offset: argument.offset,
-                length: argument.length,
-                tile_length: memory.length,
-            });
-        }
-        offsets.insert(index, argument.offset);
+        offsets.insert(index, tile_argument_offset(argument.offset));
     }
     if offsets.is_empty() {
         return Ok(None);

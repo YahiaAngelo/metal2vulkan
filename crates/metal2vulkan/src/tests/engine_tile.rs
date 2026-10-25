@@ -780,9 +780,11 @@ fn a_tiles_threadgroup_memory_persists_across_dispatches() {
 /// length takes no part in the layout and bounds no access, as plain Metal's does not, so a length
 /// that is not a multiple of 16 and one that ends past the tile's memory are both planned at their
 /// offset (plain Metal on an M3 Max under macOS 27.0.1 takes every length, and reads zero from the
-/// tile's memory's end on, which the arena's containment gives). An argument the encoder did not
-/// set, or whose offset is not a multiple of 16 or past the tile's memory, is refused, and so is a
-/// tile memory past one storage-buffer descriptor's range.
+/// tile's memory's end on, which the arena's containment gives). Every offset is planned too, where
+/// plain Metal begins the argument: at the offset floored to a multiple of 4, with no clamp, since
+/// the containment reads zero past the tile's memory and Metal's own arithmetic wraps at 2^32. An
+/// argument the encoder did not set is refused, and so is a tile memory past one storage-buffer
+/// descriptor's range.
 #[test]
 fn a_tile_pipeline_places_its_threadgroup_arguments() {
     use crate::bind::{TileThreadgroupArgument, TileThreadgroupMemory};
@@ -859,17 +861,31 @@ fn a_tile_pipeline_places_its_threadgroup_arguments() {
                 "{stem} {length} at {offset}"
             );
         }
-        // An offset that is not a multiple of 16, or past the tile's memory, is refused.
-        for (index, length, offset) in [(1, 64, 8), (1, 16, 4), (1, 16, 80), (1, 16, 1 << 20)] {
+        // Every offset is placed where plain Metal begins the argument: at the offset floored to
+        // a multiple of 4, and nothing is clamped, since an access from a base past the tile's
+        // memory is contained, reads zero and drops its store, and Metal's own arithmetic wraps at
+        // 2^32 rather than reading zero for ever. The offsets below are the ones the planner used
+        // to refuse; `(2, 0)`, `(20, 20)` and `(70, 68)` are what a floor to 16 would place
+        // differently from a floor to 4.
+        for (offset, at) in [
+            (8, 8),
+            (4, 4),
+            (2, 0),
+            (17, 16),
+            (20, 20),
+            (70, 68),
+            (72, 72),
+            (80, 80),
+            (1 << 20, 1 << 20),
+            (u32::MAX, u32::MAX - 3),
+        ] {
+            let plan = pipe
+                .plan(&dev, &state(72, &[(0, 64, 0), (1, 16, offset)]).shape())
+                .unwrap_or_else(|e| panic!("{stem}: 16 at {offset}: {e}"));
             assert_eq!(
-                refused(&[(0, 64, 0), (index, length, offset)]),
-                Err(BindError::TileThreadgroupArgument {
-                    index,
-                    offset,
-                    length,
-                    tile_length: 72,
-                }),
-                "{stem} {length} at {offset}"
+                specialized(&pipe, &plan, SpecKey::TgOffset(1)),
+                Some(at),
+                "{stem} 16 at {offset}"
             );
         }
     }

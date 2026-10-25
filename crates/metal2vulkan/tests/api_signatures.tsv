@@ -11679,7 +11679,6 @@ variant	metal2vulkan-runtime::Problem::Sparse	Sparse(SparseProblem)
 variant	metal2vulkan-runtime::Problem::StorageMode	StorageMode
 variant	metal2vulkan-runtime::Problem::Texture	Texture(TextureProblem)
 variant	metal2vulkan-runtime::Problem::TextureView	TextureView(ViewProblem)
-variant	metal2vulkan-runtime::Problem::TileThreadgroupArgument	TileThreadgroupArgument { length: u64, offset: u64, tile_length: u64 }
 variant	metal2vulkan-runtime::Problem::UndefinedValue	UndefinedValue { ty: &'static str, raw: u64 }
 variant	metal2vulkan-runtime::Problem::UnrasterizedVertexReturn	UnrasterizedVertexReturn
 variant	metal2vulkan-runtime::Problem::UnwrittenFragmentInputs	UnwrittenFragmentInputs { inputs: Box<[String]> }
@@ -12946,7 +12945,6 @@ variant	metal2vulkan::error::BindError::PatchIndexRange	PatchIndexRange { needed
 variant	metal2vulkan::error::BindError::SlotOutOfRange	SlotOutOfRange { slot: SlotRef }
 variant	metal2vulkan::error::BindError::TessellationFactorRange	TessellationFactorRange { needed: u64, limit: u64 }
 variant	metal2vulkan::error::BindError::TexelBufferTooLarge	TexelBufferTooLarge { slot: SlotRef, elements: u64, limit: u64 }
-variant	metal2vulkan::error::BindError::TileThreadgroupArgument	TileThreadgroupArgument { index: u32, offset: u32, length: u32, tile_length: u32 }
 variant	metal2vulkan::error::BindError::UnboundVertexBuffer	UnboundVertexBuffer { slot: SlotRef }
 variant	metal2vulkan::error::BindError::UniformViewAliased	UniformViewAliased { slot: SlotRef, written: SlotRef }
 variant	metal2vulkan::error::BindError::Unsupported	Unsupported(Unsupported)

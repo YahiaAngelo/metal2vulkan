@@ -878,8 +878,8 @@ impl ImageblockSize {
 /// A render encoder's tile threadgroup memory: each tile of the render pass holds `length` bytes,
 /// the pass's `threadgroupMemoryLength`, which the pass keeps across its tile dispatches and starts
 /// at zero; a tile function's threadgroup argument `n` is `arguments[n].length` bytes at
-/// `arguments[n].offset` in its tile's memory. Arguments placed at overlapping offsets share their
-/// bytes, as Metal's do.
+/// `arguments[n].offset` in its tile's memory, which the binder places where plain Metal begins it
+/// (`bind::plan`). Arguments placed at overlapping offsets share their bytes, as Metal's do.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -903,7 +903,12 @@ impl TileThreadgroupMemory {
 }
 
 /// One tile threadgroup argument (`setThreadgroupMemoryLength:offset:atIndex:`): `length` bytes at
-/// byte `offset` of the tile's threadgroup memory, both multiples of 16.
+/// byte `offset` of the tile's threadgroup memory.
+///
+/// Metal's API validation wants both to be multiples of 16, which plain Metal does not: it takes
+/// every length and every offset. The length takes no part in the layout and bounds no access, as
+/// plain Metal's does not, and the binder places the argument where plain Metal begins it, which is
+/// not always `offset` itself (`bind::plan`).
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

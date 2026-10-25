@@ -34,7 +34,7 @@ Columns:
 | Translation caps | 14 | 14 | 0 | 0 | 7 | 7 | 0 |
 | Rate maps the compile layer does not compile | 5 | 5 | 0 | 0 | 4 | 1 | 0 |
 | The translation deadline | 1 | 1 | 0 | 0 | 0 | 1 | 0 |
-| What a call did wrong | 68 | 68 | 0 | 0 | 0 | 0 | 0 |
+| What a call did wrong | 67 | 67 | 0 | 0 | 0 | 0 | 0 |
 | What a call did wrong, in detail | 167 | 152 | 0 | 0 | 0 | 0 | 0 |
 
 ## Totals by basis
@@ -48,7 +48,7 @@ Columns:
 | Translation caps | 0 | 0 | 0 | 0 | 14 | 0 | 0 | 0 |
 | Rate maps the compile layer does not compile | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 5 |
 | The translation deadline | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
-| What a call did wrong | 22 | 3 | 7 | 0 | 10 | 9 | 17 | 0 |
+| What a call did wrong | 22 | 3 | 6 | 0 | 10 | 9 | 17 | 0 |
 | What a call did wrong, in detail | 56 | 27 | 27 | 0 | 31 | 26 | 0 | 0 |
 
 ## 1. Translator and front-end refusals (`Unsupported`: a `Feature` and its `Needs`)
@@ -372,7 +372,6 @@ Columns:
 | `IndirectDispatchRange` | An indirect dispatch's `bytes` of arguments at `offset` that run past the bytes the runtime holds at Metal's address in its buffer of `length`... | every device (a public call's own check of its arguments) | `metal-takes`: an Apple M3 Max under macOS 27.0.1: an indirect dispatch whose 12 bytes of arguments run past its buffer of 8 bytes runs and counts right; Metal's API validation alone refuses it. Arguments inside the buffer's allocation are taken now, so what the refusal still reaches past Metal for is the slice past the bytes the runtime holds there | 1: `crates/metal2vulkan-runtime/src/indirect_dispatch.rs (arguments_offset)` | `-` |
 | `Sparse` | A sparse heap's or texture's call Metal stops, or answers nil for | every device (a public call's own check of its arguments) | `delegated`: SparseProblem, section 9 | 5: `crates/metal2vulkan-runtime/src/sparse/encoder.rs (move_texture_mappings)`, `crates/metal2vulkan-runtime/src/sparse/encoder.rs (update_texture_mapping_indirect)` (+2) | `-` |
 | `WrappedBuffer` | A buffer the caller made that cannot be wrapped as a Metal buffer of the length and storage (`new_buffer_with_vk_buffer`) | every device (a public call's own check of its arguments) | `ours`: a runtime extension: Metal wraps no Vulkan buffer | 1: `crates/metal2vulkan-runtime/src/wrapped_buffer.rs (new_buffer_with_vk_buffer)` | `-` |
-| `TileThreadgroupArgument` | A tile function's threadgroup argument of `length` bytes at byte `offset` of its tile's threadgroup memory, which the pass makes `tile_length`... | every device (a public call's own check of its arguments) | `metal-takes`: an Apple M3 Max, macOS 27.0.1: plain Metal takes every length and offset tried, 4, 17, 0 and 2^32 among them, and the pass completes, so the offsets this problem still refuses are among the ones Metal took | 1: `crates/metal2vulkan-runtime/src/render/tile_memory.rs (set_threadgroup_memory_length)` | `-` |
 | `DepthStencilResourceId` | A depth/stencil state's `gpu_resource_id` on a device that does not claim Apple10, at a [`MetalLevel`](crate::MetalLevel) whose plain Metal raises... | every device (a public call's own check of its arguments) | `metal-measured`: an M3 Max, macOS 26.7: plain Metal raises, as the consumer measured; 27.0.1's plain call answers 0, and so does the runtime there | 1: `crates/metal2vulkan-runtime/src/depth_stencil.rs (gpu_resource_id)` | `-` |
 | `RequiredThreads` | A pipeline's `requiredThreadsPerThreadgroup` that Metal refuses at creation, or a dispatch whose threadgroup size is not it | every device (a public call's own check of its arguments) | `delegated`: RequiredThreadsProblem, section 9 | 1: `crates/metal2vulkan-runtime/src/pipeline/additions.rs (check_kernel)` | `-` |
 | `BinaryFunctions` | A pipeline's binary functions that Metal refuses | every device (a public call's own check of its arguments) | `delegated`: BinaryFunctionProblem, section 9 | 4: `crates/metal2vulkan-runtime/src/pipeline/additions.rs (added, 2 sites)`, `crates/metal2vulkan-runtime/src/pipeline/additions.rs (new_compute_pipeline_state_with_additional_binary_functions)` (+1) | `-` |
@@ -847,7 +846,6 @@ Each refusal's sites, with the function that builds it.
 - `invalid::IndirectDispatchRange`: `crates/metal2vulkan-runtime/src/indirect_dispatch.rs (arguments_offset)`
 - `invalid::Sparse`: `crates/metal2vulkan-runtime/src/sparse/encoder.rs (move_texture_mappings)`; `crates/metal2vulkan-runtime/src/sparse/encoder.rs (update_texture_mapping_indirect)`; `crates/metal2vulkan-runtime/src/sparse/encoder.rs (update_texture_mappings)`; `crates/metal2vulkan-runtime/src/texture.rs (plan_sparse_texture, 2 sites)`
 - `invalid::WrappedBuffer`: `crates/metal2vulkan-runtime/src/wrapped_buffer.rs (new_buffer_with_vk_buffer)`
-- `invalid::TileThreadgroupArgument`: `crates/metal2vulkan-runtime/src/render/tile_memory.rs (set_threadgroup_memory_length)`
 - `invalid::DepthStencilResourceId`: `crates/metal2vulkan-runtime/src/depth_stencil.rs (gpu_resource_id)`
 - `invalid::RequiredThreads`: `crates/metal2vulkan-runtime/src/pipeline/additions.rs (check_kernel)`
 - `invalid::BinaryFunctions`: `crates/metal2vulkan-runtime/src/pipeline/additions.rs (added, 2 sites)`; `crates/metal2vulkan-runtime/src/pipeline/additions.rs (new_compute_pipeline_state_with_additional_binary_functions)`; `crates/metal2vulkan-runtime/src/pipeline/additions.rs (not_precompiled)`
