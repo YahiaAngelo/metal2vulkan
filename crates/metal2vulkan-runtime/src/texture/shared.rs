@@ -7,7 +7,11 @@
 //! - only a `Private` texture is made shareable: any other storage mode answers nil, and API
 //!   validation stops it ("Requested storage mode is not allowed for Shared Textures"); a texture
 //!   buffer and a multisample texture are made, and a texture opened from a texture buffer's handle
-//!   reads what a kernel wrote through the texture buffer (a Metal probe on the M3 Max and an M4);
+//!   reads what a kernel wrote through the texture buffer (a Metal probe on the M3 Max and an M4).
+//!   The storage rule was re-read on the M3 Max under macOS 27.0.1, one cell per process and eight
+//!   processes a cell: `Shared`, `Managed` and `Memoryless` answered nil 8 of 8 for `RGBA8Unorm`,
+//!   `R16Uint` and each of the four padded 10-bit formats, and `Private` a texture 8 of 8 for
+//!   each, the padded ones among them;
 //! - a texture made otherwise, a texture over a buffer, and a view of a shareable texture are
 //!   not shareable, and their handle is nil;
 //! - each open answers a new texture object, shareable, with the texture's properties (its
@@ -58,8 +62,7 @@ impl Device {
     /// A texture buffer is made over a buffer of its own, whose handles open texture buffers over
     /// the same texels.
     ///
-    /// Refused: as [`Device::new_texture`] refuses the descriptor (a format Metal holds only over
-    /// memory it is given among them, `NotImplemented(Format)`); storage other than `Private`
+    /// Refused: as [`Device::new_texture`] refuses the descriptor; storage other than `Private`
     /// (`Nil`, `StorageMode`), which plain Metal answers nil and its validation stops, before every
     /// rule of the descriptor; a format of which Metal makes no texture alone (`Nil`) before the
     /// multisample sample count's rule; a swizzle with writes under `write_swizzle_enabled` too

@@ -17,7 +17,7 @@ use metal2vulkan::error::Feature;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
     BlitOption, Buffer, CommandBufferStatus, CopyProblem, Device, Error, HeapDescriptor, HeapType,
-    Invalid, Nil, Origin, Problem, Region, ResourceOptions, Size, StorageMode, Texture,
+    Invalid, Origin, Problem, Region, ResourceOptions, Size, StorageMode, Texture,
     TextureDescriptor, TextureProblem, ViewProblem,
 };
 
@@ -56,19 +56,24 @@ pub(super) fn no_texture_alone(pf: PixelFormat) -> bool {
 
 /// `R10Unorm_X6` and `RG10Unorm_X12`, and their `_sRGB` twins, are made in memory of their own as
 /// readily as over memory a texture is given, as Metal's are: the device's `new_texture`, an
-/// automatic heap's, a placement heap's `new_texture_at_offset`, the heap size query and a
-/// caller's buffer's all answer a texture, for a 2D texture and a texture buffer alike, and only
-/// `new_shared_texture` answers nil (`NoTextureOfFormat`), as plain
-/// `newSharedTextureWithDescriptor:` does for all four. A multisample one stays refused, Metal's
-/// validation stopping it ("does not support multisample textures").
+/// automatic heap's, a placement heap's `new_texture_at_offset`, the heap size query, a caller's
+/// buffer's and `new_shared_texture` all answer a texture, for a 2D texture and a texture buffer
+/// alike. A multisample one stays refused, Metal's validation stopping it ("does not support
+/// multisample textures").
 ///
 /// Measured on an Apple M3 Max under macOS 27.0.1 (26A434) for all four formats: every one of
 /// those creators answered a texture in `Shared`, `Private` and `Memoryless` storage, under
 /// `ShaderRead`, `ShaderRead | ShaderWrite` and `ShaderRead | RenderTarget` usage, with four
 /// levels, as an array of three slices and as a texture buffer of 64 texels; a sparse heap placed
 /// one too; and the heap size query answered the tight linear size at an alignment of 128. The
-/// shareable creator answered nil for all four, and the multisample descriptor ended the process
-/// in Metal's validation.
+/// multisample descriptor ended the process in Metal's validation.
+///
+/// `newSharedTextureWithDescriptor:` answers a shareable texture of each of the four as well,
+/// re-read on that M3 Max with one cell per exec'd process and eight processes a cell: 2D 8x8,
+/// 2D 16x16, a texture buffer of 8 texels and one of 16, `Private` storage under `ShaderRead`,
+/// 8 of 8 each, the handle made. Its nil is the storage mode's and no format's: `Shared`,
+/// `Managed` and `Memoryless` answered nil 8 of 8 for these four and for `RGBA8Unorm` and
+/// `R16Uint` beside them.
 #[test]
 fn padded_formats_are_made_in_memory_of_their_own() {
     let cache = ScratchCache::new().unwrap();
@@ -109,15 +114,8 @@ fn padded_formats_are_made_in_memory_of_their_own() {
                     placed.new_texture_at_offset(d, 0),
                     "a placement heap's at 0",
                 );
-                // Only the shareable creator answers nil, as plain Metal's does.
-                assert_eq!(
-                    device.new_shared_texture(d).err(),
-                    Some(Error::Nil(Nil::new(
-                        "new_shared_texture",
-                        Problem::Texture(TextureProblem::NoTextureOfFormat),
-                    ))),
-                    "{what}: a shareable one"
-                );
+                // The shareable creator makes one too, as plain Metal's does.
+                made(device.new_shared_texture(d), "the shareable creator's");
             }
             // A multisample one stays refused: Metal's validation stops it.
             let mut multisample = plain;

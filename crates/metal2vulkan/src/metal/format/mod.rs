@@ -1211,8 +1211,12 @@ pub fn extended_range_blend(pf: PixelFormat, profile: &DeviceProfile) -> Result<
 /// sparse heap each place one, and `heapTextureSizeAndAlignWithDescriptor:` answers the tight
 /// linear size at an alignment of 128. A shader read answers the code's value and a shader write
 /// stores the code, a blit from a buffer lands exactly, and a render pass clears and draws into
-/// one. Only `newSharedTextureWithDescriptor:` answers nil, and only a multisample descriptor is
-/// stopped by Metal's validation.
+/// one. `newSharedTextureWithDescriptor:` makes one as well, in the `Private` storage that is the
+/// only storage any shareable texture is made in: all four formats at 2D 8x8, 2D 16x16 and a
+/// texture buffer of 8 and of 16 texels answered a shareable texture of the format, 8 of 8
+/// processes each, where `Shared`, `Managed` and `Memoryless` storage answer nil for every format
+/// alike (`RGBA8Unorm` and `R16Uint` beside these four). Only a multisample descriptor is stopped
+/// by Metal's validation.
 ///
 /// Metal's own host copies of such a texture are exact only while it keeps the texture linear —
 /// `allocatedSize` equal to the tight `width * bytes * height`, which held for every height up

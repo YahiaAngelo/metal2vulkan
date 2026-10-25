@@ -3327,8 +3327,9 @@ each item named states the rule in full.
 **Padded 10-bit textures** (`R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB` twins)
 
 - **A texture of one in memory of its own round-trips its words at every extent.** Metal makes
-  such a texture from every creator but `newSharedTextureWithDescriptor:`, which answers nil, and
-  the runtime makes it from each of those too. Metal's own `replaceRegion:` and `getBytes:` on it
+  such a texture from every creator, `newSharedTextureWithDescriptor:` among them in the `Private`
+  storage that is the only storage any shareable texture is made in, and the runtime makes it from
+  each. Metal's own `replaceRegion:` and `getBytes:` on it
   are exact only while it keeps the texture linear, and are silent no-ops where it picks its
   compressed layout instead (`allocatedSize` 128 bytes or more beyond the tight linear size: on an
   M3 Max under macOS 27.0.1, 16x16 and 64x64 under `ShaderRead` alone, where `getBytes:` left its

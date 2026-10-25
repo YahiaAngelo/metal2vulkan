@@ -855,6 +855,54 @@ fn cube_arrays_stop_past_341_cubes_and_memoryless_two_plane_cubes_are_not_nil() 
     }
 }
 
+/// The shared creator makes a padded 10-bit texture, as `newSharedTextureWithDescriptor:` does.
+/// Measured on an Apple M3 Max under macOS 27.0.1 (26A434), plain Metal, one cell per exec'd
+/// process and eight processes a cell: for `R10Unorm_X6`, `R10Unorm_X6_sRGB`, `RG10Unorm_X12`
+/// and `RG10Unorm_X12_sRGB` at 2D 8x8, 2D 16x16, a texture buffer of 8 texels and one of 16, in
+/// `Private` storage under `ShaderRead`, the call answered a shareable texture of the format
+/// whose handle was made, 8 of 8 each (16 cells, 128 calls). It answered one for the same
+/// descriptor built with six setters and Metal's defaults for everything else, and under
+/// `Unknown`, `ShaderRead | ShaderWrite`, `ShaderRead | RenderTarget` and
+/// `ShaderRead | PixelFormatView` usage, with `allowGPUOptimizedContents` off and on, and with
+/// four levels (8 of 8 each).
+///
+/// What the creator does answer nil for is storage other than `Private`, whatever the format:
+/// `Shared`, `Managed` and `Memoryless` answered nil 8 of 8 for each of the four formats and for
+/// `RGBA8Unorm` and `R16Uint` beside them, where `Private` answered a texture 8 of 8
+/// (`Device::new_shared_texture` refuses it before any rule here). An earlier reading of this
+/// family asked in `Shared` storage and took that nil for the format's.
+#[test]
+fn the_shared_creator_makes_a_padded_ten_bit_texture() {
+    use TextureType as T;
+    for pf in [
+        PixelFormat::R10UnormX6,
+        PixelFormat::R10UnormX6SRGB,
+        PixelFormat::RG10UnormX12,
+        PixelFormat::RG10UnormX12SRGB,
+    ] {
+        for width in [8, 16] {
+            let mut plain = TextureDescriptor::texture_2d(pf, width, width, false);
+            plain.usage = TextureUsage::SHADER_READ;
+            plain.resource_options = ResourceOptions::private();
+            let texels = TextureDescriptor::texture_buffer(
+                pf,
+                width,
+                ResourceOptions::private(),
+                TextureUsage::SHADER_READ,
+            );
+            for (ty, d) in [(T::Type2D, &plain), (T::TextureBuffer, &texels)] {
+                let made = d.check_shared(APPLE);
+                assert_eq!(
+                    made.as_ref().map(|layout| layout.pixel_format),
+                    Ok(pf),
+                    "{pf:?} {ty:?} {width}: the shared creator"
+                );
+                assert_eq!(made, d.check(APPLE), "{pf:?} {ty:?} {width}");
+            }
+        }
+    }
+}
+
 /// The padded 10-bit formats (`R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB` twins) take no
 /// multisample texture, which Metal's validation stops, of either multisample type; a 2D one
 /// passes the descriptor's rules.

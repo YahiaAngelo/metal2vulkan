@@ -531,12 +531,6 @@ impl TextureDescriptor {
         if no_texture_alone(pf) && !(over_surface && ycbcr(pf)) {
             return Err(Refused::Nil(TextureProblem::NoTextureOfFormat));
         }
-        // `newSharedTextureWithDescriptor:` alone answers nil for a padded 10-bit format, where
-        // the device's, a heap's and the size query all answer a texture of one (an Apple M3 Max
-        // under macOS 27.0.1, all four formats, 2D 8x8 `Private` under `ShaderRead`).
-        if creator == Creator::Shared && padded_words(pf) {
-            return Err(Refused::Nil(TextureProblem::NoTextureOfFormat));
-        }
         // Plain Metal makes no `Unspecialized` texture and answers nil, whatever the storage
         // and usage.
         if pf == PixelFormat::Unspecialized {
