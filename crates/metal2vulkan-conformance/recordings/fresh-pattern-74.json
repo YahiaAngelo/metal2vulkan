@@ -191,6 +191,7 @@
         "object_churn.vk_images_destroyed": 3,
         "object_churn.vk_images_made": 3,
         "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 1,
         "scheduled_where_submitted": 1,
         "scheduler_passes": 1,
@@ -205,7 +206,8 @@
         "wakes_spared": 7
       },
       "moving": {
-        "batches_submitted_by_waiters": 0
+        "batches_submitted_by_waiters": 0,
+        "gate_waits_slept": 0
       },
       "composed": {
         "command_buffers_deferred": 0,

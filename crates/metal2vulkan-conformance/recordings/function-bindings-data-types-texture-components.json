@@ -2298,7 +2298,7 @@
       "bounds": {
         "creation_pipelines_made": 1,
         "dedicated_memory_blocks_live": 6,
-        "device_memory_allocated": 201328256,
+        "device_memory_allocated": 201328512,
         "object_churn.vk_buffer_bindings": 1,
         "object_churn.vk_buffers_made": 1,
         "object_churn.vk_image_bindings": 6,
@@ -2313,7 +2313,7 @@
         "variant_pipelines_made": 1
       },
       "composed": {
-        "device_memory_allocated": 201328256
+        "device_memory_allocated": 201328512
       },
       "ceilings": {
         "pooled_memory_blocks_made": 3

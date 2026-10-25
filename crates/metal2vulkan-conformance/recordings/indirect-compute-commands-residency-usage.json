@@ -782,14 +782,16 @@
         "bare_starts": 1,
         "batches_with_none_pending": 1,
         "command_barriers": 4,
-        "command_buffers_begun": 8,
+        "command_buffers_begun": 9,
         "command_buffers_begun_batch_barriers": 2,
+        "command_buffers_begun_batch_work": 1,
         "command_buffers_begun_continuations": 2,
         "command_buffers_begun_encoders": 2,
         "command_buffers_begun_segments": 2,
         "command_buffers_deferred": 6,
         "command_buffers_replayed": 6,
-        "command_buffers_submitted": 8,
+        "command_buffers_replayed_inline": 6,
+        "command_buffers_submitted": 9,
         "commands_replayed.begin_command_buffer": 6,
         "commands_replayed.cmd_bind_descriptor_sets": 6,
         "commands_replayed.cmd_bind_pipeline": 6,
@@ -833,9 +835,13 @@
         "variant_pipelines_made": 4,
         "variants_taken_back": 1,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 8
+        "wakes_spared": 7
       },
       "composed": {
+        "addressable_buffers_made": 1,
+        "command_buffers_begun": 9,
+        "command_buffers_begun_batch_work": 1,
+        "command_buffers_submitted": 9,
         "device_memory_allocated": 201326592
       },
       "ceilings": {

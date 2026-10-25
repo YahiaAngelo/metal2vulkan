@@ -1443,6 +1443,7 @@
         "dispatch_pipelines_pooled": 1,
         "dispatches_planned_as_before": 12,
         "encoder_command_buffers_begun": 15,
+        "encoder_primaries_begun_ahead": 1,
         "fence_waits": 13,
         "finales_apart": 1,
         "finales_folded": 12,
@@ -1462,6 +1463,7 @@
         "object_churn.vk_memory_allocations": 1,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 13,
         "scheduled_where_submitted": 13,
         "scheduler_passes": 16,
@@ -1479,10 +1481,12 @@
         "wakes_spared": 92
       },
       "moving": {
-        "batches_submitted_by_waiters": 3
+        "batches_submitted_by_waiters": 3,
+        "commands_replayed.begin_command_buffer": 14,
+        "gate_waits_slept": 12
       },
       "composed": {
-        "addressable_buffers_made": 2,
+        "addressable_buffers_made": 1,
         "device_memory_allocated": 201326848,
         "pooled_memory_blocks_made": 3
       },

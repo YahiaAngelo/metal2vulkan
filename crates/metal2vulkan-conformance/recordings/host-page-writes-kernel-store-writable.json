@@ -410,12 +410,11 @@
         "host_pointer_import_bytes_made": 16384,
         "host_pointer_imports_made": 1,
         "new_buffer_bytes_cleared": 8960,
-        "no_copy_lies_read": 19,
-        "object_churn.buffers_evicted": 2,
+        "no_copy_lies_read": 20,
         "object_churn.buffers_parked": 3,
         "object_churn.buffers_recycled": 3,
         "object_churn.vk_buffer_bindings": 1,
-        "object_churn.vk_buffers_destroyed": 3,
+        "object_churn.vk_buffers_destroyed": 1,
         "object_churn.vk_buffers_made": 1,
         "object_churn.vk_memory_allocations": 1,
         "object_churn.vk_memory_freed": 1,
@@ -439,7 +438,11 @@
         "wakes_completion_waiters": 2,
         "wakes_spared": 14
       },
+      "moving": {
+        "batches_submitted_by_waiters": 1
+      },
       "composed": {
+        "batches_submitted_by_waiters": 1,
         "command_buffers_begun": 7,
         "command_buffers_begun_batch_barriers": 2,
         "command_buffers_begun_continuations": 1,
@@ -452,6 +455,7 @@
         "device_memory_allocated": 201326592,
         "dispatch_pipelines_pooled": 1,
         "encoder_command_buffers_begun": 5,
+        "no_copy_lies_read": 20,
         "submit_infos": 3
       },
       "ceilings": {

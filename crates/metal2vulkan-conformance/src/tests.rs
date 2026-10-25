@@ -6589,42 +6589,22 @@ fn every_case_carries_a_cost_recording() {
     /// produces a record, so a case is covered only where a later whole-set run includes it, and
     /// the next one empties the list again.
     ///
-    /// Four are the degenerate screen extent crossed with the descriptor's construction
-    /// routes ([`crate::cases::rate_map_degenerate_forms`] and `rate-map-degenerate-form-sweep`),
-    /// two are the shared creator crossed with the storage mode
-    /// ([`crate::cases::shared_creator_formats`]), one is the sparse mapping update of a slice
-    /// past the texture's slices ([`crate::cases::sparse_mappings::a_slice_past_the_textures`])
-    /// and four are the sparse mapping moves read off the texels -- one with both sides inside
-    /// the level and three past an edge
-    /// ([`crate::cases::sparse_mappings::move_inside_the_level`] and its three siblings) --
-    /// all authored after the last whole-set
-    /// `cost --write`. A cost record needs the whole set measured
-    /// in both shapes -- a case's counts depend on what ran before it in the same process -- so a
-    /// selection cannot pay it and the next whole-set run empties these eighteen lines again.
+    /// Four, and all four are sparse mapping moves read off the texels -- one with both sides
+    /// inside the level and three past an edge
+    /// ([`crate::cases::sparse_mappings::move_inside_the_level`] and its three siblings). They
+    /// landed from a concurrent branch *while* the whole-set run that paid the rest was in flight,
+    /// so that run's tree did not hold them.
     ///
-    /// Six are the device's read-write tier and the rows that sweep it
-    /// (`device-read-write-tiers` and the five `read-write-tier-*`), and
-    /// `texture-round-trip-44` is `BGRA4Unorm`'s row of `cases::textures`, authored the day its
-    /// texels became Metal's own bytes, and later than the last whole-set `cost --write` too.
-    const AFTER_THE_LAST_RUN: [&str; 18] = [
-        "device-read-write-tiers",
-        "rate-map-degenerate-form-sweep",
-        "rate-map-zero-width-layers-subscript",
-        "rate-map-zero-width-with-layer-count-and-layers",
-        "rate-map-zero-width-with-screen-size-and-layer",
-        "read-write-tier-descriptors",
-        "read-write-tier-held",
-        "read-write-tier-round-trip-float",
-        "read-write-tier-round-trip-sint",
-        "read-write-tier-round-trip-uint",
-        "shared-creator-extended-range-samples",
-        "shared-creator-padded-format-storage",
-        "sparse-mapping-a-slice-past-the-textures",
+    /// The fourteen names that stood here before were paid by one whole-set `cost --runs 8 --write`
+    /// and one `cost --runs 8 --alone --write`, each over all 1,117 cases of its own tree in one
+    /// process, which is the only shape that measures either: a case's counts depend on what ran
+    /// before it in the same process, so a selection cannot pay a record however many cases it
+    /// names. The next whole-set run empties these four lines too.
+    const AFTER_THE_LAST_RUN: [&str; 4] = [
         "sparse-mapping-move-inside-the-level",
         "sparse-mapping-move-of-a-clipped-source",
         "sparse-mapping-move-of-a-source-past-the-level",
         "sparse-mapping-move-past-the-destinations-row",
-        "texture-round-trip-44",
     ];
 
     /// Cases a whole-set run did not cover although they were committed before it ran.

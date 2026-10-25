@@ -2006,12 +2006,14 @@
         "compressed_rows_rewritten": 128,
         "creation_pipelines_drawn": 1,
         "creation_pipelines_made": 1,
+        "descriptor_keys_built": 1,
         "device_memory_allocated": 201326592,
         "draw_shapes_made": 1,
         "draw_states_recorded": 76,
         "draws_settled": 1,
         "driver_diagnostics_withheld": 2,
         "encoder_command_buffers_begun": 48,
+        "encoder_primaries_begun_ahead": 2,
         "fence_waits": 16,
         "finales_folded": 16,
         "gate_waits": 16,
@@ -2033,10 +2035,13 @@
         "object_churn.vk_images_destroyed": 21,
         "object_churn.vk_images_made": 21,
         "owned_descriptor_pools": 8,
+        "owned_kernel_spirv_bytes": 944,
+        "owned_kernels_made": 1,
         "passes_not_inline_layouts": 16,
         "pipeline_layouts_made": 1,
         "pipeline_layouts_shared": 1,
         "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 2,
         "queue_submissions": 16,
         "render_encoders_ended": 16,
         "render_passes_begun_instances": 16,
@@ -2051,6 +2056,7 @@
         "slot_returns": 16,
         "spare_command_pools_taken": 32,
         "stage_entries_shared": 6,
+        "stage_entries_specialized": 2,
         "stage_tables_read": 16,
         "submit_infos": 16,
         "trail_waits": 16,
@@ -2059,17 +2065,23 @@
         "wakes_spared": 112
       },
       "moving": {
-        "batches_submitted_by_waiters": 15
+        "batches_submitted_by_waiters": 10,
+        "commands_replayed.begin_command_buffer": 46,
+        "gate_waits_slept": 14
       },
       "composed": {
         "addressable_buffers_made": 2,
         "arena_pools_made": 2,
         "argument_samplers_taken": 1,
         "device_memory_allocated": 201326592,
+        "owned_kernel_spirv_bytes": 944,
+        "owned_kernels_made": 1,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
         "render_passes_made": 3,
-        "shader_modules_made": 2
+        "shader_modules_made": 2,
+        "stage_entries_shared": 5,
+        "stage_entries_specialized": 2
       },
       "per_state": {
         "pipelines": 2,

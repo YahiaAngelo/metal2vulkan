@@ -386,6 +386,7 @@
         "completion_arms_after_a_wake": 1,
         "creation_pipelines_drawn": 1,
         "creation_pipelines_made": 1,
+        "descriptor_keys_built": 1,
         "device_memory_allocated": 201326592,
         "draw_shapes_made": 1,
         "draw_states_recorded": 48,
@@ -397,6 +398,7 @@
         "gate_waits": 1,
         "gate_waits_slept": 1,
         "graphics_pipelines_looked_up": 1,
+        "linked_use_questions_asked": 2,
         "new_buffer_bytes_cleared": 1120,
         "object_churn.buffers_evicted": 21,
         "object_churn.buffers_parked": 2,
@@ -412,6 +414,7 @@
         "passes_not_inline_layouts": 1,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 1,
         "render_encoders_ended": 1,
         "render_passes_begun_instances": 1,
@@ -425,6 +428,8 @@
         "shader_modules_made": 1,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
+        "stage_entries_shared": 1,
+        "stage_entries_specialized": 1,
         "stage_tables_read": 15,
         "stage_tables_read_in_part": 11,
         "submit_infos": 1,
@@ -433,6 +438,10 @@
         "variants_taken_back": 1,
         "wakes_completion_waiters": 1,
         "wakes_spared": 7
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 0,
+        "gate_waits_slept": 0
       },
       "composed": {
         "argument_samplers_taken": 1,
@@ -467,7 +476,10 @@
         "creation_pipelines_drawn": 1,
         "device_memory_allocated": 201326592,
         "driver_diagnostics_withheld": 1,
-        "render_passes_made": 2
+        "linked_use_questions_asked": 2,
+        "render_passes_made": 2,
+        "stage_entries_shared": 1,
+        "stage_entries_specialized": 1
       },
       "ceilings": {
         "addressable_buffers_made": 2,

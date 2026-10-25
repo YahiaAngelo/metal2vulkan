@@ -227,9 +227,10 @@
         "gate_waits": 3,
         "gate_waits_slept": 3,
         "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 3,
         "scheduled_where_submitted": 3,
-        "scheduler_passes": 4,
+        "scheduler_passes": 5,
         "scheduler_passes_by_waiters": 3,
         "scheduler_sleeps": 4,
         "scheduler_wakes_commit": 3,
@@ -242,7 +243,8 @@
         "wakes_spared": 23
       },
       "moving": {
-        "batches_submitted_by_waiters": 1
+        "batches_submitted_by_waiters": 1,
+        "gate_waits_slept": 1
       },
       "composed": {
         "addressable_buffers_made": 2,

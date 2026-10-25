@@ -483,7 +483,6 @@
         "object_churn.buffers_recycled": 2,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
-        "primaries_begun_ahead": 1,
         "queue_submissions": 1,
         "scheduled_where_submitted": 1,
         "scheduler_passes": 1,
@@ -501,9 +500,11 @@
         "wakes_spared": 7
       },
       "moving": {
+        "batches_submitted_by_waiters": 0,
         "gate_waits_slept": 0
       },
       "composed": {
+        "batches_submitted_by_waiters": 0,
         "command_buffers_begun": 4,
         "command_buffers_begun_batch_barriers": 1,
         "command_buffers_begun_continuations": 1,

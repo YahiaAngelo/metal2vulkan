@@ -679,19 +679,28 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "creation_pipelines_made": 1,
-        "device_memory_allocated": 201326848,
+        "descriptor_keys_built": 1,
+        "device_memory_allocated": 201326976,
         "driver_diagnostics_withheld": 1,
+        "linked_use_questions_asked": 2,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
         "render_passes_made": 1,
+        "scheduler_sleep_slices": 1,
+        "scheduler_sleeps": 1,
         "shader_modules_made": 2,
+        "stage_entries_shared": 5,
+        "stage_entries_specialized": 2,
         "variant_pipelines_made": 1
       },
       "composed": {
         "addressable_buffers_made": 2,
-        "device_memory_allocated": 201326848,
+        "device_memory_allocated": 201326976,
+        "linked_use_questions_asked": 2,
         "pooled_memory_blocks_made": 3,
-        "render_passes_made": 1
+        "render_passes_made": 1,
+        "stage_entries_shared": 5,
+        "stage_entries_specialized": 2
       },
       "per_state": {
         "pipelines": 2,

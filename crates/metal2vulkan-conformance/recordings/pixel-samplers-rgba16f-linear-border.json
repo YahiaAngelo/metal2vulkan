@@ -701,6 +701,7 @@
         "object_churn.vk_images_made": 1,
         "pipeline_layouts_made": 3,
         "pooled_memory_blocks_made": 4,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 4,
         "sampler_sets_made": 1,
         "scheduled_where_submitted": 4,
@@ -719,11 +720,13 @@
         "wakes_spared": 28
       },
       "moving": {
-        "batches_submitted_by_waiters": 0
+        "batches_submitted_by_waiters": 0,
+        "gate_waits_slept": 3
       },
       "composed": {
         "addressable_buffers_made": 2,
         "arena_pools_made": 2,
+        "batches_submitted_by_waiters": 1,
         "command_buffers_begun": 14,
         "command_buffers_begun_batch_barriers": 3,
         "command_buffers_begun_batch_work": 1,

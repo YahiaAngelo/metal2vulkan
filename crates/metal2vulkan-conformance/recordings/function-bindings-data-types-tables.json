@@ -1113,6 +1113,7 @@
         "variant_pipelines_made": 1
       },
       "composed": {
+        "addressable_buffers_made": 0,
         "device_memory_allocated": 201326592
       },
       "ceilings": {

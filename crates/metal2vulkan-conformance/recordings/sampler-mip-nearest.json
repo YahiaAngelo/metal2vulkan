@@ -1110,6 +1110,7 @@
         "batches_submitted_by_waiters": 4
       },
       "composed": {
+        "batches_submitted_by_waiters": 5,
         "command_buffers_begun": 12,
         "command_buffers_begun_batch_barriers": 1,
         "command_buffers_begun_batch_work": 1,

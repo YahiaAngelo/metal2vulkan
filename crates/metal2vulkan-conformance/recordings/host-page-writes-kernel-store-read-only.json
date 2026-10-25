@@ -416,12 +416,12 @@
         "host_pointer_import_bytes_made": 16384,
         "host_pointer_imports_made": 1,
         "new_buffer_bytes_cleared": 8960,
-        "no_copy_lies_read": 19,
-        "object_churn.buffers_evicted": 1,
+        "no_copy_lies_read": 20,
+        "object_churn.buffers_evicted": 3,
         "object_churn.buffers_parked": 3,
         "object_churn.buffers_recycled": 2,
         "object_churn.vk_buffer_bindings": 2,
-        "object_churn.vk_buffers_destroyed": 2,
+        "object_churn.vk_buffers_destroyed": 4,
         "object_churn.vk_buffers_made": 2,
         "object_churn.vk_memory_allocations": 1,
         "object_churn.vk_memory_freed": 1,
@@ -444,7 +444,7 @@
         "variant_pipelines_made": 2,
         "variants_taken_back": 1,
         "wakes_completion_waiters": 2,
-        "wakes_spared": 14
+        "wakes_spared": 15
       },
       "moving": {
         "batches_submitted_by_waiters": 0

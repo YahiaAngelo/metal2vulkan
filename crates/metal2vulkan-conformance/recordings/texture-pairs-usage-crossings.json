@@ -16472,22 +16472,24 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "device_memory_allocated": 201326592,
-        "object_churn.buffers_evicted": 12,
+        "object_churn.buffers_evicted": 13,
         "object_churn.buffers_parked": 13,
-        "object_churn.images_evicted": 81,
+        "object_churn.images_evicted": 104,
         "object_churn.images_own_memory": 104,
         "object_churn.images_parked": 104,
         "object_churn.textures_image": 104,
         "object_churn.textures_texels": 13,
         "object_churn.vk_buffer_bindings": 14,
-        "object_churn.vk_buffers_destroyed": 12,
+        "object_churn.vk_buffers_destroyed": 13,
         "object_churn.vk_buffers_made": 14,
         "object_churn.vk_image_bindings": 104,
-        "object_churn.vk_images_destroyed": 273,
+        "object_churn.vk_images_destroyed": 296,
         "object_churn.vk_images_made": 296,
         "pooled_memory_blocks_made": 3,
         "requirement_images_made": 74,
-        "requirement_limits_asked": 74
+        "requirement_limits_asked": 74,
+        "scheduler_sleep_slices": 1,
+        "scheduler_sleeps": 1
       },
       "composed": {
         "device_memory_allocated": 201326592

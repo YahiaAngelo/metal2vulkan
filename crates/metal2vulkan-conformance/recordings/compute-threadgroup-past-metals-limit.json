@@ -219,6 +219,7 @@
         "object_churn.buffers_recycled": 1,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 1,
         "scheduled_where_submitted": 1,
         "scheduler_passes": 1,
@@ -234,6 +235,10 @@
         "variants_taken_back": 1,
         "wakes_completion_waiters": 1,
         "wakes_spared": 7
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 0,
+        "gate_waits_slept": 0
       },
       "composed": {
         "addressable_buffers_made": 2,

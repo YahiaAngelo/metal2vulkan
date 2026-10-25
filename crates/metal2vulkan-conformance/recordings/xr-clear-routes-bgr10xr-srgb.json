@@ -2002,12 +2002,14 @@
         "completion_arms_after_a_wake": 16,
         "creation_pipelines_drawn": 1,
         "creation_pipelines_made": 1,
+        "descriptor_keys_built": 1,
         "device_memory_allocated": 201326592,
         "draw_shapes_made": 1,
         "draw_states_recorded": 76,
         "draws_settled": 1,
         "driver_diagnostics_withheld": 2,
         "encoder_command_buffers_begun": 48,
+        "encoder_primaries_begun_ahead": 1,
         "fence_waits": 16,
         "finales_folded": 16,
         "gate_waits": 16,
@@ -2015,7 +2017,7 @@
         "graphics_pipelines_looked_up": 1,
         "linked_use_questions_asked": 2,
         "new_buffer_bytes_cleared": 16704,
-        "object_churn.buffers_evicted": 2,
+        "object_churn.buffers_evicted": 1,
         "object_churn.buffers_parked": 12,
         "object_churn.buffers_recycled": 12,
         "object_churn.images_evicted": 16,
@@ -2023,7 +2025,7 @@
         "object_churn.images_parked": 32,
         "object_churn.images_recycled": 16,
         "object_churn.textures_image": 32,
-        "object_churn.vk_buffers_destroyed": 2,
+        "object_churn.vk_buffers_destroyed": 1,
         "object_churn.vk_image_bindings": 16,
         "object_churn.vk_image_views_made": 32,
         "object_churn.vk_images_destroyed": 20,
@@ -2032,6 +2034,7 @@
         "pipeline_layouts_made": 1,
         "pipeline_layouts_shared": 1,
         "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 16,
         "render_encoders_ended": 16,
         "render_passes_begun_instances": 16,
@@ -2046,6 +2049,7 @@
         "slot_returns": 16,
         "spare_command_pools_taken": 32,
         "stage_entries_shared": 6,
+        "stage_entries_specialized": 2,
         "stage_tables_read": 16,
         "submit_infos": 16,
         "trail_waits": 16,
@@ -2054,17 +2058,21 @@
         "wakes_spared": 112
       },
       "moving": {
-        "batches_submitted_by_waiters": 11
+        "batches_submitted_by_waiters": 7,
+        "commands_replayed.begin_command_buffer": 47,
+        "gate_waits_slept": 15
       },
       "composed": {
-        "addressable_buffers_made": 2,
+        "addressable_buffers_made": 1,
         "arena_pools_made": 1,
         "argument_samplers_taken": 1,
         "device_memory_allocated": 201326592,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
         "render_passes_made": 3,
-        "shader_modules_made": 2
+        "shader_modules_made": 2,
+        "stage_entries_shared": 5,
+        "stage_entries_specialized": 2
       },
       "per_state": {
         "pipelines": 2,

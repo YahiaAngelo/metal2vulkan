@@ -359,12 +359,13 @@
         "batches_submitted_by_waiters": 0
       },
       "composed": {
-        "command_buffers_begun": 6,
+        "batches_submitted_by_waiters": 0,
+        "command_buffers_begun": 5,
         "command_buffers_begun_batch_barriers": 1,
         "command_buffers_begun_continuations": 1,
         "command_buffers_begun_segments": 1,
         "command_buffers_deferred": 0,
-        "command_buffers_submitted": 6,
+        "command_buffers_submitted": 5,
         "commands_replayed.begin_command_buffer": 0,
         "commands_replayed.cmd_bind_descriptor_sets": 0,
         "commands_replayed.cmd_bind_pipeline": 0,

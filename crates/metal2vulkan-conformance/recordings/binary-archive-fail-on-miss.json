@@ -520,9 +520,10 @@
       "bounds": {
         "addressable_buffers_made": 2,
         "creation_pipelines_made": 4,
-        "device_memory_allocated": 201326848,
+        "descriptor_keys_built": 8,
+        "device_memory_allocated": 201326976,
         "driver_diagnostics_withheld": 2,
-        "linked_use_questions_asked": 2,
+        "linked_use_questions_asked": 4,
         "pipeline_layouts_made": 3,
         "pipeline_layouts_shared": 1,
         "pooled_memory_blocks_made": 3,
@@ -532,14 +533,19 @@
         "scheduler_sleeps": 1,
         "shader_modules_made": 4,
         "shader_modules_shared": 2,
-        "stage_entries_shared": 5,
+        "stage_entries_shared": 10,
+        "stage_entries_specialized": 2,
         "variant_pipelines_made": 4,
         "variants_taken_back": 13
       },
       "composed": {
-        "device_memory_allocated": 201326848,
+        "addressable_buffers_made": 0,
+        "device_memory_allocated": 201326976,
         "driver_diagnostics_withheld": 2,
-        "render_passes_made": 2
+        "linked_use_questions_asked": 4,
+        "render_passes_made": 2,
+        "stage_entries_shared": 10,
+        "stage_entries_specialized": 2
       },
       "ceilings": {
         "addressable_buffers_made": 2,

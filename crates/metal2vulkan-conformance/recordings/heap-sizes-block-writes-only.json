@@ -989,7 +989,9 @@
         "object_churn.vk_images_destroyed": 23,
         "object_churn.vk_images_made": 23,
         "requirement_images_made": 15,
-        "requirement_limits_asked": 15
+        "requirement_limits_asked": 15,
+        "scheduler_sleep_slices": 1,
+        "scheduler_sleeps": 1
       }
     }
   ],

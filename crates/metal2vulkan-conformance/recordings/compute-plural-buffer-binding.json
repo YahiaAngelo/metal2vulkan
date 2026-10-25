@@ -374,6 +374,7 @@
         "wakes_spared": 7
       },
       "composed": {
+        "batches_submitted_by_waiters": 0,
         "command_buffers_begun": 6,
         "command_buffers_begun_batch_barriers": 1,
         "command_buffers_begun_continuations": 2,

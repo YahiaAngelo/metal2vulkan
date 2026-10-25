@@ -201,6 +201,7 @@
         "completion_arms_after_a_wake": 1,
         "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 1,
+        "encoder_primaries_begun_ahead": 1,
         "fence_waits": 1,
         "finales_folded": 1,
         "gate_waits": 1,
@@ -208,12 +209,10 @@
         "new_buffer_bytes_cleared": 64,
         "object_churn.buffers_parked": 5,
         "object_churn.buffers_recycled": 5,
-        "object_churn.images_evicted": 4,
         "object_churn.images_own_memory": 2,
         "object_churn.images_parked": 2,
         "object_churn.images_recycled": 2,
         "object_churn.textures_image": 2,
-        "object_churn.vk_images_destroyed": 4,
         "pooled_memory_blocks_made": 3,
         "queue_submissions": 1,
         "scheduled_where_submitted": 1,
@@ -227,6 +226,9 @@
         "trail_waits": 1,
         "wakes_completion_waiters": 1,
         "wakes_spared": 7
+      },
+      "moving": {
+        "commands_replayed.begin_command_buffer": 0
       },
       "composed": {
         "addressable_buffers_made": 2,

@@ -385,7 +385,7 @@
         "completion_arms": 1,
         "completion_arms_after_a_wake": 1,
         "creation_pipelines_made": 1,
-        "device_memory_allocated": 268435584,
+        "device_memory_allocated": 268435712,
         "dispatch_pipelines_pooled": 1,
         "encoder_command_buffers_begun": 3,
         "fence_waits": 1,
@@ -428,6 +428,7 @@
         "batches_submitted_by_waiters": 0
       },
       "composed": {
+        "batches_submitted_by_waiters": 0,
         "command_buffers_begun": 5,
         "command_buffers_begun_batch_barriers": 1,
         "command_buffers_begun_batch_work": 1,
@@ -438,7 +439,7 @@
         "commands_replayed.begin_command_buffer": 3,
         "commands_replayed.cmd_pipeline_barrier": 0,
         "commands_replayed.end_command_buffer": 3,
-        "device_memory_allocated": 268435584,
+        "device_memory_allocated": 268435712,
         "dispatch_pipelines_pooled": 1,
         "encoder_command_buffers_begun": 3,
         "sampler_sets_made": 1,

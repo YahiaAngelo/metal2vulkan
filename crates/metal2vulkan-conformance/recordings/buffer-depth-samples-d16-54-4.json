@@ -175,7 +175,6 @@
         "command_buffers_begun_segments": 1,
         "command_buffers_deferred": 7,
         "command_buffers_replayed": 7,
-        "command_buffers_replayed_inline": 7,
         "command_buffers_submitted": 11,
         "commands_replayed.begin_command_buffer": 7,
         "commands_replayed.cmd_begin_render_pass": 4,
@@ -242,7 +241,7 @@
         "trail_waits": 1,
         "variant_pipelines_made": 2,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 8
+        "wakes_spared": 7
       },
       "composed": {
         "device_memory_allocated": 201326720

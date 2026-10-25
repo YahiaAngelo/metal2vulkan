@@ -592,6 +592,7 @@
         "dispatch_pipelines_pooled": 2,
         "dispatches_planned_as_before": 1,
         "encoder_command_buffers_begun": 7,
+        "encoder_primaries_begun_ahead": 1,
         "fence_waits": 3,
         "finales_folded": 3,
         "gate_waits": 3,
@@ -611,6 +612,7 @@
         "object_churn.vk_images_made": 1,
         "pipeline_layouts_made": 2,
         "pooled_memory_blocks_made": 4,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 3,
         "scheduled_where_submitted": 3,
         "scheduler_passes": 3,
@@ -628,11 +630,14 @@
         "wakes_spared": 21
       },
       "moving": {
-        "batches_submitted_by_waiters": 0
+        "batches_submitted_by_waiters": 0,
+        "commands_replayed.begin_command_buffer": 2,
+        "gate_waits_slept": 2
       },
       "composed": {
         "addressable_buffers_made": 2,
         "arena_pools_made": 2,
+        "batches_submitted_by_waiters": 1,
         "command_buffers_begun": 10,
         "command_buffers_begun_batch_barriers": 2,
         "command_buffers_begun_batch_work": 1,

@@ -783,6 +783,7 @@
         "completion_arms_after_a_wake": 1,
         "creation_pipelines_drawn": 1,
         "creation_pipelines_made": 2,
+        "descriptor_keys_built": 2,
         "device_memory_allocated": 201326592,
         "draw_shapes_made": 1,
         "draw_states_recorded": 90,
@@ -828,7 +829,8 @@
         "shader_modules_shared": 4,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
-        "stage_entries_shared": 10,
+        "stage_entries_shared": 11,
+        "stage_entries_specialized": 2,
         "stage_tables_read": 33,
         "stage_tables_read_in_part": 29,
         "submit_infos": 1,
@@ -868,7 +870,9 @@
         "commands_replayed.cmd_set_viewport": 0,
         "commands_replayed.end_command_buffer": 0,
         "device_memory_allocated": 201326592,
-        "render_passes_made": 2
+        "render_passes_made": 2,
+        "stage_entries_shared": 11,
+        "stage_entries_specialized": 2
       },
       "ceilings": {
         "addressable_buffers_made": 2,

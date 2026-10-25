@@ -122,6 +122,7 @@
         "completion_arms_after_a_wake": 1,
         "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 1,
+        "encoder_primaries_begun_ahead": 1,
         "fence_waits": 1,
         "fills_recorded": 1,
         "finales_folded": 1,
@@ -144,6 +145,10 @@
         "wakes_completion_waiters": 1,
         "wakes_handler_threads": 1,
         "wakes_spared": 6
+      },
+      "moving": {
+        "batches_submitted_by_waiters": 0,
+        "commands_replayed.begin_command_buffer": 0
       },
       "composed": {
         "addressable_buffers_made": 2,

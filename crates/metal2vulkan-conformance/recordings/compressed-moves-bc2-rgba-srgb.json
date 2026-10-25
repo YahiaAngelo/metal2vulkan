@@ -3074,7 +3074,7 @@
         "wakes_spared": 175
       },
       "moving": {
-        "batches_submitted_by_waiters": 24
+        "batches_submitted_by_waiters": 16
       },
       "composed": {
         "device_memory_allocated": 201326592,

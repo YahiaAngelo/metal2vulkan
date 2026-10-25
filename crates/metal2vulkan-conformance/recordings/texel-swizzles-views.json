@@ -688,9 +688,10 @@
         "wakes_spared": 28
       },
       "moving": {
-        "batches_submitted_by_waiters": 2
+        "batches_submitted_by_waiters": 1
       },
       "composed": {
+        "batches_submitted_by_waiters": 2,
         "command_buffers_begun": 11,
         "command_buffers_begun_batch_barriers": 2,
         "command_buffers_begun_batch_work": 1,

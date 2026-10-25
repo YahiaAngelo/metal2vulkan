@@ -110,6 +110,7 @@
         "command_buffers_begun_encoders": 1,
         "command_buffers_deferred": 1,
         "command_buffers_replayed": 1,
+        "command_buffers_replayed_inline": 1,
         "command_buffers_submitted": 1,
         "commands_replayed.begin_command_buffer": 1,
         "commands_replayed.cmd_fill_buffer": 1,

@@ -383,7 +383,7 @@
         "command_buffers_begun_segments": 2,
         "command_buffers_deferred": 6,
         "command_buffers_replayed": 6,
-        "command_buffers_replayed_inline": 2,
+        "command_buffers_replayed_inline": 3,
         "command_buffers_submitted": 9,
         "commands_replayed.begin_command_buffer": 6,
         "commands_replayed.cmd_bind_descriptor_sets": 2,
@@ -397,7 +397,7 @@
         "completion_arms": 2,
         "completion_arms_after_a_wake": 2,
         "creation_pipelines_made": 2,
-        "device_memory_allocated": 268435584,
+        "device_memory_allocated": 268435712,
         "dispatch_pipelines_pooled": 2,
         "encoder_command_buffers_begun": 6,
         "fence_waits": 2,
@@ -407,13 +407,11 @@
         "host_texel_copies": 1,
         "images_started_on_the_host": 1,
         "new_buffer_bytes_cleared": 8192,
-        "object_churn.buffers_evicted": 12,
         "object_churn.buffers_parked": 2,
         "object_churn.buffers_recycled": 1,
         "object_churn.images_own_memory": 1,
         "object_churn.textures_image": 1,
         "object_churn.vk_buffer_bindings": 1,
-        "object_churn.vk_buffers_destroyed": 12,
         "object_churn.vk_buffers_made": 1,
         "object_churn.vk_image_bindings": 1,
         "object_churn.vk_image_views_made": 2,
@@ -435,13 +433,13 @@
         "trail_waits": 2,
         "variant_pipelines_made": 4,
         "wakes_completion_waiters": 2,
-        "wakes_spared": 16
+        "wakes_spared": 15
       },
       "composed": {
         "command_buffers_begun": 9,
         "command_buffers_begun_batch_work": 1,
         "command_buffers_submitted": 9,
-        "device_memory_allocated": 268435584
+        "device_memory_allocated": 268435712
       },
       "ceilings": {
         "addressable_buffers_made": 2,

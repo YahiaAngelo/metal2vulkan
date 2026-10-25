@@ -14605,8 +14605,8 @@
         "device_memory_allocated": 201326976,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
-        "scheduler_sleep_slices": 2,
-        "scheduler_sleeps": 2,
+        "scheduler_sleep_slices": 3,
+        "scheduler_sleeps": 3,
         "shader_modules_made": 1,
         "variant_pipelines_made": 1
       },

@@ -289,6 +289,9 @@
         "wakes_completion_waiters": 3,
         "wakes_spared": 21
       },
+      "moving": {
+        "batches_submitted_by_waiters": 2
+      },
       "composed": {
         "device_memory_allocated": 201326592
       },

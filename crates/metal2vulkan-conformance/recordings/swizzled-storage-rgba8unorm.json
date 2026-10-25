@@ -5167,7 +5167,7 @@
         "command_buffers_begun_segments": 37,
         "command_buffers_deferred": 122,
         "command_buffers_replayed": 111,
-        "command_buffers_replayed_inline": 14,
+        "command_buffers_replayed_inline": 41,
         "command_buffers_submitted": 160,
         "commands_replayed.begin_command_buffer": 122,
         "commands_replayed.cmd_bind_descriptor_sets": 48,
@@ -5182,9 +5182,10 @@
         "completion_arms": 48,
         "completion_arms_after_a_wake": 48,
         "creation_pipelines_made": 4,
-        "device_memory_allocated": 268435712,
+        "device_memory_allocated": 268435840,
         "dispatch_pipelines_pooled": 37,
         "encoder_command_buffers_begun": 122,
+        "encoder_primaries_begun_ahead": 1,
         "fence_waits": 48,
         "finales_apart": 37,
         "finales_folded": 11,
@@ -5208,14 +5209,15 @@
         "pipeline_layouts_made": 3,
         "pipeline_layouts_shared": 4,
         "pooled_memory_blocks_made": 4,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 48,
         "scheduled_where_submitted": 48,
-        "scheduler_passes": 142,
-        "scheduler_passes_by_waiters": 46,
+        "scheduler_passes": 133,
+        "scheduler_passes_by_waiters": 47,
         "scheduler_sleep_slices": 2,
-        "scheduler_sleeps": 92,
+        "scheduler_sleeps": 93,
         "scheduler_wakes_commit": 48,
-        "scheduler_wakes_host": 66,
+        "scheduler_wakes_host": 74,
         "shader_modules_made": 5,
         "shader_modules_shared": 2,
         "slot_returns": 48,
@@ -5227,9 +5229,12 @@
         "wakes_spared": 348
       },
       "moving": {
-        "batches_submitted_by_waiters": 6
+        "batches_submitted_by_waiters": 3,
+        "commands_replayed.begin_command_buffer": 121,
+        "gate_waits_slept": 47
       },
       "composed": {
+        "batches_submitted_by_waiters": 8,
         "command_buffers_begun": 160,
         "command_buffers_begun_batch_work": 1,
         "command_buffers_deferred": 0,
@@ -5241,7 +5246,7 @@
         "commands_replayed.cmd_pipeline_barrier": 0,
         "commands_replayed.cmd_push_constants": 0,
         "commands_replayed.end_command_buffer": 0,
-        "device_memory_allocated": 268435712
+        "device_memory_allocated": 268435840
       },
       "ceilings": {
         "addressable_buffers_made": 2,

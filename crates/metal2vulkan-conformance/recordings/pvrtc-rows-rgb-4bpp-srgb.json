@@ -794,6 +794,7 @@
         "completion_arms_after_a_wake": 12,
         "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 12,
+        "encoder_primaries_begun_ahead": 1,
         "fence_waits": 12,
         "finales_folded": 12,
         "gate_waits": 12,
@@ -814,7 +815,10 @@
         "object_churn.vk_images_destroyed": 14,
         "object_churn.vk_images_made": 14,
         "owned_descriptor_pools": 26,
+        "owned_kernel_spirv_bytes": 11016,
+        "owned_kernels_made": 1,
         "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
         "queue_submissions": 12,
         "scheduled_where_submitted": 12,
         "scheduler_passes": 12,
@@ -829,10 +833,14 @@
         "wakes_spared": 84
       },
       "moving": {
-        "batches_submitted_by_waiters": 10
+        "batches_submitted_by_waiters": 5,
+        "commands_replayed.begin_command_buffer": 11,
+        "gate_waits_slept": 11
       },
       "composed": {
-        "device_memory_allocated": 201326592
+        "device_memory_allocated": 201326592,
+        "owned_kernel_spirv_bytes": 11016,
+        "owned_kernels_made": 1
       },
       "ceilings": {
         "addressable_buffers_made": 2,

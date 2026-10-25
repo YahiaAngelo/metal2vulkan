@@ -1272,7 +1272,7 @@
         "command_buffers_begun_segments": 4,
         "command_buffers_deferred": 28,
         "command_buffers_replayed": 24,
-        "command_buffers_replayed_inline": 10,
+        "command_buffers_replayed_inline": 28,
         "command_buffers_submitted": 20,
         "commands_replayed.begin_command_buffer": 28,
         "commands_replayed.cmd_begin_render_pass": 7,
@@ -1342,6 +1342,8 @@
         "object_churn.vk_memory_allocations": 1,
         "object_churn.vk_memory_freed": 1,
         "owned_descriptor_pools": 1,
+        "owned_kernel_spirv_bytes": 7928,
+        "owned_kernels_made": 1,
         "passes_not_inline_draws": 4,
         "pipeline_layouts_made": 1,
         "pipelines_pooled": 4,
@@ -1352,9 +1354,9 @@
         "render_passes_begun_instances": 6,
         "render_passes_made": 2,
         "scheduled_where_submitted": 7,
-        "scheduler_passes": 12,
+        "scheduler_passes": 11,
         "scheduler_passes_by_waiters": 7,
-        "scheduler_sleeps": 10,
+        "scheduler_sleeps": 9,
         "scheduler_wakes_commit": 7,
         "scheduler_wakes_host": 4,
         "shader_modules_made": 3,
@@ -1367,7 +1369,7 @@
         "trail_waits": 7,
         "variant_pipelines_made": 9,
         "wakes_completion_waiters": 7,
-        "wakes_handler_threads": 1,
+        "wakes_handler_threads": 2,
         "wakes_spared": 51
       },
       "moving": {
@@ -1378,6 +1380,8 @@
         "arena_pools_made": 2,
         "argument_samplers_taken": 1,
         "device_memory_allocated": 1342177280,
+        "owned_kernel_spirv_bytes": 7928,
+        "owned_kernels_made": 1,
         "pooled_memory_blocks_made": 4
       },
       "per_state": {

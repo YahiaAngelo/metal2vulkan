@@ -6101,6 +6101,7 @@
         "device_memory_allocated": 268435840,
         "dispatch_pipelines_pooled": 1,
         "encoder_command_buffers_begun": 62,
+        "encoder_primaries_begun_ahead": 4,
         "fence_waits": 60,
         "finales_folded": 60,
         "gate_waits": 60,
@@ -6118,6 +6119,7 @@
         "object_churn.vk_images_made": 10,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 4,
+        "primaries_begun_ahead": 4,
         "queue_submissions": 60,
         "sampler_sets_made": 1,
         "scheduled_where_submitted": 60,
@@ -6136,11 +6138,14 @@
         "wakes_spared": 420
       },
       "moving": {
-        "batches_submitted_by_waiters": 36
+        "batches_submitted_by_waiters": 20,
+        "commands_replayed.begin_command_buffer": 56,
+        "gate_waits_slept": 56
       },
       "composed": {
         "addressable_buffers_made": 2,
         "arena_pools_made": 1,
+        "batches_submitted_by_waiters": 59,
         "command_buffers_begun": 64,
         "command_buffers_begun_batch_barriers": 1,
         "command_buffers_begun_batch_work": 1,

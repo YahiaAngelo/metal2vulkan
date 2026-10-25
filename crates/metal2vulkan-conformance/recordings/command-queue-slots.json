@@ -265,8 +265,8 @@
         "addressable_buffers_made": 2,
         "device_memory_allocated": 201326592,
         "pooled_memory_blocks_made": 3,
-        "scheduler_sleep_slices": 15,
-        "scheduler_sleeps": 15,
+        "scheduler_sleep_slices": 16,
+        "scheduler_sleeps": 16,
         "slot_waits": 5
       },
       "composed": {

@@ -179,10 +179,11 @@
         "wakes_spared": 140
       },
       "moving": {
-        "batches_submitted_by_waiters": 14
+        "batches_submitted_by_waiters": 11
       },
       "composed": {
         "addressable_buffers_made": 2,
+        "batches_submitted_by_waiters": 14,
         "device_memory_allocated": 201326592,
         "pooled_memory_blocks_made": 3
       }

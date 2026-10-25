@@ -520,12 +520,12 @@
         "host_texel_copies": 4,
         "images_started_on_the_host": 3,
         "new_buffer_bytes_cleared": 3600,
-        "object_churn.buffers_evicted": 12,
+        "object_churn.buffers_evicted": 2,
         "object_churn.buffers_parked": 2,
         "object_churn.images_own_memory": 3,
         "object_churn.textures_image": 3,
         "object_churn.vk_buffer_bindings": 2,
-        "object_churn.vk_buffers_destroyed": 12,
+        "object_churn.vk_buffers_destroyed": 2,
         "object_churn.vk_buffers_made": 2,
         "object_churn.vk_image_bindings": 3,
         "object_churn.vk_image_views_made": 3,
@@ -549,7 +549,7 @@
         "trail_waits": 1,
         "variant_pipelines_made": 2,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 7
+        "wakes_spared": 8
       },
       "composed": {
         "command_buffers_begun": 5,

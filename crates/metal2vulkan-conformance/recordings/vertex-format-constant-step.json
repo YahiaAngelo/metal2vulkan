@@ -2256,6 +2256,7 @@
         "completion_arms_after_a_wake": 1,
         "creation_pipelines_drawn": 45,
         "creation_pipelines_made": 45,
+        "descriptor_keys_built": 45,
         "device_memory_allocated": 201326592,
         "draw_shapes_made": 8,
         "draw_shapes_reused": 495,
@@ -2263,6 +2264,7 @@
         "draws_settled": 45,
         "driver_diagnostics_withheld": 45,
         "encoder_command_buffers_begun": 90,
+        "encoder_primaries_begun_ahead": 1,
         "fence_waits": 1,
         "finales_folded": 1,
         "gate_waits": 1,
@@ -2270,10 +2272,10 @@
         "graphics_pipelines_looked_up": 45,
         "linked_use_questions_asked": 135,
         "new_buffer_bytes_cleared": 17280,
-        "object_churn.buffers_evicted": 49,
+        "object_churn.buffers_evicted": 52,
         "object_churn.buffers_parked": 2,
         "object_churn.buffers_recycled": 2,
-        "object_churn.vk_buffers_destroyed": 49,
+        "object_churn.vk_buffers_destroyed": 52,
         "passes_not_inline_layouts": 45,
         "pipeline_layouts_made": 1,
         "pipeline_layouts_shared": 44,
@@ -2285,13 +2287,14 @@
         "scheduled_where_submitted": 1,
         "scheduler_passes": 1,
         "scheduler_passes_by_waiters": 1,
-        "scheduler_sleep_slices": 6,
-        "scheduler_sleeps": 7,
+        "scheduler_sleep_slices": 13,
+        "scheduler_sleeps": 14,
         "scheduler_wakes_commit": 1,
         "shader_modules_made": 45,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
         "stage_entries_shared": 135,
+        "stage_entries_specialized": 2,
         "stage_tables_read": 675,
         "stage_tables_read_in_part": 495,
         "submit_infos": 1,
@@ -2300,11 +2303,16 @@
         "wakes_completion_waiters": 1,
         "wakes_spared": 7
       },
+      "moving": {
+        "commands_replayed.begin_command_buffer": 89
+      },
       "composed": {
         "argument_samplers_taken": 8,
         "device_memory_allocated": 201326592,
         "draw_shapes_made": 8,
-        "render_passes_made": 1
+        "render_passes_made": 1,
+        "stage_entries_shared": 133,
+        "stage_entries_specialized": 2
       },
       "ceilings": {
         "addressable_buffers_made": 2,

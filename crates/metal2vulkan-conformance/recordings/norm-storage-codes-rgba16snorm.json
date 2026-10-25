@@ -613,6 +613,7 @@
         "host_texel_copies": 3,
         "images_started_on_the_host": 3,
         "new_buffer_bytes_cleared": 213536,
+        "object_churn.buffers_evicted": 38,
         "object_churn.buffers_parked": 7,
         "object_churn.buffers_recycled": 2,
         "object_churn.images_own_memory": 3,
@@ -620,6 +621,7 @@
         "object_churn.textures_texels": 1,
         "object_churn.vk_buffer_bindings": 5,
         "object_churn.vk_buffer_views_destroyed": 1,
+        "object_churn.vk_buffers_destroyed": 38,
         "object_churn.vk_buffers_made": 5,
         "object_churn.vk_image_bindings": 3,
         "object_churn.vk_image_views_made": 3,
@@ -644,9 +646,10 @@
         "wakes_spared": 28
       },
       "moving": {
-        "batches_submitted_by_waiters": 3
+        "batches_submitted_by_waiters": 2
       },
       "composed": {
+        "batches_submitted_by_waiters": 0,
         "command_buffers_begun": 19,
         "command_buffers_begun_batch_barriers": 4,
         "command_buffers_begun_batch_work": 3,

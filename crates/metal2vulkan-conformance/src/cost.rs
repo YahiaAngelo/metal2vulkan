@@ -2165,24 +2165,30 @@ mod the_submissions {
 mod the_ratio {
     /// The fewest cost records that must carry a ratio.
     ///
-    /// A floor, measured: 639 of the 1,103 recordings hold one (8 runs of the whole set on an Apple
-    /// M3 Max). The other 464 carry none for a reason the record itself states — 453 cases create
-    /// no Metal pipeline state, so the ratio has no denominator, and 11 hold a recorded refusal
+    /// A floor, measured: 643 of the 1,117 recordings hold one (8 runs of the whole set on an Apple
+    /// M3 Max). The other 474 carry none for a reason the record itself states — 464 cases create
+    /// no Metal pipeline state, so the ratio has no denominator, and 10 hold a recorded refusal
     /// instead ([`super::CostRecord::unmeasurable`]).
     ///
     /// It falls when a `--write` pass drops the field, which is exactly how it came to be zero.
-    const CARRY_A_RATIO: usize = 639;
+    const CARRY_A_RATIO: usize = 643;
 
     /// The most `VkPipeline`s the committed ratios may hold per Metal pipeline state over the whole
-    /// suite, as its two counts: 2,665 over 1,755, 1.519 each.
+    /// suite, as its two counts: 2,687 over 1,762, 1.525 each.
     ///
     /// The per-case bound is tighter than this everywhere, so this is not a second gate on the same
     /// thing. It is the one number that sees a **re-bless**: a pass that raises many cases' ratios
     /// by a little leaves every per-case bound satisfied by its own new reading, and only the total
     /// says the suite now makes more pipelines for the same work.
-    const PIPELINES: u64 = 2_665;
+    ///
+    /// **Re-blessed from 2,665 over 1,755 by the whole-set measurement that earned it**, which is
+    /// what this constant asks for in its own panic: the four cases the round's packets added that
+    /// create a pipeline state carry the whole of the rise, and the rate it works out to moved
+    /// 1.519 to 1.525 while no per-case worst row did — `swizzled-storage-rgba8unorm` is still
+    /// 45 over 4.
+    const PIPELINES: u64 = 2_687;
     /// The states [`PIPELINES`] was measured over.
-    const STATES: u64 = 1_755;
+    const STATES: u64 = 1_762;
 
     /// The most records that may make a creation pipeline and carry **no** ratio.
     ///
@@ -2373,8 +2379,8 @@ mod the_ratio {
 ///
 /// # The census these numbers are, read off the committed recordings
 ///
-/// 585 recordings carry a cost record that makes a creation pipeline at all. Over them: **1,439
-/// made, 815 taken by a command, 624 taken by none.** 158 cases take every one they make, 411 take
+/// 589 recordings carry a cost record that makes a creation pipeline at all. Over them: **1,446
+/// made, 815 taken by a command, 631 taken by none.** 158 cases take every one they make, 411 take
 /// none of theirs, and 16 take some and not others — the `xr-blend-planes-*` family at 3 made and 1
 /// taken, `topology-class-plain-function` and `frame-length-chain` at 4 and 2.
 ///
@@ -2395,7 +2401,17 @@ mod the_creation_prediction {
     /// mean: the first thing a reader of a raise should ask is whether the cases that grew were
     /// cases that never draw — legitimate — or cases that mispredict a draw they do make, which
     /// is the 121-pipeline bug this family has had once already.
-    const WASTED: u64 = 624;
+    ///
+    /// **Re-blessed from 624 by the whole-set measurement that earned it, and the question above
+    /// is answered rather than assumed.** Diffed row by row against the recordings the pass
+    /// replaced: all 585 rows that existed before read the same made, the same taken and the same
+    /// waste, and `taken` did not move from 815. The whole of the rise is four rows that did not
+    /// exist, every one of them a `read-write-tier-*` case of this round — `read-write-tier-held`
+    /// at 1 made and 0 taken, and the three `read-write-tier-round-trip-*` at 2 and 0. They
+    /// dispatch rather than draw, so no command can take a predicted render pipeline, which is
+    /// the legitimate half of the question and the shape `known-slow-calls.tsv` already names as
+    /// the largest single share of this count.
+    const WASTED: u64 = 631;
 
     /// The cases whose prediction the existing pair of bounds already holds **exactly**, and the
     /// reach that must not be lost.

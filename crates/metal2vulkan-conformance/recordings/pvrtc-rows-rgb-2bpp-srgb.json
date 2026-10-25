@@ -708,6 +708,8 @@
         "object_churn.vk_images_destroyed": 12,
         "object_churn.vk_images_made": 12,
         "owned_descriptor_pools": 22,
+        "owned_kernel_spirv_bytes": 15676,
+        "owned_kernels_made": 1,
         "pooled_memory_blocks_made": 3,
         "queue_submissions": 10,
         "scheduled_where_submitted": 10,
@@ -723,11 +725,13 @@
         "wakes_spared": 70
       },
       "moving": {
-        "batches_submitted_by_waiters": 9,
+        "batches_submitted_by_waiters": 7,
         "commands_replayed.begin_command_buffer": 9
       },
       "composed": {
-        "device_memory_allocated": 201326592
+        "device_memory_allocated": 201326592,
+        "owned_kernel_spirv_bytes": 15676,
+        "owned_kernels_made": 1
       },
       "ceilings": {
         "addressable_buffers_made": 2,

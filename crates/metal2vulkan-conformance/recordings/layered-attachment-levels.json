@@ -1553,6 +1553,7 @@
         "completion_arms_after_a_wake": 1,
         "creation_pipelines_drawn": 1,
         "creation_pipelines_made": 1,
+        "descriptor_keys_built": 3,
         "device_memory_allocated": 201326592,
         "draw_shapes_made": 3,
         "draw_states_recorded": 57,
@@ -1565,15 +1566,16 @@
         "gate_waits_slept": 1,
         "graphics_pipelines_looked_up": 3,
         "inline_passes": 3,
+        "linked_use_questions_asked": 2,
         "new_buffer_bytes_cleared": 1440,
-        "object_churn.buffers_evicted": 1,
+        "object_churn.buffers_evicted": 4,
         "object_churn.buffers_parked": 18,
         "object_churn.buffers_recycled": 18,
         "object_churn.images_evicted": 3,
         "object_churn.images_own_memory": 3,
         "object_churn.images_parked": 3,
         "object_churn.textures_image": 3,
-        "object_churn.vk_buffers_destroyed": 1,
+        "object_churn.vk_buffers_destroyed": 4,
         "object_churn.vk_image_bindings": 3,
         "object_churn.vk_image_views_made": 9,
         "object_churn.vk_images_destroyed": 5,
@@ -1593,6 +1595,8 @@
         "shader_modules_made": 2,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
+        "stage_entries_shared": 5,
+        "stage_entries_specialized": 2,
         "stage_tables_read": 12,
         "submit_infos": 1,
         "trail_waits": 1,
@@ -1601,7 +1605,11 @@
         "wakes_completion_waiters": 1,
         "wakes_spared": 7
       },
+      "moving": {
+        "batches_submitted_by_waiters": 0
+      },
       "composed": {
+        "addressable_buffers_made": 1,
         "argument_samplers_taken": 1,
         "command_buffers_deferred": 0,
         "commands_replayed.begin_command_buffer": 0,
@@ -1633,7 +1641,10 @@
         "creation_pipelines_drawn": 1,
         "device_memory_allocated": 201326592,
         "driver_diagnostics_withheld": 1,
-        "render_passes_made": 2
+        "linked_use_questions_asked": 2,
+        "render_passes_made": 2,
+        "stage_entries_shared": 5,
+        "stage_entries_specialized": 2
       },
       "ceilings": {
         "addressable_buffers_made": 2,

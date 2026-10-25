@@ -1039,7 +1039,7 @@
         "completion_arms": 8,
         "completion_arms_after_a_wake": 8,
         "creation_pipelines_made": 4,
-        "device_memory_allocated": 268435712,
+        "device_memory_allocated": 268435840,
         "dispatch_pipelines_pooled": 7,
         "encoder_command_buffers_begun": 22,
         "fence_waits": 8,
@@ -1049,12 +1049,12 @@
         "host_texel_copies": 14,
         "images_started_on_the_host": 2,
         "new_buffer_bytes_cleared": 128,
-        "object_churn.buffers_evicted": 1,
+        "object_churn.buffers_evicted": 12,
         "object_churn.buffers_parked": 8,
         "object_churn.buffers_recycled": 8,
         "object_churn.images_own_memory": 2,
         "object_churn.textures_image": 2,
-        "object_churn.vk_buffers_destroyed": 1,
+        "object_churn.vk_buffers_destroyed": 12,
         "object_churn.vk_image_bindings": 2,
         "object_churn.vk_image_views_made": 4,
         "object_churn.vk_images_destroyed": 4,
@@ -1078,9 +1078,10 @@
         "wakes_spared": 56
       },
       "moving": {
-        "batches_submitted_by_waiters": 5
+        "batches_submitted_by_waiters": 4
       },
       "composed": {
+        "batches_submitted_by_waiters": 1,
         "command_buffers_begun": 30,
         "command_buffers_begun_batch_barriers": 7,
         "command_buffers_begun_batch_work": 1,
@@ -1095,7 +1096,7 @@
         "commands_replayed.cmd_pipeline_barrier": 0,
         "commands_replayed.cmd_push_constants": 0,
         "commands_replayed.end_command_buffer": 0,
-        "device_memory_allocated": 268435712,
+        "device_memory_allocated": 268435840,
         "dispatch_pipelines_pooled": 7,
         "encoder_command_buffers_begun": 22,
         "submit_infos": 15

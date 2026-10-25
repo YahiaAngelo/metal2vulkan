@@ -1659,7 +1659,7 @@
         "new_buffer_bytes_cleared": 15200,
         "object_churn.buffers_evicted": 25,
         "object_churn.buffers_parked": 51,
-        "object_churn.buffers_recycled": 26,
+        "object_churn.buffers_recycled": 44,
         "object_churn.images_other": 50,
         "object_churn.textures_in_heaps": 50,
         "object_churn.vk_buffer_bindings": 75,
