@@ -548,9 +548,12 @@ fn a_hidden_depth_announces_no_dont_care_store() {
 
 /// A 4x attachment cleared and resolved alone (`MultisampleResolve`) into its sRGB twin, in a
 /// pass with no draw call, after a pass that cleared and stored it: Metal keeps the samples'
-/// earlier texels, the texture compressed or not, and resolves the clear in the attachment's
-/// encoding into the twin's channel order (an Apple M4 under macOS 27.0.1; the
-/// consumer's M3 Max alike for `BGRA8Unorm` each way). On every driver the samples resolve as
+/// earlier texels, the texture compressed or not, and resolves the clear into the twin's channel
+/// order (an Apple M4 under macOS 27.0.1; the consumer's M3 Max alike for `BGRA8Unorm` each way).
+/// The clear's codes are 0x00 and 0xff, which both encodings' averages hold, so this case does
+/// not read which encoding the resolve works in (`resolves.rs`'s
+/// `a_resolve_into_the_srgb_twin_resolves_in_the_resolve_texture_s_encoding` does: the resolve
+/// texture's). On every driver the samples resolve as
 /// the earlier ones do, the resolve texture holds the clear (opaque red), and the pass announces
 /// no `dont-care-store`. Each pair on a device of its own.
 #[test]
@@ -591,8 +594,12 @@ fn a_clear_resolved_into_the_srgb_twin_without_a_draw_keeps_the_samples() {
         descriptor.color_attachments[0].clear_color = ClearColor::new(1.0, 0.0, 0.0, 1.0);
         let _ = messages.take_notices();
         lane.run(&descriptor, Draw::None, None);
-        // The pass resolves the 4x attachment: no draw, no buffer.
-        announces(&messages, &case, false, &made(&lane, &[], &[att], false));
+        // The pass resolves the 4x attachment: no draw, no buffer. The resolve is into the
+        // attachment's format's sRGB twin, which the crate-owned resolve draws on every device
+        // and under either policy (`color_resolve.rs`), announced `shader-resolve`.
+        let mut first = made(&lane, &[], &[], false);
+        first.insert(Degradation::ShaderResolve);
+        announces(&messages, &case, false, &first);
         let resolve = lane.read(&into, (0, 0), 4, BlitOption::None);
         let samples = resolved(&lane, &texture, att);
         let reference = resolved(&lane, &earlier_msaa(&lane, att), att);

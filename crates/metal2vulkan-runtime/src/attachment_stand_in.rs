@@ -426,9 +426,11 @@ pub(super) fn stand_in_as(
         usage |= ImageUsageFlags::STORAGE;
     }
     // The exact color resolve reads a multisampled color attachment as an input attachment
-    // (`color_resolve.rs`).
+    // (`color_resolve.rs`), as does the resolve into the attachment's format's sRGB twin, whose
+    // encoding no device's average writes (`color_resolve::twin_resolved`).
     let resolved = multisampled
-        && color_resolve::shader_rules(device, pixel_format, format, target.samples).is_some();
+        && (color_resolve::shader_rules(device, pixel_format, format, target.samples).is_some()
+            || color_resolve::twin_resolved(pixel_format, target.samples));
     if color && (framebuffer_fetch::through_inputs(profile) || resolved) {
         usage |= ImageUsageFlags::INPUT_ATTACHMENT;
     }
@@ -525,6 +527,20 @@ pub(super) fn stand_in_as(
     if color && framebuffer_fetch::through_planes(profile, target.samples) {
         if let Some(planes) = framebuffer_fetch::with_planes_copies(&plan, profile) {
             plan = planes;
+        }
+    }
+    // A multisampled 8-bit sRGB color stand-in that a resolve into its format's twin reads
+    // through the UNORM twin its rules are in (`color_resolve::twin_read_view`) is mutable to
+    // that view.
+    let raw = color_resolve::twin_read_view(pixel_format, plan.format, target.samples)
+        .filter(|_| resolved);
+    if let Some(raw) = raw {
+        plan.flags |= ImageCreateFlags::MUTABLE_FORMAT;
+        if plan.view_formats.is_empty() {
+            plan.view_formats.push(plan.format);
+        }
+        if !plan.view_formats.contains(&raw) {
+            plan.view_formats.push(raw);
         }
     }
     let texture = Device::new_planned_texture(maker, &descriptor, plan)?;

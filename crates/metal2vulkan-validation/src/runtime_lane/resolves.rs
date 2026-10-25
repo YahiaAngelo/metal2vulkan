@@ -17,7 +17,7 @@
 //! Metal's validation stops, the runtime refuses typed, apart from a color attachment's resolve
 //! that names no texture or a texture under a store action that does not resolve, which resolves
 //! nothing and leaves that texture untouched, and a multisampled color attachment's resolve into
-//! its format's sRGB twin, which keeps its own encoding, as plain Metal's.
+//! its format's sRGB twin, which resolves in the resolve texture's encoding, as plain Metal's.
 
 use super::degrade_notices::assert_once;
 use super::{
@@ -1105,7 +1105,8 @@ fn resolves_are_refused_as_metal_refuses_them() {
     // Plain Metal's answer depends on the pair: into `BGRA8Unorm` the values in its channel order
     // (not built), into `RGBA8Snorm` and `R8Unorm` its codes (not built); into `R32Uint` or
     // `RGBA16Float` nothing (`a_resolve_metal_does_not_store_leaves_its_texture_untouched`); the
-    // sRGB twin resolves (`a_resolve_into_the_srgb_twin_keeps_the_attachment_s_encoding`).
+    // sRGB twin resolves in the resolve texture's encoding
+    // (`a_resolve_into_the_srgb_twin_resolves_in_the_resolve_texture_s_encoding`).
     assert_eq!(
         open(&other(&lane.single(PixelFormat::BGRA8Unorm))),
         Err(Error::NotImplemented(RuntimeGap::Render))
@@ -1459,44 +1460,93 @@ fn a_single_sampled_colour_resolve_copies_its_texels() {
     quiet(lane, &messages);
 }
 
-/// A multisampled color attachment resolving into a texture or a view of its format's sRGB
-/// twin, which Metal's validation stops, resolves in its own encoding as plain Metal's (the probe's
-/// `fmt_unorm_into_srgb`, `fmt_srgb_into_unorm` and their views, an M4; the
-/// probe's `v_resolve_format_mismatch`, an M3 Max too): cleared to (0.5, 0.25, 0.75, 1), an
-/// `RGBA8Unorm` attachment stores `8040bfff` into an `RGBA8Unorm_sRGB` texture or an sRGB view
-/// of an `RGBA8Unorm` one, and an `RGBA8Unorm_sRGB` attachment `bc89e1ff` the other way.
+/// A multisampled color attachment resolving into a texture or a view of its format's sRGB twin,
+/// which Metal's validation stops, resolves in the resolve texture's encoding as plain Metal's
+/// (our probe `srgbres` on an M3 Max under macOS 27.0.1, 2 and 4 samples, the `RGBA8` and `BGRA8`
+/// pairs both ways, four to six processes each and every one alike).
+///
+/// A pixel whose samples agree reads neither encoding: 0x00, 0x80 and 0xff are fixed points of
+/// both averages, and identical codes average to themselves whatever space the average is in. So
+/// each pair is read twice: cleared to (0.5, 0.25, 0.75, 1) with no draw, where an `RGBA8Unorm`
+/// attachment stores `8040bfff` and an `RGBA8Unorm_sRGB` one `bc89e1ff` under either rule; and
+/// cleared to zero with white on samples 0 and 1 alone, where the resolve texture's encoding
+/// decides it. There an `RGBA8Unorm_sRGB` resolve texture takes `bcbcbc80` (each color channel's
+/// codes 0xff and 0x00 decoded, averaged in linear space and encoded again, and alpha's averaged
+/// as the linear channel it is) and an `RGBA8Unorm` one `80808080` (every channel's codes
+/// averaged), whichever format the attachment is.
 #[test]
-fn a_resolve_into_the_srgb_twin_keeps_the_attachment_s_encoding() {
+fn a_resolve_into_the_srgb_twin_resolves_in_the_resolve_texture_s_encoding() {
     let (messages, _cache, lane) = lane();
     let unorm = PixelFormat::RGBA8Unorm;
     let srgb = PixelFormat::RGBA8UnormSRGB;
-    let linear = [0x80, 0x40, 0xbf, 0xff];
-    let encoded = [0xbc, 0x89, 0xe1, 0xff];
-    for (attachment, into, view, texel) in [
-        (unorm, srgb, None, linear),
-        (srgb, unorm, None, encoded),
-        (unorm, unorm, Some(srgb), linear),
-        (srgb, srgb, Some(unorm), encoded),
+    for (attachment, into, view) in [
+        (unorm, srgb, None),
+        (srgb, unorm, None),
+        (unorm, unorm, Some(srgb)),
+        (srgb, srgb, Some(unorm)),
+        (PixelFormat::BGRA8Unorm, PixelFormat::BGRA8UnormSRGB, None),
+        (PixelFormat::BGRA8UnormSRGB, PixelFormat::BGRA8Unorm, None),
     ] {
-        let msaa = lane.msaa(attachment);
-        let resolve = lane.single(into);
-        let target = match view {
-            Some(pf) => resolve.new_texture_view(pf).unwrap(),
-            None => resolve.clone(),
+        // The format the resolve texture, or the view the pass names, encodes into.
+        let written = view.unwrap_or(into);
+        let srgb_written = matches!(
+            written,
+            PixelFormat::RGBA8UnormSRGB | PixelFormat::BGRA8UnormSRGB
+        );
+        // Samples that agree: the clear's codes in the attachment's format and channel order,
+        // which both rules leave alone (the pair shares the order).
+        let [r, g, b] = match attachment {
+            PixelFormat::RGBA8Unorm | PixelFormat::BGRA8Unorm => [0x80, 0x40, 0xbf],
+            _ => [0xbc, 0x89, 0xe1],
         };
-        let mut descriptor = color_pass(
-            &msaa,
-            Some(&target),
-            StoreAction::MultisampleResolve,
-            (0, 0),
-        );
-        descriptor.color_attachments[0].clear_color = ClearColor::new(0.5, 0.25, 0.75, 1.0);
-        lane.run(&descriptor, |_, _, _| {}).unwrap();
-        assert_eq!(
-            lane.read(&resolve, (0, 0), 4, BlitOption::None),
-            repeat(&texel, (SIZE * SIZE) as usize),
-            "{attachment:?} into {into:?} through a view of {view:?}"
-        );
+        let uniform = match attachment {
+            PixelFormat::BGRA8Unorm | PixelFormat::BGRA8UnormSRGB => [b, g, r, 0xff],
+            _ => [r, g, b, 0xff],
+        };
+        // Samples that disagree: white on samples 0 and 1 over a clear to zero, read by the
+        // encoding the resolve texture is in.
+        let masked = match srgb_written {
+            true => [0xbc, 0xbc, 0xbc, 0x80],
+            false => [0x80, 0x80, 0x80, 0x80],
+        };
+        let pipeline = lane.pipeline((FULL, MASKED), &[attachment], (None, None), 4);
+        for (clear, draw, texel) in [
+            (None, true, masked),
+            (Some(ClearColor::new(0.5, 0.25, 0.75, 1.0)), false, uniform),
+        ] {
+            let msaa = lane.msaa(attachment);
+            let resolve = lane.single(into);
+            let target = match view {
+                Some(pf) => resolve.new_texture_view(pf).unwrap(),
+                None => resolve.clone(),
+            };
+            let mut descriptor = color_pass(
+                &msaa,
+                Some(&target),
+                StoreAction::MultisampleResolve,
+                (0, 0),
+            );
+            if let Some(clear) = clear {
+                descriptor.color_attachments[0].clear_color = clear;
+            }
+            let mask = buffer_with(&lane.device, &3u32.to_le_bytes()).unwrap();
+            lane.run(&descriptor, |l, e, h| {
+                if draw {
+                    e.set_fragment_buffer(Some(&mask), 0, 0).unwrap();
+                    l.draw(e, h, &pipeline, 0.5);
+                }
+            })
+            .unwrap();
+            assert_eq!(
+                hex(&lane.read(&resolve, (0, 0), 4, BlitOption::None)),
+                hex(&repeat(&texel, (SIZE * SIZE) as usize)),
+                "{attachment:?} into {into:?} through a view of {view:?}, samples {}",
+                match draw {
+                    true => "that disagree",
+                    false => "that agree",
+                }
+            );
+        }
     }
     quiet(lane, &messages);
 }

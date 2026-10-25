@@ -24,6 +24,19 @@
 //! as `extended-range-resolve`), from any source below; an image that takes neither input
 //! attachment usage nor a copy is refused, as no other resolve reads it.
 //!
+//! **A resolve into the attachment's format's sRGB twin** ([`twin_rules`], `resolve.rs`), which
+//! Metal resolves in the resolve texture's encoding, takes the crate-owned resolve on every device
+//! and under either policy: a subpass's resolve attachment is of its color attachment's own format
+//! (`VUID-VkSubpassDescription-pResolveAttachments-00850`), so no device's average writes the
+//! twin's encoding. Its rules are the resolve attachment's format's, and the attachment is read in
+//! the format whose codes it holds -- the UNORM member of the pair either way, which an sRGB
+//! attachment's image takes a view of and a UNORM one is in. Such a resolve reads the attachment
+//! itself, never its sample planes, whose copy format holds the codes under the attachment's own
+//! format's rules; the attachment's image, and a stand-in a pass renders it into, take the input
+//! attachment usage it reads them through where that is free ([`twin_resolved`],
+//! [`twin_read_view`]), and samples it can neither read nor copy are not built
+//! (`NotImplemented(Render)`).
+//!
 //! The choice is made with the attachment's resolve ([`exact`], `resolve.rs`), so the pass's
 //! shape (`render_target.rs`) leaves such a resolve out of its subpass from its first instance:
 //! the pass's last instance stores the attachment's samples, and after the pass one render pass
@@ -86,7 +99,7 @@ use super::device::{device_error, lock};
 use super::encoder::EncoderCore;
 use super::error::{internal, vulkan, Error, RuntimeGap};
 use super::exit_guard;
-use super::image_plan::ImagePlan;
+use super::image_plan::{srgb_twin, ImagePlan};
 use super::release;
 use super::render_pass::{PassLayout, Target};
 use super::render_target::{takes_input, ATTACHMENT_STAGES};
@@ -176,6 +189,33 @@ pub(super) fn of_attachment(
     }
 }
 
+/// The crate-owned resolve of a color attachment resolving into its format's sRGB twin, whose
+/// encoding Metal resolves in (`resolve.rs`): the resolve attachment's format's rules at
+/// `samples`, on every device and under either `ResolvePolicy`, since a subpass's resolve
+/// attachment is of its color attachment's own format and so no device's average writes the twin's
+/// encoding. `None` where that format has no rule at the count.
+fn twin_rules(into: &Target, samples: u32) -> Option<ColorResolveFormat> {
+    ColorResolveFormat::of(into.format).filter(|rules| rules.resolves(samples))
+}
+
+/// The rules of the crate-owned resolve `resolve` takes from the color attachment `source`: the
+/// resolve attachment's format's where it is the attachment's format's sRGB twin
+/// ([`twin_rules`], which no device's average writes, so a format with no rule at the count is
+/// refused here and samples the resolve cannot read where it plans the pass), else the
+/// attachment's own ([`of_attachment`]).
+pub(super) fn of_resolve(
+    device: &Device,
+    source: &Target,
+    resolve: &resolve::Resolve,
+) -> Result<Option<ColorResolveFormat>, Error> {
+    if !resolve.twin {
+        return of_attachment(device, source);
+    }
+    twin_rules(&resolve.attachment, source.samples)
+        .map(Some)
+        .ok_or(Error::NotImplemented(RuntimeGap::Render))
+}
+
 /// Whether the exact resolve may read the color attachment `source`, whose image takes no input
 /// attachment usage, from a copy of its samples (the module docs): its image takes transfer reads,
 /// and the device copies images of its format both ways, which the scratch image the copy writes
@@ -227,30 +267,59 @@ pub(super) fn resolve_planes(layout: &mut PassLayout, last_storage: &[u32]) {
     }
 }
 
+/// Whether a multisampled color attachment of `pf` may resolve into its format's sRGB twin, which
+/// the crate-owned resolve reads it for on every device and under either `ResolvePolicy`
+/// (`resolve.rs`): the twin's format has Metal's rules at `samples`. Its image, and the stand-in
+/// a pass renders it into (`attachment_stand_in.rs`), take the input attachment usage that
+/// resolve reads them through where it is free.
+pub(super) fn twin_resolved(pf: PixelFormat, samples: u32) -> bool {
+    samples > 1
+        && srgb_twin(pf)
+            .and_then(metal2vulkan::metal::format::direct_format)
+            .and_then(ColorResolveFormat::of)
+            .is_some_and(|rules| rules.resolves(samples))
+}
+
+/// The view format a twin resolve reads a multisampled color attachment of `pf`, held in
+/// `format`, through, where its image must list one: an 8-bit sRGB attachment's UNORM twin, which
+/// both directions' rules read the codes as (the resolve texture's rules are the UNORM member's
+/// when the attachment is the sRGB one, and the sRGB member's raw form when it is the UNORM one).
+/// `None` where the resolve reads the attachment in its own format.
+pub(super) fn twin_read_view(pf: PixelFormat, format: Format, samples: u32) -> Option<Format> {
+    let raw = metal2vulkan::metal::format::srgb_raw_twin(pf)
+        .and_then(metal2vulkan::metal::format::direct_format)?;
+    (twin_resolved(pf, samples) && raw != format).then_some(raw)
+}
+
 /// `plan` with input attachment usage, where the runtime may resolve its image by the crate-owned
 /// resolve reading it as an input attachment: a multisampled color attachment whose format and
-/// samples [`shader_rules`] resolves on `device`. `None` where it has the usage already, or needs
-/// none.
+/// samples [`shader_rules`] resolves on `device`, or one whose format's sRGB twin it resolves into
+/// whatever the device and the policy ([`twin_resolved`]). `None` where it has the usage already,
+/// or needs none.
 pub(super) fn input_candidate(plan: &ImagePlan, device: &Device) -> Option<ImagePlan> {
     let usage = plan.usage;
     let samples = plan.samples.as_raw();
+    let resolved = shader_rules(device, plan.pixel_format, plan.format, samples).is_some()
+        || twin_resolved(plan.pixel_format, samples);
     let candidate = usage.contains(ImageUsageFlags::COLOR_ATTACHMENT)
         && !usage.contains(ImageUsageFlags::INPUT_ATTACHMENT)
-        && shader_rules(device, plan.pixel_format, plan.format, samples).is_some();
+        && resolved;
     candidate.then(|| ImagePlan {
         usage: usage | ImageUsageFlags::INPUT_ATTACHMENT,
         ..plan.clone()
     })
 }
 
-/// Whether the exact resolve of `rules` may reach `target` (the color attachment it reads, or the
-/// resolve attachment it writes), an attachment in `rules`' own format, through a view in its raw
-/// twin (`ColorResolveFormat::raw_format`, the module docs): an 8-bit sRGB format's UNORM twin,
-/// where the image takes a view of it (an sRGB texture's image lists its twin's formats,
-/// `image_plan.rs`) and `device` renders it.
+/// Whether the exact resolve of `rules` reaches `target` (the color attachment it reads, or the
+/// resolve attachment it writes) through a view in `rules`' raw twin
+/// (`ColorResolveFormat::raw_format`, the module docs): an 8-bit sRGB format's UNORM twin, where
+/// the image takes a view of it (an sRGB texture's image lists its twin's formats,
+/// `image_plan.rs`) and `device` renders it. A target already in the raw twin, which a twin
+/// resolve's attachment is (`resolve::Resolve::twin`: the UNORM attachment of sRGB rules holds
+/// their codes itself), is reached through a view in its own format.
 fn raw_view(device: &Device, target: &Target, rules: ColorResolveFormat) -> Result<bool, Error> {
     let raw = rules.raw_format();
-    if raw == rules.format() || target.format != rules.format() {
+    if raw == rules.format() || (target.format != rules.format() && target.format != raw) {
         return Ok(false);
     }
     let profile = device.compile_device().profile();
@@ -898,18 +967,39 @@ impl ShaderResolves {
             let Some(format) = resolve.shader else {
                 continue;
             };
+            // A twin resolve's rules are the resolve attachment's format's, which the sample
+            // planes' copy format does not hold the codes under: it reads the attachment itself
+            // (`resolve::Resolve::twin`).
             let planes = color
                 .planes
                 .as_ref()
-                .filter(|_| last_storage.contains(&(index as u32)));
+                .filter(|_| last_storage.contains(&(index as u32)) && !resolve.twin);
             // An attachment read from a copy of its samples ([`copied`]) is read in its own
-            // format: the scratch image takes no other view.
+            // format: the scratch image takes no other view. That is the rules' raw form where
+            // the attachment is already in it, which a twin resolve's UNORM attachment under its
+            // sRGB resolve texture's rules is.
+            let raw = raw_view(device, &color.target, format)?
+                && (takes_input(&color.target)? || color.target.format == format.raw_format());
             let source = match planes {
                 Some(planes) => Source::Planes(planes.copy),
-                None => Source::Attachment {
-                    raw: takes_input(&color.target)? && raw_view(device, &color.target, format)?,
-                },
+                None => Source::Attachment { raw },
             };
+            // The view the source reads the samples through, the rules' own form or its raw
+            // twin, must be one their image takes: a twin resolve reads an sRGB attachment
+            // through the UNORM twin its rules are in, and a UNORM one through its own format. A
+            // copy of the samples ([`copied`]) is read in the attachment's own format alone, the
+            // scratch image taking no other view.
+            let read_format = source.read_format(format);
+            let reaches = match source.attachment() {
+                false => true,
+                true if takes_input(&color.target)? => {
+                    views_as(color.target.texture.image_plan()?, read_format, false)
+                }
+                true => read_format == color.target.format,
+            };
+            if !reaches {
+                return Err(Error::NotImplemented(RuntimeGap::Render));
+            }
             // The result goes out through the resolve attachment's raw view where it has one.
             let format = match raw_view(device, &resolve.attachment, format)? {
                 true => format.written_raw(),
@@ -998,6 +1088,10 @@ impl ShaderResolves {
                     copy_uses.extend(used);
                     Some(scratch)
                 }
+                // A twin resolve is the one the runtime draws whatever the device's average, so
+                // an attachment it can neither read nor copy is a resolve the runtime does not
+                // build, not an invariant ([`of_resolve`] gates every other one).
+                true if resolve.twin => return Err(Error::NotImplemented(RuntimeGap::Render)),
                 true => {
                     return Err(internal(
                         "an exact resolve of an attachment it can neither read nor copy",

@@ -4848,6 +4848,7 @@ impl RenderLowering {
                     attachment: c.target.clone(),
                     copy_to: Some(c.copied_resolve.clone()?),
                     shader: None,
+                    twin: false,
                     clear: None,
                 })
             })

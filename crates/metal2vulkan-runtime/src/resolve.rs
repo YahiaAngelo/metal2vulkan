@@ -37,27 +37,36 @@
 //!   packed 16-bit or extended-range attachment's resolve writes every format measured.
 //! - **A resolve texture of another pixel format** (probes, an M4 with macOS 27.0.1; Metal's
 //!   validation stops it, "does not match Resolve PixelFormat"): a multisampled attachment
-//!   resolving into its format's sRGB twin keeps its own encoding, a texture or a view alike
-//!   (`RGBA8Unorm` into `RGBA8Unorm_sRGB` stores the unorm bytes, the other way the sRGB ones; the
-//!   probe's `v_resolve_format_mismatch` on an M3 Max too), and the runtime resolves it in the
-//!   attachment's format, the twin among its image's view formats. Across `RGBA8Unorm` and
-//!   `BGRA8Unorm` and their twins the rule is one: the attachment's values in its own encoding, in
-//!   the destination's channel order (a texture's or a view's; the four twin pairs measured and six
-//!   of the eight across the orders); the other channel order is not built
-//!   (`NotImplemented(Render)`). The other pairs Metal writes (the M3 Max and an M4 alike) follow
-//!   no rule the runtime builds: a word of codes is stored into another such format as its codes
-//!   in that format's channel order, 0x80 as 0x81 into a snorm channel, a shared-exponent word
-//!   normalized, into `BGR10A2Unorm` as 10-bit fields swapped (`RGBA8Unorm` into `RGBA8Snorm`
-//!   writes its bytes, 0x80 as 0x81); `RGBA16Float` into `RGBA8Unorm` converts, `R32Float` into
-//!   `R32Uint` writes its bits, into `RGBA8Unorm` its red with zeros, and `RGBA16Float` into
-//!   `RG32Float` a pattern of neither; each stays refused (`ResolveFormat`). An integer format's resolve writes values no sample
-//!   holds, which change from run to run (`RGBA8Uint`, `R32Uint`): refused. Measured over every
-//!   integer color format (an M4 with macOS 27.0.1, without API validation, which
-//!   stops it; the 19 formats, 4 samples, every subset of covered samples over a clear, two runs):
-//!   a pixel whose samples differ resolves to a value no sample holds, not sample 0's, mostly
-//!   another one each run, and a 32-bit channel takes such a value even where the samples
-//!   agree; only an 8- or 16-bit channel (`RGB10A2Uint`'s too) whose samples agree resolves to
-//!   their value. No rule that holds for every pixel: refused.
+//!   resolving into its format's sRGB twin resolves in the **resolve texture's** encoding, a
+//!   texture or a view alike: the attachment's sample codes are read as codes of the resolve
+//!   texture's format, averaged in that format's space and encoded again there, and alpha's codes
+//!   averaged as a linear channel's. Measured on an M3 Max under macOS 27.0.1 with samples that
+//!   disagree, which the reading needs (0x80 is a fixed point of both encodings' averages, and so
+//!   are 0x00 and 0xff, so a pixel whose samples agree reads the same under either rule): half a
+//!   pixel's samples at code 0x40 and the rest at 0x00 store 0x2c into an `RGBA8Unorm_sRGB` resolve
+//!   texture from an `RGBA8Unorm` attachment, where the attachment's own encoding would store 0x20,
+//!   and 0x20 into an `RGBA8Unorm` one from an `RGBA8Unorm_sRGB` attachment, where the attachment's
+//!   own encoding would store 0x2c; alpha takes 0x20 either way. Both `BGRA8` pairs and both
+//!   directions alike, at 2 and 4 samples (the counts an M3 Max makes of these formats), each case
+//!   deterministic over four to six processes. So the runtime resolves it by the crate-owned
+//!   resolve in the resolve texture's format, under either `ResolvePolicy` (`color_resolve.rs`): a
+//!   subpass resolve writes only the attachment's own format
+//!   (`VUID-VkSubpassDescription-pResolveAttachments-00850`), so no device's average resolves
+//!   across the pair. The other channel order of the family, whose probes covered samples that
+//!   agree and so read neither encoding, is not built (`NotImplemented(Render)`). The other pairs
+//!   Metal writes (the M3 Max and an M4 alike) follow no rule the runtime builds: a word of codes
+//!   is stored into another such format as its codes in that format's channel order, 0x80 as 0x81
+//!   into a snorm channel, a shared-exponent word normalized, into `BGR10A2Unorm` as 10-bit fields
+//!   swapped (`RGBA8Unorm` into `RGBA8Snorm` writes its bytes, 0x80 as 0x81); `RGBA16Float` into
+//!   `RGBA8Unorm` converts, `R32Float` into `R32Uint` writes its bits, into `RGBA8Unorm` its red
+//!   with zeros, and `RGBA16Float` into `RG32Float` a pattern of neither; each stays refused
+//!   (`ResolveFormat`). An integer format's resolve writes values no sample holds, which change
+//!   from run to run (`RGBA8Uint`, `R32Uint`): refused. Measured over every integer color format
+//!   (an M4 with macOS 27.0.1, without API validation, which stops it; the 19 formats, 4 samples,
+//!   every subset of covered samples over a clear, two runs): a pixel whose samples differ resolves
+//!   to a value no sample holds, not sample 0's, mostly another one each run, and a 32-bit channel
+//!   takes such a value even where the samples agree; only an 8- or 16-bit channel (`RGB10A2Uint`'s
+//!   too) whose samples agree resolves to their value. No rule that holds for every pixel: refused.
 //! - An extended-range attachment (`BGR10_XR`, `BGRA10_XR`, their `_sRGB` twins and
 //!   `RGB10A2Unorm_sRGB`; our probe `xr`, the M3 Max under macOS 27.0.1) resolves a linear form's
 //!   colors to the average of the samples' codes rounded half up; its alpha and an sRGB form's
@@ -127,8 +136,10 @@
 //!
 //! - **Color** through the subpass's resolve attachments. Vulkan averages a resolve of a
 //!   normalized or floating-point format (`VK_RESOLVE_MODE_AVERAGE_BIT`) and leaves the
-//!   average's rounding and sRGB handling to the device, so a device may differ from Metal by
-//!   one unit at a tie (the exact path is a resolve shader).
+//!   average's rounding to the device, so a device may differ from Metal by one unit at a tie
+//!   (the exact path is a resolve shader). A resolve into the attachment's format's sRGB twin
+//!   takes no subpass resolve at all: the resolve attachment of a subpass is of the color
+//!   attachment's own format, so only the crate-owned resolve writes the twin's encoding.
 //! - **Depth and stencil** through `VkSubpassDescriptionDepthStencilResolve` (core in Vulkan
 //!   1.2, which every runtime device has): `Sample0`, `Min` and `Max` are `SAMPLE_ZERO`, `MIN`
 //!   and `MAX`, and `DepthResolvedSample` after `Sample0` is `SAMPLE_ZERO`. An aspect the pass
@@ -313,6 +324,12 @@ pub(super) struct Resolve {
     /// The rules of a color resolve the runtime draws after the pass, in place of the subpass's
     /// (`color_resolve.rs`): `None` where the device resolves it, and for depth and stencil.
     pub(super) shader: Option<ColorResolveFormat>,
+    /// The rules are the resolve attachment's format's rather than the attachment's: a
+    /// multisampled color attachment resolving into its format's sRGB twin, which Metal resolves
+    /// in the resolve texture's encoding (the module docs). Such a resolve reads the attachment's
+    /// codes through a view in the rules' own form, never its sample planes, whose copy format
+    /// holds them under the attachment's format.
+    pub(super) twin: bool,
     /// The clear color (its bits) the resolve texture's level and layers take before the
     /// scratch image's copy, where they reach past the attachment that clears them: plain Metal
     /// writes the attachment's clear color there (the module docs). `None` elsewhere.
@@ -637,7 +654,7 @@ pub(super) fn color(
         // SAFETY: every member of the union is four 32-bit values; any bits are a valid `u32`.
         resolve.clear = Some(unsafe { clear.uint32 });
     }
-    resolve.shader = color_resolve::of_attachment(device, source)?;
+    resolve.shader = color_resolve::of_resolve(device, source, &resolve)?;
     Ok(Some(resolve))
 }
 
@@ -912,6 +929,7 @@ fn steps(
                 attachment: scratch(maker, source, ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, 1)?,
                 copy_to: Some(destination.target.clone()),
                 shader: None,
+                twin: false,
                 clear: None,
             },
             depth,
@@ -965,6 +983,7 @@ fn split_steps(
                 attachment: scratch(maker, source, ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, 1)?,
                 copy_to: Some(destination.target),
                 shader: None,
+                twin: false,
                 clear: None,
             },
             depth,
@@ -981,6 +1000,9 @@ fn split_steps(
 struct Destination {
     target: Target,
     usage: ImageUsageFlags,
+    /// The destination is the attachment's format's sRGB twin, whose encoding the resolve works
+    /// in (`Resolve::twin`).
+    twin: bool,
 }
 
 impl Destination {
@@ -1028,6 +1050,7 @@ impl Destination {
                 attachment: self.target,
                 copy_to: None,
                 shader: None,
+                twin: self.twin,
                 clear: None,
             });
         }
@@ -1038,10 +1061,22 @@ impl Destination {
         {
             return Err(Error::NotImplemented(RuntimeGap::Render));
         }
+        // A twin resolve writes the resolve texture's format, so its scratch image is of that
+        // format, whose bytes the copy after the pass moves into the texture; every other
+        // resolve's is of the attachment's.
+        let written = match self.twin {
+            true => Target {
+                texture: self.target.texture.clone(),
+                format: self.target.format,
+                ..source.clone()
+            },
+            false => source.clone(),
+        };
         Ok(Resolve {
-            attachment: scratch(maker, source, needed, 1)?,
+            attachment: scratch(maker, &written, needed, 1)?,
             copy_to: Some(self.target),
             shader: None,
+            twin: self.twin,
             clear: None,
         })
     }
@@ -1139,9 +1174,10 @@ fn destination(
     if facts.samples > 1 && !untouched {
         return Err(problem(call, RenderPassProblem::ResolveSamples(which)));
     }
-    // A multisampled color attachment resolving into its format's sRGB twin keeps its own
-    // encoding (the module docs): it resolves in the attachment's format. One whose tile Metal
-    // does not store into the resolve texture's format leaves that texture untouched.
+    // A multisampled color attachment resolving into its format's sRGB twin resolves in the
+    // resolve texture's encoding (the module docs): it resolves in the resolve texture's format,
+    // by the crate-owned resolve. One whose tile Metal does not store into the resolve texture's
+    // format leaves that texture untouched.
     let pixel_format = source.texture.pixel_format();
     let twin = source.samples > 1 && srgb_twin(pixel_format) == Some(facts.pixel_format);
     let across = source.samples > 1
@@ -1213,18 +1249,24 @@ fn destination(
     }
     // A view of another format is resolved into in that format, as it renders
     // (`render_pass::attachment_format`), and the sRGB twin of the attachment's format in the
-    // attachment's, the twin among its image's view formats. A 2D texture over a buffer is resolved
-    // into through its aliasing image or its shadow, as it renders (`render/shadows.rs`), a texture
-    // buffer through its attachment twin, and a rotated texture through its twin of the pass's
-    // frame.
+    // twin's own, the twin among the attachment's image's view formats. A 2D texture over a buffer
+    // is resolved into through its aliasing image or its shadow, as it renders
+    // (`render/shadows.rs`), a texture buffer through its attachment twin, and a rotated texture
+    // through its twin of the pass's frame.
     let texture = &texture.pass_texture()?;
     let plan = texture.image_plan()?;
+    let wanted_format = match twin {
+        true => facts.pixel_format,
+        false => pixel_format,
+    };
     let (format, usage) =
-        match super::render_pass::attachment_format(which, plan, pixel_format, device) {
+        match super::render_pass::attachment_format(which, plan, wanted_format, device) {
             Ok(format) => (format, plan.usage),
             // A view in a format the device does not render resolves through a scratch of the
             // source's format (the same Metal format), copied in bytes (`Destination::attach`).
-            Err(Error::Unsupported(_)) => (
+            // A twin resolve has no such scratch: the twin's own format is the one format Metal's
+            // resolve encodes into, so a device that does not render it resolves nothing exactly.
+            Err(Error::Unsupported(_)) if !twin => (
                 source.format,
                 plan.usage.difference(
                     ImageUsageFlags::COLOR_ATTACHMENT | ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
@@ -1232,7 +1274,11 @@ fn destination(
             ),
             Err(error) => return Err(error),
         };
-    if format != source.format {
+    // A subpass's resolve attachment is of its color attachment's format
+    // (`VUID-VkSubpassDescription-pResolveAttachments-00850`), so every resolve but a twin's is
+    // resolved in the attachment's format. A twin's is drawn after the pass in the resolve
+    // texture's, which Metal encodes into (the module docs).
+    if !twin && format != source.format {
         return Err(Error::NotImplemented(RuntimeGap::Render));
     }
     // Layer `i` of a layered pass resolves into slice `resolveSlice + i`, and a layer past the
@@ -1257,6 +1303,7 @@ fn destination(
     Ok(Some(Destination {
         target: resolved,
         usage,
+        twin,
     }))
 }
 
