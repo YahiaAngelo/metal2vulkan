@@ -53,8 +53,10 @@ directory:
 ```sh
 CARGO_TARGET_DIR=target/gpucfg RUSTFLAGS='-Dwarnings --cfg m2v_gpu' \
   cargo clippy -p metal2vulkan-validation --all-targets --all-features -- -D warnings
-RUSTFLAGS='-Dwarnings --cfg m2v_gpu' cargo nextest run -p metal2vulkan-validation --release
 ```
+
+A site that stops announcing, or any other failing assertion, still compiles: the lint sees none of
+it, and only a run does.
 
 - **Device selection is an argument.** Every device-opening binary takes `--device-type cpu|gpu`,
   with no default. `cpu` matches only a CPU device and never falls back to a GPU; `gpu` takes the
@@ -70,6 +72,59 @@ RUSTFLAGS='-Dwarnings --cfg m2v_gpu' cargo nextest run -p metal2vulkan-validatio
   (`pgrep -fl '[c]argo'`), since another workload may fault the GPU on purpose; check the system
   log for GPU restarts; reproduce the suspect module on a CPU ICD only, where a stuck shader is an
   ordinary killable process; add a deterministic regression; then a person removes the tripwire.
+
+### The whole device lane in one command
+
+The device lane is what `--cfg m2v_gpu` adds: the delta between the workspace's test list with the
+cfg and without it. `scripts/device-lane/device-lane` derives that delta from two
+`cargo nextest list` runs, shards it by area, runs the shards one after another, and holds the run
+to the lane.
+
+```sh
+scripts/device-lane/device-lane --profile debug                      # the whole lane
+scripts/device-lane/device-lane --profile release --list-only        # derive and prove, no device
+scripts/device-lane/device-lane --profile release \
+  --filter 'test(/^runtime_lane::degrade_notices::/)'                # a slice of it
+```
+
+- **`--profile debug|release` is required**, and the report records it. Debug keeps the product's
+  `debug_assert`s, release is what a timing-sensitive test needs, and neither profile's result
+  stands for the other.
+- `--list-only` opens no device. `--filter EXPR` intersects a nextest filterset with the lane, and
+  the report then says the coverage is of that slice alone, never of the lane. An expression that
+  leaves the whole lane selected narrowed nothing, and stops the run.
+- `--wrap 'CMD ARG...'` prefixes each shard run. On a host whose GPU is shared, give it that
+  host's GPU lock and a resident-memory cap: macOS does not enforce `ulimit -v`, and a device test
+  has no worker boundary of its own. Every build and every listing stays outside it. Each shard is
+  compiled by its own `cargo nextest run --no-run` pass first, so the wrapped half has nothing to
+  compile: a lock held across a compile is the form that has wedged this one before, and a sibling
+  cargo on the same target directory can invalidate it between two shards.
+- The cfg and plain legs keep separate target directories (`--cfg-target`, `--plain-target`),
+  since `RUSTFLAGS` is part of a build's fingerprint. `--help` lists every option.
+
+The shard set is derived on every run and never stored: a stored set grows no term for a test added
+later, and would skip it in silence. A shard names its tests one by one, because a module holds
+GPU-free tests beside device ones and a module prefix would reach past the lane.
+
+The report (`$OUT/report.txt`, beside each shard's log, the two listings and `shards.tsv`) says:
+
+| Line | What it means |
+|---|---|
+| the census | how many tests each build lists, the lane between them, how many of the lane are `#[ignore]`d, and the lane per test binary |
+| `PROOF HOLDS` | every selected test is in exactly one shard, no shard reaches a test outside the selection, and the cfg build lists every test the plain build does. `PROOF FAILED` names what is adrift and stops the run before a device opens |
+| a shard line | its exit status, the tests nextest ran, the tests it had to run, the seconds its build took outside the wrap, and the seconds the wrapped half took |
+| the two cost lines | what the wrapped halves took in all and over how many turns, which is their turn in the host's queue and their run together and no finer, since the wrap does the waiting; then nextest's own figure for the tests, and what building cost outside the wrap |
+| `COVERAGE HOLDS` | every shard ran exactly the runnable tests it holds, by nextest's own count and not the script's. nextest's `skipped` figure says nothing here: it counts every test of the shard's binary the filterset left out as well as the `#[ignore]`d ones |
+| `VERDICT` | the line to read: every shard passed and the run covered the selection, or which of the two did not hold |
+
+The lane's `#[ignore]`d tests are no part of a run of it: the cost and timing measurements, the
+recorders (`parity::lane::metal_recording`) and the child halves of the tests that fork. The lane
+lists them and runs none, so what each shard had to run is its tests but those; one of them runs
+when a person asks for it by name.
+
+The run exits 0 only when the proof holds, the coverage adds up and every shard passed. It is no
+part of a gate: it opens a device, and takes the host's GPU a shard at a time for the length of the
+lane. The lint above is what a pre-landing check can see of the cfg; an assertion needs this run.
 
 **The runtime lane** (`runtime_lane::` tests) runs the runtime on a device under
 `VK_LAYER_KHRONOS_validation`. `METAL2VULKAN_LANE_VALIDATION=sync` (or `load-store`) adds the
