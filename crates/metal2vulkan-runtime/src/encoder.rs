@@ -162,16 +162,16 @@ impl Segment {
     }
 
     /// Whether it is a dispatch whose pipelines were being made (`pending_dispatch.rs`): an
-    /// encoder encoded again (`replay.rs`) records it at once, waiting for them, so it leaves no
-    /// segment there.
+    /// encoder encoded again (`replay.rs`) leaves one of its own in its place, prepared as the
+    /// commit prepared this one, and waits for no making.
     pub(super) fn pends(&self) -> bool {
         matches!(self.work, Deferred::Pending(_))
     }
 
-    /// Whether an encoder encoded again (`replay.rs`) records it at once: a dispatch whose
-    /// pipelines were being made ([`pends`](Self::pends)), or work a commit may record on the GPU
-    /// alone, recorded there again (`Deferred::record_on_gpu`). Its log is kept only where every
-    /// segment does.
+    /// Whether an encoder encoded again (`replay.rs`) records its place: a dispatch whose
+    /// pipelines were being made ([`pends`](Self::pends)), left as a segment again, or work a
+    /// commit may record on the GPU alone, recorded there again (`Deferred::record_on_gpu`). Its
+    /// log is kept only where every segment does.
     pub(super) fn records_again(&self) -> bool {
         self.pends() || self.work.may_run_on_gpu_alone()
     }
@@ -1681,7 +1681,9 @@ impl EncoderCore {
     }
 
     /// Whether it encodes an ended encoder's calls again ([`replaying`](Self::replaying)): its
-    /// dispatches wait for their pipelines, leaving no segment (`pending_dispatch.rs`).
+    /// tile dispatches wait for their pipelines, leaving no segment (`render/pending_tile.rs`).
+    /// Its compute dispatches wait for none, and leave the segment the first encoding left
+    /// (`pending_dispatch.rs`).
     pub(super) fn encodes_again(&self) -> bool {
         self.replaying
     }
@@ -2179,6 +2181,17 @@ impl EncoderCore {
         let mut parts = Vec::with_capacity(split.len());
         for ((raws, mut segments), summary) in split.into_iter().zip(summaries) {
             for segment in &mut segments {
+                // A dispatch whose pipelines are being made is left as the first encoding left
+                // it, prepared as its commit prepared that one (`Deferred::prepare`): recorded
+                // here where they are made, else by the host step once they are
+                // (`pending_dispatch.rs`). The rebind's call waits for no making.
+                if segment.pends() {
+                    let prepared = segment.work.prepare(&open.command_buffer, false)?;
+                    segment.recorded = prepared.recorded;
+                    segment.inputs = Some(prepared.inputs);
+                    segment.pipelines = prepared.pipelines;
+                    continue;
+                }
                 let recorded = segment.work.record_on_gpu(&open.command_buffer)?;
                 let Some((recorded, inputs)) = recorded else {
                     return Err(internal(

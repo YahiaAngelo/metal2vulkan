@@ -2355,8 +2355,9 @@ fn record(
     // The dispatch binds the variant: the kinds its making announces at every occurrence.
     let formats: BoundFormats<'_> = &|slot| bound_tables.bound_format(slot);
     // An encoder's own dispatch waits for no making: where one of its regions' pipelines is not
-    // made, it records later (`pending_dispatch.rs`).
-    // An encoder encoded again (`replay.rs`) waits for them, in the rebind's call.
+    // made, it records later (`pending_dispatch.rs`). An encoder encoded again (`replay.rs`)
+    // waits for none either, and leaves the same segment: the making is its submission's to wait
+    // for, as the first encoding left it, never the rebind's call on the program's thread.
     // Where the driver loses a layout's baked samplers after a copy in the same
     // `VkCommandBuffer` (`RuntimeDriverDefect::ImmutableSamplersLostAfterCopies`), a variant that
     // bakes them records in one of its own, as one being made does.
@@ -2370,7 +2371,7 @@ fn record(
     // may submit again (`command_buffer/rerun.rs`), is not split for it; but where its variant
     // records in one of its own.
     let laying = core.command_buffer().state().predication_mut().laying();
-    let waits = core.encodes_again() || (laying && !apart_samplers(&device, &objects));
+    let waits = laying && !apart_samplers(&device, &objects);
     let (pipelines, pending) = match (own.filter(|_| !waits), kept_made) {
         (Some(_), Some(made)) => {
             if let Some(kept) = &kept {

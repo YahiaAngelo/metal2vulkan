@@ -18,7 +18,11 @@
 //!   new `VkCommandBuffer`s of the command buffer's pool, and puts what it recorded in the
 //!   encoder's place: its recordings, uses, executions, keys and what its commands took (held
 //!   weakly, as the commit holds them). The first recording is never submitted. No GPU work is
-//!   waited for. Rebinds on two threads take turns (`reencoding`); a rebind during another's
+//!   waited for, and no pipeline's making: a dispatch whose pipelines are being made leaves a
+//!   segment of its own, as the first encoding left one (`pending_dispatch.rs`), which the
+//!   submission or the host step records once they are made, so no Metal compile runs or is
+//!   waited for on the program's thread inside the rebind's call.
+//!   Rebinds on two threads take turns (`reencoding`); a rebind during another's
 //!   turn marks the command buffer again, and its own turn encodes what moved since. A host step
 //!   of the command buffer, which records into its pool on the scheduler's thread, takes the
 //!   same turns: Vulkan synchronizes a pool's recordings externally.
@@ -53,6 +57,7 @@ use crate::buffer::HostPages;
 use crate::deferred::{Deferred, StepInputs};
 use crate::device::functions::Vk;
 use crate::encoder::{RecordedSegment, Replayed, ReplayedPart, Segment};
+use crate::pipeline::budget::Urgency;
 use crate::replay::Replay;
 use crate::residency::Residency;
 use crate::resource::ResourceKey;
@@ -198,6 +203,28 @@ impl CommandBufferShared {
                 }
             }
         }
+        // Each making a spliced dispatch's segment now waits for wakes the scheduler as it
+        // finishes, with no lock held, registered before the scheduler looks at the batches again
+        // (the wake at the end of this turn): a making that finished between that look and a
+        // later registration would leave the batch held with nothing to wake the scheduler. Its
+        // batch waits for them now, so they go before the makings nothing waits for, at the rank
+        // the commit asks for the first encoding's (`CommandBuffer::commit`).
+        let pending: Vec<Deferred> = {
+            let state = lock(&self.state);
+            (state.recorded.iter())
+                .filter(|part| spliced.contains(&part.encoder))
+                .flat_map(|part| part.segments.iter())
+                .filter(|segment| segment.steps_after_pipelines())
+                .map(|segment| segment.work.clone())
+                .collect()
+        };
+        if !pending.is_empty() {
+            let waker = device.shared().scheduler.waker();
+            for work in &pending {
+                work.when_made(&waker);
+                work.hasten(Urgency::Committed);
+            }
+        }
         // Its work recorded on the GPU alone in encoders not encoded again that named a buffer
         // over host pages that lies elsewhere now, before its first submission (which alone
         // points their resident tables), each segment by its part and its place there, which
@@ -284,10 +311,10 @@ impl State {
     /// and so does what its first segments recorded and what their host steps needed; its
     /// `VkCommandBuffer`s go with the pool unsubmitted. Refused, changing nothing and giving
     /// `replayed` back, where its place holds other parts than the encoding again's, or a segment
-    /// but a pending dispatch's (which goes, the encoding again having recorded it at once) or
-    /// work its commit recorded on the GPU alone, or its group was submitted, or the command
-    /// buffer completed. Its replays hold what its commands took with `device`, the device's
-    /// functions (`Replays::hold`).
+    /// but a pending dispatch's (which goes, the encoding again having left one of its own in its
+    /// place) or work its commit recorded on the GPU alone, or its group was submitted, or the
+    /// command buffer completed. Its replays hold what its commands took with `device`, the
+    /// device's functions (`Replays::hold`).
     pub(super) fn splice_replay(
         &mut self,
         device: &Vk,
@@ -354,9 +381,10 @@ impl State {
             let recorded = &mut self.recorded[part];
             recorded.raws = raws;
             recorded.summary = summary;
-            // Its first segments go: the encoding again recorded its pending dispatches at once,
-            // and its work on the GPU alone in segments of its own. What the commit recorded of
-            // one stays retained, never submitted, as the first recording does.
+            // Its first segments go: the encoding again left a segment of its own in each
+            // pending dispatch's place, and its work on the GPU alone in segments of its own.
+            // What the commit recorded of one stays retained, never submitted, as the first
+            // recording does.
             for segment in recorded.segments.drain(..) {
                 if let Some(mut before) = segment.recorded {
                     self.retained.extend(before.retained.into_entry());

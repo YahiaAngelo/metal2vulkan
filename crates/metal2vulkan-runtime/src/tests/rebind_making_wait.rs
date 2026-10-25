@@ -201,3 +201,141 @@ fn a_rebind_does_not_wait_for_the_making_its_encoding_again_meets() {
 fn a_rebind_waits_for_nothing_where_its_encoding_again_finds_the_pipeline_made() {
     leg(Warm::Made);
 }
+
+/// How long the command buffer is watched not to complete while its segment's making is held.
+const WATCHED_COMPLETION: Duration = Duration::from_millis(500);
+
+/// The safety net: a second hold dropped after this, so a regression that makes the rebind block
+/// again ends this test instead of wedging it while it holds the Mac's GPU lock.
+const NET: Duration = Duration::from_secs(30);
+
+/// The segment the encoding again leaves is a pending dispatch's, awaited where the first
+/// encoding's would have been: its command buffer cannot complete while the making is held,
+/// though the rebind returned and the event was signalled, and once the making lands the segment
+/// records and the dispatch's writes are in the pages the buffer lies in.
+///
+/// This is the end-to-end witness that the segment survives `State::splice_replay` -- the splice
+/// refuses a place whose parts or segments do not match, and a refusal would show here as
+/// `EncodedUseRebound` instead. It is not the regression guard for the wait itself
+/// ([`a_rebind_does_not_wait_for_the_making_its_encoding_again_meets`] is): the net below would
+/// let a blocking rebind through.
+#[test]
+fn a_dispatch_the_encoding_again_left_as_a_segment_records_once_its_making_lands() {
+    // Declared before the device, so dropped after it.
+    let pages = [Page::new(), Page::new()];
+    let scratch = Scratch::new("rebind-making-segment");
+    let device: Device = device(&scratch.0);
+    let state = state(&device);
+    let queue = device.new_command_queue().unwrap();
+    let bytes: Vec<u8> = (0..COUNT).flat_map(|i| (i as f32).to_le_bytes()).collect();
+    let input = device
+        .new_buffer_with_bytes(&bytes, ResourceOptions::shared())
+        .unwrap();
+    let scale = device
+        .new_buffer_with_bytes(&SCALE.to_le_bytes(), ResourceOptions::shared())
+        .unwrap();
+
+    // Two holds: the net's, dropped on its own after `NET`, and this test's, dropped where it
+    // means the making to land. A piece waits while either lives.
+    let net = held::hold();
+    let hold = held::hold();
+    let (past, wedged) = std::sync::mpsc::channel::<()>();
+    let watchdog = std::thread::spawn(move || {
+        // Ends as soon as the test says it is past the rebind (the sender dropped), else after
+        // `NET`, which is the only case the net is for.
+        let _ = wedged.recv_timeout(NET);
+        drop(net);
+    });
+
+    // SAFETY: each page outlives every buffer over it (dropped after the device), and only the
+    // buffer's commands use it while it lives.
+    let made = unsafe {
+        device.new_buffer_with_bytes_no_copy(
+            pages[0].memory(),
+            BYTES as u64,
+            ResourceOptions::shared(),
+            None,
+        )
+    };
+    let output = match made {
+        Ok(buffer) => buffer,
+        Err(Error::Unsupported(gap)) => {
+            eprintln!("REBIND-MAKING-SEGMENT: the device imports no host memory: {gap:?}");
+            drop(past);
+            drop(hold);
+            watchdog.join().unwrap();
+            return;
+        }
+        Err(error) => panic!("new_buffer_with_bytes_no_copy: {error:?}"),
+    };
+
+    let pooled = device.work_counts().dispatch_pipelines_pooled;
+    let gate = device.new_shared_event().unwrap();
+    let command_buffer = queue.command_buffer().unwrap();
+    command_buffer
+        .encode_wait_for_event(EventRef::Shared(&gate), 1)
+        .unwrap();
+    dispatch(&command_buffer, &state, &input, &output, &scale);
+    command_buffer.commit().unwrap();
+    assert_eq!(
+        device.work_counts().dispatch_pipelines_pooled,
+        pooled + 1,
+        "the dispatch's making waits in the held pool, so it left a pending segment"
+    );
+
+    assert_eq!(
+        output.detach_backing(),
+        Ok(true),
+        "the detach of a buffer whose only use waits for an event"
+    );
+    // SAFETY: as above.
+    unsafe { output.rebind_bytes_no_copy(pages[1].memory(), None, None) }.unwrap();
+    let counts = device.work_counts();
+    assert_eq!(
+        (counts.encoders_reencoded, counts.reencodes_refused),
+        (1, 0),
+        "the rebind encoded the dispatch's encoder again, and the splice took it"
+    );
+
+    // Past the rebind: the net is not needed, and the watchdog ends.
+    drop(past);
+
+    // Nothing of the GPU's holds it now: its batch waits for the making its segment records.
+    gate.set_signaled_value(1);
+    assert!(
+        command_buffer
+            .wait_until_completed_for(WATCHED_COMPLETION)
+            .is_err(),
+        "the command buffer completed though the making its segment records is held"
+    );
+    assert_ne!(
+        command_buffer.status(),
+        CommandBufferStatus::Completed,
+        "the segment the encoding again left awaits its making, as the first encoding's would"
+    );
+    assert!(
+        !pages[0].written() && !pages[1].written(),
+        "nothing ran while the making was held"
+    );
+
+    drop(hold);
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    let (status, error) = (command_buffer.status(), command_buffer.error());
+    let (old, new) = (pages[0].written(), pages[1].written());
+    println!("rebind-making-segment: {status:?} {error:?} old {old} new {new}");
+    watchdog.join().unwrap();
+
+    assert!(
+        !old,
+        "the dispatch wrote the pages it was encoded over ({status:?}, {error:?})"
+    );
+    assert_eq!(
+        error, None,
+        "the segment recorded and ran over the new pages"
+    );
+    assert_eq!(status, CommandBufferStatus::Completed);
+    assert!(
+        new,
+        "the segment recorded once its making landed, over the pages the buffer lies in"
+    );
+}
