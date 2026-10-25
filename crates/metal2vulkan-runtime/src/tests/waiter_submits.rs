@@ -1,0 +1,163 @@
+//! `Scheduler::submit_before_waiting`: a thread about to block for a command buffer's completion
+//! submits for itself what still waits in the scheduler's inbox, instead of waiting for a wake
+//! and a whole pass (`WorkCounts::scheduler_passes_by_waiters`,
+//! `WorkCounts::batches_submitted_by_waiters`); and it submits nothing of a command buffer with a
+//! submission or a scheduled handler, which runs the program's code on the thread that takes its
+//! last batch, or that is scheduled where its last batch goes: it passes and leaves every batch
+//! of it to the scheduler's thread, which runs those handlers, as it does today.
+//!
+//! Device tests: compiled only under the validation crate's GPU safety cfgs (`m2v_gpu`,
+//! `m2v_cpu_icd`), on the kind of device the cfg selects.
+
+use crate::{
+    CommandBuffer, CommandQueue, Device, DeviceKind, DeviceOptions, ResourceOptions,
+    ShaderCacheOptions,
+};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::thread::ThreadId;
+
+/// The command buffers of each kind: each committed and waited for before the next, so each one's
+/// wait races the scheduler's wake for its commit alone.
+const ROUNDS: u64 = 32;
+
+/// A scratch directory for the device's shader cache, removed when dropped.
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new() -> Scratch {
+        let path = std::env::temp_dir().join(format!("m2v-waiter-submits-{}", std::process::id()));
+        std::fs::create_dir_all(&path).unwrap();
+        Scratch(path)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// The device the cfg selects: a CPU device under `m2v_cpu_icd`, else a GPU, its shader cache
+/// in `cache`.
+fn device(cache: &Path) -> Device {
+    let options = DeviceOptions {
+        kinds: match cfg!(m2v_cpu_icd) {
+            true => vec![DeviceKind::Cpu],
+            false => vec![
+                DeviceKind::Discrete,
+                DeviceKind::Integrated,
+                DeviceKind::Virtual,
+            ],
+        },
+        shader_cache: ShaderCacheOptions {
+            directory: Some(cache.to_owned()),
+            ..ShaderCacheOptions::default()
+        },
+        ..DeviceOptions::default()
+    };
+    Device::system_default_with(&options).unwrap()
+}
+
+/// What a command buffer of [`rounds`] has besides its fill.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Besides {
+    Nothing,
+    /// A submission handler, which runs on the thread that takes its last batch.
+    SubmissionHandler,
+    /// A scheduled handler, which its queue's handler thread runs.
+    ScheduledHandler,
+}
+
+/// What [`rounds`] counted: the passes threads about to block made, the batches they submitted,
+/// and the threads the handlers ran on.
+struct Passed {
+    passes: u64,
+    batches: u64,
+    handler_threads: Vec<ThreadId>,
+}
+
+/// [`ROUNDS`] command buffers of `queue`, each a fill of 16 bytes with what `besides` says, each
+/// committed and waited for before the next.
+fn rounds(device: &Device, queue: &CommandQueue, besides: Besides) -> Passed {
+    let target = device.new_buffer(16, ResourceOptions::shared()).unwrap();
+    let threads: &'static Mutex<Vec<ThreadId>> = Box::leak(Box::new(Mutex::new(Vec::new())));
+    let before = device.work_counts();
+    for round in 0..ROUNDS {
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut blit = command_buffer.blit_command_encoder().unwrap();
+        blit.fill_buffer(&target, 0..16, round as u8).unwrap();
+        blit.end_encoding().unwrap();
+        let handler = Box::new(|_: &CommandBuffer| {
+            (threads.lock().unwrap()).push(std::thread::current().id());
+        });
+        match besides {
+            Besides::Nothing => {}
+            Besides::SubmissionHandler => command_buffer.add_submission_handler(handler).unwrap(),
+            Besides::ScheduledHandler => command_buffer.add_scheduled_handler(handler).unwrap(),
+        }
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed().unwrap();
+        assert_eq!(command_buffer.error(), None);
+    }
+    let after = device.work_counts();
+    Passed {
+        passes: after.scheduler_passes_by_waiters - before.scheduler_passes_by_waiters,
+        batches: after.batches_submitted_by_waiters - before.batches_submitted_by_waiters,
+        handler_threads: threads.lock().unwrap().clone(),
+    }
+}
+
+/// A thread that commits and then waits submits its own batch: at least one of [`ROUNDS`] does
+/// (the scheduler's thread, woken by the commit, may have taken it in first, and then the waiting
+/// thread finds the inbox empty and sleeps, as it did before).
+///
+/// A command buffer with a submission or a scheduled handler is never submitted by a waiting
+/// thread: it passes, taking the commit into the order, and submits no batch of it. Each handler
+/// ran, and on none of the waiting threads: Metal runs a command buffer's handlers on its own
+/// threads, and one that took a lock the waiting thread holds would deadlock where Metal's would
+/// not.
+#[test]
+fn a_thread_about_to_block_submits_what_it_committed_unless_a_handler_must_run() {
+    let scratch = Scratch::new();
+    let device = device(&scratch.0);
+    let queue = device.new_command_queue().unwrap();
+    let waiting = std::thread::current().id();
+    let plain = rounds(&device, &queue, Besides::Nothing);
+    println!(
+        "submitted by waiters: {} batches over {} passes of {ROUNDS} waits",
+        plain.batches, plain.passes
+    );
+    assert!(
+        plain.batches >= 1,
+        "no waiting thread submitted its own batch over {ROUNDS} waits"
+    );
+    assert!(plain.passes >= plain.batches);
+    for besides in [Besides::SubmissionHandler, Besides::ScheduledHandler] {
+        let held = rounds(&device, &queue, besides);
+        println!(
+            "with {besides:?}: {} batches over {} passes of {ROUNDS} waits",
+            held.batches, held.passes
+        );
+        assert_eq!(
+            held.batches, 0,
+            "a waiting thread submitted a batch of a command buffer with {besides:?}"
+        );
+        assert!(
+            held.passes >= 1,
+            "no waiting thread passed over {ROUNDS} waits with {besides:?}, so the batches it \
+             held out prove nothing"
+        );
+        assert_eq!(
+            held.handler_threads.len(),
+            ROUNDS as usize,
+            "{besides:?} did not run once a round"
+        );
+        assert!(
+            !held.handler_threads.contains(&waiting),
+            "a {besides:?} ran on the thread waiting in wait_until_completed"
+        );
+    }
+    drop(queue);
+    drop(device);
+}

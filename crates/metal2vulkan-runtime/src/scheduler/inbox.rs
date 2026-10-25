@@ -1,6 +1,6 @@
 //! The scheduler's lock with an inbox, as a pure structure: a commit leaves its batches in the
-//! inbox and returns at once, as Metal's `commit` does, and only the scheduler's thread makes
-//! passes.
+//! inbox and returns at once, as Metal's `commit` does, and the scheduler's thread makes the
+//! passes, but for the one a thread about to block makes for itself ([`Inbox::pass_once`]).
 //!
 //! A pass takes the lock, takes in what was committed, and submits what is ready, one
 //! `vkQueueSubmit` after another (about 80 us each on ANV with i915, whose execbuffer lists every
@@ -11,9 +11,10 @@
 //!   returns: the scheduler's thread takes it in at its next pass. The inbox keeps commit order,
 //!   and every pass takes it in before anything else: so the order sees commits in commit order,
 //!   and the batches go to the `VkQueue`s, and are planned, in the order a pass picks them.
-//! - **Nothing left behind.** The thread is counted while it makes a pass (`passers`). Once done
+//! - **Nothing left behind.** The passer is counted while it makes a pass (`passers`). Once done
 //!   and counted out, it looks at the inbox again after a sequentially consistent fence, and
-//!   makes another pass for what it holds. A commit puts its own in before the same fence and its
+//!   makes another pass for what it holds (a thread about to block wakes the scheduler's thread
+//!   for it instead: [`Inbox::pass_once`]). A commit puts its own in before the same fence and its
 //!   look at the count: whichever of the two fences comes first, the later look sees the other's
 //!   write, so a commit is either seen by the thread's look or finds no passer. One that finds no
 //!   passer marks the state under the lock, which then only a short hold has (a wake, a decode
@@ -28,6 +29,15 @@
 //!   the thread's work.
 //! - **Who runs the after-work.** The thread lets go, outside the lock, of what its passes
 //!   submitted (the holds, the submission handlers) in submission order.
+//! - **A thread about to block passes once** ([`Inbox::pass_once`]). A thread that is about to
+//!   sleep for work it committed itself passes for it instead of waiting for a wake, where the
+//!   inbox holds commits and no passer is counted: it is counted as the passer by a swap from
+//!   none, so two such threads never both pass, and it looks again for nothing once counted out
+//!   (it is going to sleep). What was left to it meanwhile it hands to the scheduler's thread
+//!   instead, by the same fence and look its own `look_again` would make, and a wake
+//!   ([`Inbox::wake`]). The scheduler's thread is never gated: its [`pass`](Inbox::pass) counts
+//!   in whatever is counted, and waits for the lock while such a pass holds it, as a short hold
+//!   makes it wait.
 //! - **A wake is handed off too** ([`Inbox::nudge`]). What a pass reads may change without a
 //!   commit: an event's value rises, a batch completes (a check waits for its signal to land).
 //!   Where the thread is counted, the waker leaves it a nudge and returns, as a commit does: the
@@ -106,6 +116,49 @@ impl<S, C> Inbox<S, C> {
         self.passers.load(Ordering::SeqCst) > 0
     }
 
+    /// One pass for a thread about to block (the module docs), which makes no second one: where
+    /// the inbox holds a commit and no passer is counted, it becomes the passer by a swap from
+    /// none, `pass` takes in what the inbox holds under the state's lock, and it counts out.
+    /// Whether it passed; false where it holds no commit, or where a passer was counted, whose
+    /// pass takes the commits in.
+    ///
+    /// It never looks again: the caller is about to sleep, so what was posted or nudged during
+    /// its pass goes to the thread that makes passes instead, which the caller
+    /// [`wake`](Self::wake)s after the sequentially consistent fence this leaves behind
+    /// ([`passed_over`](Self::passed_over) answers what is left).
+    pub(crate) fn pass_once(&self, pass: impl FnOnce(&mut S, &mut Vec<C>)) -> bool {
+        if !self.holds_commits() {
+            return false;
+        }
+        if (self.passers)
+            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return false;
+        }
+        let mut state = lock(&self.state);
+        let mut taking = lock(&self.taking);
+        self.take(&mut taking);
+        pass(&mut state, &mut taking);
+        debug_assert!(taking.is_empty(), "a pass takes in every commit");
+        drop(taking);
+        drop(state);
+        self.passers.fetch_sub(1, Ordering::SeqCst);
+        true
+    }
+
+    /// Whether a commit or a nudge was left to the thread that makes passes, read after
+    /// [`pass_once`](Self::pass_once) counted out: the same fence and look its
+    /// [`look_again`](Self::look_again) would make, for a caller that sleeps instead of passing
+    /// again. One posted or nudged during that pass put its write in before its own fence and
+    /// its look at the count, which found a passer: whichever fence comes first, the later look
+    /// sees the other's write, so it is seen here or its own caller found no passer and marked
+    /// the state itself.
+    pub(crate) fn passed_over(&self) -> bool {
+        fence(Ordering::SeqCst);
+        self.posted.load(Ordering::SeqCst) || self.nudged.load(Ordering::SeqCst)
+    }
+
     /// Wake for a pass: [`nudge`](Self::nudge), and where that finds no passer, `mark` the state
     /// under the lock ([`mark`](Self::mark)). Whether it marked the state, for the caller to wake
     /// the thread that makes passes: the waker never waits for a pass's submissions.
@@ -148,7 +201,7 @@ impl<S, C> Inbox<S, C> {
         true
     }
 
-    /// A pass by the thread that makes them (the scheduler's), `pass` taking in what the inbox
+    /// A pass by the scheduler's thread, never gated (the module docs), `pass` taking in what the inbox
     /// holds and answering whether to look again; then look at the inbox again
     /// ([`look_again`](Self::look_again)) while each pass answers so. Where one answers no, the
     /// inbox may hold commits left to this thread, which it looks for itself

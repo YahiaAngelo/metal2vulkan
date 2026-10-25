@@ -1,4 +1,7 @@
-//! `scheduler/inbox.rs`: a commit posts and returns at once, whether or not a pass is under way,
+//! `scheduler/inbox.rs`: a thread about to block passes once where the inbox holds commits and no
+//! passer is counted, and never where one is, so two threads never both pass; what is left to such
+//! a pass it reads back for the scheduler's thread instead of passing again; and a commit posts
+//! and returns at once, whether or not a pass is under way,
 //! and its commit goes next, in commit order; one that finds no pass under way marks the state for
 //! the thread's wake, waiting only for a short hold; the scheduler's pass looks again for a commit
 //! left to it until a pass answers it has work of its own first; commits from many threads racing
@@ -466,4 +469,92 @@ fn wakers_racing_passes_and_commits_have_every_change_read_by_a_pass() {
     );
     assert_eq!(seen.log.len(), (THREADS * COMMITS) as usize, "each once");
     assert!(!model.inbox.holds_commits() && !model.inbox.nudged());
+}
+
+/// A thread about to block passes where the inbox holds a commit and no passer is counted: it
+/// takes the commits in itself, in commit order, and makes one pass alone.
+#[test]
+fn a_thread_about_to_block_passes_once_for_the_commits_the_inbox_holds() {
+    let inbox = Log::new(Vec::new());
+    assert!(
+        !inbox.pass_once(|_, _| panic!("a pass with no commit in the inbox")),
+        "it passed for an empty inbox"
+    );
+    for commit in 0..3 {
+        inbox.post(commit, |_| {});
+    }
+    let mut passes = 0;
+    assert!(inbox.pass_once(|log, commits| {
+        take_in(log, commits);
+        passes += 1;
+    }));
+    assert_eq!(passes, 1, "it made {passes} passes");
+    assert_eq!(*lock(inbox.state()), [0, 1, 2]);
+    assert!(!inbox.holds_commits());
+    assert!(
+        !inbox.passed_over(),
+        "it read work left over after a pass that took everything in"
+    );
+}
+
+/// A thread about to block never passes while a passer is counted: the scheduler's pass takes the
+/// commits in, and the waiting thread sleeps as it does today.
+#[test]
+fn a_thread_about_to_block_never_passes_while_a_passer_is_counted() {
+    let inbox = Arc::new(Log::new(Vec::new()));
+    let (passer, release) = held_pass(&inbox);
+    commit_elsewhere(&inbox, 1);
+    assert!(inbox.holds_commits());
+    {
+        let inbox = Arc::clone(&inbox);
+        let waiter =
+            thread::spawn(move || inbox.pass_once(|_, _| panic!("two threads passed at once")));
+        assert!(
+            !waiter.join().unwrap(),
+            "a thread about to block passed while the scheduler was passing"
+        );
+    }
+    release.send(()).unwrap();
+    assert_eq!(passer.join().unwrap(), 2);
+    assert_eq!(*lock(inbox.state()), [1]);
+}
+
+/// A commit left to a pass a thread about to block made is read back by it once it counted out
+/// ([`Inbox::passed_over`]), for the scheduler's thread: it is going to sleep, so it never passes
+/// again, and the commit would otherwise wait for nothing.
+#[test]
+fn a_commit_left_to_a_blocking_thread_s_pass_is_read_back_for_the_scheduler() {
+    let inbox = Arc::new(Log::new(Vec::new()));
+    inbox.post(0, |_| {});
+    assert!(inbox.pass_once(|log, commits| {
+        take_in(log, commits);
+        // Posted while this pass is counted: its committer marks nothing and leaves it here.
+        commit_elsewhere(&inbox, 1);
+    }));
+    assert_eq!(*lock(inbox.state()), [0]);
+    assert!(
+        inbox.passed_over(),
+        "the commit left to the pass was read by nobody"
+    );
+    // The scheduler's thread, woken for it, takes it in.
+    inbox.pass(|log, commits| {
+        take_in(log, commits);
+        false
+    });
+    assert_eq!(*lock(inbox.state()), [0, 1]);
+    assert!(!inbox.passed_over());
+}
+
+/// A nudge left to such a pass is read back the same way: a waker that found the pass counted
+/// marked nothing, and the pass takes none afterwards.
+#[test]
+fn a_nudge_left_to_a_blocking_thread_s_pass_is_read_back_for_the_scheduler() {
+    let inbox = Arc::new(Log::new(Vec::new()));
+    inbox.post(0, |_| {});
+    assert!(inbox.pass_once(|log, commits| {
+        take_in(log, commits);
+        assert!(inbox.nudge(), "the waker found no passer counted");
+    }));
+    assert!(inbox.nudged(), "the nudge was taken in by the pass");
+    assert!(inbox.passed_over());
 }

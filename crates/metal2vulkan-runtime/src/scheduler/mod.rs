@@ -15,6 +15,19 @@
 //!   device's recorder where it waits with their replays queued (`recorder`), which the commits
 //!   queued without a wake: a commit wakes this thread alone.
 //!
+//! - **A thread about to block submits for itself** ([`Scheduler::submit_before_waiting`]).
+//!   Metal encodes and commits inline on the program's thread, and a thread that commits and then
+//!   waits for the completion would otherwise wait for a wake and a whole pass before its work
+//!   reached the `VkQueue`. So, where the inbox still holds commits and no pass is under way, that
+//!   thread becomes the passer ([`Inbox::pass_once`]), takes them into the order and submits what
+//!   needs nothing of this thread and runs none of the program's code ([`submit_plain_ready`]):
+//!   batches with no host step, no submission check, no handler of any kind, no switch of storage
+//!   forms, and never one of a `VkQueue` whose batches group. It takes the head committed first of
+//!   all and stops there, so its submissions are in commit order; it leaves [`Awaits`], [`Left`]
+//!   and the group to this thread, which it wakes for what it left; and it never looks at the
+//!   inbox again, so what was left to it goes to this thread by the same fences
+//!   ([`Inbox::passed_over`]). Counted: `WorkCounts::scheduler_passes_by_waiters` and
+//!   `WorkCounts::batches_submitted_by_waiters`.
 //! - **The order** ([`Order`]). Each logical queue's batches wait in commit order; the head
 //!   committed first among those ready goes next. A batch is ready once every event it waits for
 //!   is reached by a signal already submitted or by the host ([`EventTimeline`]), so no `VkQueue`
@@ -585,6 +598,62 @@ impl Scheduler {
         }
     }
 
+    /// A thread is about to block until a command buffer of this device completes
+    /// (`CommandBufferShared::waits_for_completion`): where the batches it committed still wait
+    /// in the inbox and no pass is under way, it becomes the passer ([`Inbox::pass_once`]), takes
+    /// them into the order and submits what it may itself ([`submit_plain_ready`]), then leaves
+    /// the rest to the thread, which it wakes.
+    ///
+    /// Metal encodes and commits inline on the program's thread. `commit` here submits nothing,
+    /// as Metal's returns before its command buffer is scheduled ([`commit`](Self::commit)), so a
+    /// thread that commits and then blocks would otherwise wait for a wake and a whole pass
+    /// before its work reached the `VkQueue`. The condition that earns the submission is that
+    /// this thread is about to block, which is known only here.
+    ///
+    /// **It runs none of the program's code.** Metal runs a command buffer's handlers on its own
+    /// threads, and one that took a lock this thread holds would deadlock where Metal's would
+    /// not; a release of the program's objects it ran would run where Metal runs none. So it
+    /// submits only batches whose command buffer has no submission and no scheduled handler, no
+    /// submission check and no host step, and no switch of a storage form riding on it
+    /// ([`plain_ready`]), and the holds its pass lets go of go to a handler thread wherever one
+    /// is a command buffer's last reference. Whatever it leaves is the thread's, which runs them
+    /// as it does today.
+    pub(crate) fn submit_before_waiting(&self, device: &Device) {
+        let shared = &*self.shared;
+        let mut spent = Spent::new();
+        let (mut took, mut submitted, mut left_over) = (false, 0, false);
+        let passed = shared.inbox.pass_once(|state, commits| {
+            took = !commits.is_empty();
+            take_in(state, commits, &mut spent);
+            submitted = submit_plain_ready(state, &mut spent);
+            left_over = !state.order.is_empty() || !state.grouped.is_empty();
+        });
+        if !passed {
+            return;
+        }
+        device.shared().counts.waiter_passed(submitted);
+        // The holds go outside the lock, and a command buffer's last reference to a handler
+        // thread: no release of the program's objects (a no-copy buffer's deallocator among them)
+        // runs on a thread blocking in `wait_until_completed`, where Metal runs none.
+        for buffer in spent.drain(..) {
+            if let Some(last) = buffer.let_go_short_of_last() {
+                device.let_go_elsewhere(Box::new(last));
+            }
+        }
+        // The commits' replays, which they queued without waking the recorder (`recorder`): those
+        // of the batches submitted here replayed in their submission, the rest for its thread.
+        if took {
+            if let Some(recorder) = shared.recorder.get() {
+                recorder.kick();
+            }
+        }
+        // This pass never looks again (`inbox.rs`): what is left in the order, and anything
+        // posted or nudged during it, goes to the thread that makes passes.
+        if left_over || shared.inbox.passed_over() {
+            self.wake_for(Woken::Host);
+        }
+    }
+
     /// What makes the thread look for work again from any thread: a pipeline a held batch's
     /// host step waits for was made (`render/pending.rs`). It holds the thread's state weakly,
     /// so a making it waits on keeps nothing of the scheduler alive.
@@ -928,17 +997,11 @@ struct Passed {
     took: bool,
 }
 
-/// A pass of the thread's: take `commits` into the order, in commit order, then submit what is
-/// ready ([`submit_ready`]) into `passed` and `left`. A pass that stopped at
-/// [`PASS_SUBMISSIONS`] marks the state, so the thread passes again at once after its round let
-/// go of them.
-fn pass(
-    state: &mut State,
-    commits: &mut Vec<Committed>,
-    (passed, left): (&mut Passed, &mut Left<Work>),
-    awaits: &Awaits,
-) {
-    passed.took |= !commits.is_empty();
+/// Take `commits` into the order, in commit order: each command buffer's batches, each with what
+/// it waits for and signals, behind the batches its logical queue already holds. Each commit's own
+/// hold goes to `spent`, for the caller to drop without the lock: its batches hold the command
+/// buffer now.
+fn take_in(state: &mut State, commits: &mut Vec<Committed>, spent: &mut Spent) {
     for Committed {
         buffer,
         queue,
@@ -960,9 +1023,22 @@ fn pass(
             hastened: false,
         });
         order.push(queue, held);
-        // The commit's own hold goes without the lock: its batches hold the command buffer now.
-        passed.spent.push(buffer);
+        spent.push(buffer);
     }
+}
+
+/// A pass of the thread's: take `commits` into the order, in commit order, then submit what is
+/// ready ([`submit_ready`]) into `passed` and `left`. A pass that stopped at
+/// [`PASS_SUBMISSIONS`] marks the state, so the thread passes again at once after its round let
+/// go of them.
+fn pass(
+    state: &mut State,
+    commits: &mut Vec<Committed>,
+    (passed, left): (&mut Passed, &mut Left<Work>),
+    awaits: &Awaits,
+) {
+    passed.took |= !commits.is_empty();
+    take_in(state, commits, &mut passed.spent);
     state.dirty = false;
     match submit_ready(
         state,
@@ -1195,6 +1271,172 @@ fn submit_ready(
 
 /// The process is exiting ([`exit_guard`]): the thread submits no more.
 struct Exiting;
+
+/// Submit, into `spent`, the batches a thread about to block may submit itself
+/// ([`Scheduler::submit_before_waiting`]), at most [`PASS_SUBMISSIONS`] of them: the head
+/// committed first of all while [`plain_ready`] holds for it. How many it submitted.
+///
+/// It takes the first head rather than the first *ready* one ([`Order::take_first`]), so it stops
+/// at the first head it may not submit: submission order stays commit order, and no batch that
+/// keeps its place is passed over by one committed after it ([`is_behind`] has nothing to answer).
+/// That is why it is a path of its own and not a condition in [`submit_ready`]'s head selection.
+///
+/// **It touches none of the thread's own state.** [`Awaits`] is what the thread's last pass left
+/// it asleep on, its `vkWaitSemaphores` among them, and [`Left`] is the work that pass handed it:
+/// a waiting thread that cleared the first would leave the thread asleep with work ready, and one
+/// handed a piece of the second would run a host step, or the program's code in a submission
+/// check, where Metal runs neither. So it reads `order`, `binary` and `decodes`, submits against
+/// `tracker`, `values`, `waited`, `kept` and `lists` as a pass does, and leaves `awaits`, `left`,
+/// the group, `dirty` and the sleeps alone. It makes no pass at all while the group holds a batch.
+fn submit_plain_ready(state: &mut State, spent: &mut Spent) -> usize {
+    let mut submitted = 0;
+    while submitted < PASS_SUBMISSIONS && state.grouped.is_empty() {
+        let Some(busy) = exit_guard::enter() else {
+            return submitted;
+        };
+        let taken = {
+            let State {
+                order,
+                binary,
+                decodes,
+                untracked_decodes,
+                ..
+            } = &mut *state;
+            let (binary, decodes, untracked) = (&*binary, &*decodes, *untracked_decodes);
+            order.take_first(|held| plain_ready(held, binary, decodes, untracked))
+        };
+        let Some((queue, sequence, held, waits)) = taken else {
+            drop(busy);
+            return submitted;
+        };
+        let answer = held
+            .buffer
+            .submit_batch(held.index, held.last, &waits, state);
+        // Its waits for values found reached go: it waits for none of them.
+        if matches!(answer, Ok(Submitting::Submitted(_))) {
+            let met = held.waits.len() - waits.len();
+            if met > 0 {
+                held.buffer.device().shared().counts.event_waits_met(met);
+            }
+        }
+        match answer {
+            Ok(Submitting::Submitted(submission)) => {
+                drop(busy);
+                // The predicate holds out every command buffer with submission handlers and
+                // every switch of storage forms, so there is nothing for the submitting thread
+                // to run once the lock is free, and nothing to settle and announce.
+                debug_assert!(
+                    !submission.runs_handlers(),
+                    "a waiting thread submitted a batch whose handlers it must not run"
+                );
+                let Held {
+                    buffer,
+                    binary_needs,
+                    binary_signals,
+                    waits: events,
+                    ..
+                } = held;
+                drop(events);
+                state.binary.submitted(&binary_needs, &binary_signals);
+                buffer.publish(submission);
+                spent.push(buffer);
+                submitted += 1;
+            }
+            // Nothing submitted or changed: a rebind encodes encoders of it again
+            // (`command_buffer/reencode.rs`), or the group held must go first. It goes back at
+            // its place, which it keeps, for the thread that makes passes, which the caller wakes.
+            Ok(Submitting::Later | Submitting::AfterGroup(_)) => {
+                drop(busy);
+                state.order.put_back(queue, sequence, held);
+                return submitted;
+            }
+            // Unreachable: `groups` stops holding for a queue but never starts (its `flights` are
+            // set once, `device/relay.rs`), so a batch [`plain_ready`] found ungrouped has
+            // `joins` false and submits alone (`command_buffer/group.rs`), and this pass runs
+            // only while the group holds no batch, so `admits` holds for it. Held as the thread's
+            // own pass holds one all the same, and this pass ends there: the thread, which the
+            // caller wakes, sends the group at once, as it does for any group one of whose
+            // command buffers a thread waits for (`Group::keeps`).
+            Ok(Submitting::Grouped) => {
+                drop(busy);
+                let handlers = state.group.schedule_held();
+                debug_assert!(
+                    !handlers,
+                    "a waiting thread held a batch whose handlers it must not run"
+                );
+                held.buffer.held_in_group();
+                state.grouped.push((queue, held));
+                return submitted;
+            }
+            // As a pass fails a batch it could not submit: the rest of the command buffer never
+            // runs. Its storage forms are none to settle, and its handlers never run, as they
+            // never do for a command buffer that fails before its last batch is taken.
+            Err(error) => {
+                drop(busy);
+                let Held {
+                    buffer,
+                    binary_needs,
+                    waits: events,
+                    ..
+                } = held;
+                drop(events);
+                state.binary.dropped(&binary_needs);
+                let rest = state
+                    .order
+                    .drop_head(queue, |next| next.buffer.same(&buffer));
+                for held in &rest {
+                    state.binary.dropped(&held.binary_needs);
+                }
+                spent.extend(rest.into_iter().map(|held| held.buffer));
+                buffer.failed(error, &state.values);
+                spent.push(buffer);
+                return submitted;
+            }
+        }
+    }
+    submitted
+}
+
+/// The Vulkan waits for `held`'s events' signal indices where a thread about to block may submit
+/// it itself ([`Scheduler::submit_before_waiting`]); `None` where it may not.
+///
+/// It is ready as [`submit_ready`] asks of a head: its binary semaphores' signals submitted, no
+/// rebind encoding encoders of its event group again, no CPU decode queued into a twin it may
+/// read, and every event value it waits for reached by a submitted signal or by the host. And
+/// neither the thread nor the program has anything to do for it:
+///
+/// - no segments, so no host step the thread records, and none in its [`Left`] work;
+/// - no submission check, which runs the program's code on the thread that runs it;
+/// - no submission handler and no scheduled handler, so its transition to `Scheduled` is plain
+///   and runs none of the program's code where it is published
+///   (`CommandBufferShared::submits_without_the_program`);
+/// - no switch of a fetched target's storage form riding on it, which the submitting thread
+///   settles and announces (`texture/storage_form.rs`);
+/// - and a `VkQueue` whose batches never wait in a group (`command_buffer/group.rs`), which is
+///   the thread's to hold and to send.
+fn plain_ready(
+    held: &Held,
+    binary: &BinarySignals<vk::Semaphore>,
+    decodes: &BTreeMap<ResourceKey, usize>,
+    untracked_decodes: usize,
+) -> Option<Vec<(vk::Semaphore, u64)>> {
+    if held.segments || held.checked {
+        return None;
+    }
+    if !binary.ready(&held.binary_needs) {
+        return None;
+    }
+    if held.buffer.reencode_pending() {
+        return None;
+    }
+    if untracked_decodes > 0 || (!decodes.is_empty() && reads_decoding(held, decodes)) {
+        return None;
+    }
+    if held.buffer.groups() || !held.buffer.submits_without_the_program() {
+        return None;
+    }
+    event_waits(held)
+}
 
 /// Submit the batches held for one kernel submission (`command_buffer/group.rs`), sent by `end`
 /// (counted), a section of the exit guard, then publish them, or fail their command buffers

@@ -134,11 +134,19 @@ impl CommandBufferShared {
     /// scheduler is woken, and sends the group at once ([`Group::keeps`]). The scheduler marks a
     /// batch held before it looks for a waiter, and the waiter marks its wait before it looks for
     /// a batch held, each on the same word, so one of the two sees the other.
+    ///
+    /// Else the thread submits for itself what still waits in the scheduler's inbox, before it
+    /// sleeps (`Scheduler::submit_before_waiting`): a commit submits nothing, as Metal's returns
+    /// before its command buffer is scheduled, so a thread that commits and then blocks would
+    /// otherwise wait for a wake and a whole pass first.
     pub(crate) fn waits_for_completion(&self) {
         let before = self.group_hold.fetch_or(WAITED_FOR, Ordering::SeqCst);
+        let scheduler = &self.device.shared().scheduler;
         if before & IN_GROUP != 0 {
-            self.device.shared().scheduler.wake();
+            scheduler.wake();
+            return;
         }
+        scheduler.submit_before_waiting(&self.device);
     }
 
     /// Whether a thread waits for its completion.

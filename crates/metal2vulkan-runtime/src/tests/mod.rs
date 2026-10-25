@@ -230,6 +230,8 @@ mod uniform_bind_offsets;
 mod unique_identifier;
 mod values;
 mod view_plan;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod waiter_submits;
 mod word_fill;
 mod wrapped;
 mod written_commands;

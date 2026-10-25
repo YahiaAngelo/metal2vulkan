@@ -2057,9 +2057,13 @@ impl CommandBuffer {
     /// 9, `hang.rs`) runs them as it becomes `Scheduled` before its last batch, which the hang
     /// holds: once the batch before the hang is taken and Metal's time to read `Scheduled` came.
     ///
-    /// - **The thread.** The device's scheduler thread, which makes every submission: `commit`
-    ///   returns at once, as Metal's does, and submits nothing itself. It runs with no lock of the
-    ///   runtime's held, after the submission's call returned. Behind a GPU hang, the hang's own
+    /// - **The thread.** The device's scheduler thread: `commit` returns at once, as Metal's does,
+    ///   and submits nothing itself. It runs with no lock of the runtime's held, after the
+    ///   submission's call returned. A thread about to block for a command buffer's completion
+    ///   submits what still waits in the scheduler's inbox itself, but never a batch of a command
+    ///   buffer with a handler of any kind, which stays the scheduler thread's to submit: no
+    ///   handler of the program's ever runs on a thread blocking in
+    ///   [`wait_until_completed`](Self::wait_until_completed). Behind a GPU hang, the hang's own
     ///   thread where the time came after the batch was taken.
     /// - **Before.** Its handlers run, in the order added, before the status reads `Scheduled`,
     ///   before [`wait_until_scheduled`](Self::wait_until_scheduled) returns, before its
@@ -4024,10 +4028,7 @@ impl CommandBufferShared {
     /// holds of the command buffer outlive the transition's, so it never lets go of the last one
     /// here. Counted: `WorkCounts::scheduled_where_submitted`.
     pub(crate) fn schedule(self: &Arc<Self>) {
-        let plain = {
-            let state = lock(&self.state);
-            state.scheduled.is_empty() && !state.submitting
-        };
+        let plain = plain_transition(&lock(&self.state));
         let shared = self.device.shared();
         let item = Item::Transition(Transition {
             buffer: self.hold(),
@@ -4038,6 +4039,18 @@ impl CommandBufferShared {
             Ok(()) => shared.counts.scheduled_where_submitted(),
             Err(item) => shared.contexts.post(self.queue.id(), item),
         }
+    }
+
+    /// Whether a thread about to block for the command buffer's completion may submit a batch of
+    /// it itself (`scheduler::plain_ready`): nothing of the program's runs where it is submitted
+    /// and published. Its transition to `Scheduled` is [`plain`](plain_transition), it has no
+    /// submission handler for the submitting thread to run once the scheduler's lock is free, and
+    /// no switch of a fetched target's storage form rides on it, which that thread settles and
+    /// announces (`texture/storage_form.rs`). Handlers are refused once it is committed, so none
+    /// comes after this read ([`CommandBuffer::add_submission_handler`]).
+    pub(crate) fn submits_without_the_program(&self) -> bool {
+        let state = lock(&self.state);
+        plain_transition(&state) && state.submission.is_empty() && state.storage_form.is_none()
     }
 
     /// The last batch of the command buffer `buffer` holds finished with `result` (or a batch
@@ -4509,6 +4522,13 @@ impl Run for Item {
             Item::Release(_) => false,
         }
     }
+}
+
+/// Whether a command buffer's transition runs none of the program's code ([`Transition::plain`]):
+/// it has no scheduled handler, none is added after its commit, and it waits for no submission
+/// handler.
+fn plain_transition(state: &State) -> bool {
+    state.scheduled.is_empty() && !state.submitting
 }
 
 /// Whether `wait_until_scheduled` returns: the command buffer's scheduled handlers ran (Metal's

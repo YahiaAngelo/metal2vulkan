@@ -143,6 +143,8 @@ pub(crate) struct Counters {
     batches_by_pending: [AtomicU64; 4],
     groups_kept_pending: AtomicU64,
     groups_sent_for_waits: AtomicU64,
+    scheduler_passes_by_waiters: AtomicU64,
+    batches_submitted_by_waiters: AtomicU64,
     command_buffer_wakes: AtomicU64,
     command_buffer_wakes_spared: AtomicU64,
     event_wakes: AtomicU64,
@@ -1126,6 +1128,14 @@ impl Counters {
     pub(crate) fn batches_grouped(&self, batches: usize) {
         self.grouped_submissions.fetch_add(1, Ordering::Relaxed);
         (self.batches_grouped).fetch_add(batches as u64, Ordering::Relaxed);
+    }
+
+    /// A thread about to block for a command buffer's completion made a pass of its own over the
+    /// scheduler's order and submitted `batches` batches itself
+    /// (`Scheduler::submit_before_waiting`).
+    pub(crate) fn waiter_passed(&self, batches: usize) {
+        (self.scheduler_passes_by_waiters).fetch_add(1, Ordering::Relaxed);
+        (self.batches_submitted_by_waiters).fetch_add(batches as u64, Ordering::Relaxed);
     }
 
     /// A batch was submitted, or held in a group, while `pending` earlier batches of its
@@ -2938,11 +2948,25 @@ pub struct WorkCounts {
     /// by its own wait on the GPU, or the device was lost.
     pub scheduler_wakes_completion: u64,
     /// Times a host signal woke it: an event's value set by the host, a pipeline a host step waits
-    /// for made, a texture decode finished, a command buffer encoded again after a rebind, a lost
-    /// device.
+    /// for made, a texture decode finished, a command buffer encoded again after a rebind, the
+    /// rest of a pass a thread about to block left it, a lost device.
     pub scheduler_wakes_host: u64,
     /// Sleeps that ended at the thread's longest wait with nothing having woken it.
     pub scheduler_sleep_slices: u64,
+    /// Passes a thread about to block for a command buffer's completion made over the scheduler's
+    /// order itself, instead of waiting for the scheduler's thread to make one
+    /// (`CommandBuffer::wait_until_completed`, `scheduler/mod.rs`): one where the batches it
+    /// committed still waited in the inbox and no pass was under way. Metal encodes and commits
+    /// inline on the program's thread; a commit here submits nothing, as Metal's returns before
+    /// its command buffer is scheduled, so a thread that commits and then blocks would otherwise
+    /// wait for a wake and a whole pass before its work reached the `VkQueue`.
+    pub scheduler_passes_by_waiters: u64,
+    /// The batches those passes submitted: those ready with nothing for the scheduler's thread to
+    /// do for them (no host step, no submission check, no group) and nothing of the program's to
+    /// run (no submission or scheduled handler, no switch of a storage form). A pass stops at the
+    /// first batch in commit order that is none of these and leaves the rest to the thread, so
+    /// this is below `scheduler_passes_by_waiters` where a command buffer needs it.
+    pub batches_submitted_by_waiters: u64,
     /// Passes the scheduler's thread made over its order (`scheduler/mod.rs`): one takes in what
     /// was committed and submits what is ready; one more follows a submission check or a host
     /// step the thread ran without its lock, a waker's nudge during a pass, and a pass that
@@ -4163,6 +4187,12 @@ impl Device {
             scheduler_sleep_slices: by_slice,
             scheduler_gpu_waits: gpu_waits,
             scheduler_passes: self.shared().scheduler.passes(),
+            scheduler_passes_by_waiters: counters
+                .scheduler_passes_by_waiters
+                .load(Ordering::Relaxed),
+            batches_submitted_by_waiters: counters
+                .batches_submitted_by_waiters
+                .load(Ordering::Relaxed),
             wakes_completion_waiters: completion_wakes,
             wakes_handler_threads: handler_wakes,
             wakes_command_buffer_waiters: command_buffer_wakes,
