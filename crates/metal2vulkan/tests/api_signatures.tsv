@@ -12743,6 +12743,8 @@ variant	metal2vulkan::device::VkFeature::TessellationShader	TessellationShader
 variant	metal2vulkan::device::VkFeature::UniformAndStorageBuffer16BitAccess	UniformAndStorageBuffer16BitAccess
 variant	metal2vulkan::device::VkFeature::UniformAndStorageBuffer8BitAccess	UniformAndStorageBuffer8BitAccess
 variant	metal2vulkan::device::VkFeature::UniformBufferStandardLayout	UniformBufferStandardLayout
+variant	metal2vulkan::device::VkFeature::VariablePointers	VariablePointers
+variant	metal2vulkan::device::VkFeature::VariablePointersStorageBuffer	VariablePointersStorageBuffer
 variant	metal2vulkan::device::VkFeature::VertexAttributeAccessBeyondStride	VertexAttributeAccessBeyondStride
 variant	metal2vulkan::device::VkFeature::VertexAttributeInstanceRateDivisor	VertexAttributeInstanceRateDivisor
 variant	metal2vulkan::device::VkFeature::VertexAttributeInstanceRateZeroDivisor	VertexAttributeInstanceRateZeroDivisor
@@ -13857,6 +13859,7 @@ variant	metal2vulkan::pipeline::SyntheticBinding::RootTable	RootTable
 variant	metal2vulkan::pipeline::SyntheticBinding::SamplerTable	SamplerTable
 variant	metal2vulkan::pipeline::SyntheticBinding::ShadowStencil	ShadowStencil
 variant	metal2vulkan::pipeline::SyntheticBinding::StencilStandIn	StencilStandIn
+variant	metal2vulkan::pipeline::SyntheticBinding::StoreSink	StoreSink
 variant	metal2vulkan::pipeline::SyntheticBinding::TessellationFactors	TessellationFactors
 variant	metal2vulkan::pipeline::SyntheticBinding::TessellationRecords	TessellationRecords
 variant	metal2vulkan::pipeline::SyntheticBinding::TessellationWork	TessellationWork

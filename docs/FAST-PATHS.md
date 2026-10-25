@@ -299,11 +299,15 @@ driver's. Each is open work.
   (`runtime_lane::driver_deviations::float_functions_the_device_answers_are_metals`, red since the
   guard landed). A store through a slot's **device address** no longer branches: its bit joins the
   bounds check in the one selection of the store's address, which sends a dropped store to the root
-  table's write-only sink (`lower::access::psb::prepare`, `tests::engine_dropped_store_sink`). A
-  descriptor view has no second buffer of its own storage class to select a pointer against, so the
-  same form there needs a write-only sink binding of the stage's and `OpSelect` between
-  storage-buffer pointers (`variablePointersStorageBuffer`, which every committed profile but
-  SwiftShader's and the Vulkan 1.2 floor has); neither is built. A `memcpy` or `memset` through a
+  table's write-only sink (`lower::access::psb::prepare`, `tests::engine_dropped_store_sink`). A store through a
+  **descriptor view** no longer branches either: the stage carries a write-only sink binding
+  (`SyntheticBinding::StoreSink`) and the store's pointer is one `OpSelect` between storage-buffer
+  pointers. That selection needs the **full `VariablePointers`**, not only the storage-buffer form,
+  because the narrow capability lifts the rule solely for arms pointing into one memory object and
+  these arms are two distinct buffers; both capabilities are declared and both features required.
+  Where a device reports neither, the branch is kept, and it moves no stored value there; a device
+  that answers Metal's own float functions while lacking the feature is refused by name, which no
+  committed profile reaches. A `memcpy` or `memset` through a
   buffer slot (`copy::endpoint`) reads no dropped-store word on either form. The four that follow are
   Metal's own. A store
   through an address loaded out of an argument buffer or a pointer names no slot and no bit, so the
