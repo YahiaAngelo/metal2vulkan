@@ -711,11 +711,16 @@ fn every_image_alignment_measured_fits_a_heap_s_base() {
 /// neither shadow route), so a texture held with one is held to the base whatever its own route
 /// says.
 ///
-/// `AliasRoute::Shadow` counts among the routes the base holds, as `in_own_memory` has it, though
-/// `heap_texture_at` makes its image in memory of its own too: the route is reached only on a
-/// driver that lays depth and stencil images apart from their memory (MoltenVK, measured), whose
-/// image alignments are Metal's and well inside the base, so no texture is refused for it. The
-/// rule that would loosen it is `placement_align`'s, not this one's.
+/// `AliasRoute::Shadow` binds nothing there either: `heap_texture_at` sends it and
+/// `AliasRoute::MemoryShadow` to the one arm (`heap_shadow_image`, whose `new_heap_shadow` places
+/// an image of its own and makes the heap's bytes its copies' source alone), and nothing at that
+/// dispatch tells the two apart. It is never held with a depth twin, whose image would bind: a
+/// twinned texture's own image is a colour one (`plan_images` plans it so), which the route's
+/// `!colour(&optimal)` test leaves out. The route is reached only on a driver that lays depth and
+/// stencil images apart from their memory (MoltenVK, measured), whose image alignments are
+/// Metal's and well inside the base, so no texture of it meets this bound: what the rule decides
+/// for it is the placement offset `placement_align`'s own test covers, held to Metal's alignment
+/// alone.
 #[test]
 fn the_heap_s_base_holds_only_a_texture_whose_image_binds_to_its_memory() {
     use crate::error::{Error, RuntimeGap};
@@ -730,6 +735,7 @@ fn the_heap_s_base_holds_only_a_texture_whose_image_binds_to_its_memory() {
     let own = [
         AliasRoute::Tiled,
         AliasRoute::Lossless,
+        AliasRoute::Shadow,
         AliasRoute::MemoryShadow,
         AliasRoute::Planes,
         AliasRoute::Unaliased,
@@ -740,12 +746,11 @@ fn the_heap_s_base_holds_only_a_texture_whose_image_binds_to_its_memory() {
         AliasRoute::Linear,
         AliasRoute::Hidden,
         AliasRoute::Compressed,
-        AliasRoute::Shadow,
         AliasRoute::Apart,
     ];
     for route in own {
-        assert!(route.in_own_memory(), "{route:?}");
         assert_eq!(check_heap_base(route, None, past), Ok(()), "{route:?}");
+        assert!(route.in_own_memory(), "{route:?}");
         // A depth twin of such a texture binds to the heap's memory, so the base holds it.
         assert!(holds_base(route, Some(AliasRoute::Direct)), "{route:?}");
         assert!(holds_base(route, Some(AliasRoute::Apart)), "{route:?}");
@@ -757,8 +762,8 @@ fn the_heap_s_base_holds_only_a_texture_whose_image_binds_to_its_memory() {
         );
     }
     for route in bound {
-        assert!(!route.in_own_memory(), "{route:?}");
         assert!(holds_base(route, None), "{route:?}");
+        assert!(!route.in_own_memory(), "{route:?}");
         assert!(holds_base(route, Some(AliasRoute::Direct)), "{route:?}");
         assert_eq!(
             check_heap_base(route, None, HEAP_BASE_ALIGNMENT),
@@ -774,9 +779,9 @@ fn the_heap_s_base_holds_only_a_texture_whose_image_binds_to_its_memory() {
         | AliasRoute::Linear
         | AliasRoute::Hidden
         | AliasRoute::Compressed
-        | AliasRoute::Shadow
         | AliasRoute::Apart => bound.contains(&route),
-        AliasRoute::MemoryShadow
+        AliasRoute::Shadow
+        | AliasRoute::MemoryShadow
         | AliasRoute::Unaliased
         | AliasRoute::Planes
         | AliasRoute::Tiled
@@ -793,6 +798,10 @@ fn the_heap_s_base_holds_only_a_texture_whose_image_binds_to_its_memory() {
 /// texture answers 128 KiB where Metal answers 128 bytes, and a heap over host pages holds such a
 /// texture's samples in Metal's tiles with its image in memory of its own: offset 327680, which
 /// Metal makes the texture at, was refused nil while the answer's alignment held it.
+///
+/// `AliasRoute::Shadow`, a depth or stencil image a driver lays apart from its memory, is among
+/// them: `heap_texture_at` sends it to `heap_shadow_image`, which places an image of its own, the
+/// same arm `AliasRoute::MemoryShadow` takes.
 #[test]
 fn a_placement_offset_is_held_to_metals_alignment_where_the_image_lies_apart() {
     use crate::heap::SizeAndAlign;
@@ -805,6 +814,7 @@ fn a_placement_offset_is_held_to_metals_alignment_where_the_image_lies_apart() {
     let own = [
         AliasRoute::Tiled,
         AliasRoute::Lossless,
+        AliasRoute::Shadow,
         AliasRoute::MemoryShadow,
         AliasRoute::Planes,
         AliasRoute::Unaliased,
@@ -815,16 +825,15 @@ fn a_placement_offset_is_held_to_metals_alignment_where_the_image_lies_apart() {
         AliasRoute::Linear,
         AliasRoute::Hidden,
         AliasRoute::Compressed,
-        AliasRoute::Shadow,
         AliasRoute::Apart,
     ];
     for route in own {
-        assert!(route.in_own_memory(), "{route:?}");
         assert_eq!(
             placement_align(route, answered, Some(metal)),
             metal.align,
             "{route:?}"
         );
+        assert!(route.in_own_memory(), "{route:?}");
         // 327680 is a multiple of Metal's 128 and not of the answered 128 KiB.
         assert!(!327680u64.is_multiple_of(answered));
         assert!(327680u64.is_multiple_of(placement_align(route, answered, Some(metal))));
@@ -836,12 +845,12 @@ fn a_placement_offset_is_held_to_metals_alignment_where_the_image_lies_apart() {
         );
     }
     for route in bound {
-        assert!(!route.in_own_memory(), "{route:?}");
         assert_eq!(
             placement_align(route, answered, Some(metal)),
             answered,
             "{route:?}"
         );
+        assert!(!route.in_own_memory(), "{route:?}");
     }
     // Never coarser than the answer, whatever Metal answers.
     let coarse = SizeAndAlign {

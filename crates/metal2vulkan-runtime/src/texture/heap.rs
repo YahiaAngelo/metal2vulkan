@@ -555,10 +555,19 @@ impl AliasRoute {
     /// Whether the image lies in memory of its own, so that no image of the texture binds to the
     /// heap's memory at its offset: the heap's bytes hold the texture's own layout there, which
     /// the encoders move to and from the image, or nothing of it (`Unaliased`).
+    ///
+    /// Read off `Device::heap_texture_at`'s dispatch, not off the route names: `Shadow` and
+    /// `MemoryShadow` go to the one arm, `Device::heap_shadow_image`, whose
+    /// `Device::new_heap_shadow` places an image of its own (`new_image_owned` or
+    /// `new_image_as_it_lies`) and makes the heap's bytes its copies' source alone; `Planes`,
+    /// `Unaliased`, `Lossless` and `Tiled` likewise place an image of their own. Every other
+    /// route reaches the last arm, which binds the image into the heap's memory at the texture's
+    /// offset (`Device::bind_heap_image`).
     pub(crate) fn in_own_memory(self) -> bool {
         matches!(
             self,
-            AliasRoute::MemoryShadow
+            AliasRoute::Shadow
+                | AliasRoute::MemoryShadow
                 | AliasRoute::Unaliased
                 | AliasRoute::Planes
                 | AliasRoute::Lossless
@@ -1313,8 +1322,11 @@ pub(crate) fn held_to_metal(
 /// alignment it answers is no bound on the base and refusing it would refuse a texture Metal
 /// makes — the rule [`placement_align`] follows for the offset inside the heap. A depth twin's
 /// image always binds to the heap's memory (`heap_image` of `Mine::Twin` reaches neither shadow
-/// route), and a texture held with one is never a shadow of its bytes (`shadows: twin.is_none()`),
-/// so one image of a twinned texture binds either way.
+/// route), so one image of a twinned texture binds there whatever the texture's own route says.
+/// A twinned texture is itself on no shadow route, by a gate of its own for each: `MemoryShadow`
+/// asks `Mine::Texture { shadows: true, .. }`, which a twin clears, and `Shadow` asks `own`
+/// alone but needs `!colour(&optimal)`, which the `R32_SFLOAT` image `plan_images` plans beside
+/// a twin fails.
 fn holds_heap_base(route: AliasRoute, twin: Option<AliasRoute>) -> bool {
     !route.in_own_memory() || twin.is_some_and(|twin| !twin.in_own_memory())
 }
@@ -1740,7 +1752,9 @@ impl Device {
             };
         let class = buffer_class(call, Modes::of(descriptor.resource_options)?)?;
         let free = self.with_free_usage(plan.clone(), layout.texture_type)?;
-        // A shadowed image is no depth twin's texture: one held with a twin is not.
+        // A texture held with a depth twin is no shadow of the heap's bytes in rows: `shadows`
+        // is what holds `AliasRoute::MemoryShadow` out of one (`Shadow` is held out by its own
+        // image being a colour one there, `heap_image`).
         let mine = Mine::Texture {
             shadows: twin.is_none(),
             compressed: metal_compresses_layout(
@@ -2372,7 +2386,10 @@ impl Device {
         let (_, _, type_index) = bytes.memory();
         let images = std::iter::once(&p.image).chain(p.twin.as_ref().map(|(twin, _)| twin));
         for image in images {
-            // A shadowed or unaliased image lies in memory of its own.
+            // A shadowed or unaliased image lies in memory of its own, so the heap's memory
+            // type is no bound on it. `AliasRoute::Shadow` is given only where that type already
+            // took the image's (`heap_image`'s `takes`, which holds of every type of the class
+            // the heap's buffer lies in), so passing it over refuses nothing this would.
             let own_memory = image.route.in_own_memory();
             if !own_memory && image.requirements.memory_type_bits & (1 << type_index) == 0 {
                 return Err(image.memory_refusal());
@@ -3233,7 +3250,11 @@ impl Device {
             let made = (place, options, descriptor);
             self.heap_tiled_image(bytes, p.image, &p.layout, tiled.clone(), made)?
         } else if matches!(route, AliasRoute::Shadow | AliasRoute::MemoryShadow) {
-            // A shadowed image is no depth twin's texture: it has none.
+            // Neither route's texture is held with a depth twin, whose image this arm would
+            // drop: only the final arm makes one. `MemoryShadow` tests
+            // `Mine::Texture { shadows: true, .. }`, which a twin clears; `Shadow` tests `own`
+            // alone and is held out of a twinned texture by `!colour(&optimal)` instead, its own
+            // image being the `R32_SFLOAT` one `plan_images` plans beside the twin.
             self.heap_shadow_image(bytes, p.image, &p.layout, place, options, descriptor)?
         } else if route == AliasRoute::Planes {
             self.heap_planes_image(bytes, p.image, &p.layout, place, options, descriptor)?
