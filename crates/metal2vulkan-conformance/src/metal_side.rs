@@ -2188,9 +2188,9 @@ impl Side for MetalSide {
 
     fn library(&mut self, source: &ShaderSource<'_>) -> Answer<Handle> {
         let serial = self.libraries.len();
-        let text = self.scratch.0.join(format!("{serial}.air.ll"));
-        let air = self.scratch.0.join(format!("{serial}.air"));
-        let metallib = self.scratch.0.join(format!("{serial}.metallib"));
+        let text = self.scratch.dir().join(format!("{serial}.air.ll"));
+        let air = self.scratch.dir().join(format!("{serial}.air"));
+        let metallib = self.scratch.dir().join(format!("{serial}.metallib"));
         let build = || -> Result<(), String> {
             std::fs::write(&text, source.air_text)
                 .map_err(|error| format!("{}: {error}", text.display()))?;
@@ -10630,9 +10630,9 @@ fn metal_build_library(
     at: usize,
     source: &ShaderSource<'_>,
 ) -> Answer<BuiltLibrary> {
-    let text = scratch.0.join(format!("program-{at}.air.ll"));
-    let air = scratch.0.join(format!("program-{at}.air"));
-    let metallib = scratch.0.join(format!("program-{at}.metallib"));
+    let text = scratch.dir().join(format!("program-{at}.air.ll"));
+    let air = scratch.dir().join(format!("program-{at}.air"));
+    let metallib = scratch.dir().join(format!("program-{at}.metallib"));
     let build = || -> Result<(), String> {
         std::fs::write(&text, source.air_text)
             .map_err(|error| format!("{}: {error}", text.display()))?;
@@ -10689,7 +10689,7 @@ fn metal_bytes(
             install_name,
         } => {
             let air = library(at)?.air.clone();
-            let out = scratch.0.join(format!("dynamic-{serial}.metallib"));
+            let out = scratch.dir().join(format!("dynamic-{serial}.metallib"));
             *serial += 1;
             xcrun(
                 "metal",

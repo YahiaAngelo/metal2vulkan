@@ -16,7 +16,8 @@ readme = "README.md"
 # rather than once per feature set.
 metal2vulkan = { path = "../metal2vulkan", features = ["serde", "ash", "cli"] }
 metal2vulkan-runtime = { path = "../metal2vulkan-runtime" }
-# Fixture paths and `llvm_assemble` only: the suite's shaders are the owned public fixtures.
+# Fixture paths, `llvm_assemble` and the scratch root: the suite's shaders are the owned public
+# fixtures.
 metal2vulkan-devtools = { path = "../metal2vulkan-devtools" }
 ash = { workspace = true, features = ["loaded"] }
 base64 = "0.22"
@@ -45,6 +46,15 @@ objc2-metal = "0.3"
 [[bin]]
 name = "conformance"
 path = "src/bin/conformance.rs"
+test = false
+
+# The run `tests/killed_scratch.rs` kills, to prove that a killed run's scratch directory is swept
+# and a live run's is not. A binary rather than a test so the test can find it by path
+# (`CARGO_BIN_EXE_scratch-holder`); `test = false` keeps any runner from executing it directly,
+# since it waits to be killed.
+[[bin]]
+name = "scratch-holder"
+path = "src/bin/scratch-holder.rs"
 test = false
 
 # Device-executing tests are gated on non-default cfgs rather than features, because the ordinary

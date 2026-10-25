@@ -59,6 +59,7 @@
 use crate::case::ShaderSource;
 use crate::library_facts::LibraryFacts;
 use crate::transcript::{Node, NodeName, Observed, Value};
+use metal2vulkan_devtools::scratch;
 
 /// A file a step names, inside the side's own scratch directory.
 ///
@@ -595,32 +596,35 @@ fn optional(text: Option<&str>) -> Value {
     }
 }
 
-/// A scratch directory a side keeps its program's files in, removed when the side is dropped.
+/// A scratch directory a side keeps its program's files in, removed when the side is dropped --
+/// and, if this process is killed before that, by the next run of the suite
+/// ([`scratch`]).
 ///
 /// Shared by both sides rather than written twice: the Metal side builds its metallibs here too.
-pub struct Scratch(pub std::path::PathBuf);
+pub struct Scratch(scratch::Owned);
 
 impl Scratch {
-    /// A fresh directory under the OS temp directory, named for this process.
+    /// A fresh directory in the suite's scratch root, owned by this run.
     pub fn new() -> Result<Self, String> {
-        let path = std::env::temp_dir().join(format!(
-            "metal2vulkan-conformance-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|since| since.as_nanos())
-                .unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-        Ok(Self(path))
+        let root = scratch::root();
+        scratch::Owned::made("program")
+            .map(Self)
+            .map_err(|error| format!("{}: {error}", root.display()))
+    }
+
+    /// The directory itself.
+    pub fn dir(&self) -> &std::path::Path {
+        self.0.path()
     }
 
     /// The path a [`ScratchFile`] names. The missing directory is never created, which is what
     /// makes a write to it the "Invalid URL" Metal answers.
     pub fn path(&self, file: ScratchFile) -> std::path::PathBuf {
         match file {
-            ScratchFile::At(name) => self.0.join(name),
-            ScratchFile::InAMissingDirectory(name) => self.0.join("no-such-directory").join(name),
+            ScratchFile::At(name) => self.dir().join(name),
+            ScratchFile::InAMissingDirectory(name) => {
+                self.dir().join("no-such-directory").join(name)
+            }
         }
     }
 
@@ -628,7 +632,7 @@ impl Scratch {
     pub fn source(&self, source: Source) -> std::path::PathBuf {
         match source {
             Source::File(file) => self.path(file),
-            Source::TheScratchDirectory => self.0.clone(),
+            Source::TheScratchDirectory => self.dir().to_owned(),
         }
     }
 
@@ -644,12 +648,6 @@ impl Scratch {
                 nonempty: false,
             },
         }
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

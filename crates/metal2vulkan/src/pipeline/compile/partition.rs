@@ -182,7 +182,7 @@ mod tests {
     use crate::device::DevicePolicy;
     use crate::library::FunctionConstantValues;
     use crate::pipeline::testing::{
-        compile, llvm_assemble, profile, specialized_entry, AssembleError,
+        compile, llvm_assemble_text, profile, specialized_entry, AssembleError,
     };
 
     /// A kernel `k` of `device uint *out [[buffer(0)]]` and the builtin `air.<builtin>` as a
@@ -243,20 +243,14 @@ entry:
             )
         }
 
+        /// The kernel's bitcode, assembled straight out of memory: the text goes down a pipe
+        /// into `llvm-as` and the bitcode comes back, so this helper writes no file and has
+        /// nothing to clean up. It used to assemble through `k.ll` in a directory under the OS
+        /// temp directory and remove only the inner of the two directories it made, leaving
+        /// `<temp>/m2v-partition-<pid>-<name>-<thread>` behind for every kernel of every test here
+        /// (`the_bitcode_helper_leaves_nothing_under_the_temp_directory`).
         fn bitcode(&self, name: &str) -> Option<Vec<u8>> {
-            let dir = std::env::temp_dir()
-                .join(format!(
-                    "m2v-partition-{}-{name}-{:?}",
-                    std::process::id(),
-                    std::thread::current().id()
-                ))
-                .join(name.replace(' ', "-"));
-            std::fs::create_dir_all(&dir).expect("scratch");
-            let ll = dir.join("k.ll");
-            std::fs::write(&ll, self.text()).expect("write");
-            let r = llvm_assemble(&ll);
-            let _ = std::fs::remove_dir_all(&dir);
-            match r {
+            match llvm_assemble_text(&self.text()) {
                 Ok(b) => Some(b),
                 Err(AssembleError::Missing(why)) => {
                     eprintln!("SKIPPED: {why}");
@@ -271,6 +265,39 @@ entry:
 
     fn lavapipe() -> crate::device::DeviceProfile {
         profile("lavapipe", DevicePolicy::default()).expect("profile")
+    }
+
+    /// **Making a kernel's bitcode leaves nothing under the OS temp directory.** The helper used
+    /// to write `k.ll` into `<temp>/m2v-partition-<pid>-<name>-<thread>/<name>` and remove only
+    /// the inner directory, so every kernel of every test in this module left the outer one
+    /// behind -- on a machine whose disk writes the owner has asked twice to cut, and against
+    /// AGENTS.md's rule that scratch goes as soon as the tool is done with it. The fix is that
+    /// there is no file: restore the file-and-`remove_dir_all` body and this test fails naming the
+    /// directory it finds.
+    ///
+    /// The prefix carries this process's id, so the check sees this process's leftovers and never
+    /// another run's.
+    #[test]
+    fn the_bitcode_helper_leaves_nothing_under_the_temp_directory() {
+        let prefix = format!("m2v-partition-{}-", std::process::id());
+        let ours = || -> Vec<std::path::PathBuf> {
+            let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+                return Vec::new();
+            };
+            entries
+                .flatten()
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+                .map(|entry| entry.path())
+                .collect()
+        };
+
+        let _ = PLAIN.bitcode("leaves-nothing-behind");
+
+        let left = ours();
+        assert!(
+            left.is_empty(),
+            "making a kernel's bitcode left {left:?} under the OS temp directory"
+        );
     }
 
     /// Whether kernel `k`'s specialized entry is partition-oblivious.

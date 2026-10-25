@@ -26,4 +26,5 @@ mod pipeline_selection;
 mod private_corpus_root;
 mod public_entry_rows;
 mod published_crates;
+mod swept_scratch;
 mod translation_l3_stage;

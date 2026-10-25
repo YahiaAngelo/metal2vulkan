@@ -191,31 +191,20 @@ impl Drop for CaseNotices<'_> {
     }
 }
 
-/// A shader cache directory one run owns: a new, empty directory under the OS temp directory,
-/// removed when dropped, after the device that used it.
-pub struct ScratchCache(PathBuf);
+/// A shader cache directory one run owns: a new, empty directory in the suite's scratch root,
+/// removed when dropped, after the device that used it -- and, if this process is killed before
+/// that, by the next run of the suite ([`metal2vulkan_devtools::scratch`]).
+pub struct ScratchCache(metal2vulkan_devtools::scratch::Owned);
 
 impl ScratchCache {
     /// A directory this run owns, not yet made (the device makes it).
     pub fn new() -> std::io::Result<Self> {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |since| since.as_nanos());
-        Ok(Self(std::env::temp_dir().join(format!(
-            "m2v-conformance-shader-cache-{}-{nanos}",
-            std::process::id()
-        ))))
+        metal2vulkan_devtools::scratch::Owned::reserved("shader-cache").map(Self)
     }
 
     /// The directory.
     pub fn path(&self) -> &std::path::Path {
-        &self.0
-    }
-}
-
-impl Drop for ScratchCache {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        self.0.path()
     }
 }
 

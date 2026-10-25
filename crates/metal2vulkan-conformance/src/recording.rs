@@ -571,14 +571,12 @@ mod atomic_writes {
     use super::{temp_beside, write_atomically};
 
     /// A scratch directory of this test's own, so no test ever writes in `recordings/`.
-    fn scratch(what: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "metal2vulkan-conformance-{what}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a scratch directory");
-        dir
+    ///
+    /// Returned as the guard that removes it, so a failing assertion -- which unwinds past
+    /// anything written after it -- leaves nothing behind either
+    /// ([`metal2vulkan_devtools::scratch`]).
+    fn scratch(what: &str) -> metal2vulkan_devtools::scratch::Owned {
+        metal2vulkan_devtools::scratch::Owned::made(what).expect("a scratch directory")
     }
 
     /// **A write that fails leaves the recording that was there whole.** This is the property the
@@ -593,7 +591,7 @@ mod atomic_writes {
     #[test]
     fn a_write_that_fails_leaves_the_previous_recording_whole() {
         let dir = scratch("failed-write");
-        let target = dir.join("a-case.json");
+        let target = dir.path().join("a-case.json");
         let before = "{\n  \"case\": \"a-case\"\n}\n";
         std::fs::write(&target, before).expect("the recording that was there");
 
@@ -610,15 +608,13 @@ mod atomic_writes {
             before,
             "a write that failed changed the recording on disk"
         );
-
-        std::fs::remove_dir_all(&dir).expect("the scratch directory removed");
     }
 
     /// A write that succeeds replaces the target and leaves no sibling behind.
     #[test]
     fn a_write_that_succeeds_leaves_no_temporary() {
         let dir = scratch("good-write");
-        let target = dir.join("a-case.json");
+        let target = dir.path().join("a-case.json");
         std::fs::write(&target, "the old one\n").expect("the recording that was there");
 
         write_atomically(&target, "the new one\n").expect("the write");
@@ -630,8 +626,6 @@ mod atomic_writes {
             !temp_beside(&target).exists(),
             "the write left its temporary beside the recording"
         );
-
-        std::fs::remove_dir_all(&dir).expect("the scratch directory removed");
     }
 
     /// **The temporary sits in its target's own directory, and nothing may move it.** `rename` is

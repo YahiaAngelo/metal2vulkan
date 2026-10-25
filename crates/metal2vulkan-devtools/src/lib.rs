@@ -6,6 +6,10 @@
 //! check ([`xr_blends`], [`xr_bicubic`]), and the store-buffering litmus kernel both compile
 //! ([`litmus`]).
 //!
+//! Scratch directories every suite's temporaries go in ([`scratch`]): one root under the OS temp
+//! directory, each run's directory removed when its owner drops and, when its owner is killed
+//! instead, by the next run that reads the root.
+//!
 //! The product runs no external tool and takes this crate for its tests alone: it is the
 //! product's path-only dev-dependency, which `cargo publish` drops, and a dependency of
 //! `metal2vulkan-validation`. The tool runner ([`tools`]) reads the `METAL2VULKAN_<TOOL>`
@@ -22,6 +26,7 @@ use std::process::Stdio;
 pub mod fuzz;
 pub mod litmus;
 pub mod metallib;
+pub mod scratch;
 pub mod spirv;
 pub mod tools;
 pub mod xr_bicubic;

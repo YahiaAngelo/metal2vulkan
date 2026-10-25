@@ -79,7 +79,7 @@ use metal2vulkan_runtime::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 mod commands;
@@ -692,38 +692,25 @@ fn checked_options(
     Ok(options)
 }
 
-/// A shader cache directory one run or test owns: a new, empty directory under the OS temp
-/// directory, removed when dropped (after the devices that use it), so a warm cache never stands
-/// in for a translation a run measures.
-pub struct ScratchCache(PathBuf);
+/// A shader cache directory one run or test owns: a new, empty directory in the project's scratch
+/// root, removed when dropped (after the devices that use it), so a warm cache never stands in for
+/// a translation a run measures.
+///
+/// Dropping covers a return and an unwind, and a lane process that is killed or that exits before
+/// its drop runs covers nothing -- which left 900 to 2200 of these on a host. The scratch root is
+/// what closes that: the next run of any suite removes the directory of every run whose lock the
+/// kernel has released, and no live run's ([`metal2vulkan_devtools::scratch`]).
+pub struct ScratchCache(metal2vulkan_devtools::scratch::Owned);
 
 impl ScratchCache {
     /// A new directory, not yet made (the device makes it).
     pub fn new() -> std::io::Result<ScratchCache> {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |since| since.as_nanos());
-        let dir = std::env::temp_dir().join(format!(
-            "m2v-lane-shader-cache-{}-{}-{nanos}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        match std::fs::remove_dir_all(&dir) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
-            _ => Ok(ScratchCache(dir)),
-        }
+        metal2vulkan_devtools::scratch::Owned::reserved("lane-shader-cache").map(ScratchCache)
     }
 
     /// The directory.
     pub fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for ScratchCache {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        self.0.path()
     }
 }
 

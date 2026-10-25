@@ -28,7 +28,7 @@ use crate::pipeline::relocate::relocate;
 use crate::spirv::ir::TypedModule;
 use crate::spirv::testing::check_words_valid;
 pub use metal2vulkan_devtools::{
-    engine_dir, fixtures_dir, llvm_assemble, metal_assemble, AssembleError,
+    engine_dir, fixtures_dir, llvm_assemble, llvm_assemble_text, metal_assemble, AssembleError,
 };
 
 /// A scratch directory of the caller's own, `<temp dir>/<stem>-<process id>-<n>` with `n` from a
