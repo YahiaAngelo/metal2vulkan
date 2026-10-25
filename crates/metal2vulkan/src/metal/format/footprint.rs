@@ -66,7 +66,7 @@ pub enum Footprint {
 }
 
 /// Metal's footprint layout of `pf`, where the format's own structure decides it and no image of
-/// this crate does: the 33 formats Metal answers `heapTextureSizeAndAlignWithDescriptor:` for
+/// this crate does: the 32 formats Metal answers `heapTextureSizeAndAlignWithDescriptor:` for
 /// that `repr` holds no Vulkan candidate of (`astc_without_a_vulkan_block!` and
 /// `formats_named_not_held!`). `None` for every other format, whose footprint its image decides.
 ///
@@ -100,10 +100,9 @@ pub fn footprint(pf: PixelFormat) -> Option<Footprint> {
         })
     };
     match pf {
-        // The two plain stragglers, an ordinary texel in an ordinary layout: `BGRA4Unorm` four
-        // bits a channel in a 16-bit word (`ABGR4Unorm`'s texel), `ARGB8Unorm_sRGB` a byte a
-        // channel (`ARGB8Unorm`'s).
-        P::BGRA4Unorm => tiled(2),
+        // `ARGB8Unorm_sRGB`, an ordinary texel in an ordinary layout: a byte a channel
+        // (`ARGB8Unorm`'s texel). Its sibling straggler `BGRA4Unorm` has an image of its own
+        // now, so its footprint is that image's and not this table's.
         P::ARGB8UnormSRGB => tiled(4),
         // The padded 10- and 12-bit display formats: one 16-bit word a channel, the code in the
         // word's top bits and the low bits unread (`R10Unorm_X6`'s texel, `RG10Unorm_X12`'s), and

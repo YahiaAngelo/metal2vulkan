@@ -129,6 +129,11 @@ fn channels(pf: PixelFormat) -> Option<[Channel; 4]> {
         P::B5G6R5Unorm => [HalfUnorm(5), HalfUnorm(6), HalfUnorm(5), Unused],
         P::A1BGR5Unorm | P::BGR5A1Unorm => [HalfUnorm(5), HalfUnorm(5), HalfUnorm(5), HalfUnorm(1)],
         P::ABGR4Unorm => four(HalfUnorm(4)),
+        // `BGRA4Unorm`'s channels are the same four 4-bit packed unorm channels in another order,
+        // so the rule the probe measured by channel width (`HalfUnorm`, at 1, 4, 5 and 6 bits over
+        // the four packed formats) is theirs. Metal's own clear of this format is unmeasured, and
+        // a device that renders its word is what would reach one.
+        P::BGRA4Unorm => four(HalfUnorm(4)),
         P::R32Uint => one(Uint(32)),
         P::R32Sint => one(Sint(32)),
         P::R32Float => one(Float),
@@ -729,7 +734,11 @@ pub(crate) mod tests {
         let channels = channels(pf)?;
         let texels = convert(&channels, color);
         let order: &[usize] = match pf {
-            P::BGRA8Unorm | P::BGRA8UnormSRGB | P::BGR10A2Unorm | P::BGR5A1Unorm => &[2, 1, 0, 3],
+            P::BGRA8Unorm
+            | P::BGRA8UnormSRGB
+            | P::BGR10A2Unorm
+            | P::BGR5A1Unorm
+            | P::BGRA4Unorm => &[2, 1, 0, 3],
             P::B5G6R5Unorm => &[2, 1, 0],
             P::A1BGR5Unorm | P::ABGR4Unorm => &[3, 2, 1, 0],
             // Alpha in the lowest byte, then red, green and blue (the format scout's color fill on

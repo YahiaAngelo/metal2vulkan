@@ -207,9 +207,13 @@ pub(super) fn plan_picks(record: &ViewRecord, texel_bytes: u32) -> Option<PickPl
 /// (`NotImplemented(MipmapGeneration)`). Also a YCbCr format (`metal::format::ycbcr`), whose
 /// texture Metal makes only over a surface's planes, of one level, which [`leaves_as_is`]; Metal's
 /// answer for more levels is not measured. And, until their levels' X fields are rewritten as Metal
-/// stores them, the RGBX formats (`metal::format::x_channel`).
+/// stores them, the RGBX formats (`metal::format::x_channel`). And `BGRA4Unorm`, whose image is
+/// the word of its bits (`A4R4G4B4_UNORM_PACK16`) and whose filter Metal was never asked for:
+/// `mipmap_answers.txt` holds a line for every other format the runtime filters, measured by the
+/// probe, and this format was not in it, so a blit chain here would average texels by the
+/// device's rule with nothing to hold it to.
 pub(super) fn not_implemented(pf: PixelFormat) -> bool {
-    ExtendedRange::of(pf).is_some() || ycbcr(pf) || x_channel(pf)
+    ExtendedRange::of(pf).is_some() || ycbcr(pf) || x_channel(pf) || pf == PixelFormat::BGRA4Unorm
 }
 
 /// Whether Metal's plain `generateMipmapsForTexture:` leaves a texture presenting `record` as it

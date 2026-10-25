@@ -11453,7 +11453,6 @@ variant	metal2vulkan-runtime::IndirectCommandBufferProblem::PipelineKind	Pipelin
 variant	metal2vulkan-runtime::IndirectCommandBufferProblem::PipelineWithoutSupport	PipelineWithoutSupport
 variant	metal2vulkan-runtime::IndirectCommandBufferProblem::Range	Range { location: u64, length: u64, size: u64 }
 variant	metal2vulkan-runtime::IndirectCommandBufferProblem::RenderState	RenderState
-variant	metal2vulkan-runtime::IndirectCommandBufferProblem::UnstridedBuffer	UnstridedBuffer { index: u32 }
 variant	metal2vulkan-runtime::IndirectDispatch::Threadgroups	Threadgroups { threadgroups_per_grid: Size, threads_per_threadgroup: Size }
 variant	metal2vulkan-runtime::IndirectDispatch::Threads	Threads { threads_per_grid: Size, threads_per_threadgroup: Size }
 variant	metal2vulkan-runtime::IndirectDraw::IndexedPatches	IndexedPatches { control_points: u64, patch_start: u64, patch_count: u64, patch_index_buffer: Option<GpuAddress>, control_point_index_buffer: Option<GpuAddress>, instance_count: u64, base_instance: u64, factor_buffer: GpuAddress, factor_instance_stride: u64 }
@@ -11631,7 +11630,6 @@ variant	metal2vulkan-runtime::Problem::DmaBuf	DmaBuf
 variant	metal2vulkan-runtime::Problem::Draw	Draw(DrawProblem)
 variant	metal2vulkan-runtime::Problem::DuplicateLinkedFunction	DuplicateLinkedFunction { name: String }
 variant	metal2vulkan-runtime::Problem::DynamicLibraryFunction	DynamicLibraryFunction
-variant	metal2vulkan-runtime::Problem::EmptyFillPattern	EmptyFillPattern
 variant	metal2vulkan-runtime::Problem::EmptyThreadgroup	EmptyThreadgroup
 variant	metal2vulkan-runtime::Problem::EncoderAbandoned	EncoderAbandoned
 variant	metal2vulkan-runtime::Problem::EncoderOpen	EncoderOpen
@@ -11783,6 +11781,7 @@ variant	metal2vulkan-runtime::RuntimeGap::DepthStencilResolve	DepthStencilResolv
 variant	metal2vulkan-runtime::RuntimeGap::DetachTextures	DetachTextures
 variant	metal2vulkan-runtime::RuntimeGap::DetachedTexelAccess	DetachedTexelAccess
 variant	metal2vulkan-runtime::RuntimeGap::DeviceNotifications	DeviceNotifications
+variant	metal2vulkan-runtime::RuntimeGap::EmptyFillPattern	EmptyFillPattern
 variant	metal2vulkan-runtime::RuntimeGap::ExecutionRangeOffFour	ExecutionRangeOffFour { offset: u64 }
 variant	metal2vulkan-runtime::RuntimeGap::ExecutionRangePastBuffer	ExecutionRangePastBuffer { offset: u64, length: u64 }
 variant	metal2vulkan-runtime::RuntimeGap::ExtensionEnable	ExtensionEnable(VkExtension)
@@ -11795,6 +11794,7 @@ variant	metal2vulkan-runtime::RuntimeGap::HiddenDepthStencil	HiddenDepthStencil
 variant	metal2vulkan-runtime::RuntimeGap::ImageblockMasters	ImageblockMasters
 variant	metal2vulkan-runtime::RuntimeGap::IndirectCommandBufferPastMaxBufferLength	IndirectCommandBufferPastMaxBufferLength { count: u64, max_buffer_length: u64 }
 variant	metal2vulkan-runtime::RuntimeGap::IndirectCommandPastSize	IndirectCommandPastSize { index: u64, size: u64 }
+variant	metal2vulkan-runtime::RuntimeGap::IndirectCommandUnstridedBuffer	IndirectCommandUnstridedBuffer { index: u32 }
 variant	metal2vulkan-runtime::RuntimeGap::IndirectDrawArguments	IndirectDrawArguments
 variant	metal2vulkan-runtime::RuntimeGap::IndirectImageblockSize	IndirectImageblockSize { width: u64, height: u64 }
 variant	metal2vulkan-runtime::RuntimeGap::IndirectRenderCommands	IndirectRenderCommands
@@ -12519,6 +12519,7 @@ variant	metal2vulkan::device::TileStorePolicy::Device	Device
 variant	metal2vulkan::device::TileStorePolicy::Exact	Exact
 variant	metal2vulkan::device::Unorm8LinearFilterPolicy::DeviceWithinOneCode	DeviceWithinOneCode
 variant	metal2vulkan::device::Unorm8LinearFilterPolicy::Exact	Exact
+variant	metal2vulkan::device::VkExtension::Ext4444Formats	Ext4444Formats
 variant	metal2vulkan::device::VkExtension::ExtAttachmentFeedbackLoopLayout	ExtAttachmentFeedbackLoopLayout
 variant	metal2vulkan::device::VkExtension::ExtBorderColorSwizzle	ExtBorderColorSwizzle
 variant	metal2vulkan::device::VkExtension::ExtCustomBorderColor	ExtCustomBorderColor

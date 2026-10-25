@@ -1007,10 +1007,6 @@ fn four_two_two_heap_answer(layout: &TextureLayout) -> SizeAndAlign {
 ///   validated, every usage and storage mode), and 128 under macOS 27.0.1 (and an M4 alike).
 pub(crate) fn no_texture_alignment(pf: PixelFormat, ty: TextureType, level: MetalLevel) -> u64 {
     use TextureType as T;
-    // `R10Unorm_PACKED` and `RG10Unorm_PACKED` answer as a two-plane YCbCr format does: 0 bytes
-    // at 16, and at 128 for a 2D array, in every texture type (an Apple M3 Max under macOS
-    // 27.0.1, plain Metal, both storage modes; the `format-footprints-packed-without-textures`
-    // recording).
     // `R10Unorm_PACKED` and `RG10Unorm_PACKED` answer as a two-plane YCbCr format does, and so do
     // the shapes of a one-plane YCbCr format Metal makes no texture of (a cube, a cube array, and
     // a 4:2:2 one's odd-sided writable descriptor): 0 bytes at 16, and at 128 for a 2D array, in

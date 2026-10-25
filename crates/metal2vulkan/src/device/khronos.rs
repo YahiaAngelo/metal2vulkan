@@ -1750,6 +1750,7 @@ pub(crate) fn extension_from_name(name: &str) -> Option<VkExtension> {
         "VK_QCOM_tile_shading" => E::QcomTileShading,
         "VK_KHR_maintenance5" => E::KhrMaintenance5,
         "VK_EXT_texture_compression_astc_hdr" => E::ExtTextureCompressionAstcHdr,
+        "VK_EXT_4444_formats" => E::Ext4444Formats,
         "VK_IMG_format_pvrtc" => E::ImgFormatPvrtc,
         "VK_EXT_border_color_swizzle" => E::ExtBorderColorSwizzle,
         "VK_EXT_custom_border_color" => E::ExtCustomBorderColor,

@@ -474,6 +474,11 @@ pub enum VkExtension {
     /// `VK_EXT_line_rasterization` (promoted to `VK_KHR_line_rasterization`, never core):
     /// [`VkFeature::BresenhamLines`].
     ExtLineRasterization,
+    // Appended.
+    /// `VK_EXT_4444_formats` (core in 1.3, no feature member):
+    /// `VK_FORMAT_A4R4G4B4_UNORM_PACK16` and `VK_FORMAT_A4B4G4R4_UNORM_PACK16`, which hold
+    /// `MTLPixelFormatBGRA4Unorm`'s word.
+    Ext4444Formats,
 }
 
 /// One subgroup operation class (`VkSubgroupFeatureFlagBits`).

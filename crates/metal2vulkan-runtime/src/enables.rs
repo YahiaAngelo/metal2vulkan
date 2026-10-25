@@ -940,6 +940,7 @@ const EXTENSIONS: &[(VkExtension, &CStr)] = {
             X::ExtTextureCompressionAstcHdr,
             c"VK_EXT_texture_compression_astc_hdr",
         ),
+        (X::Ext4444Formats, c"VK_EXT_4444_formats"),
         (X::ImgFormatPvrtc, c"VK_IMG_format_pvrtc"),
         (X::ExtBorderColorSwizzle, c"VK_EXT_border_color_swizzle"),
         (X::ExtCustomBorderColor, c"VK_EXT_custom_border_color"),

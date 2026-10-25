@@ -1121,11 +1121,20 @@ macro_rules! astc_without_a_vulkan_block {
 /// held.
 macro_rules! formats_named_not_held {
     () => {
-        PixelFormat::BGRA4Unorm
-            | PixelFormat::RGB8Unorm
+        PixelFormat::RGB8Unorm
             | PixelFormat::RGB8Snorm
             | PixelFormat::RGB8Uint
             | PixelFormat::RGB8Sint
+            // Its bytes are `ARGB8Unorm`'s, which this crate holds, but no Vulkan format
+            // applies the sRGB transfer function to the three channels Metal's does: every
+            // Vulkan `_SRGB` format encodes the three channels in the word's low bytes and
+            // leaves the fourth linear, and Metal's alpha is the low byte here. A view's
+            // component mapping cannot move the function, which format conversion applies
+            // before the swizzle, so an image of it would read Metal's alpha decoded and
+            // Metal's blue linear: two channels of four wrong, not a near-equivalent. Holding
+            // it exactly needs the raw-code sRGB decode in the shader
+            // (`metal::texel_format::srgb_raw`) as the only read of it, not as a refinement
+            // over the device's decode.
             | PixelFormat::ARGB8UnormSRGB
             | PixelFormat::RGB16Unorm
             | PixelFormat::RGB16Snorm
@@ -1488,6 +1497,18 @@ fn make_repr(pf: PixelFormat) -> Repr {
         P::ABGR4Unorm => color(vec![
             direct(F::R4G4B4A4_UNORM_PACK16),
             red_blue_twin(F::B4G4R4A4_UNORM_PACK16),
+        ]),
+        // Blue in bits 0-3, then green, red and alpha, by the packed naming the module docs
+        // state and `ABGR4Unorm`'s own candidates hold: `A4R4G4B4_UNORM_PACK16`'s word, bit for
+        // bit, and its red-blue twin (both core 1.3, or `VK_EXT_4444_formats`). `ABGR4Unorm`'s
+        // core-1.0 words hold the same bits with the channels one place over, but only a
+        // rotating view reads them back, and what Metal's opaque-black border reads through
+        // this format's rotation is unmeasured (`ARGB8Unorm`'s was measured, and is not alpha),
+        // so a device without the 4-bit words of Metal's own channel order is refused the
+        // version or the extension that exposes them.
+        P::BGRA4Unorm => color(vec![
+            direct(F::A4R4G4B4_UNORM_PACK16),
+            red_blue_twin(F::A4B4G4R4_UNORM_PACK16),
         ]),
         P::BGR5A1Unorm => one(F::A1R5G5B5_UNORM_PACK16),
         P::R32Uint => one(F::R32_UINT),
@@ -2289,6 +2310,7 @@ pub(crate) fn color_output_components(pf: PixelFormat) -> Option<u8> {
         P::A8Unorm
         | P::A1BGR5Unorm
         | P::ABGR4Unorm
+        | P::BGRA4Unorm
         | P::BGR5A1Unorm
         | P::RGBA8Unorm
         | P::RGBA8UnormSRGB
@@ -2522,6 +2544,7 @@ pub(crate) fn out_of_bounds_alpha_one(pf: PixelFormat) -> Option<bool> {
         P::A8Unorm
         | P::A1BGR5Unorm
         | P::ABGR4Unorm
+        | P::BGRA4Unorm
         | P::BGR5A1Unorm
         | P::RGBA8Unorm
         | P::RGBA8UnormSRGB

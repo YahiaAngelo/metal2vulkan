@@ -1,4 +1,4 @@
-//! `heapTextureSizeAndAlignWithDescriptor:` for the 33 formats this crate holds no image of
+//! `heapTextureSizeAndAlignWithDescriptor:` for the 32 formats this crate holds no image of
 //! (`metal::format::footprint`): Metal's size and alignment against the runtime's, over two
 //! declared descriptor spaces enumerated whole, plus the rows that name each family's rule.
 //!
@@ -130,11 +130,6 @@ const ROWS: &[Row] = &[
         P::ASTC8x4HDR,
         (1225, 0x1891c3dd51619e4c),
         (480, 0x5bd85c333254a925),
-    ),
-    row(
-        P::BGRA4Unorm,
-        (1225, 0xb88a6cd02f761c38),
-        (768, 0x7b026068a93b714e),
     ),
     row(
         P::ARGB8UnormSRGB,
@@ -348,9 +343,9 @@ fn shape(texture_type: T, (width, height): (u64, u64)) -> ([u64; 3], u64, u64) {
     ([width, height, 1], 1, if array { 2 } else { 1 })
 }
 
-/// The runtime answers Metal's size and alignment for every descriptor of both spaces, for all 33
+/// The runtime answers Metal's size and alignment for every descriptor of both spaces, for all 32
 /// formats: 1225 answers a format in the side sweep and 768 (480 for an ASTC footprint) in the
-/// usage matrix, 64,041 in all.
+/// usage matrix, 62,048 in all.
 #[test]
 fn metals_footprint_answers() {
     let mut total = 0;
@@ -406,8 +401,8 @@ fn metals_footprint_answers() {
         );
         total += r.sides.0 + r.usages.0;
     }
-    assert_eq!(ROWS.len(), 33);
-    assert_eq!(total, 64_041);
+    assert_eq!(ROWS.len(), 32);
+    assert_eq!(total, 62_048);
 }
 
 /// The row of each family that names its rule, so a reader meets the numbers and not only a
@@ -425,40 +420,36 @@ fn the_rows_that_name_each_rule() {
     // 8 bytes of compression metadata for each 16 x 16 tile, rounded up to 128, where the shorter
     // side is 16 texels or more and the usage is not `ShaderWrite` or `PixelFormatView`.
     assert_eq!(
-        of(P::BGRA4Unorm, T::Type2D, [64, 64, 1], 1, 1, read),
+        of(P::R12UnormX4, T::Type2D, [64, 64, 1], 1, 1, read),
         (8320, 128)
     );
     assert_eq!(
-        of(P::BGRA4Unorm, T::Type2D, [16, 16, 1], 1, 1, read),
+        of(P::R12UnormX4, T::Type2D, [16, 16, 1], 1, 1, read),
         (640, 128)
     );
     assert_eq!(
-        of(P::BGRA4Unorm, T::Type2D, [16, 15, 1], 1, 1, read),
+        of(P::R12UnormX4, T::Type2D, [16, 15, 1], 1, 1, read),
         (512, 128)
     );
     assert_eq!(
-        of(P::BGRA4Unorm, T::Type2D, [16, 17, 1], 1, 1, read),
+        of(P::R12UnormX4, T::Type2D, [16, 17, 1], 1, 1, read),
         (1152, 128)
     );
     assert_eq!(
-        of(P::BGRA4Unorm, T::Type2D, [64, 64, 1], 1, 1, 0x2),
+        of(P::R12UnormX4, T::Type2D, [64, 64, 1], 1, 1, 0x2),
         (8192, 128)
     );
     assert_eq!(
-        of(P::BGRA4Unorm, T::Cube, [64, 64, 1], 1, 1, read),
+        of(P::R12UnormX4, T::Cube, [64, 64, 1], 1, 1, read),
         (49920, 128)
     );
     assert_eq!(
-        of(P::BGRA4Unorm, T::TextureBuffer, [64, 1, 1], 1, 1, read),
+        of(P::R12UnormX4, T::TextureBuffer, [64, 1, 1], 1, 1, read),
         (128, 16)
     );
     assert_eq!(
         of(P::ARGB8UnormSRGB, T::Type2D, [64, 64, 1], 1, 1, read),
         (16512, 128)
-    );
-    assert_eq!(
-        of(P::R12UnormX4, T::Type2D, [64, 64, 1], 1, 1, read),
-        (8320, 128)
     );
     assert_eq!(
         of(P::RG12UnormX8, T::Type2D, [64, 64, 1], 1, 1, read),

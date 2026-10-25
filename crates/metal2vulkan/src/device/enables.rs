@@ -374,7 +374,8 @@ fn facts(ext: VkExtension) -> ExtensionFacts {
         | E::KhrZeroInitializeWorkgroupMemory
         | E::KhrMaintenance4
         | E::KhrSynchronization2
-        | E::ExtTextureCompressionAstcHdr => fact(true, Some(3), &[]),
+        | E::ExtTextureCompressionAstcHdr
+        | E::Ext4444Formats => fact(true, Some(3), &[]),
         // The core reads it directly: a storage access without a format by the format's own bits
         // (`DeviceProfile::without_format_by_format_bits`).
         E::KhrFormatFeatureFlags2 => fact(true, Some(3), &[]),

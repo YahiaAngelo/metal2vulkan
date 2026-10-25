@@ -960,6 +960,7 @@ codec_enum! {
         KhrFormatFeatureFlags2,
         ExtProvokingVertex, ExtPostDepthCoverage,
         ExtLineRasterization,
+        Ext4444Formats,
     }
     SubgroupOp { Basic, Vote, Arithmetic, Ballot, Shuffle, ShuffleRelative, Clustered, Quad }
     FloatWidth { F16, F32, F64 }

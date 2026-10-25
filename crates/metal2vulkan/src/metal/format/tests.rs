@@ -88,7 +88,8 @@ fn refused_formats_are_exactly_the_documented_set() {
     // - the eleven RGBX formats, held in their RGBA twins.
     // - the three bfloat formats, held raw.
     // - `RGB10A2Unorm_sRGB`, held raw.
-    assert_eq!(count("not_implemented"), 45 + 3 + 6 + 61, "{refused:?}");
+    // - `BGRA4Unorm`, held in the 4-bit word of its bits.
+    assert_eq!(count("not_implemented"), 45 + 3 + 6 + 60, "{refused:?}");
     assert!(refused["not_implemented"].iter().all(|&pf| {
         (ycbcr_format(pf).is_some() && !ycbcr(pf))
             || matches!(pf, P::RGBA16FloatXR | P::AnyDepth | P::AnyStencil)
@@ -1109,6 +1110,8 @@ fn formats_metal_names_are_named_and_refused_typed() {
     // in their words' integer formats (`padded_words`).
     // And the eleven RGBX formats, held in their RGBA twins (`x_channel`).
     // And the three bfloat formats and `RGB10A2Unorm_sRGB`, held raw (`ExtendedRange`).
+    // And `BGRA4Unorm`, held in the 4-bit word of its bits (`A4R4G4B4_UNORM_PACK16`, or
+    // `ABGR4Unorm`'s word through a rotating view).
     let bfloat = |pf| ExtendedRange::of(pf).is_some_and(ExtendedRange::bfloat);
     let rgb10a2_srgb = |pf| ExtendedRange::of(pf) == Some(ExtendedRange::Rgb10A2Srgb);
     assert_eq!(
@@ -1116,13 +1119,16 @@ fn formats_metal_names_are_named_and_refused_typed() {
             .iter()
             .filter(|&&pf| matches!(pf, formats_named_not_held!()))
             .count(),
-        named.len() - 4 - 11 - 3 - 1
+        named.len() - 4 - 11 - 3 - 1 - 1
     );
     for (raw, name) in named {
         let pf = PixelFormat::try_from(raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
         assert_eq!(pf.name(), name);
         assert_eq!(PixelFormat::from_name(name), Some(pf));
         if padded_words(pf) || x_channel(pf) || bfloat(pf) || rgb10a2_srgb(pf) {
+            continue;
+        }
+        if pf == PixelFormat::BGRA4Unorm {
             continue;
         }
         assert!(matches!(pf, formats_named_not_held!()), "{name}");
@@ -2985,17 +2991,16 @@ fn footprint_answers_where_no_image_does() {
             );
         }
     }
-    // The 33 formats of which Metal answers `heapTextureSizeAndAlignWithDescriptor:` and this
-    // crate holds no image: the six ASTC footprints, two plain stragglers, nine one-plane YCbCr
+    // The 32 formats of which Metal answers `heapTextureSizeAndAlignWithDescriptor:` and this
+    // crate holds no image: the six ASTC footprints, `ARGB8Unorm_sRGB`, nine one-plane YCbCr
     // formats, ten padded 10- and 12-bit display formats, four two-plane ones and two packed
     // ones Metal makes no texture of.
-    assert_eq!(answered, 6 + 2 + 9 + 10 + 4 + 2);
+    assert_eq!(answered, 6 + 1 + 9 + 10 + 4 + 2);
 }
 
 /// Every byte count [`footprint`] states is the bytes of a format the crate **does** hold whose
 /// element is the same size: a padded 12-bit channel takes the 16-bit word a padded 10-bit one
-/// takes, `BGRA4Unorm`'s texel is `ABGR4Unorm`'s, a transfer-function twin's is its base
-/// format's, a 4:2:2 texel is a luma byte and a chroma byte (`RG8Unorm`'s two), and an ASTC block
+/// takes, a transfer-function twin's is its base format's, a 4:2:2 texel is a luma byte and a chroma byte (`RG8Unorm`'s two), and an ASTC block
 /// is 16 bytes at every footprint. So no number in the table is one nobody checked: each is held
 /// to a Vulkan block size the mapping already answers.
 #[test]
@@ -3009,7 +3014,6 @@ fn footprint_bytes_match_a_held_twin() {
         (P::ASTC8x4LDR, P::ASTC4x4LDR),
         (P::ASTC8x4SRGB, P::ASTC4x4SRGB),
         (P::ASTC8x4HDR, P::ASTC4x4HDR),
-        (P::BGRA4Unorm, P::ABGR4Unorm),
         (P::ARGB8UnormSRGB, P::ARGB8Unorm),
         (P::R12UnormX4, P::R10UnormX6),
         (P::R12UnormX4PQ, P::R10UnormX6),
@@ -3078,4 +3082,181 @@ fn footprint_bytes_match_a_held_twin() {
             _ => {}
         }
     }
+}
+
+/// Every packed 16-bit colour format the crate holds sits in the Vulkan word of its own bits,
+/// which the two naming conventions pin exactly: Metal names such a format from the least
+/// significant bit and Vulkan names a `_PACK16` one from the most significant, so the channel
+/// letters and their widths read one way in the Metal name and the other way in the direct
+/// candidate's. `BGRA4Unorm` (blue in bits 0 to 3, then green, red and alpha) therefore sits in
+/// `A4R4G4B4_UNORM_PACK16` and not in `ABGR4Unorm`'s `R4G4B4A4_UNORM_PACK16`, whose channels are
+/// one place over.
+#[test]
+fn packed_sixteen_bit_formats_sit_in_the_vulkan_word_of_their_bits() {
+    /// The `(channel, bits)` pairs of a name like `BGRA4Unorm`, `A1BGR5Unorm` or
+    /// `A4R4G4B4_UNORM_PACK16`: each run of channel letters followed by its width, in the order
+    /// the name spells them.
+    fn fields(name: &str) -> Vec<(char, u32)> {
+        let mut out = Vec::new();
+        let mut letters = Vec::new();
+        for c in name.chars() {
+            if c.is_ascii_digit() {
+                let bits = u32::from(c as u8 - b'0');
+                // A width digit closes every letter still open, so `B5G6R5` is three fields and
+                // `A4R4G4B4` four; a letter run with one width (`RGBA8`) shares it.
+                for l in letters.drain(..) {
+                    out.push((l, bits));
+                }
+            } else if matches!(c, 'R' | 'G' | 'B' | 'A') {
+                letters.push(c);
+            } else {
+                break;
+            }
+        }
+        out
+    }
+    // The pairs the two conventions are read from, by the formats the crate holds a packed
+    // 16-bit word of.
+    const PACKED16: &[(PixelFormat, &str)] = &[
+        (PixelFormat::B5G6R5Unorm, "B5G6R5"),
+        (PixelFormat::A1BGR5Unorm, "A1BGR5"),
+        (PixelFormat::ABGR4Unorm, "ABGR4"),
+        (PixelFormat::BGR5A1Unorm, "BGR5A1"),
+        (PixelFormat::BGRA4Unorm, "BGRA4"),
+    ];
+    for &(pf, metal) in PACKED16 {
+        // The stem is the Metal name's own, so no table restates it.
+        assert!(pf.name() == format!("MTLPixelFormat{metal}Unorm"), "{pf:?}");
+        let direct = direct_format(pf).unwrap_or_else(|| panic!("{pf:?} has a direct format"));
+        let name = direct
+            .name()
+            .unwrap_or_else(|| panic!("{direct:?} is named"));
+        assert!(name.ends_with("_UNORM_PACK16"), "{pf:?}: {name}");
+        let vulkan = fields(name.trim_start_matches("VK_FORMAT_"));
+        let mut from_the_top = fields(metal);
+        from_the_top.reverse();
+        assert_eq!(vulkan, from_the_top, "{pf:?}: {name}");
+    }
+    // `BGRA4Unorm`'s word, spelled out: blue in bits 0 to 3, green 4 to 7, red 8 to 11 and alpha
+    // 12 to 15, which is `A4R4G4B4_UNORM_PACK16` read from the most significant bit. Its
+    // red-blue twin is the only other candidate, and the two are the Vulkan 1.3 pair
+    // `VK_EXT_4444_formats` exposes below 1.3.
+    let Repr::Candidates(aspects, candidates) = repr(PixelFormat::BGRA4Unorm) else {
+        panic!("BGRA4Unorm has candidates");
+    };
+    assert_eq!(*aspects, vk::ImageAspectFlags::COLOR);
+    let shape = |c: &Candidate| (c.format, c.components, c.emulation);
+    assert_eq!(
+        candidates.iter().map(shape).collect::<Vec<_>>(),
+        [
+            shape(&direct(vk::Format::A4R4G4B4_UNORM_PACK16)),
+            shape(&red_blue_twin(vk::Format::A4B4G4R4_UNORM_PACK16)),
+        ]
+    );
+    for c in candidates {
+        let x = c.format.exposure().expect("a registry format");
+        assert_eq!(x.core, Some(ApiVersion { major: 1, minor: 3 }), "{c:?}");
+        assert_eq!(x.extensions, ["VK_EXT_4444_formats"], "{c:?}");
+    }
+    // So a device exposing the pair holds a sampled texture of it in the word itself, and one
+    // without the enum values is refused the version or the extension that would expose them --
+    // never `NotImplemented`, which would say no Vulkan format has its bits.
+    let sampled = usages(&[FormatUsage::SampledImage]);
+    let mut held = 0;
+    for (stem, device) in committed_devices() {
+        let profile = device.profile();
+        match vk_format(PixelFormat::BGRA4Unorm, &sampled, profile) {
+            Ok(m) => {
+                held += 1;
+                assert_eq!(m.format, vk::Format::A4R4G4B4_UNORM_PACK16, "{stem}");
+                assert_eq!(m.components, vk::ComponentMapping::IDENTITY, "{stem}");
+                assert_eq!(m.emulation, FormatEmulation::Direct, "{stem}");
+                assert!(
+                    profile.supports_format(
+                        vk::Format::A4R4G4B4_UNORM_PACK16,
+                        FormatUsage::SampledImage
+                    ),
+                    "{stem}"
+                );
+            }
+            Err(Error::Unsupported(u)) => {
+                assert_eq!(u.feature, Feature::Format, "{stem}");
+                assert!(
+                    !matches!(u.needs, Needs::NotImplemented),
+                    "{stem}: {u:?} -- the bits have a Vulkan word"
+                );
+            }
+            Err(e) => panic!("{stem}: {e:?}"),
+        }
+    }
+    // The two MoltenVK profiles expose the pair, so the sweep is not vacuous in either direction.
+    assert!(held >= 2, "held on {held} committed profiles");
+    assert!(
+        vk_format(
+            PixelFormat::BGRA4Unorm,
+            &sampled,
+            committed_devices()
+                .iter()
+                .find(|(s, _)| s == "vk12-floor")
+                .expect("vk12-floor is committed")
+                .1
+                .profile(),
+        )
+        .is_err(),
+        "the 1.2 floor exposes no 4-bit word of Metal's channel order"
+    );
+}
+
+/// `ARGB8Unorm_sRGB`, the other plain straggler, stays refused `NotImplemented(Format)` and keeps
+/// its own heap footprint: its bytes are `ARGB8Unorm`'s, which the crate holds, but no Vulkan
+/// format applies the sRGB transfer function to the three channels Metal's does -- every Vulkan
+/// `_SRGB` format encodes the word's low three and leaves the fourth linear, and Metal's alpha is
+/// the low byte here. Holding it in `R8G8B8A8_SRGB` through `ARGB8Unorm`'s rotation would read
+/// Metal's alpha decoded and Metal's blue linear, because format conversion runs before a view's
+/// component swizzle.
+#[test]
+fn the_srgb_straggler_has_no_vulkan_image_and_keeps_its_footprint() {
+    let pf = PixelFormat::ARGB8UnormSRGB;
+    assert!(matches!(repr(pf), Repr::NotImplemented));
+    assert_eq!(aspects(pf), None);
+    assert_eq!(direct_format(pf), None);
+    assert_eq!(
+        footprint(pf),
+        Some(super::footprint::Footprint::Tiled {
+            bytes: 4,
+            block: [1, 1],
+        })
+    );
+    // Its sibling is held, and the two no longer answer the same way anywhere.
+    assert_eq!(footprint(PixelFormat::BGRA4Unorm), None);
+    // Every usage is refused `NotImplemented` on every committed profile: no candidate to pick.
+    for (stem, device) in committed_devices() {
+        for u in [
+            FormatUsage::SampledImage,
+            FormatUsage::StorageImage,
+            FormatUsage::ColorAttachment,
+        ] {
+            let refused = vk_format(pf, &usages(&[u]), device.profile());
+            assert!(
+                matches!(
+                    refused,
+                    Err(Error::Unsupported(Unsupported {
+                        feature: Feature::Format,
+                        needs: Needs::NotImplemented,
+                        ..
+                    }))
+                ),
+                "{stem} {u:?}: {refused:?}"
+            );
+        }
+    }
+    // The bytes it would be held in: `ARGB8Unorm`'s image, whose three sRGB channels would be the
+    // word's low bytes -- Metal's alpha, red and green -- and not Metal's red, green and blue.
+    let argb = direct_format(PixelFormat::ARGB8Unorm).expect("ARGB8Unorm is held");
+    assert_eq!(argb, vk::Format::R8G8B8A8_UNORM);
+    assert_eq!(
+        crate::metal::texel_format::srgb_raw_view(vk::Format::R8G8B8A8_SRGB),
+        Some(argb),
+    );
+    assert!(!crate::metal::texel_format::srgb_raw(pf));
 }

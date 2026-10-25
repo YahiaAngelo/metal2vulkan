@@ -453,8 +453,8 @@ driver's. Each is open work.
   (`RuntimeGap::DecodedHeapTexture`) and a view of another decode (its HDR form) are refused. The
   heap size query answers one: its footprint is Metal's blocks, which no image of the device
   decides.
-- **The 33 formats this crate holds no image of** (`metal::format::footprint`: ASTC's 4x2 and 8x4
-  footprints, `BGRA4Unorm`, `ARGB8Unorm_sRGB`, Apple's nine one-plane `YCBCR*` formats, the ten
+- **The 32 formats this crate holds no image of** (`metal::format::footprint`: ASTC's 4x2 and 8x4
+  footprints, `ARGB8Unorm_sRGB`, Apple's nine one-plane `YCBCR*` formats, the ten
   padded 10- and 12-bit display formats, the four `RGB10A8_2P` ones and the two packed 10-bit
   ones). `heapTextureSizeAndAlignWithDescriptor:` answers Metal's exact size and alignment for
   every one, because the footprint is arithmetic over the descriptor and no image decides it. A
@@ -462,6 +462,27 @@ driver's. Each is open work.
   Vulkan format holds the bytes (an ASTC 4x2 or 8x4 block) or their reads and writes are not
   measured yet. A **multisample** descriptor of one is refused there too, its layout unmeasured:
   Metal's validation may stop such a descriptor, so none was asked.
+  `ARGB8Unorm_sRGB` is the one of them whose gap is not the bytes: they are `ARGB8Unorm`'s, which
+  this crate holds, and no Vulkan format applies the sRGB transfer function to the three channels
+  Metal's does -- every Vulkan `_SRGB` format encodes the word's low three and leaves the fourth
+  linear, and Metal's alpha is the low byte here, which a view's component mapping cannot move
+  because format conversion runs before the swizzle. Holding it needs the raw-code sRGB decode in
+  the shader (`metal::texel_format::srgb_raw`) as the only read of it.
+- **`BGRA4Unorm` on a device without the 4-bit words of Metal's channel order.** Its texel is
+  `A4R4G4B4_UNORM_PACK16`'s word bit for bit (core 1.3, or `VK_EXT_4444_formats`), and a device
+  exposing neither is refused the version or the extension at the format's first use. The two
+  core-1.0 4-bit words hold the same bits with the channels one place over, but only a rotating
+  view reads them back and what Metal's opaque-black border reads through this format's rotation
+  is unmeasured (`ARGB8Unorm`'s was measured, and is not alpha), so no fallback candidate is
+  taken. A color attachment and a storage image of it are the device's to allow: its write
+  conversion is `WriteConversion::Unmeasured` and it has no word-view render fallback
+  (`metal::format::word`), both of which wait on a Metal measurement of its channels.
+  `generateMipmapsForTexture:` of one is refused `NotImplemented(MipmapGeneration)`
+  (`mipmap_plan::not_implemented`): `mipmap_answers.txt` holds the probe's measured filter for
+  every other format the runtime filters and the probe never asked Metal for this one, so a blit
+  chain would average its texels by the device's rule with nothing to hold it to. Its clear and
+  fill take the packed 4-bit unorm rule the probe measured by channel width over the other four
+  packed formats.
 - **PVRTC textures on a device without PVRTC.** One without a decoded twin (a sparse heap's, or a
   heap's over the caller's host pages or laid out apart from its bytes) holds its blocks for copies
   alone: a command that reads it is refused.

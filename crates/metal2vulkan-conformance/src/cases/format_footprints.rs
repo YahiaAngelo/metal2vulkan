@@ -144,13 +144,14 @@
 //!
 //! # Why a case stops at its first refusal
 //!
-//! The runtime holds **no image of any of the 33**: every one of them is refused
+//! The runtime holds **no image of 32 of the 33** (`BGRA4Unorm` is the one it holds, in the
+//! Vulkan word of its bits): every other one is refused
 //! `Unsupported { feature: Format, needs: NotImplemented }`, measured over every descriptor of
 //! every case of this family. A case that recorded a refusal at each site and went on — which is
 //! what `heap_metal_sizes` does, because the runtime answers all of its descriptors — would print
 //! some 2900 `Refused` rows and need a `known-gaps.tsv` row for each, which is a ledger nobody
 //! reads and therefore no ledger. So each case stops at the first site it is refused, and the
-//! family's six refusal rows stand for the gap: the full list of the 33 is in the orchestrator's
+//! family's refusal rows stand for the gap: the full list is in the orchestrator's
 //! todos, where work belongs, and the recordings hold Metal's answer for every one, which is what
 //! an implementation of them will be held to.
 //!
@@ -836,7 +837,7 @@ mod tests {
 /// table that makes the runtime answer `Invalid` anywhere must never be recorded.
 ///
 /// Unlike `heap_metal_sizes`' guard this one tolerates every **other** typed error. The runtime
-/// holds no image of any of this family's 33 formats and refuses each `NotImplemented(Format)`,
+/// holds no image of 32 of this family's 33 formats and refuses each `NotImplemented(Format)`,
 /// which is the gap this family exists to make visible; only `Invalid` says the descriptor itself
 /// is one Metal stops.
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
