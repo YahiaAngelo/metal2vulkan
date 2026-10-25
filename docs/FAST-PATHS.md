@@ -288,16 +288,23 @@ driver's. Each is open work.
   stores through a slot bound to memory whose GPU writes Metal drops (no-copy memory of its private
   option bit 24, or pages replaced read-only) are now dropped in the shader, gated on a uniform
   per-draw and per-dispatch word (`SpecKey::DroppedStoreSlots`). Five shapes stay open, the fifth
-  this crate's own: the guard is a branch, and the branch moves what Apple's fast-math library
-  answers. `air.fast_asinh.f32` and `air.fast_acosh.f32` expand to different last bits depending on
-  the basic block their call sits in, and the guard sinks every value a guarded store consumes into
-  that block. Over the math case's 1024 operand pairs on an M3 Max under macOS 27.0.1, 34 of 2048
-  `asinh` and `acosh` answers move by one or two ulps, and where `x + sqrt(x*x +- 1)` cancels (a
-  large negative `x`, or `acosh` just above 1) the move carries to `NaN` against a finite answer; no
-  other function moves and the precise entry does not move at all
+  this crate's own: a store through a **descriptor view** is still guarded by a branch, and the
+  branch moves what Apple's fast-math library answers. `air.fast_asinh.f32` and
+  `air.fast_acosh.f32` expand to different last bits depending on the basic block their call sits
+  in, and the guard sinks every value a guarded store consumes into that block. Over the math
+  case's 1024 operand pairs on an M3 Max under macOS 27.0.1, 34 of 2048 `asinh` and `acosh` answers
+  move by one or two ulps, and where `x + sqrt(x*x +- 1)` cancels (a large negative `x`, or `acosh`
+  just above 1) the move carries to `NaN` against a finite answer; no other function moves and the
+  precise entry does not move at all
   (`runtime_lane::driver_deviations::float_functions_the_device_answers_are_metals`, red since the
-  guard landed). The exact form is measured: the same word and the same bit test, written as a
-  selected store address instead of a branch, answer all 2048 exactly. The four that follow are
+  guard landed). A store through a slot's **device address** no longer branches: its bit joins the
+  bounds check in the one selection of the store's address, which sends a dropped store to the root
+  table's write-only sink (`lower::access::psb::prepare`, `tests::engine_dropped_store_sink`). A
+  descriptor view has no second buffer of its own storage class to select a pointer against, so the
+  same form there needs a write-only sink binding of the stage's and `OpSelect` between
+  storage-buffer pointers (`variablePointersStorageBuffer`, which every committed profile but
+  SwiftShader's and the Vulkan 1.2 floor has); neither is built. A `memcpy` or `memset` through a
+  buffer slot (`copy::endpoint`) reads no dropped-store word on either form. The four that follow are
   Metal's own. A store
   through an address loaded out of an argument buffer or a pointer names no slot and no bit, so the
   word does not reach it; an atomic is not gated, because what Metal's atomics do to such memory is
