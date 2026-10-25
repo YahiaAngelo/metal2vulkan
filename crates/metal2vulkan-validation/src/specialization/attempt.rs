@@ -27,8 +27,8 @@
 //! exists only for a linked function, so a call no linked function answers is the empty switch,
 //! not a refusal. Its stop is structural instead, and runs after a compile that translated: where
 //! the compile's own output says the stage uses a table
-//! ([`uses_function_tables`], which holds for a table the entry takes and for one an argument buffer
-//! holds, and not for a table the set's constants removed), the attempt links every function the
+//! (`uses_function_tables`, a private reader that holds for a table the entry takes and for one an
+//! argument buffer holds, and not for a table the set's constants removed), the attempt links every function the
 //! authored cases link that it has not linked yet (Metal's `MTLLinkedFunctions`, the functions a
 //! pipeline can place in a table) and compiles once more, so the census measures the switch over
 //! the candidates and not only the empty one. The stop is recorded either way, with an empty list
