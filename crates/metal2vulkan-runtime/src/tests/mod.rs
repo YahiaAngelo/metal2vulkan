@@ -77,6 +77,8 @@ mod dispatch_pending;
 mod draw_shape_notices;
 mod driver_defects;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod driver_pipeline_compile;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod dropped_usage;
 mod enables;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
