@@ -139,7 +139,7 @@ const OVERDRAW: [u8; 4] = [208, 224, 240, 240];
 /// The rectangle the fifth draw covers: half the clip-space height, over every column.
 ///
 /// Which half of the target that is -- the first rows or the last -- is Metal's answer, and nothing
-/// here states it ([`tests::metal_drew_the_bands_and_then_the_half_overdraw`]).
+/// here states it (`tests::metal_drew_the_bands_and_then_the_half_overdraw`).
 const HALF: [f32; 4] = [-1.0, -1.0, 1.0, 0.0];
 
 /// The owned fixture whose `tob_rect` draws a rectangle from a buffer's two corners, whose

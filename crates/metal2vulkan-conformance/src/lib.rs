@@ -111,8 +111,6 @@ pub mod work;
 
 #[cfg(target_os = "macos")]
 pub mod metal_side;
-/// The IOSurfaces the Metal side lays a two-plane YCbCr texture over. Its own module because it
-/// reaches CoreFoundation and IOSurface through their C functions, which nothing else here does.
 #[cfg(target_os = "macos")]
 mod metal_surface;
 #[cfg(target_os = "macos")]

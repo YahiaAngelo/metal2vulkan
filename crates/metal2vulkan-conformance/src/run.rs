@@ -494,7 +494,7 @@ pub fn record_all(cases: &[Box<dyn Case>]) -> Vec<(String, Result<std::path::Pat
 /// never compared with our behaviour.
 ///
 /// A case whose answer is carried was never run here, so its validated answer is
-/// [`Validated::NotRun`]: the absence is recorded, not guessed at.
+/// [`crate::recording::Validated::NotRun`]: the absence is recorded, not guessed at.
 #[cfg(target_os = "macos")]
 fn record_one(case: &dyn Case) -> Result<std::path::PathBuf, String> {
     use crate::recording::Validated;

@@ -630,9 +630,8 @@ fn metal_binding(binding: &ProtocolObject<dyn MTLBinding>) -> Answer<BindingFact
 /// All five stage lists of one `MTLRenderPipelineReflection`, whichever creation answered it.
 ///
 /// Each list is bound to a local rather than called in the `for` header, for the reason
-/// [`Side::compute_pipeline_bindings`](crate::case::Side::compute_pipeline_bindings) states: the
-/// coverage derivation reads a receiver by walking back from the dot, and in a `for` header that
-/// walk swallows the loop variable.
+/// [`Side::compute_pipeline_bindings`] states: the coverage derivation reads a receiver by walking
+/// back from the dot, and in a `for` header that walk swallows the loop variable.
 fn metal_stage_bindings(reflection: &MTLRenderPipelineReflection) -> Answer<StageBindings> {
     let read = |bindings: &NSArray<ProtocolObject<dyn MTLBinding>>| -> Answer<Vec<BindingFacts>> {
         let mut found = Vec::new();
@@ -1680,8 +1679,8 @@ fn state_mutability(
     }
 }
 
-/// Set every field [`ComputeAway`] states on a compute pipeline descriptor, each away from Metal's
-/// own default.
+/// Set every field [`crate::compute_descriptors::AWAY`] states on a compute pipeline descriptor,
+/// each away from Metal's own default.
 ///
 /// The label is set only because the table states one: `setLabel:nil` ends Metal's process.
 fn state_compute_descriptor(descriptor: &Retained<MTLComputePipelineDescriptor>) {
@@ -1767,7 +1766,7 @@ fn read_compute_supplied(
     }
 }
 
-/// Set every field [`TileAway`] states on a tile render pipeline descriptor.
+/// Set every field [`crate::tile_descriptors::AWAY`] states on a tile render pipeline descriptor.
 ///
 /// `resets` says whether the caller will send `reset` afterwards, because the buffer mutability is
 /// stated only where it will not: subscripting `tileBuffers` and then resetting the descriptor
@@ -1858,7 +1857,7 @@ fn read_tile_supplied(descriptor: &Retained<MTLTileRenderPipelineDescriptor>) ->
     }
 }
 
-/// Set every field [`MeshAway`] states on a mesh render pipeline descriptor.
+/// Set every field [`crate::mesh_descriptors::AWAY`] states on a mesh render pipeline descriptor.
 fn state_mesh_descriptor(descriptor: &Retained<MTLMeshRenderPipelineDescriptor>) {
     descriptor.setLabel(Some(&NSString::from_str(MESH_AWAY.label)));
     // SAFETY: the sample count is the stated table's own 4, a count every Metal device supports,

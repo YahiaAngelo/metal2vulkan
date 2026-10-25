@@ -736,7 +736,7 @@ const STAGE_IN_SIZE: [u32; 3] = [3, 1, 1];
 /// fetches past the buffer**. The first recording of this row was taken with three, and Metal
 /// answered 0 for the two elements past the end — an out-of-bounds read whose value Metal leaves
 /// undefined, which is not an answer a case may compare.
-/// [`tests::the_attribute_buffer_covers_the_region`] holds the margin.
+/// `tests::the_attribute_buffer_covers_the_region` holds the margin.
 const ATTRIBUTES: [u32; 10] = [0xa0, 0, 0xa1, 0, 0xa2, 0, 0xa3, 0, 0xa4, 0];
 
 /// Words the stage-in row's output buffer holds: the kernel writes a `uint4` at

@@ -178,7 +178,7 @@ const RESOLVING: [StoreAction; 2] = [
 
 /// Every `MTLMultisampleDepthResolveFilter`, named value by value so the suite's option-space axis
 /// reads them, and held against the runtime's own list by
-/// [`tests::the_swept_filters_are_every_value_metal_defines`].
+/// `tests::the_swept_filters_are_every_value_metal_defines`.
 const FILTERS: [MultisampleDepthResolveFilter; 3] = [
     MultisampleDepthResolveFilter::Sample0,
     MultisampleDepthResolveFilter::Min,

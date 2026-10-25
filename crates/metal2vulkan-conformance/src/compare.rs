@@ -369,12 +369,11 @@ fn notice_declarations(
 ///
 /// Our side's answer has one shape: a typed error, which a [`crate::case::Failure`] can only record
 /// as an `Err`. Metal's answer has **every other** shape there is, and the rule is written that way
-/// round on purpose: a value, a tree of facts whose own value is
-/// [`Value::Absent`](crate::transcript::Value::Absent), a digest with no value beside it, or a
-/// negative fact ([`crate::transcript::Negative`]) are all Metal answering the call. Only two of
-/// Metal's answers are not: its **own** error, where the two sides agree and the difference is
-/// between the errors; and the one fact that says Metal never came back from the call, which is
-/// [`NeverReturned`] and not a gap of ours at all.
+/// round on purpose: a value, a tree of facts whose own value is [`Value::Absent`], a digest with
+/// no value beside it, or a negative fact ([`crate::transcript::Negative`]) are all Metal answering
+/// the call. Only two of Metal's answers are not: its **own** error, where the two sides agree and
+/// the difference is between the errors; and the one fact that says Metal never came back from the
+/// call, which is [`NeverReturned`] and not a gap of ours at all.
 ///
 /// Reading `Ok` against `Err` alone was how a refusal went invisible three ways over. A site whose
 /// answer is a tree — a queue's slots, an event's order, a buffer-backed texture's facts — records

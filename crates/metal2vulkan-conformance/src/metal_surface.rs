@@ -46,8 +46,8 @@
 //! **ends the process** when it is broken (`crate::surface::PlaneSpec::unsafe_stride`).
 //!
 //! The frameworks are reached through their C functions (CoreFoundation and IOSurface), as
-//! `metal2vulkan-validation`'s own surface probe reaches them; each object made here is released
-//! here.
+//! `metal2vulkan-validation`'s own surface probe reaches them and nothing else in this crate does,
+//! which is why this is a module of its own; each object made here is released here.
 
 use core::ffi::c_void;
 use core::ptr::NonNull;

@@ -53,8 +53,8 @@
 // THE SHAPES
 //
 //   control        an entirely IN-BOUNDS move: tile (0,0) of texture A to tile (3,3) of texture
-//                  B. Its reading MUST move -- B(3,3) holding A(0,0)'s word and A(0,0) reading 0 --
-//                  or nothing below is a measurement of anything. A control that cannot move
+//                  B. Its reading MUST move -- B(3,3) reading A(0,0)'s word and A(0,0) reading 0
+//                  -- or nothing below is a measurement of anything. A control that cannot move
 //                  proves nothing.
 //   region-open    source origin (2,0), source size 4 by 1 where level 0 holds 4 by 4 tiles, so
 //                  source tiles 2 and 3 are inside and 4 and 5 are not; destination origin (0,0)
@@ -100,25 +100,34 @@
 // shows only past an edge, and why `dest-2d` was the shape worth taking: without an in-bounds 2D
 // reading, "the destination is the region" and "the destination is a run" could not be told apart.
 //
+// WHAT "TOOK" MEANS BELOW. A destination tile the move wrote did NOT read uniform: it printed
+// `MIXED(first=<the source tile's word>)`. The source word is that tile's FIRST TEXEL, and the
+// rest of the tile is not that word. So "B(3,3) took A(0,0)" below says WHICH source tile a
+// destination tile took, read off its first texel, and says nothing about what the rest of that
+// tile holds. This printout cannot say: its `differing>=` count stops at the first row of the tile
+// that differs, so the count is a floor and never a share. Which tile each destination took is the
+// whole question here, and the rule above rests on nothing else -- how much of a tile's bytes a
+// move carries is a separate question, and one this probe does not read.
+//
 // Shape by shape:
 //
-//   control        B(3,3) held A(0,0)'s word, A(0,0) read zero, every other tile as it was.
-//   region-open    source (2,0) 4x1: B(0,0) and B(1,0) held A(2,0) and A(3,0); B(2,0) and B(3,0)
+//   control        B(3,3) took A(0,0), A(0,0) read zero, every other tile as it was.
+//   region-open    source (2,0) 4x1: B(0,0) and B(1,0) took A(2,0) and A(3,0); B(2,0) and B(3,0)
 //                  read zero and A's other rows were whole, so the two tiles past the level moved
 //                  nowhere.
 //   region-mapped  the same move onto a B holding its own words at (2,0) and (3,0): both still
 //                  held them, so the destination tiles the overhang named are left as they were
 //                  rather than zeroed.
 //   region-dest    source (0,0) 4x1 onto (2,0): ALL FOUR moved -- B(2,0), B(3,0), B(2,1), B(3,1)
-//                  held A(0,0), A(1,0), A(2,0), A(3,0) -- and A's whole row 0 read zero.
+//                  took A(0,0), A(1,0), A(2,0), A(3,0) -- and A's whole row 0 read zero.
 //   dest-row       the same onto (2,1): B(2,1), B(3,1), B(2,2), B(3,2). The run's row starts at the
 //                  origin's own column, not at the level's left edge.
 //   src-clip-2d    source (2,2) 4x4, clipped to 2x2, onto (1,1) with three tiles to its right:
-//                  B(1,1), B(2,1), B(3,1), B(1,2) held A(2,2), A(3,2), A(2,3), A(3,3). This is the
+//                  B(1,1), B(2,1), B(3,1), B(1,2) took A(2,2), A(3,2), A(2,3), A(3,3). This is the
 //                  reading that says the row is the STATED width's: a row of the clipped two would
 //                  have put the third tile at (1,2).
 //   dest-2d        source (0,0) 2x2 onto (1,1), both sides inside: B(1,1), B(2,1), B(1,2), B(2,2)
-//                  held A(0,0), A(1,0), A(0,1), A(1,1) -- the region's own offsets.
+//                  took A(0,0), A(1,0), A(0,1), A(1,1) -- the region's own offsets.
 //   slice          source slice 2 of a two-slice texture: nothing moved, both slices whole.
 //   level          source level 9 of a nine-level texture: nothing moved.
 //

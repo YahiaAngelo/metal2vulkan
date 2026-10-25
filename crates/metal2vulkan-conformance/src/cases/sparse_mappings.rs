@@ -714,7 +714,7 @@ static MOVES: Row = Row {
 /// It is written as fields rather than as a table because the probe this family's move rows came
 /// from got it wrong the other way: its first form OR'd the row into a constant that already held
 /// that bit, so two rows shared a word and a tile's provenance was recoverable only by
-/// elimination. [`tests::every_tiles_marker_is_its_own`] reads every marker of the grid back and
+/// elimination. `tests::every_tiles_marker_is_its_own` reads every marker of the grid back and
 /// fails on a repeat, so the distinctness is checked rather than argued.
 const fn marker(texture: usize, x: u64, y: u64) -> u8 {
     0x40 | ((texture as u8) << 5) | ((y as u8) << 2) | (x as u8)
@@ -848,12 +848,14 @@ static MOVE_INSIDE_THE_LEVEL: Row = Row {
 /// **A destination row that overflows the level, which does not clip**: the reading nobody could
 /// have guessed and the one our own clipping got wrong.
 ///
-/// Source (0, 0) of 4 by 1 tiles — every tile inside level 0's four — onto destination origin
-/// (2, 0), where the level has two tiles to the right of the origin and the stated region would
-/// need four. Metal moved **all four** source tiles: B(2,0), B(3,0), B(2,1) and B(3,1) held
-/// A(0,0), A(1,0), A(2,0) and A(3,0), and A's whole row 0 read zero afterwards
-/// (`probes/sparse_move_past_the_bounds.m`, shape `region-dest`, an M3 Max under macOS 27.0.1,
-/// plain Metal, each tile's verdict read off all 4,096 of its texels).
+/// Source (0, 0) of 4 by 1 tiles — every tile inside level 0's four — onto destination
+/// origin (2, 0), where the level has two tiles to the right of the origin and the stated region
+/// would need four. Metal moved **all four** source tiles: B(2,0), B(3,0), B(2,1) and B(3,1) took
+/// A(0,0), A(1,0), A(2,0) and A(3,0), each read off the destination tile's own first texel, and
+/// A's whole row 0 read zero afterwards (`probes/sparse_move_past_the_bounds.m`, shape
+/// `region-dest`, an M3 Max under macOS 27.0.1, plain Metal, every tile's verdict read off all
+/// 4,096 of its texels, and a destination tile reading as mixed rather than as that word
+/// throughout).
 ///
 /// So the destination is a **run of tiles rather than a region**: it starts at the destination
 /// origin, is laid out `sourceSize.width` tiles to a row — clipped only by the tiles to the right
@@ -882,12 +884,12 @@ static MOVE_PAST_THE_DESTINATIONS_ROW: Row = Row {
 /// destination tiles the stated region named but the run did not reach keep their own texels.
 ///
 /// Source (2, 0) of 4 by 1 tiles where level 0 holds four, so tiles (2,0) and (3,0) are inside and
-/// the two past the edge are not, onto destination origin (0, 0). Metal moved the two:
-/// B(0,0) and B(1,0) held A(2,0) and A(3,0), and A's row 1 was whole
-/// (`probes/sparse_move_past_the_bounds.m`, shape `region-open`). So the overhang does not
-/// **wrap** — a rule that continued into the next row would have put A(0,1) and A(1,1) into
-/// B(2,0) and B(3,0) and left A's row 1 unmapped, and this row reads A(0,1) and A(1,1) after the
-/// move for exactly that reason.
+/// the two past the edge are not, onto destination origin (0, 0). Metal moved the two: B(0,0) and
+/// B(1,0) took A(2,0) and A(3,0), each read off the destination tile's own first texel, and A's
+/// row 1 was whole (`probes/sparse_move_past_the_bounds.m`, shape `region-open`). So the overhang
+/// does not **wrap** — a rule that continued into the next row would have put A(0,1) and A(1,1)
+/// into B(2,0) and B(3,0) and left A's row 1 unmapped, and this row reads A(0,1) and A(1,1) after
+/// the move for exactly that reason.
 ///
 /// And B(2,0) and B(3,0) are **mapped and filled with their own markers before the move**, which
 /// is the probe's `region-mapped` shape: the stated destination region names them and the run
@@ -924,9 +926,9 @@ static MOVE_OF_A_SOURCE_PAST_THE_LEVEL: Row = Row {
 /// **A source clipped on both axes**, which is the shape a pairing by list index gets wrong.
 ///
 /// Source (2, 2) of 4 by 4 tiles on a level holding four by four, so 2 by 2 survive, onto
-/// destination origin (1, 1), where three tiles lie to the right. Metal read B(1,1), B(2,1),
-/// B(3,1) and B(1,2) holding A(2,2), A(3,2), A(2,3) and A(3,3)
-/// (`probes/sparse_move_past_the_bounds.m`, shape `src-clip-2d`).
+/// destination origin (1, 1), where three tiles lie to the right. B(1,1), B(2,1), B(3,1) and
+/// B(1,2) took A(2,2), A(3,2), A(2,3) and A(3,3), each read off the destination tile's own first
+/// texel (`probes/sparse_move_past_the_bounds.m`, shape `src-clip-2d`).
 ///
 /// Its third tile at (3, 1) is the whole reading: the run's row is the **stated** width's three
 /// and not the clipped source's two, which would have put it at (1, 2). And pairing two clipped

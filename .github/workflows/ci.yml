@@ -153,7 +153,7 @@ jobs:
             metal2vulkan-air=3 \
             metal2vulkan-runtime=73 \
             metal2vulkan-validation=4 \
-            metal2vulkan-conformance=21 \
+            metal2vulkan-conformance=1 \
             metal2vulkan-devtools=0
           do
             crate=${row%=*}

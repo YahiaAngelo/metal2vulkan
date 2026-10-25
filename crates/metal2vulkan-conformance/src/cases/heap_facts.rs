@@ -325,7 +325,7 @@ fn labels() -> HeapFactsCase {
 /// The two buffers the available-size sweep places, in order: an offset and a length each.
 ///
 /// The offsets are multiples of Metal's 256-byte placement grain and both placements lie inside
-/// `SIZE`, which [`tests::every_placement_of_the_available_size_sweep_is_one_metal_takes`] holds
+/// `SIZE`, which `tests::every_placement_of_the_available_size_sweep_is_one_metal_takes` holds
 /// them to.
 const PLACEMENTS: [(u64, u64); 2] = [(0, 4096), (1 << 13, 1 << 16)];
 

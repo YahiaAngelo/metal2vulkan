@@ -60,9 +60,9 @@ pub const BEFORE: u8 = 0xee;
 /// and the name its case holds.
 ///
 /// The table is the case names' home, because a case names itself with a static string. Nothing
-/// here may drift: [`tests::the_table_is_exactly_the_formats_whose_texels_are_metals_bytes`] holds
+/// here may drift: `tests::the_table_is_exactly_the_formats_whose_texels_are_metals_bytes` holds
 /// it against the predicate over every format Metal describes, and
-/// [`tests::every_case_names_its_own_format`] holds each name against its format's ordinal.
+/// `tests::every_case_names_its_own_format` holds each name against its format's ordinal.
 ///
 /// Each row names its format through [`PixelFormat`] rather than by ordinal. The two spellings
 /// were both here — the ordinal in the row and the enumerator in a comment beside it — which is

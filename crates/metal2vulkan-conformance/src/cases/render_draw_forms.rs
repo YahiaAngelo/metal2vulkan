@@ -367,7 +367,7 @@ struct Row {
     /// A draw whose base instance is not 0 states **0** here, so where its instance ids start is a
     /// question about a channel rather than about which pixels it covered. Metal's `instance_id`
     /// may or may not include the base instance, and this family does not assume either
-    /// ([`iids_either_convention`]).
+    /// (`tests::iids_either_convention`).
     shift: u32,
     form: Form,
 }
