@@ -198,6 +198,51 @@ fn a_decoded_function_links_like_the_original() {
     );
 }
 
+/// A function decoded from cache bytes answers what each of its slots may be stored through, the
+/// same as the function it was compiled from: the question a consumer asks of a state it took from
+/// a cache, in a process that never saw the AIR. The encoding carries `slot_writes`, and a compile
+/// keeps it whatever the reflection of the same entry could describe, so the decoded answer is a
+/// determined one and not an empty list (which would read as a state that binds no slot).
+#[test]
+fn a_decoded_function_answers_its_slot_writes() {
+    let dev = device("moltenvk-m3");
+    let Some(bc) = fixture("store_const") else {
+        return;
+    };
+    let f = Library::from_air(&bc)
+        .expect("library")
+        .function("store_const")
+        .expect("function");
+    let fd = FunctionDescriptor::new(f);
+    let compiled = dev
+        .compile_function(&fd, &LoweringInputs::new(), &Budget::standard())
+        .expect("compile");
+    let back = CompiledFunction::from_bytes(&compiled.to_bytes(), &dev).expect("decode");
+
+    let from_function = ComputePipelineDescriptor::new(StageSource::Function(fd))
+        .slot_writes(&Budget::standard())
+        .expect("the function path answers");
+    let from_decoded = ComputePipelineDescriptor::new(StageSource::Compiled(back))
+        .slot_writes(&Budget::standard())
+        .expect("a decoded function answers");
+    assert_eq!(from_decoded, from_function);
+
+    // `device uint *out [[buffer(0)]]`: one slot, read-write, as Metal answers a device buffer.
+    let slots = from_decoded.kernel_slots();
+    assert_eq!(slots.len(), 1, "{slots:?}");
+    assert_eq!(slots[0].index, Some(0));
+    assert_eq!(
+        crate::reflection::SlotWrite::may_write(slots, metal::BindingType::Buffer, 0),
+        crate::reflection::SlotWritability::Maybe
+    );
+    // Nothing binds buffer 1, so no store of the state can land there: the answer a consumer
+    // needs before it binds a read-only buffer.
+    assert_eq!(
+        crate::reflection::SlotWrite::may_write(slots, metal::BindingType::Buffer, 1),
+        crate::reflection::SlotWritability::Never
+    );
+}
+
 /// Bytes of another profile are `WrongDevice`, bytes of another key too when the caller names
 /// the key, and bytes of another artifact kind are `Corrupt`.
 #[test]
