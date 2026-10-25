@@ -39,31 +39,31 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// The buffer's bytes: one page of any host, as the consumer's are.
-const BYTES: usize = 16 << 10;
+pub(super) const BYTES: usize = 16 << 10;
 
 /// The threads the dispatch runs, in one threadgroup, and the scale it multiplies by: the kernel
 /// writes `3.0` into word 1, so a written page is one whose words are not all zero.
-const COUNT: u64 = 64;
-const SCALE: f32 = 2.0;
+pub(super) const COUNT: u64 = 64;
+pub(super) const SCALE: f32 = 2.0;
 
 /// One page of host memory, zeroed, freed when dropped: declared before the device that uses it,
 /// so dropped after it. A leg reads it back whatever keep-alive it passed, so a quiet leg is a
 /// witness and not a free.
-struct Page(NonNull<u8>);
+pub(super) struct Page(NonNull<u8>);
 
 impl Page {
     fn layout() -> Layout {
         Layout::from_size_align(BYTES, BYTES).unwrap()
     }
 
-    fn new() -> Page {
+    pub(super) fn new() -> Page {
         // SAFETY: the layout's size is not zero.
         let pointer = unsafe { std::alloc::alloc_zeroed(Page::layout()) };
         Page(NonNull::new(pointer).unwrap())
     }
 
     /// Whether the kernel wrote it: its words are zero until it does.
-    fn written(&self) -> bool {
+    pub(super) fn written(&self) -> bool {
         // SAFETY: `BYTES` bytes, allocated in `new` aligned past a word, which no command writes
         // any more (its command buffer completed).
         let words = unsafe { std::slice::from_raw_parts(self.0.as_ptr().cast::<u32>(), BYTES / 4) };
@@ -75,7 +75,7 @@ impl Page {
     /// # Safety
     ///
     /// They outlive every buffer over them, which alone uses them while it lives.
-    unsafe fn memory(&self) -> HostMemory {
+    pub(super) unsafe fn memory(&self) -> HostMemory {
         // SAFETY: the caller's contract; `BYTES` bytes, allocated in `new` page-aligned.
         unsafe { HostMemory::new(self.0) }
     }
@@ -113,7 +113,7 @@ impl Keep {
 }
 
 /// The dispatch of `state` writing `output`, encoded into `command_buffer`.
-fn dispatch(
+pub(super) fn dispatch(
     command_buffer: &CommandBuffer,
     state: &ComputePipelineState,
     input: &Buffer,
