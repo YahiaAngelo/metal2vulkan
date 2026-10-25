@@ -1,36 +1,46 @@
 //! A run of render pipeline creations over one vertex-and-fragment pair, differing only in blend
-//! state, misses the driver's cache **every single time** on a device that reports what it found
-//! (`ShaderCacheStatistics::driver_pipeline_hits`, `driver_pipeline_misses`).
+//! state, is handed **one** `VkPipelineCache`, the one the run's first creation made for their
+//! shared record, so no sibling's stages are converted or compiled again
+//! (`ShaderCache::caches_shared`; where the device reports what it found,
+//! `ShaderCacheStatistics::driver_pipeline_hits` too).
 //!
 //! # What this records, and why it is worth a test
 //!
-//! Every making of the runtime is given a `VkPipelineCache` of its own, made from a record named
-//! by the whole graphics key and destroyed once the call returned (`shader_cache/driver.rs`).
-//! A sweep of states over one function pair therefore gets a record each: 32 states over two
-//! modules are 32 records and 32 caches, no two of which the other can read. The sibling test
+//! A making's record is named by what reaches the driver's conversion of one of its stages and by
+//! nothing else -- the names of its pre-rasterization and fragment shader parts, its vertex input,
+//! and whether it rasterizes points (`GraphicsContent::record`) -- and the device keeps one
+//! `VkPipelineCache` per record name, made by the first making that names it and handed to every
+//! later one (`shader_cache/driver.rs`). So a sweep of blend states over one function pair is one
+//! record and one cache, however many states it has.
+//!
+//! It is worth a test because the arrangement it replaced was worse than handing the driver no
+//! cache at all. Every making had a `VkPipelineCache` of its own, named by the whole graphics key
+//! and destroyed once the call returned, so 32 states over two modules were 32 records and 32
+//! caches, no two of which the other could read. MoltenVK answers a stage's lookup out of the
+//! shader module's own library cache when it is handed no pipeline cache and out of the pipeline
+//! cache alone when it is handed one, so every stage of every making was converted again: 64
+//! conversions over 32 blend states where one shared cache converts 2, 1.8x to 10.5x of the call
+//! by the module's size (measured on an M3 Max, macOS 27.0.1, MoltenVK 1.4.2, through the driver's
+//! own activity tracking,
+//! `metal2vulkan-conformance/probes/pipeline_cache_across_blend_states.c`). The sibling test
 //! `render_sibling_work` holds the translator's side of such a sweep -- the modules, the layout
-//! and the specialized entries are shared, so nothing is translated twice. This holds the
-//! **driver's** side, which is the opposite: nothing is shared, and the count says so.
+//! and the specialized entries are shared, so nothing is translated twice; this holds the
+//! driver's.
 //!
-//! The assertion is that **no creation of the run hits**, which is a fact about the arrangement
-//! and not about speed, so it holds under any load. A hit would mean the device found the
-//! sibling's pipeline in a cache seeded from a record the sibling's own key names, which within
-//! one process and one empty cache directory cannot happen: each making's record is written after
-//! its own making and read by no other key.
+//! # What each assertion says
 //!
-//! The run asserts the hits and misses **together against the creations**, so a device that
-//! reports nothing (no `VK_EXT_pipeline_creation_feedback`, where neither counter moves) reads as
-//! a skip rather than as a pass: a zero-hit assertion alone would pass vacuously there.
+//! **Every sibling was handed the cache the first creation made** (`caches_shared`), which is a
+//! count of this crate's own arrangement and holds on every device, whatever its driver reports
+//! and whatever the host's load. Since the device holds its caches under the record's name, the
+//! count says both that the siblings named one record and that each took that record's cache.
 //!
-//! # What it does not say
-//!
-//! It does not say the driver converted each sibling's stages again. Whether a miss costs a
-//! conversion is the driver's own business and `VK_EXT_pipeline_creation_feedback` reports
-//! nothing finer than a hit per stage; on MoltenVK 1.4.2 a miss does cost one, measured with the
-//! driver's private per-activity tracking in
-//! `metal2vulkan-conformance/probes/pipeline_cache_across_blend_states.c`, and that is a probe and
-//! not a test for exactly that reason. What the counter proves here is the arrangement that
-//! leaves the driver no cache to find anything in.
+//! **What the driver reports is the device's own.** A driver that keys a converted stage, and says
+//! so per stage (MoltenVK), reports every sibling found in the cache: nothing of theirs was
+//! converted or compiled again. A driver that reports a hit for the whole pipeline alone reports
+//! every sibling a miss, which is right -- each sibling's pipeline is genuinely new, and
+//! `pipelineCompile` is one call a state in every arrangement measured. So the run asserts only
+//! that the two agree: where it reports anything it reports one answer per creation, and where it
+//! reports a hit at all it reports one for every sibling.
 //!
 //! The device takes a shader cache directory of its own, empty, so no run reads a record an
 //! earlier run stored.
@@ -48,7 +58,7 @@ use metal2vulkan::metal::{BlendFactor, BlendOperation};
 const RUN: u64 = 16;
 
 /// Blend factors no two of which make one pipeline: each sibling is its own descriptor, and so
-/// its own record.
+/// its own `VkPipeline`, while the record and the cache of all of them are one.
 const FACTORS: [BlendFactor; 8] = [
     BlendFactor::Zero,
     BlendFactor::One,
@@ -60,10 +70,10 @@ const FACTORS: [BlendFactor; 8] = [
     BlendFactor::DestinationAlpha,
 ];
 
-/// Every sibling render creation of one function pair misses the driver's cache: a making's cache
-/// holds its own key's record alone, so a sibling finds nothing of the first's in it.
+/// Every sibling render creation of one function pair is handed the cache the first creation made
+/// for their shared record: blend state names no record of its own, so nothing is converted again.
 #[test]
-fn every_sibling_render_creation_misses_the_driver_s_cache() {
+fn every_sibling_render_creation_takes_the_first_s_driver_cache() {
     let scratch = Scratch::new("driver-pipeline-compile");
     let device = device(&scratch.0);
     let base = descriptor(&device);
@@ -79,11 +89,12 @@ fn every_sibling_render_creation_misses_the_driver_s_cache() {
         color.rgb_blend_operation = BlendOperation::Add;
         d
     };
-    // The warm-up's creation compiles the stages and makes their modules, so the run's siblings
-    // ask the driver for nothing but a pipeline over stages it has already seen.
+    // The warm-up's creation makes the record's cache, converts the stages and compiles them, so
+    // the run's siblings ask the driver for nothing but a pipeline over stages its cache holds.
     let _first = device
         .new_render_pipeline_state(&sibling(0), &options)
         .unwrap();
+    let shared_before = device.shared().shader_cache.caches_shared();
     let before = device.shader_cache_statistics();
     let mut kept = Vec::with_capacity(RUN as usize);
     for i in 0..RUN {
@@ -94,19 +105,32 @@ fn every_sibling_render_creation_misses_the_driver_s_cache() {
         );
     }
     let after = device.shader_cache_statistics();
+    let shared = device.shared().shader_cache.caches_shared() - shared_before;
     let hits = after.driver_pipeline_hits - before.driver_pipeline_hits;
     let misses = after.driver_pipeline_misses - before.driver_pipeline_misses;
+    println!(
+        "DRIVER-PIPELINE-COMPILE: {shared} of {RUN} siblings took the first's cache, \
+         {hits} hits and {misses} misses reported"
+    );
+    assert_eq!(
+        shared, RUN,
+        "every one of {RUN} sibling creations must be handed the `VkPipelineCache` the first \
+         creation made for the record they share, blend state naming no record of its own: \
+         {shared} were"
+    );
     if hits + misses == 0 {
-        // The device reports nothing it found, so there is nothing to read here. Saying so is the
-        // point: without it a zero-hit assertion would pass on such a device while measuring
-        // nothing at all.
+        // The device reports nothing it found, so there is nothing more to read here.
         return;
     }
     assert_eq!(
-        (hits, misses),
-        (0, RUN),
-        "a device that reports what it found must report every one of {RUN} sibling creations as a \
-         miss, each making's cache holding its own key's record alone: {hits} hits and {misses} \
-         misses"
+        hits + misses,
+        RUN,
+        "a device that reports what it found must report one answer per creation: {hits} hits and \
+         {misses} misses over {RUN} creations"
+    );
+    assert!(
+        hits == 0 || hits == RUN,
+        "a driver that reports a sibling found in the first's cache must report every one of \
+         {RUN} found there, their stages being the same: {hits} hits and {misses} misses"
     );
 }

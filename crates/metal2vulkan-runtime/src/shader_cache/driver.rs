@@ -1,44 +1,68 @@
-//! The Vulkan driver's pipeline cache data: one record per pipeline making, each making with a
-//! `VkPipelineCache` of its own (it replaced the one entry per device and the caches per variant).
+//! The Vulkan driver's pipeline cache data: one record per family of makings that convert the
+//! same stages, and one live `VkPipelineCache` per record for the device (it replaced the one
+//! entry per device, the caches per variant, and the cache per making).
 //!
-//! - **One making, one cache, one record.** Every `vkCreate*Pipelines` call of the runtime
-//!   (`ShaderCache::make_pipelines`) is made with a `VkPipelineCache` of its own: made from the
-//!   making's record where one loads, else empty, and destroyed after the call. Where the making
-//!   added to the data (no record, or its pipeline not in it), the data is written as the record;
-//!   where the data is the record's, byte for byte, nothing is written. A boot reads the records
-//!   of the pipelines it makes, and nothing else.
-//! - **Found, not read back.** A making seeded from its record whose driver reports the pipeline
-//!   found in that cache (`VK_EXT_pipeline_creation_feedback`'s
+//! - **One record, one live cache, every making of its name.** A record's `VkPipelineCache` is
+//!   made once, by the first `vkCreate*Pipelines` call of the runtime
+//!   (`ShaderCache::make_pipelines`) that names it: from the record where one loads, else empty.
+//!   The device keeps it ([`LiveCaches`]) and hands it to every later making of that name, until
+//!   its teardown destroys it. So a family of makings that differ only in state no stage's
+//!   conversion reads converts and compiles its stages once, and no making past the first reads a
+//!   file or pays the driver's load of a record. Where a making added to the data (no record, or
+//!   its pipeline not in it), the data is written as the record; where it is what the cache was
+//!   loaded with or last wrote, nothing is written. A boot reads the records of the families it
+//!   makes, and nothing else. A device that holds [`LIVE`] caches already hands a further name's
+//!   making a cache of its own, destroyed after the call.
+//! - **Why not a cache per making.** MoltenVK answers a stage's lookup out of the shader module's
+//!   own library cache when it is handed no pipeline cache, and out of the pipeline cache alone
+//!   when it is handed one. A cache made and destroyed around one making therefore carried
+//!   nothing to the next and converted every stage of every making: 64 conversions over 32 blend
+//!   states of one vertex-and-fragment pair, where no cache at all and one cache shared by the 32
+//!   each convert 2, 1.8x to 10.5x of the call by the module's size. Measured on an M3 Max,
+//!   macOS 27.0.1, MoltenVK 1.4.2 (`driverVersion` 0x28a2), through the driver's own activity
+//!   tracking (`metal2vulkan-conformance/probes/pipeline_cache_across_blend_states.c`); one
+//!   machine and one driver, and no other is measured.
+//! - **Found, not read back.** A making handed a cache that was loaded from its record, whose
+//!   driver reports the pipeline found in that cache (`VK_EXT_pipeline_creation_feedback`'s
 //!   `APPLICATION_PIPELINE_CACHE_HIT`, for the whole pipeline or every stage: `found_in_cache`)
 //!   reads no data back and writes nothing: the record held what the making needed. MoltenVK
 //!   1.4.1's data after such a making is the record's entries in the other order (its shader
 //!   library map iterates its modules' keys opposite to their insertion), so the byte comparison
 //!   alone wrote every record of two modules again at each warm making. The data's format is
 //!   MoltenVK's own, undocumented beyond Vulkan's header, so no comparison here reads its
-//!   entries. A making whose driver reports nothing, or reports a compile, reads the data and
-//!   compares it as above.
-//! - **Named by what the making reads** ([`Making`]). A record is named by the SHA-256 of
-//!   [`VERSION`], the making's description, the driver's identity (vendor, device, driver
+//!   entries. A making whose driver reports nothing, or reports a compile, or whose cache was
+//!   made empty, reads the data and compares its SHA-256 with what the cache was loaded with or
+//!   last wrote.
+//! - **Named by what a stage's conversion reads** ([`Making`]). A record is named by the SHA-256
+//!   of [`VERSION`], the making's description, the driver's identity (vendor, device, driver
 //!   version, `pipelineCacheUUID`) and the digest of the layer settings the instance was created
 //!   with; and by the device's profile fingerprint (`store::entry_name`). A program's pipeline is
 //!   described by its variant's stages (SPIR-V words, entry points, stage flags, required subgroup
 //!   sizes, specialization), its layout (its immutable samplers among it), and the state its
-//!   making adds (a graphics key, whose line topology is named as the triangle topology of its
-//!   shape, so a state's line and triangle pipelines share their record: `record_topology` in
-//!   `pipeline/graphics.rs`; a compute pipeline's specialization and flags); a helper of the
-//!   runtime's by its SPIR-V and its parameters. Records live in the content directory, which no
-//!   build owns (`store.rs`): a new build of the runtime or the translator that leaves a
-//!   pipeline's SPIR-V and state as they were finds its record. The driver keys each pipeline by
-//!   everything its creation reads, so a description that covers a making loosely costs a
-//!   compile, never a wrong pipeline.
-//! - **No figure of the driver's to meet.** A record holds one making's data (an Xgc pipeline's
+//!   making adds. A render making adds the names of the two pipeline parts that hold shaders, its
+//!   pre-rasterization and fragment shader libraries (`GraphicsContent::record` in
+//!   `pipeline/graphics.rs`), its vertex input, and whether it rasterizes points; it adds no
+//!   blend state, no write mask, no fragment output interface and no topology besides the point
+//!   class, none of which reaches the driver's conversion of a stage, so a state's sweep over
+//!   them is one record and one cache. A compute making adds its specialization and flags, which
+//!   do reach it. A helper of the runtime's is named by its SPIR-V and its parameters.
+//!   Records live in the content directory, which no build owns (`store.rs`): a new build of the
+//!   runtime or the translator that leaves a pipeline's SPIR-V and state as they were finds its
+//!   record. The driver keys each pipeline by everything its creation reads, so a description
+//!   that covers a making loosely costs a compile, never a wrong pipeline.
+//! - **No figure of the driver's to meet.** A record holds one family's data (an Xgc pipeline's
 //!   1.7 MB on an RTX 3090), so how much of a large cache's initial data a
 //!   driver keeps does not decide which pipelines are kept. The shader cache's cap and its scans,
 //!   the least recently used first (`store.rs`), do: a hit refreshes a record's access time.
-//! - **One making's libraries.** A driver that compiles every shader of a cache's initial data
-//!   when the cache is made (`RuntimeDriverDefect::PipelineCacheDataCompiledAtLoad`, MoltenVK)
-//!   compiles from a record the making's own stages alone, which the making converts anyway without
-//!   one; host steps and pool pieces load and save records as the program's threads do.
+//! - **One family's libraries, loaded once.** A driver that compiles every shader of a cache's
+//!   initial data when the cache is made (`RuntimeDriverDefect::PipelineCacheDataCompiledAtLoad`,
+//!   MoltenVK) compiles from a record the family's own stages alone, and once for the device, not
+//!   once a making: the record's cache is made one time. A record shared by a family does not grow
+//!   with the family either, since MoltenVK's data holds converted libraries and no pipeline
+//!   state -- 32 blend states of one pair are the 1522 bytes of one, whose load is 2 of Metal's
+//!   compiles and 50 us against the 64 compiles and 2639 us of the 32 records a cache per making
+//!   wrote. Host steps and pool pieces take and save a record's cache as the program's threads
+//!   do.
 //! - **Makings at once.** A record is written to a temporary file renamed over it, by the
 //!   device's cache thread (`Store::write_record_soon`, `worker.rs`), so a reader reads the whole
 //!   old record or the whole new one, never a mix; a making that reads the record of one still
@@ -68,17 +92,28 @@
 
 use super::store::{self, count, entry_name, Lookup, Store};
 use super::EntryKind;
+use crate::device::lock;
 use crate::exit_guard::{self, Call};
 use crate::release;
 use ash::vk;
 use metal2vulkan::cache::Hash256;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::{Arc, Mutex};
 
 const MAGIC: [u8; 8] = *b"M2VPPLC\0";
 /// The version of what a record's name covers and how a record is framed: a change to either
-/// bumps it, so no build opens a record another build names or frames otherwise.
-pub(crate) const VERSION: u32 = 1;
+/// bumps it, so no build opens a record another build names or frames otherwise. A record of an
+/// older version is named otherwise, so it is never found and never read: a bump costs a family
+/// its records, never a misread.
+pub(crate) const VERSION: u32 = 2;
+
+/// The most `VkPipelineCache`es a device keeps live, one per record name. Past it a making of a
+/// further name is handed a cache of its own, destroyed once the making returned, so a program
+/// that makes pipelines of unboundedly many families keeps a bounded number of the driver's
+/// caches.
+pub(crate) const LIVE: usize = 256;
 /// The identity's bytes.
 const IDENTITY: usize = 4 + 4 + 4 + 16;
 /// Bytes before the data.
@@ -249,22 +284,27 @@ pub(crate) struct Records {
 }
 
 impl Records {
-    /// The name of `making`'s record.
-    pub(crate) fn name(&self, making: Making) -> String {
-        let key = making
+    /// What `making` reads, with this device's: the key of its record, which is also what the
+    /// device holds its live cache under ([`LiveCaches`]).
+    pub(crate) fn key(&self, making: Making) -> Hash256 {
+        making
             .digest(&Sha256::digest(self.identity.0).into())
             .digest(&self.settings)
-            .finish();
+            .finish()
+    }
+
+    /// The name of the record of `key`.
+    pub(crate) fn name(&self, key: &Hash256) -> String {
         entry_name(
             &store::content(),
             EntryKind::PipelineData,
-            &key,
+            key,
             &self.profile,
         )
     }
 }
 
-/// What a making's cache started from.
+/// What a live cache started from.
 struct Seed {
     /// The record's bytes.
     bytes: Vec<u8>,
@@ -272,38 +312,97 @@ struct Seed {
     data: Range<usize>,
 }
 
-/// Make with `create`, handed a `VkPipelineCache` of the making's own on the device of `raw`
-/// (the module docs), seeded from `making`'s record in `store` where one loads, and write the
-/// data the making added as the record; `create` is handed a null cache where the driver makes
-/// none. `raw` is the device's checked accessor's (`DeviceShared::vk`).
-///
-/// `create` returns, with what it made, what the driver reported of the making: whether it found
-/// the pipeline in the cache it was handed ([`found_in_cache`]'s answer: found, compiled, or
-/// `None`, unreported). A making seeded from its record that the driver reports found reads none
-/// of its cache's data back and writes nothing (counted, `driver_data_found`: the module docs);
-/// every other one reads its data and keeps it.
-///
-/// [`found_in_cache`]: super::found_in_cache
-///
-/// Once the process is exiting (`exiting`: the exit guard's [`closed`](exit_guard::closed), or a
-/// test's own), the making's own `vkCreate*Pipelines` is the one Vulkan call it makes: a pool
-/// piece's section, begun before the close, runs on past it (`exit_guard`), and what the making
-/// would add to it (its cache's creation, its data's read for the record, its release) is left
-/// out. Asked before the cache is made, where `create` is then handed a null cache, and again once
-/// `create` returned, where the cache is left to the process's end, unread.
-pub(crate) fn make<T, E>(
-    store: &Store,
-    records: &Records,
-    raw: &ash::Device,
-    making: Making,
-    exiting: impl Fn() -> bool,
-    create: impl FnOnce(vk::PipelineCache) -> (Result<T, E>, Option<bool>),
-) -> Result<T, E> {
-    if exiting() {
-        return create(vk::PipelineCache::null()).0;
+/// One record's `VkPipelineCache`, made once and handed to every making of that record's name
+/// (the module docs). It keeps no device functions and has no destroying `Drop`: its device
+/// destroys it, at its teardown ([`LiveCaches::destroy`]) or, for a cache past [`LIVE`] that no
+/// map holds, after the one making that was handed it.
+pub(crate) struct Live {
+    cache: vk::PipelineCache,
+    /// The record's name in the store.
+    name: String,
+    /// Whether the cache was made from the record's data: only then does a making whose driver
+    /// reports the pipeline found in it read no data back (the module docs).
+    loaded: bool,
+    /// The SHA-256 of the data the cache was made from, or of what a making last wrote as the
+    /// record; `None` until one of the two happened.
+    kept: Mutex<Option<Hash256>>,
+}
+
+impl Live {
+    /// Destroy the cache.
+    ///
+    /// # Safety
+    ///
+    /// The device is live, and no making holds the cache any more: its device's teardown, after
+    /// every pipeline was made, or the return of the one making handed a cache of its own.
+    unsafe fn destroy(&self, raw: &ash::Device) {
+        // SAFETY: the caller's.
+        unsafe { release::object(raw, self.cache) };
     }
-    let name = records.name(making);
-    let identity = &records.identity;
+}
+
+/// The `VkPipelineCache`es a device keeps, one per record name, at most [`LIVE`] of them (the
+/// module docs).
+#[derive(Default)]
+pub(crate) struct LiveCaches {
+    caches: Mutex<HashMap<Hash256, Arc<Live>>>,
+}
+
+impl LiveCaches {
+    /// The device's cache of the record of `key`, and whether the device holds it (so a later
+    /// making of the name is handed this one and its caller destroys nothing). A cache is made
+    /// here, from the record where one loads, when the device holds none of that name; `None`
+    /// where the driver made none, when the making is handed a null cache.
+    ///
+    /// The record is read and the cache made with no lock of the map held, so one making's load
+    /// does not hold up another's: two makings of one name at once may each make a cache, and the
+    /// one that is second to the map destroys its own and takes the first's.
+    fn of(
+        &self,
+        store: &Store,
+        records: &Records,
+        raw: &ash::Device,
+        key: &Hash256,
+    ) -> Option<(Arc<Live>, bool)> {
+        if let Some(live) = lock(&self.caches).get(key) {
+            count(&store.counters.driver_caches_shared);
+            return Some((Arc::clone(live), true));
+        }
+        let name = records.name(key);
+        let made = Arc::new(make_live(store, &records.identity, raw, name)?);
+        let mut caches = lock(&self.caches);
+        if let Some(live) = caches.get(key) {
+            let live = Arc::clone(live);
+            drop(caches);
+            // SAFETY: nothing was ever handed this cache, and the device is live.
+            unsafe { made.destroy(raw) };
+            count(&store.counters.driver_caches_shared);
+            return Some((live, true));
+        }
+        if caches.len() >= LIVE {
+            return Some((made, false));
+        }
+        caches.insert(*key, Arc::clone(&made));
+        Some((made, true))
+    }
+
+    /// Destroy every cache: the device's teardown, with the device live and every pipeline of
+    /// every making made (`DeviceShared::drop`).
+    ///
+    /// # Safety
+    ///
+    /// As [`Live::destroy`]'s.
+    pub(crate) unsafe fn destroy(&self, raw: &ash::Device) {
+        for (_, live) in lock(&self.caches).drain() {
+            // SAFETY: the caller's.
+            unsafe { live.destroy(raw) };
+        }
+    }
+}
+
+/// The `VkPipelineCache` of the record `name` on the device of `raw`, made from that record's
+/// data where it loads and the driver takes it, else empty; `None` where the driver made none.
+fn make_live(store: &Store, identity: &Identity, raw: &ash::Device, name: String) -> Option<Live> {
     let seed = match store.load_content(&name, |bytes| {
         let data = open(identity, &bytes)?;
         Some(Seed { bytes, data })
@@ -312,80 +411,126 @@ pub(crate) fn make<T, E>(
         Lookup::Absent | Lookup::Unreadable | Lookup::Rejected => None,
     };
     let seeded = seed.as_ref().and_then(|seed| {
-        let info =
-            vk::PipelineCacheCreateInfo::default().initial_data(&seed.bytes[seed.data.clone()]);
+        let data = &seed.bytes[seed.data.clone()];
+        let info = vk::PipelineCacheCreateInfo::default().initial_data(data);
         // SAFETY: the device is live and `info` lives for the call.
         let made = unsafe { raw.create_pipeline_cache(&info, None) };
         exit_guard::called(Call::CreatePipelineCache);
         match made {
             Ok(cache) => {
                 count(&store.counters.driver_loads);
-                Some(cache)
+                Some((cache, Sha256::digest(data).into()))
             }
             Err(_) => {
-                // The driver refused data that passed the checks; the making's save replaces it.
+                // The driver refused data that passed the checks; a making's save replaces it.
                 count(&store.counters.rejected);
                 None
             }
         }
     });
-    // The creation log's split names whether the making started from its record.
-    crate::pipeline::creation_log::record_loaded(seeded.is_some());
-    let loaded = if seeded.is_some() {
-        seed.as_ref()
-    } else {
-        None
-    };
-    let cache = match seeded {
-        Some(cache) => cache,
+    match seeded {
+        Some((cache, kept)) => Some(Live {
+            cache,
+            name,
+            loaded: true,
+            kept: Mutex::new(Some(kept)),
+        }),
         None => {
             let info = vk::PipelineCacheCreateInfo::default();
             // SAFETY: as above.
             let made = unsafe { raw.create_pipeline_cache(&info, None) };
             exit_guard::called(Call::CreatePipelineCache);
-            match made {
-                Ok(cache) => cache,
-                Err(_) => return create(vk::PipelineCache::null()).0,
-            }
+            made.ok().map(|cache| Live {
+                cache,
+                name,
+                loaded: false,
+                kept: Mutex::new(None),
+            })
         }
-    };
-    let (made, found) = create(cache);
+    }
+}
+
+/// Make with `create`, handed the device's `VkPipelineCache` of the record `making` names on the
+/// device of `raw` (the module docs), made from that record where one loads, and write the data
+/// the making added as the record; `create` is handed a null cache where the driver makes none.
+/// `raw` is the device's checked accessor's (`DeviceShared::vk`).
+///
+/// `create` returns, with what it made, what the driver reported of the making: whether it found
+/// the pipeline in the cache it was handed ([`found_in_cache`]'s answer: found, compiled, or
+/// `None`, unreported). A making handed a cache that was loaded from its record, which the driver
+/// reports found, reads none of its cache's data back and writes nothing (counted,
+/// `driver_data_found`: the module docs); every other one reads its data and keeps it where it
+/// is not what the cache was loaded with or last wrote.
+///
+/// [`found_in_cache`]: super::found_in_cache
+///
+/// Once the process is exiting (`exiting`: the exit guard's [`closed`](exit_guard::closed), or a
+/// test's own), the making's own `vkCreate*Pipelines` is the one Vulkan call it makes: a pool
+/// piece's section, begun before the close, runs on past it (`exit_guard`), and what the making
+/// would add to it (a cache's creation, its data's read for the record) is left out. Asked before
+/// the cache is taken, where `create` is then handed a null cache, and again once `create`
+/// returned, where the cache is left to the device's teardown or the process's end, unread.
+pub(crate) fn make<T, E>(
+    store: &Store,
+    records: &Records,
+    live: &LiveCaches,
+    raw: &ash::Device,
+    making: Making,
+    exiting: impl Fn() -> bool,
+    create: impl FnOnce(vk::PipelineCache) -> (Result<T, E>, Option<bool>),
+) -> Result<T, E> {
     if exiting() {
-        return made;
+        return create(vk::PipelineCache::null()).0;
     }
-    if made.is_ok() {
-        match (loaded, found) {
-            (Some(_), Some(true)) => count(&store.counters.driver_data_found),
-            _ => keep(store, (identity, &name), raw, cache, loaded),
+    let key = records.key(making);
+    let Some((held, shared)) = live.of(store, records, raw, &key) else {
+        return create(vk::PipelineCache::null()).0;
+    };
+    // The creation log's split names whether the cache the making was handed holds its record.
+    crate::pipeline::creation_log::record_loaded(held.loaded);
+    let (made, found) = create(held.cache);
+    let exited = exiting();
+    if made.is_ok() && !exited {
+        match (held.loaded, found) {
+            (true, Some(true)) => count(&store.counters.driver_data_found),
+            _ => keep(store, &records.identity, raw, &held),
         }
     }
-    // SAFETY: the making returned, and nothing else holds the cache.
-    unsafe { release::object(raw, cache) };
+    if !shared && !exited {
+        // SAFETY: the making returned, and no map holds this cache, so nothing else can be
+        // handed it.
+        unsafe { held.destroy(raw) };
+    }
     made
 }
 
-/// Write `cache`'s data as the record `name` unless it is `loaded`'s, byte for byte, or the
-/// checks refuse it (counted). The read is a section of the exit guard ([`exit_guard`]): on the
-/// program's own thread, once the process is exiting, nothing is read or written.
-fn keep(
-    store: &Store,
-    (identity, name): (&Identity, &str),
-    raw: &ash::Device,
-    cache: vk::PipelineCache,
-    loaded: Option<&Seed>,
-) {
+/// Write `cache`'s data as its record unless it is what the cache was loaded with or last wrote,
+/// by its SHA-256 (counted), or the checks refuse it (counted). The read is a section of the exit
+/// guard ([`exit_guard`]): on the program's own thread, once the process is exiting, nothing is
+/// read or written.
+///
+/// `vkGetPipelineCacheData` names no externally synchronized parameter, and the Vulkan
+/// specification's pipeline cache chapter states that the use of a pipeline cache object in the
+/// creation commands "is internally synchronized, and the same pipeline cache object can be used
+/// in multiple threads simultaneously", so this read needs no lock against another thread's
+/// making from the same cache. The per-record lock below is held only over the comparison and the
+/// write, so two makings of one record never write the same bytes twice.
+fn keep(store: &Store, identity: &Identity, raw: &ash::Device, live: &Live) {
     let Some(busy) = exit_guard::enter() else {
         return;
     };
-    // SAFETY: the cache is live, and no making uses it any more.
-    let read = unsafe { raw.get_pipeline_cache_data(cache) };
+    // SAFETY: the cache is live, and the call is internally synchronized against the makings of
+    // other threads (above).
+    let read = unsafe { raw.get_pipeline_cache_data(live.cache) };
     exit_guard::called(Call::GetPipelineCacheData);
     drop(busy);
     let Ok(data) = read else {
         store.write_failed();
         return;
     };
-    if loaded.is_some_and(|seed| seed.bytes[seed.data.clone()] == data[..]) {
+    let digest: Hash256 = Sha256::digest(&data).into();
+    let mut kept = lock(&live.kept);
+    if *kept == Some(digest) {
         count(&store.counters.driver_data_unchanged);
         return;
     }
@@ -393,8 +538,11 @@ fn keep(
         store.counters.refused(refusal);
         return;
     }
-    match store.write_record_soon(name, seal(identity, &data)) {
-        Ok(_) => count(&store.counters.driver_saves),
+    match store.write_record_soon(&live.name, seal(identity, &data)) {
+        Ok(_) => {
+            *kept = Some(digest);
+            count(&store.counters.driver_saves);
+        }
         Err(_) => store.write_failed(),
     }
 }

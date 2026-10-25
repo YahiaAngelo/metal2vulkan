@@ -78,13 +78,18 @@ second process does not translate it again. It cannot be turned off.
   another build's entries go after 30 days unused. In memory, at most `memory_capacity` bytes
   (256 MiB by default): a pipeline state made again takes its translation from there without
   reading the disk.
-- **The driver's pipeline cache.** Each pipeline is made with a `VkPipelineCache` of its own,
-  seeded from a record named by what the making reads (its SPIR-V, layout and state, and the
-  driver's identity) and written back only when the making added to it. After an update of
-  metal2vulkan, a pipeline whose SPIR-V and state did not change is made from its record; a driver
-  update starts empty. On drivers that report `pipelineBinaryInternalCacheControl` (NVIDIA's), a
-  device the runtime makes turns the driver's own internal cache off; an adopted device keeps what
-  its creator chose.
+- **The driver's pipeline cache.** A device keeps one `VkPipelineCache` per record, made by the
+  first pipeline making that names that record -- from the record where one is there, else empty --
+  and handed to every later making of the same name until the device goes. A record is named by
+  what the driver's conversion of a stage reads (its SPIR-V, layout, specialization and the state
+  that reaches the conversion, with the driver's identity) and nothing else, so a state's sweep
+  over blend factors, write masks or the topology's class is one record and one cache: its stages
+  are converted and compiled once. The data is written back only when a making added to it. After
+  an update of metal2vulkan, a pipeline whose SPIR-V and state did not change is made from its
+  record; a driver update starts empty. A device keeps at most 256 of these caches; a program with
+  more record names than that makes the rest a cache for the one making, as every making once had.
+  On drivers that report `pipelineBinaryInternalCacheControl` (NVIDIA's), a device the runtime
+  makes turns the driver's own internal cache off; an adopted device keeps what its creator chose.
 - **Written in the background.** A creation hands its entries to the device's cache thread and
   does not wait for the directory: the same bytes under the same name, committed by the same
   rename, after the call returns. An entry still queued answers that device's own lookups, and the

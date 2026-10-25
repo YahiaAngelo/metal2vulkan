@@ -112,9 +112,13 @@ pub(super) struct Affected {
 ///   not. Read in 1.4.1's source (`MVKShaderModule.mm`); seen by the Vulkan consumer on an M3 Max
 ///   (1.4.1, driverVersion 10401) as `MTLCompilerService` rebuilding about 115 libraries at every
 ///   device creation from an 8.9 MB entry of 131 shaders, about 28 s for one process: known
-///   broken through 1.4.1. Nothing is refused, and nothing branches on it any more: each pipeline
-///   making's cache is seeded from that making's own record (`shader_cache/driver.rs`), so a load
-///   compiles only the making's own stages, which it converts anyway without one.
+///   broken through 1.4.1. Nothing is refused, and nothing branches on it any more: the device
+///   keeps one cache per record, made once from that record (`shader_cache/driver.rs`), so a load
+///   compiles the family's own stages alone and compiles them once for the device, not once a
+///   making. Measured at 1.4.2 on an M3 Max: the record of 32 blend states over one
+///   vertex-and-fragment pair is the 1522 bytes of one state's, since the data holds converted
+///   libraries and no pipeline state, and its load is 2 of Metal's compiles and 50 us against the
+///   64 compiles and 2639 us of loading the 32 records a cache per making wrote.
 ///
 /// `LazilyAllocatedVolumePlaneViews`:
 /// - MoltenVK (`MOLTENVK`): `MVKImageViewPlane::newMTLTexture` makes a 2D view of a 3D image

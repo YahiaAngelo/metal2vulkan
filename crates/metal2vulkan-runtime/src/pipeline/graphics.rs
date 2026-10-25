@@ -138,32 +138,23 @@ fn rasterizes_lines(topology: vk::PrimitiveTopology, polygon_mode: vk::PolygonMo
     ) || polygon_mode == vk::PolygonMode::LINE
 }
 
-/// The topology a graphics making's record is named by (`shader_cache/driver.rs`): a line
-/// topology names it as the triangle topology of its shape, so a state's line and triangle
-/// pipelines of an otherwise equal key share one record; every other topology names its own.
+/// Whether `topology` makes a graphics making's record one of the point class's
+/// (`shader_cache/driver.rs`): the one way the topology reaches the driver's conversion of a
+/// stage, so every other topology of an otherwise equal state shares one record.
 ///
-/// The topology class enters no stage's code there on MoltenVK 1.4.1, which keys a converted
-/// stage by its SPIR-V (`MVKShaderModule`'s key, its code's size and hash) and its conversion
-/// configuration (`MVKPipelineCache::getShaderLibraryImpl`, which takes the first entry whose
-/// `SPIRVToMSLConversionConfiguration::matches`); the topology reaches that configuration through
-/// `enable_point_size_builtin` alone, set for the point class (`MVKGraphicsPipeline::
-/// isRenderingPoints`). So a line pipeline made after its triangle sibling takes the sibling's
-/// converted stages from the shared record, where a record of its own made it convert them
-/// again from SPIR-V (120 ms and more for a 271k-word fragment module). Points keep their own
-/// record: their stages convert otherwise. A record is a cache the driver may use or not: one
-/// whose driver compiles the two classes apart holds both pipelines once both are made, which
-/// costs a larger record, never a wrong pipeline.
-fn record_topology(
-    topology: metal2vulkan::vk::PrimitiveTopology,
-) -> metal2vulkan::vk::PrimitiveTopology {
-    use metal2vulkan::vk::PrimitiveTopology as T;
-    match topology {
-        T::LINE_LIST => T::TRIANGLE_LIST,
-        T::LINE_STRIP => T::TRIANGLE_STRIP,
-        T::LINE_LIST_WITH_ADJACENCY => T::TRIANGLE_LIST_WITH_ADJACENCY,
-        T::LINE_STRIP_WITH_ADJACENCY => T::TRIANGLE_STRIP_WITH_ADJACENCY,
-        other => other,
-    }
+/// MoltenVK 1.4.1 keys a converted stage by its SPIR-V (`MVKShaderModule`'s key, its code's size
+/// and hash) and its conversion configuration (`MVKPipelineCache::getShaderLibraryImpl`, which
+/// takes the first entry whose `SPIRVToMSLConversionConfiguration::matches`); the topology reaches
+/// that configuration through `enable_point_size_builtin` alone, which
+/// `MVKGraphicsPipeline::isRenderingPoints` sets for a point list, or for a polygon mode of
+/// points (which the pre-rasterization part's name holds already). So a line pipeline made after
+/// its triangle sibling takes the sibling's converted stages from the shared cache, where a cache
+/// of its own made it convert them again from SPIR-V (120 ms and more for a 271k-word fragment
+/// module). Points keep their own record: their stages convert otherwise. A record is a cache the
+/// driver may use or not: one whose driver compiles two classes apart holds both pipelines once
+/// both are made, which costs a larger record, never a wrong pipeline.
+fn renders_points(topology: metal2vulkan::vk::PrimitiveTopology) -> bool {
+    topology == metal2vulkan::vk::PrimitiveTopology::POINT_LIST
 }
 
 /// The render encoder's state a pipeline takes as static state where it does not make it
@@ -506,6 +497,19 @@ impl GraphicsContent {
         pipeline: &RenderPipeline,
         key: &GraphicsKey,
     ) -> [Hash256; 4] {
+        self.named(objects, pipeline, key, Some(self.depth_bias))
+    }
+
+    /// [`names`](Self::names), with `depth_bias` named in the pre-rasterization part's state in
+    /// place of this content's: a library names its own (`Some`), a record names none
+    /// (`None`, [`record`](Self::record)).
+    fn named(
+        &self,
+        objects: &VariantObjects,
+        pipeline: &RenderPipeline,
+        key: &GraphicsKey,
+        depth_bias: Option<bool>,
+    ) -> [Hash256; 4] {
         use metal2vulkan::vk::ShaderStage;
         let graphics = &pipeline.graphics;
         let content = objects.parts_content(pipeline);
@@ -572,7 +576,7 @@ impl GraphicsContent {
                     key.fixed.provoking_last,
                     key.fixed.cull_mode,
                     key.fixed.front_face,
-                    self.depth_bias,
+                    depth_bias,
                     graphics.rasterizer_discard,
                     &graphics.tessellation,
                 ))
@@ -593,6 +597,45 @@ impl GraphicsContent {
                 .text(&multisample)
                 .finish(),
         ]
+    }
+
+    /// What names the record of a making of `pipeline` (the variant's compiled pipeline) for
+    /// `key` (`shader_cache/driver.rs`): everything that reaches the driver's conversion of one
+    /// of its stages, and nothing else.
+    ///
+    /// That is the names of the two parts that hold shaders, its pre-rasterization and fragment
+    /// shader libraries ([`names`](Self::names)) -- each of them the layout's description, its own
+    /// stages' SPIR-V with the constants they declare and their values, the pass, the dynamic
+    /// states and its part's state -- with the vertex input, which reaches MoltenVK's conversion
+    /// configuration as its vertex stage's inputs, and whether the pipeline rasterizes points
+    /// ([`renders_points`], the one way the topology reaches that configuration).
+    ///
+    /// The depth bias is left out of the pre-rasterization part's state here, where a library
+    /// names it: Metal biases triangles alone, so a state's line pipeline has the bias off where
+    /// its triangle sibling has it on, and the bias reaches no stage's conversion. So the two
+    /// share one record and one cache, where naming it made the line pipeline convert its stages
+    /// again (120 ms and more for a 271k-word fragment module).
+    ///
+    /// So a state's sweep over blend factors, write masks, the logic operation, the fragment
+    /// output interface or the topology's class but points is one record and one cache: on
+    /// MoltenVK a cache per blend state converted every stage of every making, 64 over 32 states
+    /// of one vertex-and-fragment pair where one shared cache converts 2
+    /// (`shader_cache/driver.rs`). Each part's name still holds its part's own fixed-function
+    /// state, cull mode and front face among it, which reaches no conversion either, so such a
+    /// sweep keeps records apart where it need not: that costs a conversion, never a wrong
+    /// pipeline, since the driver keys each pipeline by everything its creation reads.
+    fn record(
+        &self,
+        objects: &VariantObjects,
+        pipeline: &RenderPipeline,
+        key: &GraphicsKey,
+    ) -> Making {
+        let [_, pre_rasterization, fragment, _] = self.named(objects, pipeline, key, None);
+        objects
+            .making("graphics")
+            .digest(&pre_rasterization)
+            .digest(&fragment)
+            .text(&(&pipeline.vertex_input, renders_points(key.topology)))
     }
 
     /// Hands `use_infos` the create infos of this content, of `objects`' modules and layout,
@@ -1070,17 +1113,10 @@ impl VariantObjects {
         let mut stages = [vk::PipelineCreationFeedback::default(); REPORTED_STAGES];
         let mut reported_stages = 0;
         let driver_reports = shared.shader_cache.driver_reports() && libraries.is_none();
-        // Its record is named by the variant's content and what this making adds to it, a line
-        // topology as its triangle sibling's (`record_topology`).
-        let sibling = (record_topology(key.topology) != key.topology).then(|| GraphicsKey {
-            topology: record_topology(key.topology),
-            ..key.clone()
-        });
-        let making = self
-            .making("graphics")
-            .text(&pipeline.vertex_input)
-            .text(graphics)
-            .text(sibling.as_ref().unwrap_or(key));
+        // Its record is named by what reaches the driver's conversion of one of its stages
+        // (`GraphicsContent::record`), so a sweep over blend state or the fragment output
+        // interface is one record and one cache.
+        let making = content.record(self, pipeline, key);
         // The diagnostics the device's driver is measured to report as it makes this pipeline,
         // withheld inside its creation alone (`driver_facts.rs`).
         let properties = self.device.properties();
@@ -1350,34 +1386,26 @@ mod tests {
         );
     }
 
-    /// A line topology names its making's record as the triangle topology of its shape; the
-    /// point, triangle and patch topologies name their own (`record_topology`).
+    /// The point list alone names its making's record as the point class's; every other
+    /// topology, the lines and the patches among them, names the same record as its state's
+    /// triangles (`renders_points`).
     #[test]
-    fn a_line_topology_names_its_triangle_sibling_s_record() {
+    fn the_point_list_alone_names_the_point_class_s_record() {
         use metal2vulkan::vk::PrimitiveTopology as T;
-        for (topology, named) in [
-            (T::POINT_LIST, T::POINT_LIST),
-            (T::LINE_LIST, T::TRIANGLE_LIST),
-            (T::LINE_STRIP, T::TRIANGLE_STRIP),
-            (T::TRIANGLE_LIST, T::TRIANGLE_LIST),
-            (T::TRIANGLE_STRIP, T::TRIANGLE_STRIP),
-            (T::TRIANGLE_FAN, T::TRIANGLE_FAN),
-            (T::LINE_LIST_WITH_ADJACENCY, T::TRIANGLE_LIST_WITH_ADJACENCY),
-            (
-                T::LINE_STRIP_WITH_ADJACENCY,
-                T::TRIANGLE_STRIP_WITH_ADJACENCY,
-            ),
-            (
-                T::TRIANGLE_LIST_WITH_ADJACENCY,
-                T::TRIANGLE_LIST_WITH_ADJACENCY,
-            ),
-            (
-                T::TRIANGLE_STRIP_WITH_ADJACENCY,
-                T::TRIANGLE_STRIP_WITH_ADJACENCY,
-            ),
-            (T::PATCH_LIST, T::PATCH_LIST),
+        for (topology, points) in [
+            (T::POINT_LIST, true),
+            (T::LINE_LIST, false),
+            (T::LINE_STRIP, false),
+            (T::TRIANGLE_LIST, false),
+            (T::TRIANGLE_STRIP, false),
+            (T::TRIANGLE_FAN, false),
+            (T::LINE_LIST_WITH_ADJACENCY, false),
+            (T::LINE_STRIP_WITH_ADJACENCY, false),
+            (T::TRIANGLE_LIST_WITH_ADJACENCY, false),
+            (T::TRIANGLE_STRIP_WITH_ADJACENCY, false),
+            (T::PATCH_LIST, false),
         ] {
-            assert_eq!(super::record_topology(topology), named, "{topology:?}");
+            assert_eq!(super::renders_points(topology), points, "{topology:?}");
         }
     }
 

@@ -762,9 +762,10 @@ impl Drop for DeviceShared {
         // layouts that baked them are gone.
         let sampler_sets = lock(&self.sampler_sets).drain();
         sampler_sets.destroy(&*self);
-        // Every other pipeline was destroyed with its state (each holds this device); the cache
-        // thread stops.
-        self.shader_cache.close();
+        // Every other pipeline was destroyed with its state (each holds this device), so the
+        // `VkPipelineCache` the cache keeps for each record goes, and the cache thread stops.
+        // SAFETY: the device is live and no making is left to be handed a cache.
+        unsafe { self.shader_cache.close(self.vk()) };
         // What waited with blocks of its memory (a host import's deallocators) goes once they are
         // freed, with no lock held.
         let after = lock(&self.memory).destroy(self.vk());

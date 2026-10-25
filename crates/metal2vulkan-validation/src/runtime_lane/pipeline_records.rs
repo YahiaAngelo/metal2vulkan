@@ -1,28 +1,31 @@
-//! Each pipeline making's own `VkPipelineCache` and its record (the runtime's
-//! `shader_cache/driver.rs`), on the device the cfg selects, under the validation layer. It
-//! replaced the device's one driver cache entry and the variant caches of a driver that compiles
-//! saved data at load, on every driver:
+//! One `VkPipelineCache` and one record per family of makings that convert the same stages (the
+//! runtime's `shader_cache/driver.rs`), on the device the cfg selects, under the validation layer.
+//! It replaced the device's one driver cache entry, the variant caches of a driver that compiles
+//! saved data at load, and the cache per making, on every driver:
 //!
-//! - **Seed and hit.** A making with no record writes one, named by what it reads: the state's
-//!   creation writes its first draw's, a draw of points another (another key of the same
-//!   stages). A later device over the same directory makes each from its record, the first at
-//!   the state's creation and the points' at their draw (nothing is kept from earlier draws): both
-//!   loaded, both the driver's cache hits where it reports them
-//!   (`VK_EXT_pipeline_creation_feedback`: the whole pipeline's hit, or every stage's, as the
-//!   runtime counts them; MoltenVK 1.4.1 says it for each stage alone), and each draw's target
-//!   byte for byte the first device's. A making from a record that the driver reports found
-//!   there reads no data back and writes nothing (`driver_data_found`: MoltenVK's data after such
-//!   a making is the record's entries in the other order, which a byte comparison took for a
-//!   change at every making). One the driver does not report found writes it again exactly where
-//!   the driver's data after the making is no longer the record's bytes (RADV's after its first
-//!   hit from a compile's record is not, and settles), and counts every other read unchanged
+//! - **Seed and hit.** A making with no record writes one, named by what a stage's conversion
+//!   reads: the state's creation writes its first draw's, a draw of points another (the point
+//!   class converts the same stages otherwise). A later device over the same directory makes each
+//!   record's cache from that record, the first at the state's creation and the points' at their
+//!   draw (nothing is kept from earlier draws): both loaded, both the driver's cache hits where
+//!   it reports them (`VK_EXT_pipeline_creation_feedback`: the whole pipeline's hit, or every
+//!   stage's, as the runtime counts them; MoltenVK 1.4.1 says it for each stage alone), and each
+//!   draw's target byte for byte the first device's. A making handed a cache loaded from its
+//!   record that the driver reports found there reads no data back and writes nothing
+//!   (`driver_data_found`: MoltenVK's data after such a making is the record's entries in the
+//!   other order, which a byte comparison took for a change at every making). One the driver does
+//!   not report found writes it again exactly where the driver's data after the making is no
+//!   longer what the cache was loaded with or last wrote (RADV's after its first hit from a
+//!   compile's record is not, and settles), and counts every other read unchanged
 //!   (`driver_data_unchanged`).
-//! - **Lines from the triangles' record.** A state's line pipeline, made at its first line draw,
-//!   is made from the record of its triangle sibling, which the state's creation made: a line
-//!   topology names its record as the triangle topology of its shape (`record_topology`). Its
-//!   making loads that record and leaves no record of its own; MoltenVK reports every stage
-//!   found there (the line class converts its stages as the triangle class does; points do
-//!   not, and keep their own record).
+//! - **Lines from the triangles' cache.** A state's line pipeline, made at its first line draw,
+//!   names the record its triangle sibling named, which the state's creation made the cache of:
+//!   the topology reaches the driver's conversion of a stage through the point class alone
+//!   (`renders_points`), and the depth bias it also turns (Metal biases triangles alone) is left
+//!   out of a record's name. So its making loads nothing -- the device holds that record's cache
+//!   live already -- and leaves no record of its own; MoltenVK reports every stage found in that
+//!   cache (the line class converts its stages as the triangle class does; points do not, and
+//!   keep their own record).
 //! - **Overwrite.** A record holding another pipeline's data (one of a dispatch's compute
 //!   pipelines' records, the state's predicted threadgroup's or the dispatch's, copied over each
 //!   of a render state's) is loaded: the driver's miss, and where the
@@ -36,6 +39,12 @@
 //!   makings' bytes tells whether one's data holds the other's pipeline.
 //! - **Makings at once.** Two processes making the same pipeline on one directory at the same
 //!   time leave one whole record of it and no temporary file, which a later device hits.
+//!
+//! **Records are read with no device live.** A making hands its record to the device's cache
+//! thread, which writes it after the call returns, and `Device`'s drop writes what is still
+//! queued (`shader_cache/worker.rs`), so every claim here about the files is read once the device
+//! that wrote them is gone. A claim about one making alone is read from the counters, which move
+//! inside the making.
 //!
 //! **Makings where the device links libraries**: a pipeline there is linked from libraries of its
 //! parts, and each library of shaders is a making of its own with its record ([`Makings`]): a
@@ -737,19 +746,21 @@ fn a_later_device_makes_every_pipeline_an_earlier_one_made_from_its_records() {
 }
 
 /// A state's line pipeline, made at its first line draw after the state's creation made its
-/// triangle pipeline, is made from that sibling's record (`record_topology` in the runtime's
-/// `pipeline/graphics.rs`): it loads it, and no record of its own appears. On MoltenVK, which
+/// triangle pipeline, names the record its triangle sibling named (`renders_points` in the
+/// runtime's `pipeline/graphics.rs`, and the depth bias the topology turns is left out of a
+/// record's name): the device holds that record's `VkPipelineCache` live from the creation, so the
+/// line making loads no record and leaves none of its own. On MoltenVK, which
 /// keys a converted stage by its SPIR-V and a conversion configuration the line class leaves as
-/// the triangle class's, the driver reports every stage found: nothing converted again, and the
-/// making reads no data back and writes no record (`driver_data_found`). Where the
-/// device links pipelines from libraries the line draw makes a pre-rasterization library of its
-/// own instead, which this does not cover.
+/// the triangle class's, the driver reports every stage found in that cache: nothing converted
+/// again, and the making's read of the data finds what the triangles' making wrote, so no record
+/// is written (`driver_data_unchanged`). Where the device links pipelines from libraries the line
+/// draw makes a pre-rasterization library of its own instead, which this does not cover.
 #[test]
-fn a_line_pipeline_is_made_from_its_triangle_sibling_s_record() {
+fn a_line_pipeline_takes_its_triangle_sibling_s_driver_cache() {
     let cache = ScratchCache::new().unwrap();
     let messages = Messages::default();
     let format = PixelFormat::RGBA8Unorm;
-    {
+    let covered = {
         let _driver_cache = DriverCache::fresh();
         let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), |_| {}).unwrap();
         let driver = DriverData::of(&device);
@@ -757,27 +768,27 @@ fn a_line_pipeline_is_made_from_its_triangle_sibling_s_record() {
         let state = state(&device, &library, format);
         let created = device.shader_cache_statistics();
         report("triangles, created", &created);
-        let triangles = records(cache.path());
         draw(&device, &state, (format, PrimitiveType::Line));
         let drawn = device.shader_cache_statistics();
         report("lines, drawn", &drawn);
         let linked = device.work_counts().pipelines_linked > 0;
-        if !driver.whole() || linked {
+        let covered = driver.whole() && !linked;
+        if !covered {
             println!(
-                "PIPELINE-RECORDS lines: not covered (the driver keeps its data: {}, links: \
-                 {linked})",
+                "PIPELINE-RECORDS lines: not covered (the driver keeps its data: {}, links: {linked})",
                 driver.whole()
             );
         } else {
+            // Only a making's save writes a record, so these two counters together say the line
+            // pipeline's making left no record of its own, whatever its cache thread has written
+            // by now.
             assert_eq!(
-                drawn.driver_loads - created.driver_loads,
-                1,
-                "the line pipeline's making loaded its triangle sibling's record"
-            );
-            assert_eq!(
-                records(cache.path()).into_keys().collect::<Vec<_>>(),
-                triangles.into_keys().collect::<Vec<_>>(),
-                "no record of the line pipeline's own"
+                (
+                    drawn.driver_loads - created.driver_loads,
+                    drawn.driver_saves - created.driver_saves
+                ),
+                (0, 0),
+                "the line making loaded or wrote a record, its sibling's cache being live"
             );
             if device.properties().description.driver_id == Some(DriverId::MOLTENVK) {
                 assert_eq!(
@@ -786,18 +797,22 @@ fn a_line_pipeline_is_made_from_its_triangle_sibling_s_record() {
                         drawn.driver_pipeline_misses - created.driver_pipeline_misses
                     ),
                     (1, 0),
-                    "MoltenVK found every stage of the line pipeline converted in the record"
+                    "MoltenVK found every stage of the line pipeline in the sibling's cache"
                 );
                 assert_eq!(
-                    (
-                        drawn.driver_data_found - created.driver_data_found,
-                        drawn.driver_saves - created.driver_saves
-                    ),
-                    (1, 0),
-                    "a making MoltenVK found in its record read nothing back and wrote nothing"
+                    drawn.driver_data_unchanged - created.driver_data_unchanged,
+                    1,
+                    "the line making's read found what the triangles' making wrote"
                 );
             }
         }
+        covered
+    };
+    // The device is gone, so its cache thread wrote what was queued and nothing more is coming
+    // (`shader_cache/worker.rs`): the directory holds the triangles' record alone.
+    if covered {
+        let left: Vec<_> = records(cache.path()).into_keys().collect();
+        assert_eq!(left.len(), 1, "one record, the triangles': {left:?}");
     }
     layer_reported_nothing_at_all(&messages);
 }
@@ -809,7 +824,7 @@ fn a_record_holding_another_pipeline_s_data_is_written_again() {
     // creation makes the pipeline of its predicted threadgroup, and the dispatch its own where its
     // threadgroup is another (`pipeline/dispatch_making.rs`), a making and a record each.
     let other = ScratchCache::new().unwrap();
-    let (driver, foreign, saves) = {
+    let (driver, saves) = {
         let _driver_cache = DriverCache::fresh();
         let device = validated_device_with(TEST_DEVICE, &messages, other.path(), |_| {}).unwrap();
         let driver = DriverData::of(&device);
@@ -817,8 +832,12 @@ fn a_record_holding_another_pipeline_s_data_is_written_again() {
         let made = device.shader_cache_statistics();
         report("the compute pipeline", &made);
         assert_eq!(kept(&made), driver.whole(), "the driver's data: {driver:?}");
-        (driver, records(other.path()), made.driver_saves)
+        (driver, made.driver_saves)
     };
+    // Every record is read once its device is gone, so its cache thread has written what the
+    // makings handed it (`shader_cache/worker.rs`): a read while a device lives sees a record a
+    // making saved only once the thread got to it.
+    let foreign = records(other.path());
     // Data that ends inside its header is never kept (the module docs): no record to copy.
     if !driver.whole() {
         assert!(
@@ -854,6 +873,7 @@ fn a_record_holding_another_pipeline_s_data_is_written_again() {
         )
     };
     let own: Vec<(PathBuf, Vec<u8>)> = records(cache.path()).into_iter().collect();
+
     assert_eq!(
         own.len() as u64,
         makings.creation,
@@ -871,7 +891,7 @@ fn a_record_holding_another_pipeline_s_data_is_written_again() {
     // Loaded, then the driver's miss: the compute pipeline's data holds no making of a render
     // state. Where the driver's data holds its pipelines, the miss adds this one, so each record
     // is written again; where it holds none, the data stays the record's bytes.
-    let rewritten = {
+    let (none, made) = {
         let _driver_cache = DriverCache::fresh();
         let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), |_| {}).unwrap();
         let none = device.shader_cache_statistics();
@@ -883,38 +903,39 @@ fn a_record_holding_another_pipeline_s_data_is_written_again() {
             &made,
             (0, makings.creation),
         );
-        let rewritten: Vec<Vec<u8>> = own
-            .iter()
-            .map(|(path, _)| std::fs::read(cache.path().join(path)).unwrap())
-            .collect();
-        let changed = rewritten
-            .iter()
-            .filter(|rewritten| *rewritten != foreign)
-            .count() as u64;
-        assert_loaded(
-            "the compute pipeline's data in its place",
-            (&none, &made),
-            makings.creation,
-            changed,
-        );
-        assert_eq!(
-            changed,
-            match driver.holds() {
-                true => makings.creation,
-                false => 0,
-            },
-            "the driver's misses added this pipeline to each record"
-        );
         assert_eq!(
             draw(&device, &state, (format, PrimitiveType::Triangle)),
             target
         );
-        rewritten
+        (none, made)
     };
+    // Read once the device is gone, as above.
+    let rewritten: Vec<Vec<u8>> = own
+        .iter()
+        .map(|(path, _)| std::fs::read(cache.path().join(path)).unwrap())
+        .collect();
+    let changed = rewritten
+        .iter()
+        .filter(|rewritten| *rewritten != foreign)
+        .count() as u64;
+    assert_loaded(
+        "the compute pipeline's data in its place",
+        (&none, &made),
+        makings.creation,
+        changed,
+    );
+    assert_eq!(
+        changed,
+        match driver.holds() {
+            true => makings.creation,
+            false => 0,
+        },
+        "the driver's misses added this pipeline to each record"
+    );
     let bytes: Vec<&[u8]> = rewritten.iter().map(|bytes| &bytes[..]).collect();
     driver.assert_records(&bytes);
     // A later device hits them, writing each again exactly where the driver's data changed.
-    {
+    let (none, made) = {
         let _driver_cache = DriverCache::fresh();
         let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), |_| {}).unwrap();
         let none = device.shader_cache_statistics();
@@ -926,28 +947,30 @@ fn a_record_holding_another_pipeline_s_data_is_written_again() {
             &made,
             driver.reported_of_records(makings.creation),
         );
-        let now: Vec<Vec<u8>> = own
-            .iter()
-            .map(|(path, _)| std::fs::read(cache.path().join(path)).unwrap())
-            .collect();
-        let changed = now
-            .iter()
-            .zip(&rewritten)
-            .filter(|(now, rewritten)| now != rewritten)
-            .count() as u64;
-        assert_loaded(
-            "written again, a later device",
-            (&none, &made),
-            makings.creation,
-            changed,
-        );
-        let bytes: Vec<&[u8]> = now.iter().map(|bytes| &bytes[..]).collect();
-        driver.assert_records(&bytes);
         assert_eq!(
             draw(&device, &state, (format, PrimitiveType::Triangle)),
             target
         );
-    }
+        (none, made)
+    };
+    // Read once the device is gone, as above.
+    let now: Vec<Vec<u8>> = own
+        .iter()
+        .map(|(path, _)| std::fs::read(cache.path().join(path)).unwrap())
+        .collect();
+    let changed = now
+        .iter()
+        .zip(&rewritten)
+        .filter(|(now, rewritten)| now != rewritten)
+        .count() as u64;
+    assert_loaded(
+        "written again, a later device",
+        (&none, &made),
+        makings.creation,
+        changed,
+    );
+    let bytes: Vec<&[u8]> = now.iter().map(|bytes| &bytes[..]).collect();
+    driver.assert_records(&bytes);
     layer_reported_nothing_at_all(&messages);
 }
 

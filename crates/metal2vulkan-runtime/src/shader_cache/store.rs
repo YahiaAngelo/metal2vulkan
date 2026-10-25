@@ -210,6 +210,13 @@ pub(crate) struct Counters {
     pub(crate) driver_data_mismatched: AtomicU64,
     pub(crate) driver_data_unchanged: AtomicU64,
     pub(crate) driver_data_found: AtomicU64,
+    /// Makings handed a `VkPipelineCache` the device already held for their record, made by an
+    /// earlier making of the same name (`driver.rs`): each one a stage's conversion and Metal's
+    /// compile of it not run again. Not in [`ShaderCacheStatistics`]; the device tests of the
+    /// sharing read it here.
+    ///
+    /// [`ShaderCacheStatistics`]: super::ShaderCacheStatistics
+    pub(crate) driver_caches_shared: AtomicU64,
 }
 
 impl Counters {

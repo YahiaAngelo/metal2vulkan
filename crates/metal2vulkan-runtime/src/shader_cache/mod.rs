@@ -10,15 +10,16 @@
 //!   never an error.
 //! - **What it holds.** The compile layer's artifacts in their self-checking envelope: translated
 //!   functions under their [`FunctionCompileKey`] and compute and render pipelines under their
-//!   [`PipelineKey`]; and the driver's `VkPipelineCache` data, one record per pipeline making,
-//!   named by what the making reads (`driver.rs`); and what render creations work out from their
-//!   descriptors before their compiles, under the descriptor's key (`creation.rs`).
+//!   [`PipelineKey`]; and the driver's `VkPipelineCache` data, one record per family of makings
+//!   that convert the same stages, named by what a stage's conversion reads (`driver.rs`); and
+//!   what render creations work out from their descriptors before their compiles, under the
+//!   descriptor's key (`creation.rs`).
 //! - **A new build never reads an older build's entries.** They live under `v1/<build>/`, where
 //!   `<build>` is the SHA-256 of the crate's version, both artifact versions, and the digest of
 //!   the crate's sources that `build.rs` computes (the product files).
 //! - **Records of content, every build's**. Beside the builds', one directory holds records named
-//!   by the content they describe, which hold no translation: the driver's data of each pipeline
-//!   making (above).
+//!   by the content they describe, which hold no translation: the driver's data of each family of
+//!   makings (above).
 //! - **A wrong entry is never used.** An entry's name is the SHA-256 of its build, kind, key and
 //!   profile fingerprint, and a read is a hit only if the envelope's versions, kind, key and
 //!   profile equal the request's and its checksum holds (`from_bytes_for_key`). Anything else is
@@ -56,7 +57,7 @@ use super::Device;
 use crate::MessageSink;
 use ash::vk;
 use creation::CreationMemo;
-use driver::{Making, Records};
+use driver::{LiveCaches, Making, Records};
 use metal2vulkan::cache::{Hash256, PipelineArtifact, PipelineKey};
 use metal2vulkan::library::{CompiledFunction, FunctionCompileKey};
 use metal2vulkan::pipeline::{ComputePipeline, RenderPipeline};
@@ -182,11 +183,12 @@ pub struct ShaderCacheStatistics {
     pub write_failures: u64,
     /// Entries removed to keep the directory under its cap.
     pub evictions: u64,
-    /// Pipeline makings whose `VkPipelineCache` started from the making's saved record (it was
-    /// whether the device's one driver cache did, 0 or 1).
+    /// Records whose `VkPipelineCache` started from the record's saved data: one per family of
+    /// makings the device makes a cache for, not one per making (it was whether the device's one
+    /// driver cache did, 0 or 1).
     pub driver_loads: u64,
-    /// Pipelines of the program's states that the driver reports it found in their making's
-    /// cache, seeded from the making's record (`VK_EXT_pipeline_creation_feedback`, where the
+    /// Pipelines of the program's states that the driver reports it found in the cache their
+    /// making was handed (`VK_EXT_pipeline_creation_feedback`, where the
     /// device lists the extension): the whole pipeline's feedback is valid and says
     /// `APPLICATION_PIPELINE_CACHE_HIT`, or every stage's feedback is valid and says it. Drivers
     /// differ in where they say it: most for the whole pipeline; MoltenVK 1.4.1 for each stage
@@ -197,24 +199,27 @@ pub struct ShaderCacheStatistics {
     /// stage: compiled, or a stage converted again.
     pub driver_pipeline_misses: u64,
     /// Records of the driver's pipeline cache data written: one per making that added to its
-    /// cache's data (no record, or its pipeline not in it). (It was the saves of the device's one
-    /// driver cache.)
+    /// record's cache (no record, or its pipeline not in it), so a family whose makings convert
+    /// the same stages writes its record once. (It was the saves of the device's one driver
+    /// cache.)
     pub driver_saves: u64,
     /// Reads of the driver's pipeline cache data refused because the data ends inside the
-    /// header it states, at a making's save. Such data is never kept, so the making's cache
+    /// header it states, at a making's save. Such data is never kept, so a record's cache
     /// starts empty in every process. A driver defect.
     pub driver_data_truncated: u64,
     /// Reads of the driver's pipeline cache data refused because its header is not this
     /// device's version-one header (version, vendor, device or UUID), counted as
     /// [`driver_data_truncated`](Self::driver_data_truncated) is.
     pub driver_data_mismatched: u64,
-    /// Reads of the driver's pipeline cache data that were the record the making loaded, byte
-    /// for byte: nothing written. With [`driver_saves`](Self::driver_saves) and the two refusals,
+    /// Reads of the driver's pipeline cache data whose SHA-256 was that of what the cache was
+    /// loaded with or last wrote: nothing written. With
+    /// [`driver_saves`](Self::driver_saves) and the two refusals,
     /// one read per making the runtime finished while the process was not exiting and did not
     /// count in [`driver_data_found`](Self::driver_data_found).
     pub driver_data_unchanged: u64,
-    /// Makings from their record that the driver reports found there (the whole pipeline's
-    /// `APPLICATION_PIPELINE_CACHE_HIT`, or every stage's), whose data is not read back:
+    /// Makings handed a cache loaded from their record that the driver reports found there (the
+    /// whole pipeline's `APPLICATION_PIPELINE_CACHE_HIT`, or every stage's), whose data is not
+    /// read back:
     /// nothing written. With the reads, one per making the runtime finished while the process
     /// was not exiting.
     pub driver_data_found: u64,
@@ -317,7 +322,7 @@ impl CacheSetup {
 }
 
 /// One device's shader cache: its memo, its view of the directory, what names its makings'
-/// records, and the cache thread.
+/// records, the `VkPipelineCache` it keeps for each record, and the cache thread.
 pub(super) struct ShaderCache {
     /// The compiled pipelines kept in memory.
     pub(super) memo: PipelineMemo,
@@ -328,6 +333,9 @@ pub(super) struct ShaderCache {
     worker: Worker,
     /// What names the makings' records (`driver.rs`).
     records: Records,
+    /// The `VkPipelineCache` the device keeps for each record name, one per family of makings
+    /// that convert the same stages (`driver.rs`).
+    live: LiveCaches,
     /// Whether a making reports whether the driver found its pipeline in its cache
     /// (`VK_EXT_pipeline_creation_feedback`).
     driver_reports: bool,
@@ -338,8 +346,9 @@ impl ShaderCache {
     /// `profile`, with the cache thread started (which scans the directory). Its makings' records
     /// are named with `settings` (the digest of its instance's layer settings), and its makings
     /// report whether the driver found their pipelines where `feedback`
-    /// (`VK_EXT_pipeline_creation_feedback`). (No driver cache is made or loaded here; each making
-    /// makes its own.) Its warnings go to `sink` (the instance's message sink), else on stderr.
+    /// (`VK_EXT_pipeline_creation_feedback`). (No driver cache is made or loaded here; the first
+    /// making of each record's name makes that record's.) Its warnings go to `sink` (the
+    /// instance's message sink), else on stderr.
     pub(super) fn start(
         setup: CacheSetup,
         properties: &vk::PhysicalDeviceProperties,
@@ -364,23 +373,34 @@ impl ShaderCache {
                 settings,
                 profile,
             },
+            live: LiveCaches::default(),
             driver_reports: feedback,
         })
     }
 
-    /// Stop the cache thread, which writes what is queued first: the device is going.
-    pub(super) fn close(&self) {
+    /// Destroy the `VkPipelineCache` of every record the device holds, then stop the cache
+    /// thread, which writes what is queued first: the device is going.
+    ///
+    /// # Safety
+    ///
+    /// The device of `raw` is live and every pipeline of every making is made: the device's
+    /// teardown (`DeviceShared::drop`).
+    pub(super) unsafe fn close(&self, raw: &ash::Device) {
+        // SAFETY: the caller's.
+        unsafe { self.live.destroy(raw) };
         self.worker.stop();
     }
 
     /// What `create` makes with the `VkPipelineCache` it is handed, its `vkCreate*Pipelines`
-    /// call on the device of `raw` (`DeviceShared::vk`): a cache of the making's own, seeded from
-    /// the record `making` names where one loads, whose data is written as that record where the
-    /// making added to it, and destroyed after (`driver.rs`); null where the driver makes none.
+    /// call on the device of `raw` (`DeviceShared::vk`): the device's cache of the record
+    /// `making` names, made by the first making of that name from the record where one loads,
+    /// and kept until the device's teardown, whose data is written as that record where the
+    /// making added to it (`driver.rs`); null where the driver makes none.
     /// The call holds a turn of the process's budget of makings in flight (`pipeline/budget.rs`):
     /// its own, waited for, or its pool piece's. `create` returns, with what it made, whether the
     /// driver reports its pipeline found in that cache ([`found_in_cache`], `None` where it
-    /// reports nothing): one found in its record's cache reads no data back (`driver.rs`).
+    /// reports nothing): one found in a cache loaded from its record reads no data back
+    /// (`driver.rs`).
     pub(super) fn make_pipelines<T, E>(
         &self,
         raw: &ash::Device,
@@ -391,6 +411,7 @@ impl ShaderCache {
         let made = driver::make(
             &self.store,
             &self.records,
+            &self.live,
             raw,
             making,
             crate::exit_guard::closed,
@@ -400,6 +421,16 @@ impl ShaderCache {
             self.worker.evict();
         }
         made
+    }
+
+    /// Makings handed a `VkPipelineCache` the device already held for their record
+    /// (`store::Counters::driver_caches_shared`): what the device tests of the sharing read.
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+    pub(crate) fn caches_shared(&self) -> u64 {
+        self.store
+            .counters
+            .driver_caches_shared
+            .load(Ordering::Relaxed)
     }
 
     /// Whether a making chains a `VkPipelineCreationFeedbackCreateInfo`, its whole pipeline's

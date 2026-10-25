@@ -79,7 +79,7 @@ thread_local! {
     /// The split of the making whose line this thread times now ([`Line::made`]), if any: each
     /// part noted, with how long it took.
     static SPLIT: RefCell<Option<Vec<(String, Duration)>>> = const { RefCell::new(None) };
-    /// Whether the driver making this thread ran last started from its record
+    /// Whether the cache the driver making this thread ran last was handed holds its record
     /// ([`record_loaded`]), while a split is noted.
     static RECORD: Cell<Option<bool>> = const { Cell::new(None) };
 }
@@ -100,8 +100,9 @@ pub(crate) fn note(part: impl FnOnce() -> String, took: Duration) {
     });
 }
 
-/// The driver making this thread runs started its cache from its record, or not
-/// (`shader_cache/driver.rs`), while a split is noted.
+/// The cache the driver making this thread runs was handed was made from its record, or not
+/// (`shader_cache/driver.rs`): a making of a record whose cache the device already holds live says
+/// what the making that made it said. While a split is noted.
 pub(crate) fn record_loaded(loaded: bool) {
     if splitting() {
         RECORD.with(|record| record.set(Some(loaded)));

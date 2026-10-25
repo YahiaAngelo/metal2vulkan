@@ -6,7 +6,9 @@
 //! not loaded past its restart size.
 
 use crate::error::{Error, Problem, ShaderCacheError};
-use crate::shader_cache::driver::{make, open, seal, Identity, Making, Records, Refusal};
+use crate::shader_cache::driver::{
+    make, open, seal, Identity, LiveCaches, Making, Records, Refusal, LIVE,
+};
 use crate::shader_cache::store::{entry_name, Directory, Lookup, Store, LAYOUT, UNUSED_BUILD};
 use crate::shader_cache::{CacheSetup, EntryKind, ShaderCacheOptions};
 use ash::vk::{self, Handle};
@@ -597,28 +599,38 @@ fn a_making_s_record_is_named_by_what_it_reads_and_crosses_builds() {
         settings: [settings; 32],
         profile: [profile; 32],
     };
+    // The record's name of what a making reads, which is also what the device holds that
+    // record's live `VkPipelineCache` under.
+    let named = |records: Records, making: Making| records.name(&records.key(making));
     let making = || {
         Making::new("graphics")
             .words(&[1, 2, 3])
             .text(&(4u32, "five"))
     };
-    let base = records(identity(1), 1, 1).name(making());
+    let base = named(records(identity(1), 1, 1), making());
     assert_eq!(
         base,
-        records(identity(1), 1, 1).name(making()),
+        named(records(identity(1), 1, 1), making()),
         "a stable name"
     );
     for (other, why) in [
         (
-            records(identity(1), 1, 1).name(Making::new("compute").words(&[1, 2, 3])),
+            named(
+                records(identity(1), 1, 1),
+                Making::new("compute").words(&[1, 2, 3]),
+            ),
             "another kind",
         ),
         (
-            records(identity(1), 1, 1).name(Making::new("graphics").words(&[1, 2, 4])),
+            named(
+                records(identity(1), 1, 1),
+                Making::new("graphics").words(&[1, 2, 4]),
+            ),
             "other words",
         ),
         (
-            records(identity(1), 1, 1).name(
+            named(
+                records(identity(1), 1, 1),
                 Making::new("graphics")
                     .words(&[1, 2, 3])
                     .text(&(4u32, "six")),
@@ -626,14 +638,20 @@ fn a_making_s_record_is_named_by_what_it_reads_and_crosses_builds() {
             "another state",
         ),
         (
-            records(Identity::new(0x1002, 1, 8, [1; 16]), 1, 1).name(making()),
+            named(
+                records(Identity::new(0x1002, 1, 8, [1; 16]), 1, 1),
+                making(),
+            ),
             "another driver version",
         ),
         (
-            records(identity(1), 2, 1).name(making()),
+            named(records(identity(1), 2, 1), making()),
             "other layer settings",
         ),
-        (records(identity(1), 1, 2).name(making()), "another profile"),
+        (
+            named(records(identity(1), 1, 2), making()),
+            "another profile",
+        ),
     ] {
         assert_ne!(other, base, "{why}");
     }
@@ -767,7 +785,8 @@ thread_local! {
     static CALLS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The fake driver's `vkCreatePipelineCache`: a cache of handle 1.
+/// The fake driver's `vkCreatePipelineCache`: a cache of a handle no earlier call gave, so a
+/// test reads from the handle which cache a making was handed.
 unsafe extern "system" fn create_cache(
     _: vk::Device,
     _: *const vk::PipelineCacheCreateInfo<'_>,
@@ -775,10 +794,15 @@ unsafe extern "system" fn create_cache(
     cache: *mut vk::PipelineCache,
 ) -> vk::Result {
     CALLS.with(|calls| calls.borrow_mut().push("vkCreatePipelineCache"));
+    let handle = CACHES.fetch_add(1, Ordering::Relaxed);
     // SAFETY: the caller's out pointer, valid for one handle.
-    unsafe { cache.write(vk::PipelineCache::from_raw(1)) };
+    unsafe { cache.write(vk::PipelineCache::from_raw(handle)) };
     vk::Result::SUCCESS
 }
+
+/// The handle the fake driver's next `vkCreatePipelineCache` gives: never zero, which is the
+/// null handle.
+static CACHES: AtomicU64 = AtomicU64::new(1);
 
 /// The fake driver's `vkGetPipelineCacheData`: device 1's data.
 unsafe extern "system" fn cache_data(
@@ -832,20 +856,43 @@ fn fake_driver() -> ash::Device {
     }
 }
 
-/// One making on the fake driver with a store of `store`, the process exiting `before` it began
-/// and `after` its `vkCreate*Pipelines` returned: the driver's entry points it called (a run of
-/// calls of one, as `ash` reads data in two, counted once) and the cache that call was handed.
-/// The driver reports nothing of the making.
-fn made(store: &Store, before: bool, after: bool) -> (Vec<&'static str>, vk::PipelineCache) {
-    reported(store, (before, after), None)
+/// One making on the fake driver with a store of `store` and the device's caches `live`, the
+/// process exiting `before` it began and `after` its `vkCreate*Pipelines` returned: the driver's
+/// entry points it called (a run of calls of one, as `ash` reads data in two, counted once) and
+/// the cache that call was handed. The driver reports nothing of the making.
+fn made(
+    store: &Store,
+    live: &LiveCaches,
+    before: bool,
+    after: bool,
+) -> (Vec<&'static str>, vk::PipelineCache) {
+    reported(store, live, (before, after), None)
 }
 
 /// [`made`], the driver reporting `found` of the making (`shader_cache::found_in_cache`'s
 /// answer).
 fn reported(
     store: &Store,
+    live: &LiveCaches,
+    exiting: (bool, bool),
+    found: Option<bool>,
+) -> (Vec<&'static str>, vk::PipelineCache) {
+    described(
+        store,
+        live,
+        exiting,
+        found,
+        Making::new("compute").words(&[1, 2, 3]),
+    )
+}
+
+/// [`reported`], of the making `making` describes.
+fn described(
+    store: &Store,
+    live: &LiveCaches,
     (before, after): (bool, bool),
     found: Option<bool>,
+    making: Making,
 ) -> (Vec<&'static str>, vk::PipelineCache) {
     CALLS.with(|calls| calls.borrow_mut().clear());
     let records = Records {
@@ -858,8 +905,9 @@ fn reported(
     let result: Result<(), ()> = make(
         store,
         &records,
+        live,
         &fake_driver(),
-        Making::new("compute").words(&[1, 2, 3]),
+        making,
         || match created.get() {
             false => before,
             true => after,
@@ -876,16 +924,144 @@ fn reported(
     (calls, handed.expect("the making ran"))
 }
 
+/// The device's caches destroyed on the fake driver, as its teardown destroys them: the entry
+/// points that took.
+fn torn_down(live: &LiveCaches) -> Vec<&'static str> {
+    CALLS.with(|calls| calls.borrow_mut().clear());
+    // SAFETY: the fake device is live and no making is left.
+    unsafe { live.destroy(&fake_driver()) };
+    let mut calls = CALLS.with(|calls| calls.take());
+    calls.dedup();
+    calls
+}
+
 /// Once the process is exiting, a making calls the driver for its pipelines alone: one that ends
-/// after the close (a pool piece's section runs on past it, `exit_guard`) neither reads its cache
-/// for the record nor releases it, and one that begins after makes no cache. Before, it makes its
-/// cache, reads it, saves the record and releases it.
+/// after the close (a pool piece's section runs on past it, `exit_guard`) does not read its
+/// record's cache, and one that begins after makes no cache. Before, it makes the record's cache,
+/// reads it and saves the record; the cache goes at the device's teardown, not with the making.
 #[test]
 fn a_making_once_the_process_is_exiting_calls_the_driver_for_its_pipelines_alone() {
     let scratch = Scratch::new();
     let store = store(scratch.path(), BUILD, 1 << 20);
     let saves = || store.counters.driver_saves.load(Ordering::Relaxed);
-    let (calls, cache) = made(&store, false, false);
+    // A device of its own for each making, as a later process is: each loads the record.
+    let live = LiveCaches::default();
+    let (calls, cache) = made(&store, &live, false, false);
+    assert_eq!(calls, ["vkCreatePipelineCache", "vkGetPipelineCacheData"]);
+    assert_ne!(cache, vk::PipelineCache::null());
+    assert_eq!(saves(), 1);
+    assert_eq!(torn_down(&live), ["vkDestroyPipelineCache"]);
+    // The same making again, its record loaded, closed while the driver makes it.
+    let live = LiveCaches::default();
+    let (calls, cache) = made(&store, &live, false, true);
+    assert_eq!(
+        calls,
+        ["vkCreatePipelineCache"],
+        "a making that ended after the close read its cache"
+    );
+    assert_ne!(cache, vk::PipelineCache::null());
+    assert_eq!(torn_down(&live), ["vkDestroyPipelineCache"]);
+    let live = LiveCaches::default();
+    let (calls, cache) = made(&store, &live, true, true);
+    assert!(
+        calls.is_empty(),
+        "a making begun after the close called {calls:?}"
+    );
+    assert_eq!(cache, vk::PipelineCache::null());
+    assert_eq!(saves(), 1, "a making saved once the process was exiting");
+    assert!(
+        torn_down(&live).is_empty(),
+        "a making begun after the close left a cache behind"
+    );
+}
+
+/// Every making of one record's name is handed the one `VkPipelineCache` the first of them made
+/// (`driver_caches_shared`): no later making makes or loads one, and the record is written once,
+/// since what each later making reads back is what the first wrote (`driver_data_unchanged`).
+/// Another name makes its own.
+#[test]
+fn every_making_of_a_record_s_name_takes_the_first_s_cache() {
+    let scratch = Scratch::new();
+    let store = store(scratch.path(), BUILD, 1 << 20);
+    let counter = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
+    let counts = || {
+        let c = &store.counters;
+        (
+            counter(&c.driver_caches_shared),
+            counter(&c.driver_saves),
+            counter(&c.driver_data_unchanged),
+        )
+    };
+    let live = LiveCaches::default();
+    let (calls, first) = made(&store, &live, false, false);
+    assert_eq!(calls, ["vkCreatePipelineCache", "vkGetPipelineCacheData"]);
+    assert_eq!(counts(), (0, 1, 0));
+    for _ in 0..3 {
+        let (calls, again) = made(&store, &live, false, false);
+        assert_eq!(
+            calls,
+            ["vkGetPipelineCacheData"],
+            "a later making of the name made or loaded a cache"
+        );
+        assert_eq!(again, first, "a later making was handed another cache");
+    }
+    assert_eq!(counts(), (3, 1, 3));
+    // Another name: its own cache, and the first's is still the first's.
+    let (calls, other) = described(
+        &store,
+        &live,
+        (false, false),
+        None,
+        Making::new("compute").words(&[4, 5, 6]),
+    );
+    assert_eq!(calls, ["vkCreatePipelineCache", "vkGetPipelineCacheData"]);
+    assert_ne!(other, first);
+    assert_eq!(counts(), (3, 2, 3));
+    assert_eq!(torn_down(&live), ["vkDestroyPipelineCache"]);
+}
+
+/// A device keeps at most [`LIVE`] caches: the making of a further name is handed one of its own,
+/// destroyed once it returned, so nothing of its name is kept and the teardown destroys the
+/// bound's worth alone.
+#[test]
+fn a_device_keeps_at_most_the_bound_of_live_caches() {
+    let scratch = Scratch::new();
+    let store = store(scratch.path(), BUILD, 1 << 20);
+    let live = LiveCaches::default();
+    for n in 0..LIVE as u32 {
+        let (calls, _) = described(
+            &store,
+            &live,
+            (false, false),
+            None,
+            Making::new("compute").text(&n),
+        );
+        assert_eq!(calls, ["vkCreatePipelineCache", "vkGetPipelineCacheData"]);
+    }
+    let (calls, _) = described(
+        &store,
+        &live,
+        (false, false),
+        None,
+        Making::new("compute").text(&"past the bound"),
+    );
+    assert_eq!(
+        calls,
+        [
+            "vkCreatePipelineCache",
+            "vkGetPipelineCacheData",
+            "vkDestroyPipelineCache"
+        ],
+        "a making past the bound kept its cache"
+    );
+    // The same name again: the device kept nothing of it, so it makes and destroys one again.
+    let (calls, _) = described(
+        &store,
+        &live,
+        (false, false),
+        None,
+        Making::new("compute").text(&"past the bound"),
+    );
     assert_eq!(
         calls,
         [
@@ -894,29 +1070,20 @@ fn a_making_once_the_process_is_exiting_calls_the_driver_for_its_pipelines_alone
             "vkDestroyPipelineCache"
         ]
     );
-    assert_ne!(cache, vk::PipelineCache::null());
-    assert_eq!(saves(), 1);
-    // The same making again, its record loaded, closed while the driver makes it.
-    let (calls, cache) = made(&store, false, true);
     assert_eq!(
-        calls,
-        ["vkCreatePipelineCache"],
-        "a making that ended after the close read or released its cache"
+        store.counters.driver_caches_shared.load(Ordering::Relaxed),
+        0,
+        "no making was handed another's cache"
     );
-    assert_ne!(cache, vk::PipelineCache::null());
-    let (calls, cache) = made(&store, true, true);
-    assert!(
-        calls.is_empty(),
-        "a making begun after the close called {calls:?}"
-    );
-    assert_eq!(cache, vk::PipelineCache::null());
-    assert_eq!(saves(), 1, "a making saved once the process was exiting");
+    assert_eq!(torn_down(&live), ["vkDestroyPipelineCache"]);
 }
 
-/// A making from its record that the driver reports found reads none of its cache's data back and
-/// writes nothing (`driver_data_found`); one with no record, or one the driver reports compiled,
-/// or one of a driver that reports nothing, reads its data and keeps it as before: a save where
-/// it had no record, the record's own bytes counted unchanged where it had one.
+/// A making handed a cache loaded from its record that the driver reports found reads none of its
+/// data back and writes nothing (`driver_data_found`); one whose cache was made empty, or one the
+/// driver reports compiled, or one of a driver that reports nothing, reads its data and keeps it
+/// as before: a save where the record held nothing of it, the bytes counted unchanged where it
+/// did. Each making here is a device of its own, as a later process is, so each loads the record
+/// rather than taking a cache another making left live.
 #[test]
 fn a_making_its_driver_found_in_its_record_reads_no_data_back() {
     let scratch = Scratch::new();
@@ -931,26 +1098,22 @@ fn a_making_its_driver_found_in_its_record_reads_no_data_back() {
             counter(&c.driver_data_found),
         )
     };
-    let read_back = [
-        "vkCreatePipelineCache",
-        "vkGetPipelineCacheData",
-        "vkDestroyPipelineCache",
-    ];
+    let read_back = ["vkCreatePipelineCache", "vkGetPipelineCacheData"];
     // No record: the driver's report of a hit changes nothing (an empty cache holds nothing to
     // find), so the data is read and saved.
-    let (calls, _) = reported(&store, (false, false), Some(true));
+    let (calls, _) = reported(&store, &LiveCaches::default(), (false, false), Some(true));
     assert_eq!(calls, read_back);
     assert_eq!(counts(), (0, 1, 0, 0));
     // From the record, found: no data read back, nothing written.
-    let (calls, _) = reported(&store, (false, false), Some(true));
-    assert_eq!(calls, ["vkCreatePipelineCache", "vkDestroyPipelineCache"]);
+    let (calls, _) = reported(&store, &LiveCaches::default(), (false, false), Some(true));
+    assert_eq!(calls, ["vkCreatePipelineCache"]);
     assert_eq!(counts(), (1, 1, 0, 1));
     // From the record, compiled: read back, the record's bytes, unchanged.
-    let (calls, _) = reported(&store, (false, false), Some(false));
+    let (calls, _) = reported(&store, &LiveCaches::default(), (false, false), Some(false));
     assert_eq!(calls, read_back);
     assert_eq!(counts(), (2, 1, 1, 1));
     // From the record, unreported: read back and compared, as before the reports.
-    let (calls, _) = made(&store, false, false);
+    let (calls, _) = made(&store, &LiveCaches::default(), false, false);
     assert_eq!(calls, read_back);
     assert_eq!(counts(), (3, 1, 2, 1));
 }
