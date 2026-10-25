@@ -1187,8 +1187,10 @@ impl Texels {
     /// Whether Metal's GPU reads and writes two of the texels' rows over bytes they share: an
     /// IOSurface plane's at its pitch rounded down to 16, the one shape that does
     /// ([`plane_rows_share_bytes`]). The shadow's copies hold the sharing
-    /// ([`plane_copy_regions`]); a blit that addresses the rows as bytes does not
-    /// (`blit_texture.rs`).
+    /// ([`plane_copy_regions`]); a blit that would write the rows as bytes does not and is refused
+    /// instead, as is a copy between them and an image texture either way, while a blit that reads
+    /// them into a buffer is served: a write must settle which of two rows leaves the shared bytes
+    /// behind and Metal settles it no one way, while a read settles nothing (`blit_texture.rs`).
     pub(super) fn plane_rows_overlap(&self) -> bool {
         plane_rows_share_bytes(&self.layout, &self.cpu)
     }

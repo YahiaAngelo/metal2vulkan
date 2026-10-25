@@ -605,6 +605,13 @@ driver's. Each is open work.
   (`DriverWorkaround::EarlyTestsDropMultisampledImageWrites`), a function declaring early tests
   that discards, returns depth, stencil or a sample mask, or writes other memory. A form testing
   at the function's entry against the stand-in is not built.
+- **Threads per tile past the pass's tile.** `dispatch_threads_per_tile` refuses threads per tile
+  wider or taller than the pass's tile when they are within Metal's limit for the state
+  (`DrawProblem::ThreadsPerTilePastTile`). Plain Metal runs such a dispatch over every tile of the
+  pass from that tile's origin, so a pixel inside the threads per tile of more than one tile's
+  origin runs once per tile, on overlapping threadgroups the runtime does not model; a dispatch of
+  the tile's own threads would store once where Metal stores repeatedly, so no narrower dispatch
+  serves it.
 - **A vertex function that selects its slice, on a device without `shaderOutputLayer` and
   `geometryShader`.** Metal renders each primitive into the slice its first vertex selects. Vulkan
   stores `Layer` from a vertex function only with `shaderOutputLayer`, and the generated geometry
@@ -867,11 +874,20 @@ else.
   leaves of the shared bytes is unmeasured; a two-plane YCbCr texture's rows of codes, which no row
   rule holds and which overlap by any amount across any number of rows, and the other formats whose
   rows no row rule bounds (a two-plane extended-range one's, a 4:2:2 one's pairs, a depth or stencil
-  plane's elements), which two regions do not express; and a blit that addresses such a plane's rows
-  as bytes (`blit_texture.rs`), which would write every shared byte from one fixed row where Metal
-  has no one order: the row Metal leaves there follows the command, the GPU pitch and the row count,
-  one shape of `copyFromTexture:toTexture:` gives three whole-plane outcomes from run to run, and a
-  kernel's winner moves with the threadgroup shape (an Apple M3 Max under macOS 27.0.1, one case a
-  process, `probes/overlapping_plane_row_writes.m`). A rotated plane never reaches any of this: its
+  plane's elements), which two regions do not express; a blit that would write such a plane's rows
+  as bytes (`blit_texture.rs`: a copy into it from a buffer, and one between two textures over
+  buffers, refused whichever side the plane is on, the destination having no one order and what
+  Metal reads out of a source plane there being unmeasured), which would write every shared byte
+  from one fixed row where Metal has no one order: the row Metal leaves there follows the command,
+  the GPU pitch and the row count, one shape of `copyFromTexture:toTexture:` gives three whole-plane
+  outcomes from run to run, and a kernel's winner moves with the threadgroup shape (an Apple M3 Max
+  under macOS 27.0.1, one case a process, `probes/overlapping_plane_row_writes.m`); and a copy
+  between such a plane and an image texture, either way, whose one `bufferRowLength` states no
+  sharing. A blit out of such a plane into a buffer is served: its rows are read, not written, and
+  each of the caller's rows takes the plane's bytes at its own GPU row, so a byte two rows share is
+  read once for each of them, which is what Metal's `copyFromTexture:toBuffer:` reads
+  (`probes/overlapping_plane_row_reads.m`). A read is not the mirror of a write here -- a write must
+  settle which of two rows leaves the shared bytes behind and Metal settles it no one way, while a
+  read settles nothing. A rotated plane never reaches any of this: its
   `bytesPerRow` must be a multiple of 16, so its GPU rows lie at the pitch itself and share no
   byte.

@@ -554,7 +554,7 @@ fn every_format_the_filter_computes_is_its_filter_level_by_level() {
             "the mipmap filter on {}: {formats} formats, {checked} bytes, every one the filter's",
             device.name()
         );
-        assert_eq!(formats, 35, "the formats the filter computes");
+        assert_eq!(formats, 36, "the formats the filter computes");
         let kinds: Vec<Degradation> = [
             (Degradation::MipmapsAsAppleM4, unlike_an_m3),
             (Degradation::MipmapTieRounding, near_ties),
@@ -1085,7 +1085,7 @@ fn a_first_level_read_in_place_recovers_every_code() {
         );
         assert_eq!(
             in_place.len() + copied.len(),
-            35,
+            36,
             "the formats the filter computes"
         );
         assert!(
