@@ -165,6 +165,7 @@ pub mod sparse_mappings;
 pub mod sparse_tiles;
 pub mod srgb_fetch;
 pub mod stage_in_regions;
+pub mod stage_in_unread;
 pub mod stencil_resolve_pairs;
 pub mod stencil_resolved_sample;
 pub mod surface_fills;
@@ -477,6 +478,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(blit_encoder_commands::all());
     cases.extend(compute_encoder_commands::all());
     cases.extend(attribute_strides::all());
+    cases.extend(stage_in_unread::all());
     cases.extend(blit_indirect_commands::all());
     cases.push(Box::new(compute_heap_residency::heap_residency()));
     cases.extend(buffer_texture_blits::all());
