@@ -224,6 +224,43 @@ impl Device {
         compile_stage_from(f, self.profile(), InputsFrom::Given(inp), entries, &mut m)
     }
 
+    /// `inp` with its stage-input descriptor narrowed to the `[[stage_in]]` attributes the kernel
+    /// `f` reads, which is the form a creation keys its kernel under and compiles it with.
+    ///
+    /// A kernel fetches one attribute at a time, from that attribute's own entries of the
+    /// descriptor alone, so an attribute no instruction of its entry reads reaches no instruction
+    /// of the module: a kernel that reads five attributes compiles to one module however a sixth
+    /// it never reads is stated. Narrowing the inputs is what gives it one key as well as one
+    /// module, so a consumer that keys compiled functions by
+    /// [`Device::function_compile_key`] under these inputs compiles the kernel once for the whole
+    /// family instead of once a state. The inputs it answers are the ones to give both
+    /// [`Device::function_compile_key`] and the compile
+    /// ([`Device::compile_function_from_entries`]), as a render creation gives
+    /// [`RenderPipelineKeys::vertex_inputs`] to both.
+    ///
+    /// This narrows the kernel's **compile**, not the descriptor: what a creation reads of the
+    /// stage-input descriptor past the fetch reads it whole, so
+    /// [`Device::compile_compute_pipeline`] still refuses an attribute whose buffer has no
+    /// layout, read or not, [`Device::compute_pipeline_key`] still states every field of it, and
+    /// [`ComputePipelineDescriptor::reflection`] still lists a buffer for every set attribute.
+    ///
+    /// It decodes and specializes the kernel's AIR under `b`, reading the stage's specialized
+    /// entry from `entries` (the one a key or check of the same creation made, else one made
+    /// there now), so a sweep of states over one kernel decodes once. Inputs without a
+    /// stage-input descriptor are their own answer, decoding nothing.
+    ///
+    /// Refused by the decode's and the specialization's own errors.
+    pub fn kernel_inputs_read(
+        &self,
+        f: &FunctionDescriptor,
+        inp: &LoweringInputs,
+        b: &Budget,
+        entries: &StageEntries,
+    ) -> Result<LoweringInputs, Error> {
+        let mut m = Meter::new(b);
+        crate::pipeline::compile::kernel_inputs_read(f, inp, entries, &mut m)
+    }
+
     /// The key of the compute pipeline `d` (no decode).
     pub fn compute_pipeline_key(&self, d: &ComputePipelineDescriptor) -> crate::cache::PipelineKey {
         let stage = match &d.kernel {

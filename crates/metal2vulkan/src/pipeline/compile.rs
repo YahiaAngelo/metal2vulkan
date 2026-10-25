@@ -1765,6 +1765,67 @@ pub(crate) fn declared_attributes(
     out
 }
 
+/// The Metal `[[stage_in]]` attribute indices the specialized kernel entry `spec` reads: its
+/// `air.stage_in` parameters that survived function-constant specialization and that an
+/// instruction uses, which are the parameters `lower::stage_io` plans and so the only attributes
+/// the module fetches (`lower::stage_io::stage_in::param`, one `StageInFetch::of` a parameter).
+/// The use is read as the lowering reads it (`lower::select`: an argument any instruction of the
+/// entry's body names, a call's operand included), so the set is the lowering's own and not a
+/// narrower reading of it. Empty for any other stage, which declares no such parameter.
+pub(crate) fn stage_in_attributes(spec: &air::Entry) -> BTreeSet<u32> {
+    let mut out = BTreeSet::new();
+    let Some(func) = spec.module.func(spec.func) else {
+        return out;
+    };
+    let Some(body) = func.body.as_ref() else {
+        return out;
+    };
+    let mut used = BTreeSet::new();
+    for inst in body.insts.values() {
+        inst.kind.for_each_value(|v| {
+            if let Value::Arg(a) = v {
+                used.insert(a.raw());
+            }
+        });
+    }
+    for b in &spec.ep.params {
+        if let ParamRole::StageIn { location } = &b.role {
+            if let AbiInt::Const(index) = location.index {
+                if used.contains(&b.param) {
+                    out.insert(index);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `inputs` with a kernel's stage-input descriptor narrowed to the attributes the entry of stage
+/// `fd` reads (`StageInputDescriptor::narrowed_to` of [`stage_in_attributes`]): the inputs a
+/// compile of `fd` under `inputs` emits its module from, stated so that the key the compile is
+/// keyed under names them and nothing else. It decodes and specializes only (the entry `entries`
+/// holds, or one made there now), as a key before compiling does.
+///
+/// `inputs` without a stage-input descriptor is its own answer, decoding nothing: a kernel that
+/// states none, and every other stage, keep the inputs they were given.
+pub(crate) fn kernel_inputs_read(
+    fd: &FunctionDescriptor,
+    inputs: &LowerInputs,
+    entries: &StageEntries,
+    m: &mut Meter,
+) -> Result<LowerInputs, Error> {
+    guarded(|| {
+        let Some(given) = inputs.stage_input.as_ref() else {
+            return Ok(inputs.clone());
+        };
+        let specialized = entries.specialized(fd, inputs.max_call_stack_depth.unwrap_or(1), m)?;
+        let read = stage_in_attributes(&specialized.spec);
+        let mut out = inputs.clone();
+        out.stage_input = Some(given.narrowed_to(&read));
+        Ok(out)
+    })
+}
+
 /// The color attachments the specialized fragment entry `spec` reads (`[[color(n)]]`) whose
 /// pixel format in `colors` is `RGBA8Unorm_sRGB` or `BGRA8Unorm_sRGB`
 /// (`LoweringInputs::srgb_fetches`). Empty for any other stage.

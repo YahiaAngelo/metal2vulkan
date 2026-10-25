@@ -983,6 +983,45 @@ impl StageInputDescriptor {
         }
         out
     }
+
+    /// This descriptor as the fetches of the attributes `read` names read it: those attributes and
+    /// the layouts they name, each verbatim, and the index type and index buffer index as they
+    /// stand; every other attribute, and every layout only such an attribute named, dropped.
+    ///
+    /// A kernel fetches one attribute at a time, from that attribute's own descriptor entries
+    /// alone (`StageInFetch::of`, which `lower::stage_io::stage_in::param` reaches for each
+    /// `[[stage_in]]` parameter an instruction uses), so an attribute `read` leaves out reaches
+    /// no instruction of the module: a compile under this descriptor emits what a compile under
+    /// the whole one emits, word for word, and the key it is compiled under states the whole
+    /// difference between two descriptors their fetches read apart.
+    ///
+    /// Everything the attributes `read` names fetch is kept as it stands, so every
+    /// [`StageInFetch::of`] of such an attribute answers what it answered: the canonical form of
+    /// a constant step, and of an index type no kept layout steps through, is
+    /// [`canonical`](Self::canonical)'s to write.
+    ///
+    /// This is not a check: an attribute `read` names that the descriptor lacks stays absent, and
+    /// the compile refuses it where Metal's pipeline creation stops
+    /// (`InvalidDescriptor(StageInputAttribute)`). Nor is it what a creation reads of the
+    /// descriptor past the fetch: its layout agreement (`check_layouts`), its reflection
+    /// ([`ComputePipelineDescriptor::reflection`](crate::pipeline::ComputePipelineDescriptor::reflection),
+    /// which lists a buffer for every set attribute, read or not) and the compute pipeline key
+    /// (`compute_fields`) each read the descriptor as given.
+    pub(crate) fn narrowed_to(
+        &self,
+        read: &std::collections::BTreeSet<u32>,
+    ) -> StageInputDescriptor {
+        let mut out = StageInputDescriptor::new();
+        out.index_type = self.index_type;
+        out.index_buffer_index = self.index_buffer_index;
+        for (&index, a) in self.attributes.iter().filter(|(i, _)| read.contains(i)) {
+            out.attributes.insert(index, *a);
+            if let Some(l) = self.layouts.get(&a.buffer_index) {
+                out.layouts.insert(a.buffer_index, *l);
+            }
+        }
+        out
+    }
 }
 
 impl Default for StageInputDescriptor {

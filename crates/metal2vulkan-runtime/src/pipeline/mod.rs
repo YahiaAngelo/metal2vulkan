@@ -1526,9 +1526,9 @@ impl Variant {
     ///
     /// The compile reads the kernel's specialized entry from the device's stage entries, as a
     /// render creation's stages do: a sibling pipeline of the same kernel at the same call-stack
-    /// depth compiles under its own lowering inputs, so no memo of compiled functions spares it,
-    /// but it decodes and specializes nothing an earlier sibling did
-    /// (`tests::stage_entries_shared`).
+    /// depth decodes and specializes nothing an earlier sibling did
+    /// (`tests::stage_entries_shared`), and where its lowering inputs come out the same the memo
+    /// of compiled functions spares it the translation too.
     fn compiled(
         sources: &Sources<'_>,
         function: &FunctionDescriptor,
@@ -1537,12 +1537,16 @@ impl Variant {
     ) -> Result<(Remembered<ComputePipeline, Variant>, Kernel), metal2vulkan::error::Error> {
         let compile = sources.device().compile_device();
         let budget = sources.budget();
-        let inputs = descriptor.inputs(key);
-        let function_key = compile.function_compile_key(function, &inputs);
         // The kernel's specialized entry is the device's, as a render stage's is: a sibling
         // pipeline of the same kernel at the same call-stack depth decodes and specializes
         // nothing an earlier one did (`pipeline/memo.rs`, `StageEntries`).
         let entries = sources.device().shared().shader_cache.memo.stage_entries();
+        // The kernel compiles under the `[[stage_in]]` attributes its entry reads, which the
+        // shared entry states: a sibling state whose descriptor moves an attribute the kernel
+        // never reads asks for the function this one compiled, and the memo answers it.
+        let inputs =
+            compile.kernel_inputs_read(function, &descriptor.inputs(key), &budget, entries)?;
+        let function_key = compile.function_compile_key(function, &inputs);
         let compiled =
             sources.function(function, &inputs, (&function_key, Some(entries)), &budget)?;
         let compiled = descriptor.with_stage(StageSource::Compiled(compiled));

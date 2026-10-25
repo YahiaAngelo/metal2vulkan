@@ -54,7 +54,7 @@ use crate::device::requirements::VkFeature;
 use crate::device::{Device, DeviceDescription, DevicePolicy};
 use crate::library::Library;
 use crate::metal::{AttributeFormat, IndexType, StepFunction};
-use crate::pipeline::compile::{compile_stage, InputsFrom};
+use crate::pipeline::compile::{compile_stage, InputsFrom, StageEntries};
 use crate::pipeline::descriptor::{
     ComputePipelineDescriptor, StageInputAttributeDescriptor, StageInputDescriptor,
     StageInputLayoutDescriptor, StageSource,
@@ -468,11 +468,26 @@ fn rows() -> Vec<(String, StageInputDescriptor)> {
     rows
 }
 
-/// The lowering inputs of a row.
+/// The lowering inputs of a row: the whole descriptor, as a creation states it before it learns
+/// what the kernel reads.
 fn inputs(d: &StageInputDescriptor) -> LoweringInputs {
     let mut inputs = LoweringInputs::new();
     inputs.stage_input = Some(d.clone());
     inputs
+}
+
+/// The lowering inputs a creation compiles the kernel of a row under: [`inputs`] narrowed to the
+/// attributes the kernel reads (`Device::kernel_inputs_read`), through `entries`, so the sweep
+/// decodes and specializes the one kernel once however many rows it reads.
+fn read_inputs(
+    device: &Device,
+    kernel: &FunctionDescriptor,
+    entries: &StageEntries,
+    d: &StageInputDescriptor,
+) -> LoweringInputs {
+    device
+        .kernel_inputs_read(kernel, &inputs(d), &Budget::standard(), entries)
+        .expect("the kernel's read attributes")
 }
 
 /// The sweep's rows are all different descriptors, so nothing below is a comparison of a
@@ -538,52 +553,211 @@ fn an_unread_attribute_changes_no_word_of_the_module() {
     );
 }
 
-/// Every row of the sweep is a **function compile key and a compute pipeline key of its own**: a
-/// kernel that reads five attributes is translated again, and its pipeline compiled again, for
-/// every value of an attribute it never reads.
+/// The whole sweep is **one function compile key**, and so one translation: a kernel that reads
+/// five attributes is compiled once however the sixth it never reads is stated.
 ///
-/// This is the measurement of the waste, not an endorsement of it. The module
-/// [`an_unread_attribute_changes_no_word_of_the_module`] compiles is the same in all of these, so
-/// every key past the first buys a translation of bytes the first already produced, and on a
-/// driver that converts SPIR-V at pipeline creation each one buys a shader conversion too. The
-/// count is asserted at the sweep's own length rather than left unwritten, because it is the
-/// deterministic check behind the bug: a narrowing of the key fails here with its own number, and
-/// so does a widening.
+/// This is the measurement of the fix. `Device::kernel_inputs_read` narrows a creation's lowering
+/// inputs to the attributes the kernel's entry reads, and a creation keys its kernel and compiles
+/// it under those (`metal2vulkan-runtime`'s `Variant::compiled`), so the 36 rows ask for one
+/// compiled function and the memo of compiled functions answers 35 of them. Before the narrowing
+/// each row was a key of its own and each bought a translation of bytes the first already
+/// produced; [`an_unread_attribute_changes_no_word_of_the_module`] is what says those were the
+/// same bytes.
+///
+/// The **compute pipeline key stays one a row**, which is deliberate and is not the waste: it
+/// states the descriptor as a creation reads it past the fetch (its layout agreement, which
+/// refuses an attribute whose buffer has no layout read or not, and the buffers its reflection
+/// lists for every set attribute), and a creation of a key the memo lacks links and relocates a
+/// module it already has rather than translating one.
+///
+/// The counts are asserted at what they read, so neither a narrowing that went further nor one
+/// that came back can land quietly.
 #[test]
 fn an_unread_attribute_keys_a_translation_of_its_own() {
     let Some(bitcode) = fixture() else { return };
     let device = device();
     let kernel = kernel(&bitcode);
+    let entries = StageEntries::new();
     let rows = rows();
     let mut function_keys: BTreeSet<[u8; 32]> = BTreeSet::new();
+    let mut whole_keys: BTreeSet<[u8; 32]> = BTreeSet::new();
     let mut pipeline_keys: BTreeSet<[u8; 32]> = BTreeSet::new();
     for (_, d) in &rows {
-        function_keys.insert(*device.function_compile_key(&kernel, &inputs(d)).digest());
+        let read = read_inputs(&device, &kernel, &entries, d);
+        function_keys.insert(*device.function_compile_key(&kernel, &read).digest());
+        whole_keys.insert(*device.function_compile_key(&kernel, &inputs(d)).digest());
         let mut descriptor = ComputePipelineDescriptor::new(StageSource::Function(kernel.clone()));
         descriptor.stage_input = Some(d.clone());
         pipeline_keys.insert(*device.compute_pipeline_key(&descriptor).digest());
     }
+    let (specialized, shared) = entries.counts();
     eprintln!(
-        "{} rows: {} function compile key(s), {} compute pipeline key(s)",
+        "{} rows: {} function compile key(s) read, {} stated whole, {} compute pipeline key(s); \
+         {specialized} entry specialized, {shared} shared",
         rows.len(),
         function_keys.len(),
-        pipeline_keys.len()
+        whole_keys.len(),
+        pipeline_keys.len(),
     );
     assert_eq!(
         function_keys.len(),
+        1,
+        "the sweep's {} rows are {} function compile keys, so {} of them buy a translation of \
+         bytes another produced",
         rows.len(),
-        "the sweep's {} rows are {} function compile keys: the key is narrower or wider than the \
-         whole descriptor, and the module docs' reading of it is stale either way",
+        function_keys.len(),
+        function_keys.len() - 1
+    );
+    assert_eq!(
+        whole_keys.len(),
         rows.len(),
-        function_keys.len()
+        "the descriptor stated whole is still {} keys: the narrowing is `kernel_inputs_read`'s \
+         and not a change to what a key makes of the inputs it is given",
+        rows.len()
     );
     assert_eq!(
         pipeline_keys.len(),
         rows.len(),
-        "the sweep's {} rows are {} compute pipeline keys: as above, for `compute_fields`",
-        rows.len(),
-        pipeline_keys.len()
+        "the compute pipeline key states the whole descriptor, as `compute_fields` writes it"
     );
+    assert_eq!(
+        (specialized, shared),
+        (1, rows.len() as u64 - 1),
+        "the sweep decodes and specializes the one kernel once and shares it {} times",
+        rows.len() - 1
+    );
+}
+
+/// Every row narrows to the read set alone, and the **canonical form** of every narrowed row is
+/// one descriptor: the one key above is that, and not two descriptors a digest happened to agree
+/// on.
+///
+/// The narrowed descriptors themselves are not all equal, and must not be: the narrowing keeps
+/// what it keeps verbatim, the index type and index buffer index among it, so that every
+/// `StageInFetch::of` of a read attribute answers what it answered under the whole descriptor.
+/// Writing those at Metal's defaults where no kept layout steps through the index buffer is
+/// `StageInputDescriptor::canonical`'s to do, and the key hashes the canonical form
+/// (`pipeline::compile::key::canonical_inputs`), so that is what this compares.
+#[test]
+fn every_row_narrows_to_the_read_set_alone() {
+    let Some(bitcode) = fixture() else { return };
+    let device = device();
+    let kernel = kernel(&bitcode);
+    let entries = StageEntries::new();
+    let rows = rows();
+    let mut held: Option<(String, StageInputDescriptor)> = None;
+    for (name, d) in &rows {
+        let read = read_inputs(&device, &kernel, &entries, d);
+        let narrowed = read.stage_input.clone().expect("a stage-input descriptor");
+        assert_eq!(
+            narrowed.attributes.keys().copied().collect::<Vec<u32>>(),
+            vec![0, 1, 2, 3, 4],
+            "{name} narrows to attributes the kernel does not read, or drops one it does"
+        );
+        assert_eq!(
+            narrowed.layouts.keys().copied().collect::<Vec<u32>>(),
+            vec![SOURCE],
+            "{name} keeps a layout no read attribute names, or drops the one they read"
+        );
+        let canonical = narrowed.canonical();
+        match &held {
+            None => held = Some((name.clone(), canonical)),
+            Some((first, first_canonical)) => assert_eq!(
+                &canonical, first_canonical,
+                "{name} narrows to a descriptor the baseline {first} does not fetch alike"
+            ),
+        }
+    }
+}
+
+/// The module a row compiles to under the **narrowed** inputs is the module it compiles to under
+/// the whole descriptor, word for word, over the whole sweep.
+///
+/// This is the exactness of the narrowing itself, and the other half of
+/// [`an_unread_attribute_changes_no_word_of_the_module`]: that one says the 36 descriptors compile
+/// alike, and this one says compiling under the attributes the kernel reads compiles to the same
+/// thing as compiling under all of them. A row whose words moved would be an input the narrowing
+/// must not drop.
+#[test]
+fn narrowing_the_inputs_changes_no_word_of_the_module() {
+    let Some(bitcode) = fixture() else { return };
+    let device = device();
+    let kernel = kernel(&bitcode);
+    let entries = StageEntries::new();
+    let compile = |inputs: &LoweringInputs, name: &str| -> Vec<u32> {
+        let mut meter = Meter::new(&Budget::standard());
+        compile_stage(
+            &kernel.function,
+            &kernel.constants,
+            (&kernel.linked, &kernel.libraries),
+            device.profile(),
+            InputsFrom::Given(inputs),
+            &mut meter,
+        )
+        .unwrap_or_else(|why| panic!("{name} compiles: {why:?}"))
+        .artifact()
+        .module
+        .words
+        .clone()
+    };
+    for (name, d) in &rows() {
+        let whole = compile(&inputs(d), name);
+        let read = compile(&read_inputs(&device, &kernel, &entries, d), name);
+        assert_eq!(
+            read, whole,
+            "{name} compiled to another module under the attributes the kernel reads: an \
+             attribute the narrowing drops reaches an instruction"
+        );
+    }
+}
+
+/// Every row's pipeline is **created from the kernel compiled under the narrowed inputs and the
+/// descriptor as given**, which is what a creation does, and none of them refuses.
+///
+/// This is the check a count cannot make. The narrowing takes inputs out of the kernel's compile,
+/// and what a creation reads of the descriptor past the fetch still reads it whole: the pipeline
+/// compares every fetch its artifact recorded against the descriptor it was given
+/// (`check_stage_in`), and holds the descriptor's layouts to Metal's agreement
+/// (`check_layouts`). A narrowing that moved a read attribute's fetch, or that let the
+/// descriptor's own refusals go, would not change a key count — it would surface here, as a
+/// refusal of a descriptor Metal accepts or an acceptance of one it stops.
+///
+/// Each row's pipeline also keeps the key `Device::compute_pipeline_key` states for its
+/// descriptor, so a consumer that looks one up before creating it finds what the creation made.
+#[test]
+fn a_narrowed_kernel_still_makes_every_row_s_pipeline() {
+    let Some(bitcode) = fixture() else { return };
+    let device = device();
+    let kernel = kernel(&bitcode);
+    let entries = StageEntries::new();
+    let budget = Budget::standard();
+    for (name, d) in &rows() {
+        let read = read_inputs(&device, &kernel, &entries, d);
+        let compiled = device
+            .compile_function(&kernel, &read, &budget)
+            .unwrap_or_else(|why| panic!("{name}'s kernel compiles: {why:?}"));
+        let mut descriptor =
+            ComputePipelineDescriptor::new(StageSource::Compiled(compiled.clone()));
+        descriptor.stage_input = Some(d.clone());
+        let pipeline = device
+            .compile_compute_pipeline(&descriptor, &budget)
+            .unwrap_or_else(|why| {
+                panic!(
+                    "{name}'s pipeline links the kernel compiled under the attributes it reads: \
+                     {why:?}"
+                )
+            });
+        assert_eq!(
+            &pipeline.key,
+            &device.compute_pipeline_key(&descriptor),
+            "{name}'s pipeline keeps a key its descriptor does not state"
+        );
+        assert_eq!(
+            compiled.key(),
+            &device.function_compile_key(&kernel, &read),
+            "{name}'s kernel keeps a key the inputs it compiled under do not state"
+        );
+    }
 }
 
 /// An attribute the kernel **does** read keys a translation of its own: moving one of the five, or
@@ -599,9 +773,14 @@ fn a_read_attribute_is_part_of_the_key() {
     let Some(bitcode) = fixture() else { return };
     let device = device();
     let kernel = kernel(&bitcode);
+    let entries = StageEntries::new();
     let plain = (IndexType::UInt32, INDEX_A);
     let base = descriptor(&[], &[], plain);
-    let key = |d: &StageInputDescriptor| *device.function_compile_key(&kernel, &inputs(d)).digest();
+    let key = |d: &StageInputDescriptor| {
+        *device
+            .function_compile_key(&kernel, &read_inputs(&device, &kernel, &entries, d))
+            .digest()
+    };
     let mut moved_format = base.clone();
     moved_format.attributes.insert(
         0,

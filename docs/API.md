@@ -944,7 +944,12 @@ assert_eq!(linked, pipeline);
   `compile_function_with_report` also returns a `CompileReport` of what the compile cost.
 - A render pipeline's stages compile under inputs that a decode of its functions learns.
   `render_pipeline_key` returns `RenderPipelineKeys`: each stage's function key, and the inputs to
-  compile a missing stage under. Each pipeline kind's compile (`compile_render_variant`,
+  compile a missing stage under. So does a compute pipeline's kernel:
+  `kernel_inputs_read(&kernel, &inputs, &budget, &entries)` narrows the stage-input descriptor to
+  the attributes its entry reads, and the kernel keys and compiles under those, so states that
+  differ only in an attribute it never reads share one compiled function. What a creation reads of
+  the descriptor past the fetch -- its layout agreement, its reflection, and `compute_pipeline_key`
+  -- reads it whole. Each pipeline kind's compile (`compile_render_variant`,
   `compile_mesh_variant`, `compile_compute_pipeline`, `compile_tile_pipeline`) holds a pipeline of
   `Function` stages to the device's compiler word bound (`DeviceProfile::module_word_bound`,
   ANV's) itself; one linked from `Compiled` stages it cannot translate again. A caller who
