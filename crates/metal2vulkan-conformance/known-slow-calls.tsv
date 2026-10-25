@@ -107,10 +107,18 @@
 #
 # BETWEEN TWO UNDEGRADED PASSES THE WORST MOVEMENT OVER ALL 100 ROWS IS 2.00x -- below even the
 # 2.43x the original margin / 2.5 divisor was set from. So the ratio is not inherently unstable;
-# a degraded CPU is what makes it look that way, and `band` being margin / 7.0 rather than margin / 2.5 is paying for a pass the
-# gate should have refused. It did not refuse it: 0.275 against 0.236 us is 1.17x, under the 1.5x
-# CALIBRATION_MAY_MOVE allows, so the calibration reference check passed a pass whose figures move
-# 64x. Tightening that check is the fix, and it is the owner's call, not this file's.
+# and `band` being margin / 7.0 rather than margin / 2.5 is paying for a pass the gate did not
+# refuse: 0.275 against 0.236 us is 1.17x, under the 1.5x CALIBRATION_MAY_MOVE allows, so the
+# calibration reference check passed a pass whose figures move 64x. IT REFUSES IT NOW, and not on
+# the instrument's reading of itself -- every quantity the gate already read ranks that pass as the
+# best of the three, because a uniformly slow CPU is a steady one. What catches it is the floor
+# under the measurement (FLOOR_MAY_REACH): the suite makes hundreds of calls that do almost
+# nothing, so both undegraded passes read a cheapest figure of 41 ns on each leg -- one clock tick,
+# 0.17 instrument costs -- while this one has none of Metal's 2,979 figures under even the resolve
+# line and a floor of 5.15. constant_data_offset, a getter that does nothing, cost 41 ns on Metal's
+# leg in both good passes and 3.000 us in that one. So the divisor is now the owner's to lower, on
+# the figure that matters: a resolved ratio moves 1.97x at worst between undegraded passes, so 2.5
+# puts the band at 4.0x and retires a fixed row there instead of at 1.43x.
 #
 # WHAT THAT MEANS FOR A ROW, CORRECTED. This header used to say that six calls "read far over the
 # margin in one of those two passes and far under it in the other", and name
@@ -159,7 +167,8 @@
 # past the resolve line -- so a degraded pass can also move a row INTO the gate's judgement. A row
 # that thin must neither be added nor retired, which is what src/slow_calls.rs does: the
 # instrument's own cost is bracketed per leg and checked against what this chip's recordings carry,
-# and a row the measurement cannot resolve above that instrument is held in neither direction.
+# and against the cheapest figure that leg produced, and a row the measurement cannot resolve
+# above that instrument is held in neither direction.
 #
 # THE COUNTED FORM OF THE GAP ABOVE, which no gate holds. The per-pipeline translation this header
 # names is invisible to both halves: at 3.62x worst it is under the per-case margin, and a per-call
