@@ -345,6 +345,16 @@ driver's. Each is open work.
   `sparseResidencyImage2D` (the three `SparseNeed` checks), and the Metal half stays
   `probes/sparse_unmapped_blit.m`'s.
 
+- **A sparse mapping update of a slice past the texture's own slices** maps nothing for us, where
+  plain Metal takes the call and reaches real memory: it binds one page, keeps it through an unmap
+  of the same slice, and part of that page lands inside an in-bounds mapped tile, whose texels then
+  read Metal's unwritten pattern (`0xFFFFFFFF`). The runtime maps and counts none
+  (`UnitGrid::clipped_size`), so it loses no texel and no page. The address Metal's out-of-bounds
+  slice produced is Apple's own page layout for the chip and no rule for it is measured, so the
+  exact form cannot be derived yet; the conformance case
+  `sparse-mapping-a-slice-past-the-textures` holds every side of the difference visible, with its
+  four rows of `crates/metal2vulkan-conformance/known-gaps.tsv`.
+
 - **An extended-range format's sample through a constexpr clamp-to-zero sampler at a subnormal
   coordinate**: Metal's texture unit reads a subnormal normalized coordinate as the zero of its
   sign before the address mode decides, so a border axis reads texel 0 just outside the level.

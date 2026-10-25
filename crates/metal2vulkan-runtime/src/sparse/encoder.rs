@@ -7,7 +7,7 @@
 //! regions are GPU memory the work before it may write: the batch waits for a host step, which
 //! reads them once that work completed (`indirect.rs`).
 
-use super::mapping::{MetalUnit, UnitUpdate};
+use super::mapping::{MetalUnit, MoveSide, UnitUpdate};
 use super::texture::SparseImage;
 use super::{tile_texels, SparseProblem};
 use crate::buffer::Buffer;
@@ -258,11 +258,38 @@ impl ResourceStateCommandEncoder {
     /// to 2 onto 1 to 3: only tile 2, onto 3). At `firstMipmapInTail` the slice's whole tail moves,
     /// onto the other side's tail or onto one tile of a tiled level, and one tile onto a whole
     /// tail, as Metal's validation takes and Metal moves them; past it nothing moves, as plain
-    /// Metal (validation stops it). A level or slice past a texture's own, and a source size past
-    /// a tiled level's tiles, are **taken**, moving the tiles inside both textures and nothing
-    /// else: plain Metal takes all three and leaves both heaps' `usedSize` where it was, measured
-    /// beside the update's (`UnitGrid::clipped_region`); which tiles it moved there is not
-    /// measured, so moving the clipped pairs is a near-equivalent. Through a view, each side names its texture's own tiles as
+    /// Metal (validation stops it).
+    ///
+    /// A level or slice past a texture's own, and a region past a tiled level's tiles, are
+    /// **taken**: plain Metal takes all three and leaves both heaps' `usedSize` where it was.
+    /// **Which** tiles it moves there is measured, off the texels either side of the move rather
+    /// than off a counter that cannot show them
+    /// (`metal2vulkan-conformance/probes/sparse_move_past_the_bounds.m`, the M3 Max under macOS
+    /// 27.0.1, plain Metal, one shape per process, each tile's verdict read off all 4,096 of its
+    /// texels):
+    ///
+    /// - a **source level or slice** past the texture's own moves nothing at all — both textures'
+    ///   every tile is as it was — which is what the runtime records for one;
+    /// - a **source region** past the level's tiles moves the tiles inside it, onto the
+    ///   destination tiles at their own place in the region, and moves nothing anywhere for the
+    ///   part outside: nothing wraps into another row and the destination tiles that part named
+    ///   read zero. A destination tile the overhanging part named that was already **mapped** is
+    ///   left holding its own texels rather than zeroed;
+    /// - a **destination region** past the level's tiles is **not clipped**, and that is because
+    ///   the destination is a **run of tiles rather than a region**: it starts at the destination
+    ///   origin, takes `source_size`'s width as stated — clipped only by the tiles the level has
+    ///   to the right of that origin — and takes the next row when one fills, one tile per
+    ///   surviving source tile. A destination origin of (2, 0) with a region of 4 by 1 tiles on a
+    ///   level holding 4 by 4 moved all four source tiles, the last two onto (2, 1) and (3, 1);
+    ///   the same onto (2, 1) put them at (2, 2) and (3, 2); and a source of 4 by 4 tiles clipped
+    ///   to 2 by 2 onto an origin of (1, 1), where three tiles lie to the right, put its third at
+    ///   (3, 1), which is the stated width's row and not the clipped source's. Where the stated
+    ///   destination region fits inside the level the run is exactly that region, so an ordinary
+    ///   move pairs by the tile's own offset within it, which a 2 by 2 move onto (1, 1) read.
+    ///
+    /// `UnitGrid::move_pairs` holds all of it, and says which two parts of it — past the level's
+    /// last row, and a region deeper than one image — no shape measured. Through a view, each side
+    /// names its texture's own tiles as
     /// [`update_texture_mapping`](Self::update_texture_mapping)'s does (the levels the texture's,
     /// the slices the view's; validation stops a region past the view's own level). Plain Metal
     /// moves between textures of different heaps and of different formats, tiles of different sizes
@@ -299,20 +326,20 @@ impl ResourceStateCommandEncoder {
         };
         let source_slice = source_slice.saturating_add(first_slice(source, from)?);
         let destination_slice = destination_slice.saturating_add(first_slice(destination, to)?);
-        let from_region = Region {
-            origin: source_origin,
-            size: source_size,
-        };
-        let to_region = Region {
-            origin: destination_origin,
-            size: source_size,
-        };
-        let clipped = |image: &SparseImage, level, slice, region: &Region| {
-            image.grid.clipped_region(level, slice, region)
-        };
-        let sources = clipped(from, source_level, source_slice, &from_region);
-        let destinations = clipped(to, destination_level, destination_slice, &to_region);
-        let pairs: Vec<(MetalUnit, MetalUnit)> = sources.into_iter().zip(destinations).collect();
+        let pairs: Vec<(MetalUnit, MetalUnit)> = from.grid.move_pairs(
+            MoveSide {
+                level: source_level,
+                slice: source_slice,
+                origin: source_origin,
+            },
+            source_size,
+            &to.grid,
+            MoveSide {
+                level: destination_level,
+                slice: destination_slice,
+                origin: destination_origin,
+            },
+        );
         if !pairs.is_empty() {
             self.updates.push(SparseUpdate::Move {
                 source: source.clone(),

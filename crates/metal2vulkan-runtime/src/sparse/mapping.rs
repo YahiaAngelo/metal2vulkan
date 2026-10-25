@@ -12,7 +12,7 @@
 
 use super::emulated::Written;
 use super::texture::{SparseShape, VkSparseLayout};
-use crate::values::Region;
+use crate::values::{Origin, Region, Size};
 use metal2vulkan::bind::TileMapping;
 use metal2vulkan::metal::TextureType;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -139,6 +139,11 @@ fn covering(start: [u32; 3], end: [u32; 3], unit: [u32; 3]) -> impl Iterator<Ite
     (first[2]..last[2]).flat_map(move |z| {
         (first[1]..last[1]).flat_map(move |y| (first[0]..last[0]).map(move |x| [x, y, z]))
     })
+}
+
+/// An origin's three axes as the unit grid's own calls take them.
+fn axes_of(origin: Origin) -> [u32; 3] {
+    [origin.x, origin.y, origin.z].map(|axis| axis as u32)
 }
 
 impl UnitGrid {
@@ -477,30 +482,157 @@ impl UnitGrid {
     /// Differs: Metal's `usedSize` over a region of a **slice** past the texture's varies — a tile
     /// more beside other regions, and an unmap of it can take the count below zero, and the direct
     /// selector alone took one page for it in the measurement above — where the runtime maps and
-    /// counts none. Which tiles a move past these bounds moves is not measured: `usedSize` cannot
-    /// show it and the probe reads no texels.
+    /// counts none. That difference is the conformance suite's
+    /// `sparse-mapping-a-slice-past-the-textures`, which reads the texels four mapped tiles hold
+    /// either side of such an update as well as the count, because the count cannot say which
+    /// tiles an update reached.
     pub(crate) fn clipped_region(&self, level: u64, slice: u64, region: &Region) -> Vec<MetalUnit> {
-        if level >= self.shape.levels || slice >= u64::from(self.slices()) {
+        let Some(clipped) = self.clipped_size(level, slice, region) else {
             return Vec::new();
+        };
+        self.update_units(
+            level as u32,
+            slice as u32,
+            axes_of(region.origin),
+            clipped.map(|axis| axis as u32),
+        )
+    }
+
+    /// The tiles of `region` of `level` and `slice` that lie inside this grid, on each axis, or
+    /// `None` where the region names no unit of it at all.
+    ///
+    /// The one place [`clipped_region`](Self::clipped_region)'s rule is written down, so the move
+    /// below reads the same bounds the three mapping selectors do. A level at
+    /// `firstMipmapInTail` answers one unit however large the region is — the slice's whole tail —
+    /// which is what `[1, 1, 1]` stands for here; a level past the tail, a level or slice past the
+    /// texture's own, an origin past the level's tiles and a size of 0 on an axis each answer
+    /// `None`.
+    fn clipped_size(&self, level: u64, slice: u64, region: &Region) -> Option<[u64; 3]> {
+        if level >= self.shape.levels || slice >= u64::from(self.slices()) {
+            return None;
         }
-        let (level32, slice32) = (level as u32, slice as u32);
-        if level32 >= self.first_tail() {
-            return self.update_units(level32, slice32, [0; 3], [0; 3]);
+        let level32 = level as u32;
+        match level32.cmp(&self.first_tail()) {
+            std::cmp::Ordering::Equal => return Some([1; 3]),
+            std::cmp::Ordering::Greater => return None,
+            std::cmp::Ordering::Less => {}
         }
         let tiles = self.tiles(level32).map(u64::from);
         let origin = [region.origin.x, region.origin.y, region.origin.z];
         let size = [region.size.width, region.size.height, region.size.depth];
         if (0..3).any(|axis| origin[axis] >= tiles[axis] || size[axis] == 0) {
-            return Vec::new();
+            return None;
         }
-        let clipped: [u64; 3] =
-            std::array::from_fn(|axis| size[axis].min(tiles[axis] - origin[axis]));
-        self.update_units(
-            level32,
-            slice32,
-            origin.map(|axis| axis as u32),
-            clipped.map(|axis| axis as u32),
-        )
+        Some(std::array::from_fn(|axis| {
+            size[axis].min(tiles[axis] - origin[axis])
+        }))
+    }
+
+    /// The Metal units a move of `size` tiles at `source`'s origin of its level and slice of this
+    /// grid, onto `into`'s origin of its level and slice of `destination`, moves — each source
+    /// unit with the unit it moves onto.
+    ///
+    /// **This is plain Metal's own rule, measured off the texels either side of the move** on an
+    /// Apple M3 Max under macOS 27.0.1
+    /// (`metal2vulkan-conformance/probes/sparse_move_past_the_bounds.m`, one shape per process,
+    /// each tile's verdict read off all 4,096 of its texels). A move changes no `usedSize`, so a
+    /// counter cannot see any of it; eight shapes settle it and one rule answers all eight:
+    ///
+    /// - **the source region is clipped** to the level's own tiles, on each axis, and its
+    ///   surviving tiles move in Metal's order (x, then y, then z). The part outside moves nothing
+    ///   anywhere: it does not wrap into another row and it takes no destination tile. A level or
+    ///   slice past the texture's own, an origin past the level's tiles and a size of 0 on an axis
+    ///   each move nothing at all ([`clipped_size`](Self::clipped_size)'s `None`).
+    /// - **the destination is a run of tiles, not a region.** It starts at `into`'s origin and is
+    ///   laid out `size.width` tiles to a row — the width **as stated**, clipped only by the tiles
+    ///   the level has to the right of the origin — taking the next row when one fills, one
+    ///   destination per surviving source tile. So the destination's width is clipped and its
+    ///   height is **not**: a destination region that runs past the level's right edge does not
+    ///   lose those tiles, it continues on the rows below.
+    ///
+    /// Where the stated destination region fits inside the level, `size.width` is the whole of it
+    /// and the run is exactly the region, so the pairing is the tile's own offset within it —
+    /// which is what an ordinary move looks like, and is why the run shows only past an edge.
+    ///
+    /// Two things here are **not** measured and take the conservative form. A destination run that
+    /// would pass the level's **last row** drops the tiles past it, rather than wrapping on to
+    /// somewhere nobody has read. And a region deeper than one image pairs per image, the run
+    /// restarting at the destination's own row and column for each: every measured shape is one
+    /// image deep, and `size.width` tiles to a row is the one part of the rule a 3D move could
+    /// read differently.
+    ///
+    /// At `firstMipmapInTail` on either side the units are one each — the slice's whole tail — so
+    /// a tail moves onto the other side's tail or onto one tile of a tiled level, and one tile
+    /// onto a whole tail, which is what Metal's validation takes and Metal moves.
+    pub(crate) fn move_pairs(
+        &self,
+        source: MoveSide,
+        size: Size,
+        destination: &UnitGrid,
+        into: MoveSide,
+    ) -> Vec<(MetalUnit, MetalUnit)> {
+        let from = Region {
+            origin: source.origin,
+            size,
+        };
+        let to = Region {
+            origin: into.origin,
+            size,
+        };
+        let (Some(held), Some(takes)) = (
+            self.clipped_size(source.level, source.slice, &from),
+            destination.clipped_size(into.level, into.slice, &to),
+        ) else {
+            return Vec::new();
+        };
+        let (level, slice) = (into.level as u32, into.slice as u32);
+        let sources = self.update_units(
+            source.level as u32,
+            source.slice as u32,
+            axes_of(source.origin),
+            held.map(|axis| axis as u32),
+        );
+        // A tail on either side is one unit however many tiles the region names, so the two lists
+        // are one each and the pairing is the zip of them.
+        if source.level as u32 >= self.first_tail() || level >= destination.first_tail() {
+            let targets =
+                destination.update_units(level, slice, axes_of(into.origin), takes.map(|_| 1));
+            return sources.into_iter().zip(targets).collect();
+        }
+        let tiles = destination.tiles(level).map(u64::from);
+        // The run's row: the width as the move states it, clipped by the tiles to the right of the
+        // origin. The stated width and not the clipped source's, which is what the measurement
+        // pins down -- a source of 4 by 4 tiles clipped to 2 by 2 onto an origin of (1, 1) put its
+        // third tile at (3, 1), which is a row of three and not of two.
+        let per_row = size.width.min(tiles[0] - into.origin.x).max(1);
+        let image = held[0].max(1) * held[1].max(1);
+        let mut pairs = Vec::new();
+        for (at, unit) in sources.into_iter().enumerate() {
+            let at = at as u64;
+            // Where the tile lies in its own image of the source region, and which image it is:
+            // the run restarts at the destination's origin for each image, which is the part of
+            // the rule no measured shape reaches.
+            let (within, slab) = (at % image, at / image);
+            let (x, y) = (
+                into.origin.x + within % per_row,
+                into.origin.y + within / per_row,
+            );
+            let z = into.origin.z + slab;
+            // Past the level's last row or image the destination is unmeasured, so nothing moves
+            // there rather than moving somewhere nobody has read.
+            if y >= tiles[1] || z >= tiles[2].max(1) {
+                continue;
+            }
+            pairs.push((
+                unit,
+                MetalUnit::Tile {
+                    level,
+                    slice,
+                    at: [x as u32, y as u32, z as u32],
+                },
+            ));
+        }
+        pairs
     }
 
     /// The bytes of memory `unit` binds.
@@ -523,6 +655,17 @@ impl UnitGrid {
             [0, 1, 2].map(|axis| granularity[axis].min(extent[axis].saturating_sub(offset[axis])));
         (offset, size)
     }
+}
+
+/// One side of a move: which level, slice and origin of one texture's tile grid it names.
+///
+/// The two sides share the move's one `sourceSize`, as Metal's selector does, so the size is not
+/// here: it is [`UnitGrid::move_pairs`]'s own argument.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MoveSide {
+    pub(crate) level: u64,
+    pub(crate) slice: u64,
+    pub(crate) origin: Origin,
 }
 
 /// The units of one mapping update, as encoded: what the scheduler applies in order.

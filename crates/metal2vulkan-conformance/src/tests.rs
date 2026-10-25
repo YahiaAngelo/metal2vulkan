@@ -6590,19 +6590,22 @@ fn every_case_carries_a_cost_recording() {
     /// the next one empties the list again.
     ///
     /// Four are the degenerate screen extent crossed with the descriptor's construction
-    /// routes ([`crate::cases::rate_map_degenerate_forms`] and `rate-map-degenerate-form-sweep`)
-    /// and two are the shared creator crossed with the storage mode
-    /// ([`crate::cases::shared_creator_formats`]), all authored after the last whole-set
+    /// routes ([`crate::cases::rate_map_degenerate_forms`] and `rate-map-degenerate-form-sweep`),
+    /// two are the shared creator crossed with the storage mode
+    /// ([`crate::cases::shared_creator_formats`]) and one is the sparse mapping update of a slice
+    /// past the texture's slices ([`crate::cases::sparse_mappings::a_slice_past_the_textures`]),
+    /// all authored after the last whole-set
     /// `cost --write`. A cost record needs the whole set measured
     /// in both shapes -- a case's counts depend on what ran before it in the same process -- so a
-    /// selection cannot pay it and the next whole-set run empties these six lines again.
-    const AFTER_THE_LAST_RUN: [&str; 6] = [
+    /// selection cannot pay it and the next whole-set run empties these seven lines again.
+    const AFTER_THE_LAST_RUN: [&str; 7] = [
         "rate-map-degenerate-form-sweep",
         "rate-map-zero-width-layers-subscript",
         "rate-map-zero-width-with-layer-count-and-layers",
         "rate-map-zero-width-with-screen-size-and-layer",
         "shared-creator-extended-range-samples",
         "shared-creator-padded-format-storage",
+        "sparse-mapping-a-slice-past-the-textures",
     ];
 
     /// Cases a whole-set run did not cover although they were committed before it ran.

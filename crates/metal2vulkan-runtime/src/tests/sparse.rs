@@ -4,13 +4,13 @@
 
 use crate::error::{Error, RuntimeGap};
 use crate::sparse::device::{wanted, SparseDevice};
-use crate::sparse::mapping::{MetalUnit, TexelBox, UnitGrid, VkUnit};
+use crate::sparse::mapping::{MetalUnit, MoveSide, TexelBox, UnitGrid, VkUnit};
 use crate::sparse::texture::{sparse_refusal, SparseShape, VkSparseLayout};
 use crate::sparse::{
     convert_pixel_regions, first_mipmap_in_tail, pixel_region_tiles, tail_size_in_bytes,
     tile_texels, SparsePageSize, SparseTextureRegionAlignmentMode,
 };
-use crate::{HeapDescriptor, Region};
+use crate::{HeapDescriptor, Origin, Region, Size};
 use ash::vk;
 use metal2vulkan::error::{Feature, SparseNeed, Unsupported};
 use metal2vulkan::metal::{PixelFormat, TextureType};
@@ -693,6 +693,142 @@ fn a_mapping_update_past_the_bounds_clips_as_plain_metal_does() {
         grid.clipped_region(0, 0, &Region::new_2d(4, 4, 1, 1))
             .is_empty(),
         "the tile past (3, 3)"
+    );
+}
+
+/// **Which tiles a sparse move moves, past the bounds and inside them**, against plain Metal's own
+/// readings.
+///
+/// A move changes no `usedSize`, so nothing a counter can read says any of this; these are the
+/// texels either side of the move on an Apple M3 Max under macOS 27.0.1, plain Metal
+/// (`AGXG15CDevice`, read back off the device), one shape per process, each tile's verdict off all
+/// 4,096 of its texels, over this very shape — a 256 by 256 nine-level texture whose level 0 holds
+/// 4 by 4 of Metal's 16-KiB tiles, every tile of the source filled with a word naming itself
+/// (`metal2vulkan-conformance/probes/sparse_move_past_the_bounds.m`).
+///
+/// Each assertion below names its probe shape and what Metal read for it. The first is the
+/// control: an entirely in-bounds move whose reading **must** change, or none of the rest is a
+/// measurement of anything.
+#[test]
+fn a_move_is_metals_run_of_destination_tiles() {
+    let source_grid = grid([256, 256, 1], 9, 1, 3, false);
+    let other = grid([256, 256, 1], 9, 1, 3, false);
+    let at = |level: u64, slice: u64, x: u64, y: u64| MoveSide {
+        level,
+        slice,
+        origin: Origin::new(x, y, 0),
+    };
+    let four_wide = Size::new(4, 1, 1);
+    let four = Size::new(4, 4, 1);
+    let two = Size::new(2, 2, 1);
+    // `control`: one tile at (0, 0) onto (3, 3). Metal read B(3, 3) holding A(0, 0)'s word and
+    // A(0, 0) reading zero, every other tile of both textures as it was.
+    assert_eq!(
+        source_grid.move_pairs(at(0, 0, 0, 0), Size::new(1, 1, 1), &other, at(0, 0, 3, 3)),
+        vec![(tile(0, 0, [0, 0]), tile(0, 0, [3, 3]))]
+    );
+    // `dest-2d`: 2 by 2 tiles at (0, 0) onto (1, 1), both sides inside the level. Metal read
+    // B(1,1), B(2,1), B(1,2), B(2,2) holding A(0,0), A(1,0), A(0,1), A(1,1) -- the tile's own
+    // offset within the region, which is what an ordinary move looks like.
+    assert_eq!(
+        source_grid.move_pairs(at(0, 0, 0, 0), two, &other, at(0, 0, 1, 1)),
+        vec![
+            (tile(0, 0, [0, 0]), tile(0, 0, [1, 1])),
+            (tile(0, 0, [1, 0]), tile(0, 0, [2, 1])),
+            (tile(0, 0, [0, 1]), tile(0, 0, [1, 2])),
+            (tile(0, 0, [1, 1]), tile(0, 0, [2, 2])),
+        ]
+    );
+    // `region-open`: the SOURCE overhangs -- 4 by 1 tiles at (2, 0) of a level holding 4 by 4 --
+    // onto (0, 0). Metal moved the two tiles inside and nothing anywhere for the two outside:
+    // B(0,0) and B(1,0) held A(2,0) and A(3,0), B(2,0) and B(3,0) read zero, and A's other rows
+    // were untouched, so nothing wrapped.
+    assert_eq!(
+        source_grid.move_pairs(at(0, 0, 2, 0), four_wide, &other, at(0, 0, 0, 0)),
+        vec![
+            (tile(0, 0, [2, 0]), tile(0, 0, [0, 0])),
+            (tile(0, 0, [3, 0]), tile(0, 0, [1, 0])),
+        ]
+    );
+    // `region-dest`: the DESTINATION overhangs -- 4 by 1 tiles at (0, 0) onto (2, 0), two tiles
+    // past the row. Metal moved ALL FOUR: B(2,0), B(3,0), B(2,1), B(3,1) held A(0,0), A(1,0),
+    // A(2,0), A(3,0), and A's whole row 0 read zero. The destination's width is clipped to the two
+    // tiles right of the origin and its height is not, so the run takes the next row.
+    assert_eq!(
+        source_grid.move_pairs(at(0, 0, 0, 0), four_wide, &other, at(0, 0, 2, 0)),
+        vec![
+            (tile(0, 0, [0, 0]), tile(0, 0, [2, 0])),
+            (tile(0, 0, [1, 0]), tile(0, 0, [3, 0])),
+            (tile(0, 0, [2, 0]), tile(0, 0, [2, 1])),
+            (tile(0, 0, [3, 0]), tile(0, 0, [3, 1])),
+        ]
+    );
+    // `dest-row`: the same overhang a row down, onto (2, 1). Metal read B(2,1), B(3,1), B(2,2),
+    // B(3,2), so the run's row is the origin's own column onwards and not the level's left edge.
+    assert_eq!(
+        source_grid.move_pairs(at(0, 0, 0, 0), four_wide, &other, at(0, 0, 2, 1)),
+        vec![
+            (tile(0, 0, [0, 0]), tile(0, 0, [2, 1])),
+            (tile(0, 0, [1, 0]), tile(0, 0, [3, 1])),
+            (tile(0, 0, [2, 0]), tile(0, 0, [2, 2])),
+            (tile(0, 0, [3, 0]), tile(0, 0, [3, 2])),
+        ]
+    );
+    // `src-clip-2d`: both sides overhang, and the reading that says the run's row is the width the
+    // move STATES rather than the clipped source's. 4 by 4 tiles at (2, 2) clip to 2 by 2, onto
+    // (1, 1) where three tiles lie to the right: Metal read B(1,1), B(2,1), B(3,1), B(1,2) holding
+    // A(2,2), A(3,2), A(2,3), A(3,3). A row of the clipped two would have put the third at (1, 2).
+    assert_eq!(
+        source_grid.move_pairs(at(0, 0, 2, 2), four, &other, at(0, 0, 1, 1)),
+        vec![
+            (tile(0, 0, [2, 2]), tile(0, 0, [1, 1])),
+            (tile(0, 0, [3, 2]), tile(0, 0, [2, 1])),
+            (tile(0, 0, [2, 3]), tile(0, 0, [3, 1])),
+            (tile(0, 0, [3, 3]), tile(0, 0, [1, 2])),
+        ]
+    );
+    // `level` and `slice`: a source level or slice past the texture's own moved nothing at all --
+    // both textures' every tile as it was and `usedSize` where it started. The destination side of
+    // each, and an origin past the level's last tile, move nothing here too; Metal's own reading
+    // for those is the update's rather than the move's.
+    for (source, into) in [
+        (at(9, 0, 0, 0), at(0, 0, 0, 0)),
+        (at(0, 0, 0, 0), at(9, 0, 0, 0)),
+        (at(0, 1, 0, 0), at(0, 0, 0, 0)),
+        (at(0, 0, 0, 0), at(0, 1, 0, 0)),
+        (at(0, 0, 4, 4), at(0, 0, 0, 0)),
+        (at(0, 0, 0, 0), at(0, 0, 4, 4)),
+        (at(4, 0, 0, 0), at(0, 0, 0, 0)),
+    ] {
+        assert!(
+            source_grid.move_pairs(source, two, &other, into).is_empty(),
+            "{source:?} -> {into:?}"
+        );
+    }
+    // A size of no tiles on an axis moves nothing, as it maps nothing.
+    assert!(source_grid
+        .move_pairs(at(0, 0, 0, 0), Size::new(0, 2, 1), &other, at(0, 0, 0, 0))
+        .is_empty());
+    // The tail is one unit however large the region: a tail onto a tiled level's tile, and a tile
+    // onto a whole tail, each one pair, which is what Metal's validation takes and Metal moves.
+    let tail = MetalUnit::Tail { slice: 0 };
+    assert_eq!(
+        source_grid.move_pairs(at(3, 0, 0, 0), four, &other, at(0, 0, 1, 1)),
+        vec![(tail, tile(0, 0, [1, 1]))]
+    );
+    assert_eq!(
+        source_grid.move_pairs(at(0, 0, 1, 1), four, &other, at(3, 0, 0, 0)),
+        vec![(tile(0, 0, [1, 1]), tail)]
+    );
+    // A run that would pass the level's last row drops the tiles past it: unmeasured, so nothing
+    // moves there rather than moving somewhere nobody has read. 4 by 1 tiles onto (2, 3), the
+    // level's last row, places two and drops two.
+    assert_eq!(
+        source_grid.move_pairs(at(0, 0, 0, 0), four_wide, &other, at(0, 0, 2, 3)),
+        vec![
+            (tile(0, 0, [0, 0]), tile(0, 0, [2, 3])),
+            (tile(0, 0, [1, 0]), tile(0, 0, [3, 3])),
+        ]
     );
 }
 

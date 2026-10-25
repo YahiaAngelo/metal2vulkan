@@ -21,7 +21,7 @@
 //! | region size, in tiles | 0, 1, a row, a level's whole grid, the last tile | — | nothing: the bounds are 0 and the level's own grid, and both are rows |
 //! | region origin | 0, the last tile of the level | — | — |
 //! | mip level | 0, 1, 2, `firstMipmapInTail`, past the texture's levels | 5 of 9 | levels 4 to 8, which are past `firstMipmapInTail` and whose update Metal maps as the tail's |
-//! | slice | 0 and 1 of a two-slice array | 2 | — |
+//! | slice | 0 and 1 of a two-slice array, and one past the texture's two | 3 | — |
 //! | update selector | singular, plural, indirect | 3 | — |
 //! | indirect argument count | 0, 1, several | — | a count past the buffer, which the runtime refuses typed and whose Metal behaviour is a refusal case of its own |
 //! | indirect offset | 0, a nonzero multiple of 4 | — | an offset that is not a multiple of 4, which the runtime documents as read at the multiple below and which belongs to a refusal case |
@@ -38,7 +38,10 @@
 //!   it by one page, a level's whole grid by that level's tiles;
 //! - **the level** moves it: level 0 of this texture is 16 tiles, level 1 is 4, level 2 is 1, and
 //!   the tail is one page however small a region names it;
-//! - **the slice** moves it: a second slice's tiles are tiles of their own;
+//! - **the slice** moves it: a second slice's tiles are tiles of their own, and a slice **past**
+//!   the texture's own moves it where plain Metal takes a page for one and we take none
+//!   ([`a_slice_past_the_textures`], which also reads the texels four mapped tiles hold either
+//!   side of such an update, because `usedSize` cannot say which tiles one reached);
 //! - **the move** does not move it, which is the point of its row: the runtime's own
 //!   documentation says a move leaves `usedSize` alone, and nothing had measured that.
 //!
@@ -121,9 +124,22 @@ const PAST_THE_LEVELS: u64 = LEVELS as u64;
 /// The slices the array rows' texture holds.
 const SLICES: u32 = 2;
 
+/// A slice past the texture's own: the shape [`A_SLICE_PAST_THE_TEXTURES`] states.
+const PAST_THE_SLICES: u64 = SLICES as u64;
+
 /// The byte [`mapped_tiles_hold_their_texels`] fills its mapped tiles with. Not zero: a tile that
 /// read zero would be indistinguishable from one the copy never reached.
 const FILL: u8 = 0xc3;
+
+/// The four bytes [`A_SLICE_PAST_THE_TEXTURES`] fills its four mapped tiles with, in the order
+/// (slice 0, tile 0), (slice 0, tile 1), (slice 1, tile 0), (slice 1, tile 1).
+///
+/// **Four distinct values and none of them zero**, which is what makes the row's reading able to
+/// separate the rules rather than only to pass. A side that mapped one slice for both, or one tile
+/// for both, reads another row's byte where its own belongs; and a tile an update unmapped reads
+/// zero through a blit on this oracle (`probes/sparse_unmapped_blit.m`), which no fill here can,
+/// so "this tile lost its mapping" and "this tile is as it was" are two readings and not one.
+const SLICE_FILLS: [u8; 4] = [0xc3, 0x3c, 0xa5, 0x5a];
 
 /// The notices **every** row of the family takes.
 ///
@@ -329,6 +345,105 @@ static A_LEVEL_PAST_THE_TEXTURES: Row = Row {
             0,
             update(MappingMode::Map, TileRect::one([0, 0]), PAST_THE_LEVELS, 0),
         )
+    },
+};
+
+/// **A slice past the texture's own**, on its own, and the one row of the family that reads
+/// texels to answer a question `usedSize` cannot.
+///
+/// Plain Metal **takes** the call, as it takes a level past the texture's: measured on this M3 Max
+/// through the direct selector (`probes/sparse_mapping_past_the_bounds.m`), where a map of one tile
+/// of slice 2 of a two-slice texture raised the heap's `usedSize` by one page and the command
+/// buffer completed with no error. So a typed refusal of ours would be a refusal where Metal
+/// allows, and the runtime maps nothing and counts nothing for it
+/// (`UnitGrid::clipped_region`). Metal's own API validation layer stops the call, which is the
+/// second oracle and not this one.
+///
+/// **A page in `usedSize` does not say which tiles an update reached, and that is why this row
+/// reads texels.** A heap counter moves for a tile anywhere, or for no tile at all, so a case
+/// built on it alone passes while the question stays open — which is exactly how the gap this row
+/// closes survived. Four tiles are mapped and filled with [`SLICE_FILLS`]' four distinct bytes,
+/// two in each real slice, and read back **before and after** an update of the slice past the
+/// texture's. The two readings separate the rules:
+///
+/// - **the update reaches no tile** (what the runtime does): all four tiles read their own byte
+///   in both readings, and only `usedSize` differs;
+/// - **the slice is read as slice 0**: slice 0's tile (1, 0) is unmapped by the row's `Unmap`
+///   step and reads zero in the second reading, where no fill of this row writes zero;
+/// - **the slice is clamped to the last**: slice 1's tile (1, 0) reads zero instead;
+/// - **the update reaches a tile of the slice it names and nothing visible**: the four tiles are
+///   as they were and `usedSize` moved, which is the counter-without-a-tile answer and is
+///   distinguishable from the first because `usedSize` moved.
+///
+/// Both modes are stated, because they are measured to differ here: a map of such a region took a
+/// page and an unmap of one can take the count below zero. The `Unmap` is the mode the texel
+/// reading hangs on — it names a tile both real slices hold **mapped and filled**, so a side that
+/// reached slice 0 or slice 1 with it loses a byte somebody wrote, and every read of this row is
+/// still of a tile the program itself mapped.
+static A_SLICE_PAST_THE_TEXTURES: Row = Row {
+    case: "sparse-mapping-a-slice-past-the-textures",
+    notices: &[],
+    program: || {
+        // The two tiles of level 0 each real slice holds mapped: the second is the one the
+        // out-of-bounds `Unmap` names.
+        const HELD: [TileRect; 2] = [TileRect::one([0, 0]), TileRect::one([1, 0])];
+        // The four tiles read back, in slice then tile order, so the reads line up with
+        // [`SLICE_FILLS`].
+        let reads = || {
+            let mut steps = Vec::new();
+            for slice in 0..SLICES as u64 {
+                for region in HELD {
+                    steps.push(MappingStep::ReadRegion {
+                        texture: 0,
+                        level: 0,
+                        slice,
+                        region,
+                    });
+                }
+            }
+            steps
+        };
+        let mut steps = Vec::new();
+        for slice in 0..SLICES as u64 {
+            for region in HELD {
+                steps.push(MappingStep::One {
+                    texture: 0,
+                    mode: MappingMode::Map,
+                    region,
+                    level: 0,
+                    slice,
+                });
+            }
+        }
+        for slice in 0..SLICES as u64 {
+            for (which, region) in HELD.iter().enumerate() {
+                steps.push(MappingStep::FillRegion {
+                    texture: 0,
+                    level: 0,
+                    slice,
+                    region: *region,
+                    value: SLICE_FILLS[slice as usize * HELD.len() + which],
+                });
+            }
+        }
+        // The control reading: four mapped tiles holding four distinct bytes. Without it a second
+        // reading of all zeroes would be indistinguishable from a fill that never landed.
+        steps.extend(reads());
+        steps.push(MappingStep::Commit);
+        // A map of a region of a slice past the texture's own, at a tile no real slice has
+        // mapped, so a page Metal takes for it is a page this row did not ask for anywhere.
+        steps.extend(update(
+            MappingMode::Map,
+            TileRect::one([2, 0]),
+            0,
+            PAST_THE_SLICES,
+        ));
+        // And an unmap of one, at a tile both real slices hold mapped and filled: the step whose
+        // effect the reading after it can actually see.
+        steps.extend(update(MappingMode::Unmap, HELD[1], 0, PAST_THE_SLICES));
+        steps.extend(reads());
+        steps.push(MappingStep::Commit);
+        program(vec![array()], Vec::new(), 0, steps)
     },
 };
 
@@ -656,11 +771,12 @@ static MAPPED_TEXELS: Row = Row {
 
 /// Every row of the family, in the order the report lists them.
 #[cfg(test)]
-static EVERY_ROW: [&Row; 9] = [
+static EVERY_ROW: [&Row; 10] = [
     &MODES_AND_SIZES,
     &LEVELS_AND_THE_TAIL,
     &A_LEVEL_PAST_THE_TEXTURES,
     &SLICES_OF_AN_ARRAY,
+    &A_SLICE_PAST_THE_TEXTURES,
     &PLURAL_UPDATES,
     &INDIRECT_UPDATES,
     &MOVES,
@@ -772,6 +888,14 @@ pub fn slices_of_an_array() -> SparseMappings {
     }
 }
 
+/// The case of a slice past the texture's own, which our side maps nothing for and plain Metal
+/// takes a page for, with the texels four mapped tiles hold either side of it.
+pub fn a_slice_past_the_textures() -> SparseMappings {
+    SparseMappings {
+        row: &A_SLICE_PAST_THE_TEXTURES,
+    }
+}
+
 /// The case of the plural update selector.
 pub fn plural_updates() -> SparseMappings {
     SparseMappings {
@@ -810,6 +934,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
         Box::new(levels_and_the_tail()),
         Box::new(a_level_past_the_textures()),
         Box::new(slices_of_an_array()),
+        Box::new(a_slice_past_the_textures()),
         Box::new(plural_updates()),
         Box::new(indirect_updates()),
         Box::new(moves()),
@@ -885,6 +1010,12 @@ mod tests {
     /// accident. A level past the texture's own is allowed and is a row of its own — Metal maps
     /// nothing for it — so the check bounds the region against the **tail's** grid there, which is
     /// the smallest any level has.
+    ///
+    /// A **slice** past the texture's own is allowed on the same terms, and only by exactly one:
+    /// [`A_SLICE_PAST_THE_TEXTURES`] is the row that names it, plain Metal is measured to take such
+    /// an update, and the region it names is still bounded by its level's own tiles here — which is
+    /// the bound that could fault a device. The slice indexes images and not memory within one, so
+    /// a slice one past the texture's cannot reach past a level's grid however the device reads it.
     #[test]
     fn every_region_lies_inside_its_level() {
         for row in EVERY_ROW {
@@ -892,9 +1023,11 @@ mod tests {
             for (at, step) in program.steps.iter().enumerate() {
                 for (region, level, slice) in regions_of(step) {
                     let grid = tiles_at(level.min(u64::from(LEVELS) - 1) as u32);
+                    let slices = u64::from(slices_of(&program));
                     assert!(
-                        slice < u64::from(slices_of(&program)),
-                        "{}: step {at} names slice {slice}",
+                        slice < slices
+                            || (slice == slices && row.case == A_SLICE_PAST_THE_TEXTURES.case),
+                        "{}: step {at} names slice {slice} of a texture of {slices}",
                         row.case
                     );
                     for (axis, tiles) in grid.iter().enumerate() {
@@ -1094,8 +1227,10 @@ mod tests {
                 }
             }
         }
-        // And the check is not vacuous: one row does fill and read, so the walk above ran.
-        assert_eq!(fills, 2, "no row fills or reads a tile at all");
+        // And the check is not vacuous: two rows fill and read, so the walk above ran. One tile
+        // filled and one read by `mapped_tiles_hold_their_texels`, and four filled and eight read
+        // (two readings of four tiles) by `a_slice_past_the_textures`.
+        assert_eq!(fills, 2 + 12, "no row fills or reads a tile at all");
     }
 
     /// The tiles `region` of `level` and `slice` holds, as the keys the walk above tracks.
@@ -1195,7 +1330,8 @@ mod tests {
         for level in [0, 1, 2, TAIL_LEVEL, PAST_THE_LEVELS] {
             assert!(levels.contains(&level), "no row names level {level}");
         }
-        assert_eq!(slices, BTreeSet::from([0, 1]));
+        // 0 and 1 of the array, and one past the texture's two.
+        assert_eq!(slices, BTreeSet::from([0, 1, PAST_THE_SLICES]));
         // A region of no tiles, of one, and of a level's whole grid.
         for tiles in [0, 1, tiles_at(0)[0] * tiles_at(0)[1]] {
             assert!(sizes.contains_key(&tiles), "no row states {tiles} tiles");
