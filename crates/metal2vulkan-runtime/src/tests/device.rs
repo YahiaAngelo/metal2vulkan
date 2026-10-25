@@ -487,9 +487,11 @@ fn a_device_below_the_timeline_semaphore_minimum_is_refused() {
 /// family in turn, the first family's first queue leading; a device of one family takes its
 /// queues, at most four; a device whose families differ (a transfer-only family beside the
 /// graphics one) takes the first graphics-and-compute family's queues alone, wherever it sits.
-/// The next queues in the same order, at most two, are reserved for presenting queues, and the
-/// first queue of a family of transfers alone whose copies take any texel for staging copies; a
-/// family of compute without graphics is reserved for none.
+/// The round robin takes those queues less the two reserved for presenting queues, at least four
+/// and at most sixteen, so a family with queues to spare lends them rather than leaving them
+/// idle; the next queues in the same order, at most two, are reserved for presenting queues, and
+/// the first queue of a family of transfers alone whose copies take any texel for staging copies;
+/// a family of compute without graphics is reserved for none.
 #[test]
 fn equivalent_queue_families_are_all_taken_in_turn() {
     let all = vk::QueueFlags::GRAPHICS
@@ -546,19 +548,34 @@ fn equivalent_queue_families_are_all_taken_in_turn() {
     let decode = family(transfer.queue_flags | vk::QueueFlags::VIDEO_DECODE_KHR, 1);
     let encode = family(transfer.queue_flags | vk::QueueFlags::VIDEO_ENCODE_KHR, 1);
     let flow = family(transfer.queue_flags | vk::QueueFlags::OPTICAL_FLOW_NV, 1);
+    // Fourteen of the sixteen go to the round robin, two to presenting: its queues past the two
+    // reserved would otherwise sit idle while logical queues shared four.
+    let fourteen: Vec<(u32, u32)> = (0..14).map(|index| (0, index)).collect();
     assert_eq!(
         queue_plan(&[family(all, 16), transfer, compute, decode, encode, flow]),
-        staged(
-            0,
-            &[(0, 0), (0, 1), (0, 2), (0, 3)],
-            &[(0, 4), (0, 5)],
-            Some((1, 0))
-        )
+        staged(0, &fourteen, &[(0, 14), (0, 15)], Some((1, 0)))
     );
     assert_eq!(
         queue_plan(&[family(all, 16), compute, decode, encode, flow]),
-        plan(0, &[(0, 0), (0, 1), (0, 2), (0, 3)], &[(0, 4), (0, 5)]),
+        plan(0, &fourteen, &[(0, 14), (0, 15)]),
         "no family of transfers alone: no staging queue"
+    );
+    // The round robin's ceiling: a family of more than eighteen leaves the rest untaken.
+    let sixteen: Vec<(u32, u32)> = (0..16).map(|index| (0, index)).collect();
+    assert_eq!(
+        queue_plan(&[family(all, 24)]),
+        plan(0, &sixteen, &[(0, 16), (0, 17)]),
+        "the round robin takes at most sixteen, and presenting the next two"
+    );
+    // Its floor: a family of seven lends five, and one of six still lends four, so no device
+    // takes fewer round-robin queues than it took before.
+    assert_eq!(
+        queue_plan(&[family(all, 7)]),
+        plan(
+            0,
+            &[(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)],
+            &[(0, 5), (0, 6)]
+        )
     );
     // RADV's shape (a Radeon 780M with Mesa 26.2.4): a graphics family of one, a compute family of
     // four, video decode and encode families, and a family of sparse binding alone. Its compute

@@ -5,6 +5,27 @@
 //! round robin among its logical queues, but for the ones it reserved for queues made for
 //! presenting (`Device::new_command_queue_for_presenting`).
 //!
+//! **What one queue costs another.** Two logical queues that took one `VkQueue` submit to one
+//! Vulkan queue, which runs its submissions in order, so one's command buffers wait for the
+//! other's whole command buffer, however long it runs. Metal's queues wait for each other only
+//! inside one command, measured on an M3 Max under macOS 27.0.1 (a side queue's command buffers
+//! run one at a time for a 1.5 s window, over a buffer the long command buffer never names, with
+//! 9402 to 10344 completed and 0.8 to 1.6 ms at worst where nothing else ran):
+//! - behind one compute dispatch of 2.50 s, 1 completed, after 2496 ms: the whole dispatch;
+//! - behind one dispatch of 1.29 s over a grid that filled the GPU, 1 past 100 ms, after 1290 ms:
+//!   the whole dispatch again, so it is the command and not the cores that holds the queue;
+//! - behind the same 2.50 s as 256 dispatches of one command buffer, 11335 to 12992 completed,
+//!   1.7 to 3.8 ms at worst and none past 100 ms: nothing at all.
+//!
+//! So a long command buffer of many commands holds a shared `VkQueue` where Metal holds no other
+//! queue. The runtime answers that with queues rather than with scheduling, which one `VkQueue`
+//! cannot give: a created device lends the round robin every queue its families have past the two
+//! it reserves for presenting, up to 16 (`device/create.rs`), so a program that makes no more
+//! command queues than that shares none. Past them, and on a device whose families have one queue
+//! each (MoltenVK's four, RADV's and lavapipe's single graphics queue), queues share and the
+//! waiting stands; each queue that takes a `VkQueue` another took is counted
+//! (`WorkCounts::queues_sharing_a_vk_queue`).
+//!
 //! A queue holds at most its `maxCommandBufferCount` uncompleted command buffers, as Metal's does
 //! (measured on an M3 Max with macOS 26.7 and an M4 with macOS 27.0.1, with and without API
 //! validation):

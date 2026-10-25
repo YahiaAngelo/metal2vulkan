@@ -188,6 +188,8 @@ mod pool_room;
 mod pool_room_creations;
 mod private_properties;
 mod queue;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod queue_sharing;
 mod range;
 mod rate_map;
 mod reader_sizes;

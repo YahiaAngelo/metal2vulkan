@@ -788,12 +788,32 @@ fn identified(
         .collect()
 }
 
-/// The most `VkQueue`s a created device takes: logical queues share them round robin.
-const MAX_QUEUES: u32 = 4;
+/// The fewest `VkQueue`s a created device takes for the round robin logical queues share, where
+/// the families taken have that many.
+const LEAST_QUEUES: u32 = 4;
+
+/// The most it takes for that round robin, where the families taken have queues to spare past
+/// [`PRESENT_QUEUES`].
+///
+/// Two logical queues that share a `VkQueue` submit to one Vulkan queue, which runs its
+/// submissions in order, so one's command buffers wait for the other's whole command buffer,
+/// where Metal's queues wait for each other only inside one command (`queue.rs`, measured). A
+/// device with queues to spare therefore gives each logical queue one of its own rather than
+/// leaving them idle.
+///
+/// The ceiling is NVIDIA's graphics family of 16, the largest measured. What a further queue
+/// costs is its `VkQueue`'s lock, timeline semaphore and four counters, and, on a driver that
+/// takes cross-queue timeline waits, one wait in a batch's `vkQueueSubmit` the first time it sees
+/// that queue's value move (about 0.5 us on an RTX 5080, 1.1 us on ms01's Iris Xe, 1.6 us on a
+/// Radeon 780M). The one driver measured with queues to spare, NVIDIA's 615.71.09, stalls its
+/// submissions on semaphore operations (`DriverFact::SemaphoreOperationsStallSubmits`) and so
+/// takes no such wait at all: its batches begin with a barrier instead, whose cost does not grow
+/// with the queues.
+const ROUND_ROBIN_CEILING: u32 = 16;
 
 /// The most `VkQueue`s a created device reserves for presenting queues
 /// (`Device::new_command_queue_for_presenting`), outside the round robin: the taken families'
-/// queues past [`MAX_QUEUES`], where they have them.
+/// queues past the round robin's, where they have them.
 const PRESENT_QUEUES: u32 = 2;
 
 /// The queues a created device takes ([`queue_plan`]).
@@ -817,9 +837,14 @@ pub(crate) struct QueuePlan {
 /// does graphics and compute work (the same flags, queue count, timestamp bits and transfer
 /// granularity: MoltenVK's four families of one queue each, one Metal command queue per queue),
 /// one queue of each family first, then the families' next queues in turn; otherwise that
-/// family's queues alone. At most [`MAX_QUEUES`] either way. Queues of another family are
+/// family's queues alone. Queues of another family are
 /// another Metal command queue on MoltenVK, whose command buffers the GPU runs beside the
-/// first's; queues of one family there share one. The next queues in that order, at most
+/// first's; queues of one family there share one.
+///
+/// The round robin logical queues share takes those queues less [`PRESENT_QUEUES`], at least
+/// [`LEAST_QUEUES`] and at most [`ROUND_ROBIN_CEILING`], so a family with queues to spare lends
+/// them to the round robin rather than leaving them idle (NVIDIA's 16 give 14) and no device
+/// takes fewer than it took before. The next queues in that order, at most
 /// [`PRESENT_QUEUES`], are reserved for presenting queues. A queue of a family of transfers alone
 /// is reserved for staging copies: a copy engine, which runs beside the graphics family's work
 /// where another of its queues waits behind it; an asynchronous compute queue is none (its work
@@ -845,7 +870,10 @@ pub(crate) fn queue_plan(families: &[vk::QueueFamilyProperties]) -> Option<Queue
     let mut order = (0..first.queue_count)
         .flat_map(|index| taken.iter().map(move |&family| (family, index)))
         .collect::<Vec<_>>();
-    let present = order.split_off(order.len().min(MAX_QUEUES as usize));
+    let round_robin = (order.len().saturating_sub(PRESENT_QUEUES as usize))
+        .clamp(LEAST_QUEUES as usize, ROUND_ROBIN_CEILING as usize)
+        .min(order.len());
+    let present = order.split_off(round_robin);
     // Transfers alone (sparse binding and protected memory aside: no graphics, compute, video or
     // optical flow work), and copies of any texel.
     let unit = vk::Extent3D {
@@ -1368,7 +1396,6 @@ fn create_on(
         });
     enables.enable_sparse(&sparse_features);
     // One create info per family taken, of as many queues as the plan takes of it.
-    let priorities = [1.0f32; (MAX_QUEUES + PRESENT_QUEUES) as usize];
     let mut taken: Vec<(u32, usize)> = Vec::new();
     for &(family, _) in plan.queues.iter().chain(&plan.present).chain(&plan.staging) {
         match taken.iter_mut().find(|(at, _)| *at == family) {
@@ -1376,6 +1403,10 @@ fn create_on(
             None => taken.push((family, 1)),
         }
     }
+    // One priority per queue of the family the plan takes most of, so the slice each create info
+    // names is always within it: the round robin alone takes up to `ROUND_ROBIN_CEILING` of one
+    // family, and presenting `PRESENT_QUEUES` more.
+    let priorities = vec![1.0f32; taken.iter().map(|&(_, count)| count).max().unwrap_or(0)];
     let queues: Vec<vk::DeviceQueueCreateInfo<'_>> = taken
         .iter()
         .map(|&(family, count)| {

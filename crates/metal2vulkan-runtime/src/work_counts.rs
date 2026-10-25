@@ -179,6 +179,7 @@ pub(crate) struct Counters {
     slot_returns: AtomicU64,
     slot_return_nanos: AtomicU64,
     slot_waits: AtomicU64,
+    queues_sharing_a_vk_queue: AtomicU64,
     slot_wait_nanos: AtomicU64,
     completed_waits: AtomicU64,
     event_waits_met: AtomicU64,
@@ -1289,6 +1290,13 @@ impl Counters {
     pub(crate) fn slot_waited(&self, nanos: u64) {
         self.slot_waits.fetch_add(1, Ordering::Relaxed);
         self.slot_wait_nanos.fetch_add(nanos, Ordering::Relaxed);
+    }
+
+    /// A new logical queue took a `VkQueue` an earlier logical queue took too
+    /// (`Device::next_queue`).
+    pub(crate) fn queue_shared_a_vk_queue(&self) {
+        self.queues_sharing_a_vk_queue
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// A batch with work was submitted waiting for `waits` timelines at values the host saw them
@@ -3171,6 +3179,12 @@ pub struct WorkCounts {
     pub slot_waits: u64,
     /// Nanoseconds those makes waited.
     pub slot_wait_nanos: u64,
+    /// Command queues made on a `VkQueue` an earlier command queue of the device took too, so
+    /// that one's command buffers wait for the other's where Metal's would not: the device shares
+    /// its `VkQueue`s round robin, so a program that makes more command queues than the device
+    /// took `VkQueue`s shares them (`queue.rs`, `device/create.rs`). Zero on a device with a
+    /// `VkQueue` for each.
+    pub queues_sharing_a_vk_queue: u64,
     /// The waits batches with work made for timelines at values the host had seen them reach,
     /// which make what completed work wrote visible to them: one per timeline whose completed
     /// value moved since a batch of the same `VkQueue` last waited for it.
@@ -4410,6 +4424,7 @@ impl Device {
             slot_return_nanos: counters.slot_return_nanos.load(Ordering::Relaxed),
             slot_waits: counters.slot_waits.load(Ordering::Relaxed),
             slot_wait_nanos: counters.slot_wait_nanos.load(Ordering::Relaxed),
+            queues_sharing_a_vk_queue: counters.queues_sharing_a_vk_queue.load(Ordering::Relaxed),
             completed_waits: counters.completed_waits.load(Ordering::Relaxed),
             event_waits_met: counters.event_waits_met.load(Ordering::Relaxed),
             bare_starts: counters.bare_starts.load(Ordering::Relaxed),

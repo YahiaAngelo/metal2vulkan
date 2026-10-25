@@ -988,9 +988,17 @@ impl Device {
 
     /// A new logical queue's identity, and the index of the `VkQueue` it submits to: round
     /// robin over the device's queues that are not reserved for presenting.
+    ///
+    /// Past the round robin's queues it gives one an earlier logical queue took, whose
+    /// submissions this queue's then wait behind where Metal's queues would not
+    /// (`device/create.rs`'s `ROUND_ROBIN_CEILING`): counted,
+    /// `WorkCounts::queues_sharing_a_vk_queue`.
     pub(super) fn next_queue(&self) -> (u64, usize) {
         let id = self.0.contexts.fresh();
         let made = self.0.round_robin_made.fetch_add(1, Ordering::Relaxed);
+        if made >= self.0.round_robin as u64 {
+            self.0.counts.queue_shared_a_vk_queue();
+        }
         (id, (made % self.0.round_robin as u64) as usize)
     }
 
