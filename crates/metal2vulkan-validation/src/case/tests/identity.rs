@@ -4,10 +4,15 @@ use super::*;
 fn documentation_and_manifest_field_order_do_not_change_identity() {
     let mut case = example();
     let id = case.computed_case_id().unwrap();
+    let inputs = case.computed_input_sha256().unwrap();
     case.rationale = Some("different explanation".into());
+    case.no_effect = Some("the entry returns before any write".into());
     case.authored_by = Some("someone else".into());
     case.name = "renamed-slot".into();
     assert_eq!(case.computed_case_id().unwrap(), id);
+    // The prose is outside the input digest too, so rewording a case keeps its stored
+    // observations: they are slotted by (case_id, input_sha256).
+    assert_eq!(case.computed_input_sha256().unwrap(), inputs);
 
     case.case_id = id;
     let json = serde_json::to_value(&case).unwrap();

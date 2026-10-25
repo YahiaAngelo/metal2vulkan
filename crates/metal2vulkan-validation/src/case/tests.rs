@@ -73,6 +73,7 @@ mod indirect_commands;
 mod mesh_draws;
 mod mips;
 mod out_of_bounds;
+mod prose;
 mod raster_sample_count;
 mod render_pass_rate_map;
 mod sparse;
