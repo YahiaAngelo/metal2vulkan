@@ -17,14 +17,27 @@
 //! translator bug and fails the test.
 //!
 //! The table must equal `public_fixture_expectations_engine.tsv` exactly. A change from `ok`
-//! to a refusal needs a reviewed TSV edit whose commit states the reason. On a mismatch the test
-//! prints the observed rows so a reviewed update can take them, and names every difference: a
-//! cell that moved under a row the table already has, by its fixture, entry and profile and from
-//! what to what, apart from a row that is new or gone. The two classes answer different
-//! questions — a moved cell is a fixture the engine now compiles or refuses differently, a new or
-//! gone row is a fixture or an entry point that came or went — so a review attributes each to the
-//! commit that explains it without diffing the block by hand. Rows of a fixture whose assembler
-//! is not installed (`metal-as` off macOS) are skipped visibly and taken from the expectations.
+//! to a refusal needs a reviewed update whose commit states the reason. On a mismatch the test
+//! names every difference: a cell that moved under a row the table already has, by its fixture,
+//! entry and profile and from what to what, apart from a row that is new or gone. The two classes
+//! answer different questions — a moved cell is a fixture the engine now compiles or refuses
+//! differently, a new or gone row is a fixture or an entry point that came or went — so a review
+//! attributes each to the commit that explains it. Rows of a fixture whose assembler is not
+//! installed (`metal-as` off macOS) are skipped visibly and taken from the expectations.
+//!
+//! The review is the first step and the rewrite is the second: once every named difference is
+//! accounted for, an ignored bless rewrites the table from what the build observes, as
+//! `golden_hashes` does for the golden tables. It names the differences again as it takes
+//! them, and needs every assembler, so it runs on macOS:
+//!
+//! ```text
+//! cargo nextest run -p metal2vulkan --all-features --run-ignored ignored-only -E 'test(bless_engine_inventory)'
+//! ```
+//!
+//! Writing the table is the bless's, not a paste-ready block's on a failure: nextest captures a
+//! test's output through a pipe that holds no tab character, so a printed block arrives with its
+//! columns collapsed and cannot be pasted back. Every message a part prints is readable under that
+//! capture, which is why the differences are named and the rows are not printed.
 //!
 //! The check is split so nextest runs it in parallel, and so the fixtures that need macOS are
 //! apart from those that do not (one test took 136-353 s on the Mac): the table equals the
@@ -44,8 +57,17 @@ use crate::pipeline::testing::{
     AssembleError,
 };
 use crate::spirv::testing::committed_profiles;
+use crate::tests::golden_hashes::parallel;
+
+/// The committed table, relative to the crate root; [`EXPECTED`] is its text.
+const TABLE: &str = "tests/public_fixture_expectations_engine.tsv";
 
 const EXPECTED: &str = include_str!("../../tests/public_fixture_expectations_engine.tsv");
+
+/// The command that rewrites the expectations from what the build observes, once the named
+/// differences have been reviewed ([`bless_engine_inventory`]).
+const BLESS: &str = "cargo nextest run -p metal2vulkan --all-features --run-ignored ignored-only \
+                     -E 'test(bless_engine_inventory)'";
 
 /// `.ll` files directly in `dir`, sorted by name.
 fn ll_files(dir: &Path) -> Vec<PathBuf> {
@@ -132,6 +154,31 @@ fn header(profiles: &[(String, DeviceProfile)]) -> String {
     line
 }
 
+/// One inventory line: its fixture, its entry, and one cell per committed profile, with its
+/// newline. Every row the inventory writes, observed or blessed, goes through here, so the
+/// separator [`index_rows`] splits on is written in one place.
+fn row(fixture: &str, entry: &str, cells: impl IntoIterator<Item = String>) -> String {
+    let mut line = format!("{fixture}\t{entry}");
+    for cell in cells {
+        line.push('\t');
+        line.push_str(&cell);
+    }
+    line.push('\n');
+    line
+}
+
+/// The table as the expectations hold it: [`header`], then one block of rows per fixture in
+/// [`fixtures`]' order. The bless writes this and the committed file is this, so the parts compare
+/// a file one function shapes.
+fn render_table(profiles: &[(String, DeviceProfile)], blocks: &[String]) -> String {
+    let mut s = header(profiles);
+    s.push('\n');
+    for rows in blocks {
+        s.push_str(rows);
+    }
+    s
+}
+
 /// The inventory rows of fixture `name` (each line with its newline), and whether they were taken
 /// from the expectations because its assembler is not installed (a visible skip).
 fn fixture_rows(
@@ -153,11 +200,8 @@ fn fixture_rows(
         }
         Err(AssembleError::Rejected(why)) => {
             eprintln!("{name}: assembler rejected the fixture: {why}");
-            observed.push_str(&format!("{name}\t-"));
-            for _ in profiles {
-                observed.push_str("\tunassembled");
-            }
-            observed.push('\n');
+            let cells = profiles.iter().map(|_| "unassembled".to_owned());
+            observed.push_str(&row(name, "-", cells));
             return (observed, false);
         }
     };
@@ -171,23 +215,17 @@ fn fixture_rows(
         Err(e) => {
             eprintln!("{name}: decode: {e}");
             let c = refusal(&e).unwrap_or_else(|| panic!("{name}: decode: translator bug: {e}"));
-            observed.push_str(&format!("{name}\t-"));
-            for _ in profiles {
-                observed.push('\t');
-                observed.push_str(&c);
-            }
-            observed.push('\n');
+            let cells = profiles.iter().map(|_| c.clone());
+            observed.push_str(&row(name, "-", cells));
             return (observed, false);
         }
     };
     assert!(!entries.is_empty(), "{name}: no entry points");
     for entry in entries {
-        observed.push_str(&format!("{name}\t{entry}"));
-        for (stem, p) in profiles {
-            observed.push('\t');
-            observed.push_str(&cell(&bitcode, name, &entry, stem, p));
-        }
-        observed.push('\n');
+        let cells = profiles
+            .iter()
+            .map(|(stem, p)| cell(&bitcode, name, &entry, stem, p));
+        observed.push_str(&row(name, &entry, cells));
     }
     (observed, false)
 }
@@ -264,21 +302,11 @@ fn check_part(metal_as: bool, part: usize, of: usize) {
         eprintln!("SKIPPED {skipped} fixture(s) whose assembler is not installed");
     }
     if observed != expected {
-        eprintln!("---- observed engine inventory rows ----\n{observed}---- end ----");
-        let stems = profiles
-            .iter()
-            .map(|(stem, _)| stem.clone())
-            .collect::<Vec<_>>();
-        let d = diff_rows(&expected, &observed, &stems);
-        eprintln!("---- every difference in this part ----");
-        for line in d.cells.iter().chain(&d.rows) {
-            eprintln!("  {line}");
-        }
-        eprintln!("---- end ----");
+        let d = named_differences(&expected, &observed, &profiles);
         panic!(
             "the engine inventory changed in this part: {} cell(s) moved under a row the table \
              already has, and {} row(s) are new or gone ({} observed vs {} expected rows). \
-             Review each one and update tests/public_fixture_expectations_engine.tsv:\n{}{}",
+             Review each one, then take them into {TABLE} with\n  {BLESS}\n{}{}",
             d.cells.len(),
             d.rows.len(),
             observed.lines().count(),
@@ -287,6 +315,23 @@ fn check_part(metal_as: bool, part: usize, of: usize) {
             shown(&d.rows),
         );
     }
+}
+
+/// Every difference between `expected` and `observed`, printed one per line before it is returned.
+/// A line carries no tab (`fixture | entry | profile: was -> now`), so a reader gets all of it from
+/// nextest's captured output, which holds no tab character.
+fn named_differences(expected: &str, observed: &str, profiles: &[(String, DeviceProfile)]) -> Diff {
+    let stems = profiles
+        .iter()
+        .map(|(stem, _)| stem.clone())
+        .collect::<Vec<_>>();
+    let d = diff_rows(expected, observed, &stems);
+    eprintln!("---- every difference ----");
+    for line in d.cells.iter().chain(&d.rows) {
+        eprintln!("  {line}");
+    }
+    eprintln!("---- end ----");
+    d
 }
 
 /// The differences between a part's expected and observed rows, named one by one.
@@ -406,6 +451,114 @@ mod llvm_as {
 /// elsewhere.
 mod metal_as {
     parts!(true, 4; part_1_of_4 = 0, part_2_of_4 = 1, part_3_of_4 = 2, part_4_of_4 = 3);
+}
+
+/// Rewrite `tests/public_fixture_expectations_engine.tsv` from what this build observes: `BLESS`
+/// above.
+///
+/// It is ignored and named, so taking a change is a second, deliberate step after the parts have
+/// named every difference — the parts never write the table, and nothing blesses it on a plain
+/// run. It names the differences again as it takes them, and refuses without every assembler,
+/// whose fixtures' rows would otherwise be written back from the expectations unobserved.
+///
+/// It observes every fixture at once, as the golden tables' bless does, rather than taking the
+/// parts in turn: one pass over all of them stays well inside nextest's slow-test limit, which a
+/// serial pass over twelve parts' worth of fixtures would approach.
+#[test]
+#[ignore]
+fn bless_engine_inventory() {
+    let profiles = committed_profiles().expect("committed profiles");
+    let expected_rows = expected_rows();
+    let fixtures = fixtures();
+    let observations = parallel(fixtures.len(), |i| {
+        let (name, path) = &fixtures[i];
+        fixture_rows(name, path, &profiles, &expected_rows)
+    });
+    let skipped = fixtures
+        .iter()
+        .zip(&observations)
+        .filter(|(_, (_, skip))| *skip)
+        .map(|((name, _), _)| name.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        skipped.is_empty(),
+        "refusing to bless without every assembler (skipped: {skipped:?}); bless on macOS"
+    );
+    let blocks = observations
+        .into_iter()
+        .map(|(rows, _)| rows)
+        .collect::<Vec<_>>();
+    let observed = blocks.concat();
+    let expected = EXPECTED.split_once('\n').map_or("", |(_, body)| body);
+    let d = named_differences(expected, &observed, &profiles);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(TABLE);
+    std::fs::write(&path, render_table(&profiles, &blocks)).expect("write the expectations");
+    eprintln!(
+        "{TABLE}: blessed {} rows x {} profiles, taking {} moved cell(s) and {} new or gone row(s)",
+        observed.lines().count(),
+        profiles.len(),
+        d.cells.len(),
+        d.rows.len(),
+    );
+}
+
+/// What the bless writes is the file the parts read: [`render_table`] puts the committed profiles'
+/// [`header`] first, keeps each block's rows together in the order it was given them, and separates
+/// a row's fixture, entry and cells by the tab [`index_rows`] splits on. Re-rendering the committed
+/// table's own rows reproduces it byte for byte, so a bless rewrites it in place without reshaping
+/// it.
+///
+/// A printout cannot stand in for this: nextest's captured output holds no tab character, so a row
+/// written with a separator chosen to survive capture would not read back here.
+#[test]
+fn the_blessed_table_is_the_file_the_parts_read() {
+    let profiles = committed_profiles().expect("committed profiles");
+    let cells = |c: &str| profiles.iter().map(|_| c.to_owned()).collect::<Vec<_>>();
+    let blocks = [
+        format!(
+            "{}{}",
+            row("b.ll", "main", cells("ok")),
+            row("b.ll", "helper", cells("ok"))
+        ),
+        row("a.ll", "-", cells("unassembled")),
+    ];
+    let text = render_table(&profiles, &blocks);
+
+    let (first, body) = text.split_once('\n').expect("a header line");
+    assert_eq!(first, header(&profiles));
+    assert!(text.ends_with('\n'), "{text:?}");
+    let rows = body.lines().collect::<Vec<_>>();
+    for r in &rows {
+        assert_eq!(
+            r.split('\t').count(),
+            2 + profiles.len(),
+            "a row with one cell per profile: {r:?}"
+        );
+    }
+    assert_eq!(
+        rows.iter().map(|r| split_row(r).0).collect::<Vec<_>>(),
+        [("b.ll", "main"), ("b.ll", "helper"), ("a.ll", "-")],
+        "the blocks' rows, in the order they were given"
+    );
+    assert_eq!(index_rows(body).len(), 3);
+
+    let mut committed: Vec<String> = Vec::new();
+    let mut last = "";
+    for line in EXPECTED.lines().skip(1) {
+        let fixture = line.split('\t').next().unwrap_or_default();
+        if fixture != last {
+            committed.push(String::new());
+            last = fixture;
+        }
+        let block = committed.last_mut().expect("a block");
+        block.push_str(line);
+        block.push('\n');
+    }
+    assert_eq!(
+        render_table(&profiles, &committed),
+        EXPECTED,
+        "{TABLE} is not what a bless of its own rows writes"
+    );
 }
 
 /// The mismatch diagnostic on synthetic blocks: it names the row, the entry and the profile of a

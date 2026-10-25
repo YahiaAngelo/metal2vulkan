@@ -664,8 +664,9 @@ fn cell(fixture: &Fixture, subject: &Subject, stem: &str, dev: &Device, what: &s
     }
 }
 
-/// Run `f` over `0..n` on every available CPU, results in index order.
-fn parallel<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
+/// Run `f` over `0..n` on every available CPU, results in index order. The engine inventory's
+/// bless (`public_fixtures_engine`) observes the same fixtures the same way.
+pub(super) fn parallel<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
     let threads = std::thread::available_parallelism().map_or(4, |t| t.get());
     let next = AtomicUsize::new(0);
     let mut out: Vec<(usize, T)> = std::thread::scope(|s| {

@@ -94,10 +94,12 @@ Set `CARGO_INCREMENTAL=0` for a build that won't be edited and rebuilt.
 - `crates/metal2vulkan/tests/api_surface.rs` pins every public name of the translator. A new public
   item gets its row there.
 - Fixtures are synthetic and ours, under `crates/metal2vulkan-validation/fixtures/public/`. A new
-  fixture lands with its rows in `crates/metal2vulkan/tests/public_fixture_expectations_engine.tsv`
-  (in inventory order) and its golden printout under `tests/air_input/`, blessed with
-  `cargo test -p metal2vulkan --all-features --lib tests::air_input -- --ignored` (on macOS, for
-  the `.air.ll` fixtures).
+  fixture's rows in `crates/metal2vulkan/tests/public_fixture_expectations_engine.tsv` are blessed
+  from the test rather than written by hand, with
+  `cargo nextest run -p metal2vulkan --all-features --run-ignored ignored-only -E 'test(bless_engine_inventory)'`
+  (on macOS, which has every assembler); the parts name every moved cell and every new or gone row
+  first, so read those before blessing. Its golden printout under `tests/air_input/` is blessed with
+  `cargo test -p metal2vulkan --all-features --lib tests::air_input -- --ignored`.
 - The manifests set `autobins = false`: a new binary needs its own `[[bin]]` table.
 
 ## Golden output hashes and `SEMANTICS_VERSION`
