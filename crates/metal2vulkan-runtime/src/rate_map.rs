@@ -31,9 +31,10 @@
 //!   side and any samples; the compile layer compiles only where Apple's compile is measured,
 //!   and refuses the rest, `Error::RateMap` with its
 //!   [`UnpinnedCompile`](metal2vulkan::bind::UnpinnedCompile): a screen past 16384 a side (where Apple's
-//!   compile crashes or corrupts the map) and sample densities whose compile is not measured,
-//!   among them an axis of no screen pixels carrying more than one quality sample, where the
-//!   compile is measured for one sample alone.
+//!   compile crashes or corrupts the map) and sample densities whose compile is not measured. An
+//!   axis of no screen pixels is not among them: it has one tile of no screen and no physical
+//!   pixels whatever its samples, so no coordinate reads its quality function and the density
+//!   bound is never applied to it.
 //! - **Metal's answers.** `screenSize` is the descriptor's, depth 1; `physicalGranularity` 32 by
 //!   32, depth 1; `parameterBufferSizeAndAlign` 24,624 bytes, align 4; the coordinate maps past
 //!   the layers read the last layer (both Macs, probes 7 and 9). `physicalSizeForLayer:` past the

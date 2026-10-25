@@ -67,6 +67,15 @@ fn a_screen_side_is_at_most_32768_pixels() {
             "{screen:?}"
         );
     }
+    // An axis of no screen pixels takes any number of samples: no coordinate reads its quality
+    // function, so the compile layer's density bound never applies to it, where the same four
+    // samples over two screen pixels are `UnpinnedCompile::DenseSamples`
+    // (`the_compile_layers_bounds_are_its_own_error`).
+    let dense: &[f32] = &[0.5, 0.25, 0.5, 0.25];
+    for samples in [&[0.5, 1.0][..], dense] {
+        let map = compile(&descriptor(0, 64, &[(samples, &[0.5])])).expect("the map is made");
+        assert_eq!(map.physical_size(0), Some([0, 33]), "{samples:?}");
+    }
     // A map of no layers over a screen of no width is made as well, as plain Metal makes it.
     let none = compile(&descriptor(0, 64, &[])).expect("the map is made");
     assert_eq!(none.layer_count(), 0);
