@@ -30,17 +30,17 @@ bb0:
   %i11 = icmp eq %i10, i32 0
   br %i11, bb2, bb1
 bb1:
-  %i13 = tail call i32 @f4 [air Texture(Texture { op: Query(Width), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None })](%a1, i32 0) arg0( Ref nocapture )
+  %i13 = tail call i32 @f4 [air Texture(Texture { op: Query(Width), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None, states_access: true })](%a1, i32 0) arg0( Ref nocapture )
   %i14 = tail call reassoc nnan ninf nsz arcp contract afn float @f3 [air Convert(Convert { dst: NumTy { elem: F32, lanes: 1 }, dst_kind: Float, src: NumTy { elem: I32, lanes: 1 }, src_kind: Unsigned, src_fp8: None })](%i13)
   %i15 = insertelement <2 x float> undef, %i14, i64 0
-  %i16 = tail call i32 @f5 [air Texture(Texture { op: Query(Height), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None })](%a1, i32 0) arg0( Ref nocapture )
+  %i16 = tail call i32 @f5 [air Texture(Texture { op: Query(Height), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None, states_access: true })](%a1, i32 0) arg0( Ref nocapture )
   %i17 = tail call reassoc nnan ninf nsz arcp contract afn float @f3 [air Convert(Convert { dst: NumTy { elem: F32, lanes: 1 }, dst_kind: Float, src: NumTy { elem: I32, lanes: 1 }, src_kind: Unsigned, src_fp8: None })](%i16)
   %i18 = insertelement %i15, %i17, i64 1
   %i19 = fdiv reassoc nnan ninf nsz arcp contract afn <2 x float> %i8, %i18
   br bb2
 bb2:
   %i21 = phi <2 x float> [%i19, bb1], [%i8, bb0]
-  %i22 = tail call %t16 @f6 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, %a2, %i21, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i22 = tail call %t16 @f6 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a1, %a2, %i21, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i23 = extractvalue <4 x half> %i22, 0
   %i24 = extractelement %i1, i64 1
   %i25 = getelementptr inbounds %t22, %a4, i64 0, i32 2

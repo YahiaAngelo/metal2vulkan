@@ -25,50 +25,50 @@ bb0:
   %i5 = zext %i4 to i64
   %i6 = getelementptr inbounds <4 x float>, %a5, %i5
   %i7 = tail call ptr addrspace(2) @f2 [air Sampler(GetReadSampler)]()
-  %i8 = tail call %t15 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, %i7, %i3, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
+  %i8 = tail call %t15 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, %i7, %i3, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
   %i9 = extractvalue <4 x float> %i8, 0
   store %i9, %i6, align 16
-  %i11 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i11 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, ptr addrspace(2) @g0, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i12 = extractvalue <4 x float> %i11, 0
   %i13 = getelementptr inbounds <4 x float>, %i6, i64 1
   store %i12, %i13, align 16
-  %i15 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g1, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i15 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, ptr addrspace(2) @g1, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i16 = extractvalue <4 x float> %i15, 0
   %i17 = getelementptr inbounds <4 x float>, %i6, i64 2
   store %i16, %i17, align 16
-  %i19 = tail call %t15 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, %i7, %i3, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
+  %i19 = tail call %t15 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a1, %i7, %i3, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
   %i20 = extractvalue <4 x float> %i19, 0
   %i21 = getelementptr inbounds <4 x float>, %i6, i64 3
   store %i20, %i21, align 16
-  %i23 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i23 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a1, ptr addrspace(2) @g0, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i24 = extractvalue <4 x float> %i23, 0
   %i25 = getelementptr inbounds <4 x float>, %i6, i64 4
   store %i24, %i25, align 16
-  %i27 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, ptr addrspace(2) @g1, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i27 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a1, ptr addrspace(2) @g1, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i28 = extractvalue <4 x float> %i27, 0
   %i29 = getelementptr inbounds <4 x float>, %i6, i64 5
   store %i28, %i29, align 16
-  %i31 = tail call %t15 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a2, %i7, %i3, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
+  %i31 = tail call %t15 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a2, %i7, %i3, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
   %i32 = extractvalue <4 x float> %i31, 0
   %i33 = getelementptr inbounds <4 x float>, %i6, i64 6
   store %i32, %i33, align 16
-  %i35 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a2, ptr addrspace(2) @g0, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i35 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a2, ptr addrspace(2) @g0, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i36 = extractvalue <4 x float> %i35, 0
   %i37 = getelementptr inbounds <4 x float>, %i6, i64 7
   store %i36, %i37, align 16
-  %i39 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a2, ptr addrspace(2) @g1, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i39 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a2, ptr addrspace(2) @g1, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i40 = extractvalue <4 x float> %i39, 0
   %i41 = getelementptr inbounds <4 x float>, %i6, i64 8
   store %i40, %i41, align 16
-  %i43 = tail call %t15 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a3, %i7, %i3, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
+  %i43 = tail call %t15 @f3 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a3, %i7, %i3, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture )
   %i44 = extractvalue <4 x float> %i43, 0
   %i45 = getelementptr inbounds <4 x float>, %i6, i64 9
   store %i44, %i45, align 16
-  %i47 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a3, ptr addrspace(2) @g0, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i47 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a3, ptr addrspace(2) @g0, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i48 = extractvalue <4 x float> %i47, 0
   %i49 = getelementptr inbounds <4 x float>, %i6, i64 10
   store %i48, %i49, align 16
-  %i51 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a3, ptr addrspace(2) @g1, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i51 = tail call %t15 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a3, ptr addrspace(2) @g1, %i2, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i52 = extractvalue <4 x float> %i51, 0
   %i53 = getelementptr inbounds <4 x float>, %i6, i64 11
   store %i52, %i53, align 16

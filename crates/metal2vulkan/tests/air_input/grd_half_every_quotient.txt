@@ -21,7 +21,7 @@ bb0:
 bb1:
   %i9 = zext %i4 to i64
   %i10 = getelementptr inbounds %t14, %a0, %i9, i32 0
-  %i11 = tail call i32 @f1 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i10, %i33, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i11 = tail call i32 @f1 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i10, %i33, i32 0, i32 2, i1 1) arg0( nocapture )
   ret void
 bb2:
   %i13 = phi i32 [i32 2166136261, bb0], [%i33, bb3]

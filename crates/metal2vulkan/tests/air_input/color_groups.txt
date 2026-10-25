@@ -126,7 +126,7 @@ bb2:
 define %t15 @f6 "cg_counts" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a2( nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = getelementptr inbounds %t26, %a2, i64 0, i32 0
-  %i1 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i1 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i2 = shufflevector <4 x float> %a1, <4 x float> poison, <1, 2, 3, 0>
   %i3 = shufflevector <4 x float> %a1, <4 x float> poison, <2, 3, 0, 1>
   %i4 = shufflevector <4 x float> %a1, <4 x float> poison, <3, 0, 1, 2>

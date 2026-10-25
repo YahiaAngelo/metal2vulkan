@@ -33,7 +33,7 @@ bb0:
   br %i14, bb1, bb2
 bb1:
   %i16 = tail call ptr addrspace(4) @f6 [air Imageblock(Data)](<2 x i16> zeroinitializer, i32 0, i16 0)
-  tail call void @f7 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 1 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write) })](%a0, %i16, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, %a3, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
+  tail call void @f7 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 1 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write), states_access: true })](%a0, %i16, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, %a3, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
   br bb2
 bb2:
   ret void
@@ -63,7 +63,7 @@ bb1:
   %i16 = getelementptr inbounds %t22, %a0, i64 0, i32 0, i32 0
   %i17 = tail call ptr addrspace(4) @f6 [air Imageblock(Data)](<2 x i16> zeroinitializer, i32 0, i16 0)
   %i18 = load ptr addrspace(1), %i16, align 8
-  tail call void @f7 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 1 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write) })](%i18, %i17, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, %a3, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
+  tail call void @f7 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 1 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write), states_access: true })](%i18, %i17, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, %a3, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
   br bb2
 bb2:
   ret void
@@ -87,7 +87,7 @@ bb0:
   br %i12, bb1, bb2
 bb1:
   %i14 = tail call ptr addrspace(4) @f6 [air Imageblock(Data)](<2 x i16> zeroinitializer, i32 0, i16 0)
-  tail call void @f8 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I16, lanes: 2 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write) })](%a0, %i14, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, %a3, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
+  tail call void @f8 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I16, lanes: 2 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write), states_access: true })](%a0, %i14, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, %a3, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
   br bb2
 bb2:
   ret void

@@ -22,7 +22,7 @@ bb0:
   %i4 = or i32 %i3, %i1
   %i5 = zext %i4 to i64
   %i6 = getelementptr inbounds %t15, %a3, %i5, i32 0
-  %i7 = tail call i32 @f4 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i6, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i7 = tail call i32 @f4 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i6, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i8 = insertelement <2 x i32> undef, %a0, i64 0
   %i9 = insertelement %i8, %a1, i64 1
   %i10 = getelementptr inbounds <2 x i32>, %a4, %i5

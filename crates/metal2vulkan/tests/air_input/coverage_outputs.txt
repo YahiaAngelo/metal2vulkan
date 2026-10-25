@@ -53,7 +53,7 @@ bb0:
   %i6 = add i32 %i3, %i5
   %i7 = zext %i6 to i64
   %i8 = getelementptr inbounds %t28, %a2, %i7, i32 0
-  %i9 = tail call i32 @f6 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i8, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i9 = tail call i32 @f6 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i8, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i10 = insertelement <4 x i32> c41, %i9, i64 0
   %i11 = insertelement %i10, %a0, i64 1
   ret %i11
@@ -72,7 +72,7 @@ bb0:
   %i6 = add i32 %i3, %i5
   %i7 = zext %i6 to i64
   %i8 = getelementptr inbounds %t28, %a2, %i7, i32 0
-  %i9 = tail call i32 @f6 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i8, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i9 = tail call i32 @f6 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i8, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i10 = insertelement <4 x i32> c41, %i9, i64 0
   %i11 = insertelement %i10, %a0, i64 1
   %i12 = and i32 %i9, i32 31
@@ -84,12 +84,12 @@ bb0:
 
 define %t16 @f5 "cvo_read" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
-  %i0 = tail call i32 @f7 [air Texture(Texture { op: Query(NumSamples), image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0) arg0( Ref nocapture )
+  %i0 = tail call i32 @f7 [air Texture(Texture { op: Query(NumSamples), image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None, states_access: true })](%a0) arg0( Ref nocapture )
   %i1 = icmp eq %i0, i32 0
   br %i1, bb2, bb1
 bb1:
   %i3 = extractelement %a2, i64 1
-  %i4 = tail call i32 @f10 [air Texture(Texture { op: Query(Width), image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0) arg0( Ref nocapture )
+  %i4 = tail call i32 @f10 [air Texture(Texture { op: Query(Width), image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None, states_access: true })](%a0) arg0( Ref nocapture )
   %i5 = mul i32 %i4, %i3
   %i6 = extractelement %a2, i64 0
   %i7 = add i32 %i5, %i6
@@ -100,7 +100,7 @@ bb2:
 bb3:
   %i11 = phi i32 [i32 0, bb1], [%i26, bb3]
   %i12 = tail call ptr addrspace(2) @f8 [air Sampler(GetReadSampler)]()
-  %i13 = tail call %t22 @f9 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i12, %a2, %i11, i32 1) arg0( Ref nocapture )
+  %i13 = tail call %t22 @f9 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: I32, lanes: 4 }, sign: Some(Unsigned) }), coord16: false, form: Current, status: true, access: Some(Read), states_access: true })](%a0, %i12, %a2, %i11, i32 1) arg0( Ref nocapture )
   %i14 = extractvalue <4 x i32> %i13, 0
   %i15 = extractelement %i14, i64 3
   %i16 = icmp eq %i15, i32 0

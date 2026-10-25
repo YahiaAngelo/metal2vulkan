@@ -503,6 +503,32 @@ const OBSERVED: &[(&str, &str)] = &[
     ("air.wg.barrier", "void (i32, i32)"),
     ("air.simdgroup.barrier", "void (i32, i32)"),
     ("air.atomic.fence", "void (i32, i32, i32)"),
+    // Before AIR 2.0 (`xcrun metal` 32023.921 at deployment target macOS 10.12, `air64_v111`):
+    // a texture operation states no trailing access qualifier, and a memory atomic no trailing
+    // volatile flag. One `metal2vulkan-air` test reads these back operand by operand
+    // (`pre_air_2_0_states_no_access_qualifier_or_volatile_flag`).
+    ("air.read_texture_2d.v4f32", "v4f32 (p1, v2i32, i32)"),
+    ("air.read_depth_2d.f32", "f32 (p1, i32, v2i32, i32)"),
+    ("air.write_texture_2d.v4f32", "void (p1, v2i32, v4f32, i32)"),
+    (
+        "air.sample_texture_2d.v4f32",
+        "v4f32 (p1, p2, v2f32, i1, v2i32, i1, f32)",
+    ),
+    (
+        "air.gather_texture_2d.v4f32",
+        "v4f32 (p1, p2, v2f32, i1, v2i32, i32)",
+    ),
+    ("air.atomic.global.add.u.i32", "i32 (p1, i32, i32, i32)"),
+    ("air.atomic.local.add.u.i32", "i32 (p3, i32, i32, i32)"),
+    ("air.atomic.local.load.i32", "i32 (p3, i32, i32)"),
+    ("air.atomic.local.store.i32", "void (p3, i32, i32, i32)"),
+    (
+        "air.atomic.global.cmpxchg.weak.i32",
+        "i32 (p1, p0, i32, i32, i32, i32)",
+    ),
+    // AIR 2.9 spells `frexp` as an intrinsic where every earlier emitter outlines it as the
+    // runtime routine `___metal_frexp_<T>_pthread<I>`.
+    ("air.frexp.v4f32", "v4f32 (v4f32, p0)"),
     // AIR 2.9 (`xcrun metal` 32023.921 at deployment target macOS 27): a barrier takes its order,
     // and a memory atomic its `mem_flags` before the volatile flag.
     ("air.wg.barrier", "void (i32, i32, i32)"),
@@ -1368,12 +1394,23 @@ fn the_older_forms_without_a_residency_status_are_chosen_by_the_declaration() {
             "{name} {decl}"
         );
     }
-    // An operation that carries no status in any form has no second form from this axis.
+    // An operation that carries no status in any form has no second form from this axis: a
+    // write's only alternative is the pre-AIR-2.0 one, which states no access qualifier, and
+    // that one is last.
     let write = texture(
         "air.write_texture_2d.v4f32",
         "void (p1, v2i32, v4f32, i32, i32)",
     );
-    assert!(write.status && write.alternative().is_none());
+    assert!(write.status && write.states_access);
+    let older = write.alternative().expect("the pre-AIR-2.0 form");
+    assert_eq!(
+        older,
+        Texture {
+            states_access: false,
+            ..write
+        }
+    );
+    assert!(older.alternative().is_none());
 }
 
 /// A 2D or 3D texture atomic's two forms: Xcode's AIR passes an offset after the coordinate (and
@@ -2025,6 +2062,207 @@ fn barrier_and_fence_immediates_bind() {
             object_data: true,
         }
     );
+}
+
+/// AIR 2.9 (deployment target macOS 27) spells `frexp` as the intrinsic `air.frexp.<T>`, where
+/// every earlier emitter outlines it as the runtime routine `___metal_frexp_<T>_pthread<I>`. Both
+/// spellings read to the same `Math`, so one expansion serves them (`canon::routine`), and the
+/// routine's name is still not an `air.*` one.
+#[test]
+fn air_2_9_frexp_reads_as_the_outlined_routine() {
+    for (ty, routine_ty) in [
+        ("f32", "float_pthreadint32"),
+        ("f16", "half_pthreadint32"),
+        ("v4f32", "v4float_pthreadv4int32"),
+        ("v2f16", "v2half_pthreadv2int32"),
+    ] {
+        let decl = format!("{ty} ({ty}, p0)");
+        let intrinsic = declared_air(&format!("air.frexp.{ty}"), &decl);
+        let routine = declared_air(&format!("___metal_frexp_{routine_ty}"), &decl);
+        assert_eq!(intrinsic, routine, "{ty}");
+        let AirIntrinsic::Math(m) = intrinsic else {
+            panic!("{ty}: not a math function")
+        };
+        assert_eq!(m.f, MathFn::Frexp, "{ty}");
+    }
+    // The operand form is still checked: the exponent pointer is a thread pointer, and no
+    // other arity binds.
+    for decl in [
+        "v4f32 (v4f32)",
+        "v4f32 (v4f32, p1)",
+        "v4f32 (v4f32, p0, i32)",
+    ] {
+        assert_eq!(
+            declared("air.frexp.v4f32", decl),
+            DeclClass::Mismatch,
+            "{decl}"
+        );
+    }
+    // An integer frexp is no name of the family at all, so it stays an unknown intrinsic rather
+    // than a mismatched one.
+    assert_eq!(
+        declared("air.frexp.v4i32", "v4i32 (v4i32, p0)"),
+        DeclClass::Unknown
+    );
+    // `air.fast_frexp.<T>` reads as the same operation at `Precision::Fast`, as every float stem
+    // does. MSL has no `fast::frexp` for an emitter to write, and a frexp has no precision to
+    // trade: its mantissa and exponent are the operand's own bits.
+    let AirIntrinsic::Math(fast) = declared_air("air.fast_frexp.v4f32", "v4f32 (v4f32, p0)") else {
+        panic!("not a math function")
+    };
+    assert_eq!((fast.f, fast.precision), (MathFn::Frexp, Precision::Fast));
+}
+
+/// Before AIR 2.0 (deployment target macOS 10.12 and earlier, iOS 10 and earlier) a texture
+/// operation states no trailing access qualifier and a memory atomic no trailing volatile flag.
+/// Each such declaration decodes to the operation its later form decodes to: a texture's
+/// `access` is then `None`, an atomic's `volatile` is `false`, and the calls' other immediates
+/// keep their meaning. The forms are told apart by the declaration's own type, and a 64-bit,
+/// `float`, or thread atomic -- all later than AIR 2.0 -- has no such form.
+#[test]
+fn pre_air_2_0_states_no_access_qualifier_or_volatile_flag() {
+    let mut c = Consts::new();
+    let ptr = Value::Arg(crate::ir::ArgIdx::new(0));
+    let val = Value::Arg(crate::ir::ArgIdx::new(1));
+    let coord = Value::Arg(crate::ir::ArgIdx::new(2));
+    let smp = Value::Arg(crate::ir::ArgIdx::new(3));
+    let (relaxed, device) = (c.i32(0), c.i32(2));
+    let (yes, no) = (c.bool(true), c.bool(false));
+    let (lod, read_access) = (c.i32(0), c.i32(1));
+    let bias = Value::Arg(crate::ir::ArgIdx::new(4));
+
+    // Textures: (name, the AIR 1.x declaration, the AIR 2.0 one, the 2.0 call, the 1.x call).
+    let textures: [(&str, &str, &str, Vec<Value>, Vec<Value>); 3] = [
+        (
+            "air.read_texture_2d.v4f32",
+            "v4f32 (p1, v2i32, i32)",
+            "v4f32 (p1, v2i32, i32, i32)",
+            vec![ptr, coord, lod, read_access],
+            vec![ptr, coord, lod],
+        ),
+        (
+            "air.write_texture_2d.v4f32",
+            "void (p1, v2i32, v4f32, i32)",
+            "void (p1, v2i32, v4f32, i32, i32)",
+            vec![ptr, coord, val, lod, read_access],
+            vec![ptr, coord, val, lod],
+        ),
+        (
+            "air.sample_texture_2d.v4f32",
+            "v4f32 (p1, p2, v2f32, i1, v2i32, i1, f32)",
+            "v4f32 (p1, p2, v2f32, i1, v2i32, i1, f32, i32)",
+            vec![ptr, smp, coord, no, coord, yes, bias, read_access],
+            vec![ptr, smp, coord, no, coord, yes, bias],
+        ),
+    ];
+    for (name, old_decl, new_decl, new_args, old_args) in textures {
+        let (AirIntrinsic::Texture(o), AirIntrinsic::Texture(n)) =
+            (declared_air(name, old_decl), declared_air(name, new_decl))
+        else {
+            panic!("{name}");
+        };
+        assert_eq!((o.states_access, n.states_access), (false, true), "{name}");
+        assert_eq!(
+            Texture {
+                states_access: true,
+                ..o
+            },
+            n,
+            "{name}"
+        );
+        let (old, new) = (declared(name, old_decl), declared(name, new_decl));
+        let (Ok(Bound::Air(AirIntrinsic::Texture(a))), Ok(Bound::Air(AirIntrinsic::Texture(b)))) = (
+            bind(old, &old_args, &c.table),
+            bind(new, &new_args, &c.table),
+        ) else {
+            panic!("{name}");
+        };
+        // The same call in both forms: the qualifier the later one reads is the only difference.
+        assert_eq!((a.access, b.access), (None, Some(Access::Read)), "{name}");
+        assert_eq!(
+            Texture {
+                access: None,
+                states_access: false,
+                ..b
+            },
+            a,
+            "{name}"
+        );
+    }
+
+    // Atomics: (name, the AIR 1.x declaration, the AIR 2.0 one, the 2.0 call, the 1.x call).
+    let atomics: [(&str, &str, &str, Vec<Value>, Vec<Value>); 3] = [
+        (
+            "air.atomic.global.add.u.i32",
+            "i32 (p1, i32, i32, i32)",
+            "i32 (p1, i32, i32, i32, i1)",
+            vec![ptr, val, relaxed, device, yes],
+            vec![ptr, val, relaxed, device],
+        ),
+        (
+            "air.atomic.local.load.i32",
+            "i32 (p3, i32, i32)",
+            "i32 (p3, i32, i32, i1)",
+            vec![ptr, relaxed, device, yes],
+            vec![ptr, relaxed, device],
+        ),
+        (
+            "air.atomic.local.store.i32",
+            "void (p3, i32, i32, i32)",
+            "void (p3, i32, i32, i32, i1)",
+            vec![ptr, val, relaxed, device, yes],
+            vec![ptr, val, relaxed, device],
+        ),
+    ];
+    for (name, old_decl, new_decl, new_args, old_args) in atomics {
+        let (AirIntrinsic::Atomic(o), AirIntrinsic::Atomic(n)) =
+            (declared_air(name, old_decl), declared_air(name, new_decl))
+        else {
+            panic!("{name}");
+        };
+        assert_eq!(
+            (o.stated_volatile, n.stated_volatile),
+            (false, true),
+            "{name}"
+        );
+        assert_eq!(
+            Atomic {
+                stated_volatile: true,
+                ..o
+            },
+            n,
+            "{name}"
+        );
+        let (old, new) = (declared(name, old_decl), declared(name, new_decl));
+        let (Ok(Bound::Air(AirIntrinsic::Atomic(a))), Ok(Bound::Air(AirIntrinsic::Atomic(b)))) = (
+            bind(old, &old_args, &c.table),
+            bind(new, &new_args, &c.table),
+        ) else {
+            panic!("{name}");
+        };
+        // The volatile flag the later form reads is the only difference, and it orders nothing.
+        assert_eq!((a.volatile, b.volatile), (false, true), "{name}");
+        assert_eq!(
+            Atomic {
+                volatile: false,
+                stated_volatile: false,
+                ..b
+            },
+            a,
+            "{name}"
+        );
+    }
+
+    // No such form for a 64-bit, `float`, or thread atomic, nor for an operation whose layout
+    // never stated a qualifier: their language versions are all later than AIR 2.0.
+    for (name, decl) in [
+        ("air.atomic.global.add.u.i64", "i64 (p1, i64, i32, i32)"),
+        ("air.atomic.global.add.f32", "f32 (p1, f32, i32, i32)"),
+        ("air.atomic.private.add.u.i32", "i32 (p0, i32, i32, i32)"),
+        ("air.fence_texture_2d", "void ()"),
+    ] {
+        assert_eq!(declared(name, decl), DeclClass::Mismatch, "{name} {decl}");
+    }
 }
 
 /// AIR 2.9 (deployment target macOS 27) inserts each memory atomic's `mem_flags` between its scope

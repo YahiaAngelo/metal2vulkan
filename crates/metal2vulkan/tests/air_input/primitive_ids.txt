@@ -107,7 +107,7 @@ bb0:
 define %t12 @f3 "pi_counts" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a2( Ref nocapture "air-buffer-no-alias"="" ) %a3( align 16 dereferenceable(16) Ref nocapture "air-buffer-no-alias"="" ) %a4( nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = getelementptr inbounds %t24, %a4, i64 0, i32 0
-  %i1 = tail call i32 @f7 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i1 = tail call i32 @f7 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i2 = zext %a0 to i64
   %i3 = getelementptr inbounds <2 x float>, %a2, %i2
   %i4 = load <2 x float>, %i3, align 8

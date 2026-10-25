@@ -68,7 +68,7 @@ bb1:
 bb2:
   %i7 = phi i32 [i32 0, bb0], [%i15, bb2]
   %i8 = tail call ptr addrspace(2) @f6 [air Sampler(GetReadSampler)]()
-  %i9 = tail call %t15 @f7 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i8, %a2, %i7, i32 1) arg0( Ref nocapture )
+  %i9 = tail call %t15 @f7 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: true, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read), states_access: true })](%a0, %i8, %a2, %i7, i32 1) arg0( Ref nocapture )
   %i10 = extractvalue <4 x float> %i9, 0
   %i11 = add nuw nsw i32 %i7, %i4
   %i12 = zext %i11 to i64
@@ -82,7 +82,7 @@ bb2:
 define %t12 @f5 "wm_read" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( Ref nocapture ) %a1( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = tail call ptr addrspace(2) @f6 [air Sampler(GetReadSampler)]()
-  %i1 = tail call %t15 @f8 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i0, %a2, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
+  %i1 = tail call %t15 @f8 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read), states_access: true })](%a0, %i0, %a2, <2 x i32> zeroinitializer, i32 0, i32 1) arg0( Ref nocapture )
   %i2 = extractvalue <4 x float> %i1, 0
   %i3 = extractelement %a2, i64 1
   %i4 = shl i32 %i3, i32 3

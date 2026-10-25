@@ -887,6 +887,143 @@ fn single_io(list: &str, input: &[O<'_>], output: Option<&[O<'_>]>) -> Result<Ai
     decode(&m, &PointeeTable::default(), &mut meter())
 }
 
+/// An output's `air.render_target` states its attachment and then its dual-source index, except
+/// on an emitter with no `[[index(n)]]` to state: AIR 1.8 and earlier write the attachment alone
+/// and the trailing attribute keys follow it directly. Both decode, to the same attachment, and
+/// the shorter one to index 0, the only index its language version has. The operand after the
+/// attachment decides, not the recorded version: an index is an integer, an attribute key a
+/// string. Transcribed from `xcrun metal -c -mmacosx-version-min=10.11` (`air64_v18`) and
+/// `-mmacosx-version-min=10.12` (`air64_v111`).
+#[test]
+fn a_render_target_without_a_dual_source_index_is_index_zero() {
+    let varying: &[O<'_>] = &[I(0), S("air.fragment_input"), S("user(v)"), S("air.flat")];
+    // AIR 1.11 and later; AIR 1.8 and earlier.
+    let both: &[O<'_>] = &[S("air.render_target"), I(0), I(0)];
+    let attachment_only: &[O<'_>] = &[S("air.render_target"), I(0)];
+    let want = OutputRole::RenderTarget {
+        attachment: AbiInt::Const(0),
+        index: 0,
+        raster_order_group: None,
+    };
+    for (shape, output) in [
+        ("attachment and index", both),
+        ("attachment only", attachment_only),
+    ] {
+        let abi = single_io("air.fragment", varying, Some(output))
+            .unwrap_or_else(|e| panic!("{shape}: {e:?}"));
+        assert_eq!(abi.entries[0].outputs[0].role, want, "{shape}");
+    }
+    // A stated index is still read, so the two shapes are told apart rather than conflated.
+    let second_source: &[O<'_>] = &[S("air.render_target"), I(0), I(1)];
+    let abi = single_io("air.fragment", varying, Some(second_source)).unwrap();
+    assert_eq!(
+        abi.entries[0].outputs[0].role,
+        OutputRole::RenderTarget {
+            attachment: AbiInt::Const(0),
+            index: 1,
+            raster_order_group: None
+        }
+    );
+    // A fragment function's `[[color(n)]]` input states the attachment alone at every version,
+    // AIR 2.9 included, so an input is unchanged by this.
+    let color_input: &[O<'_>] = &[I(0), S("air.render_target"), I(0)];
+    let abi = single_io("air.fragment", color_input, Some(both)).unwrap();
+    assert_eq!(
+        abi.entries[0].params[0].role,
+        ParamRole::ColorInput {
+            index: AbiInt::Const(0),
+            raster_order_group: None
+        }
+    );
+}
+
+/// A buffer member of an argument buffer states no `air.address_space` before AIR 2.5: the key
+/// arrived there, and the member has no parameter whose pointer type could carry it. Such a member
+/// decodes to device space, which Metal cannot tell from `constant` in an argument buffer (both
+/// are `setBuffer:offset:atIndex:`) and which claims no uniform-block containment. A member that
+/// states a space keeps it, and a top-level buffer with no parameter pointer still needs the key.
+/// Transcribed from `xcrun metal -c -mmacosx-version-min=12.0` (`air64_v24`) and `=13.0`
+/// (`air64_v25`).
+#[test]
+fn an_argument_buffer_member_without_an_address_space_is_device() {
+    let member = |space: Option<u64>| {
+        let mut m = vec![
+            I(2),
+            S("air.buffer"),
+            S("air.location_index"),
+            I(2),
+            I(1),
+            S("air.read"),
+        ];
+        if let Some(raw) = space {
+            m.extend([S("air.address_space"), I(raw)]);
+        }
+        m.extend([S("air.arg_type_size"), I(16)]);
+        m
+    };
+    let decoded = |space: Option<u64>| {
+        let mut b = ModuleBuilder::new();
+        let params = kernel_params(&mut b);
+        let void = b.void();
+        let f = entry_fn(&mut b, "k", void, &params);
+        let member = node(&mut b, &member(space));
+        let layout = node(
+            &mut b,
+            &[
+                I(0),
+                I(16),
+                I(0),
+                S("float4"),
+                S("b"),
+                S("air.indirect_argument"),
+                N(member),
+            ],
+        );
+        let buf = vec![
+            I(0),
+            S("air.indirect_buffer"),
+            S("air.buffer_size"),
+            I(16),
+            S("air.location_index"),
+            I(0),
+            I(1),
+            S("air.read"),
+            S("air.address_space"),
+            I(1),
+            S("air.struct_type_info"),
+            N(layout),
+            S("air.arg_type_size"),
+            I(16),
+        ];
+        let args = [buf, texture_arg(1), sampler_arg(2), gid_arg(3)];
+        let arg_nodes: Vec<_> = args.iter().map(|a| N(node(&mut b, a))).collect();
+        let inputs = node(&mut b, &arg_nodes);
+        let outputs = node(&mut b, &[]);
+        let e = node(&mut b, &[F(f), N(outputs), N(inputs)]);
+        b.named_md("air.kernel", &[e]);
+        let m = b.finish().unwrap();
+        let abi = decode(&m, &PointeeTable::default(), &mut meter())?;
+        let ParamRole::ArgumentBuffer(arg) = &abi.entries[0].params[0].role else {
+            panic!("argument buffer")
+        };
+        let info = abi.struct_info(arg.layout.unwrap()).unwrap();
+        let MemberKind::Indirect(member) = &info.members[0].kind else {
+            panic!("indirect member")
+        };
+        let ParamRole::Buffer(b) = &member.role else {
+            panic!("buffer member, not {:?}", member.role)
+        };
+        Ok::<AddrSpace, Error>(b.space)
+    };
+    // No key: device. Device and constant stated: as stated.
+    assert_eq!(decoded(None).unwrap(), AddrSpace::Device);
+    assert_eq!(decoded(Some(1)).unwrap(), AddrSpace::Device);
+    assert_eq!(decoded(Some(2)).unwrap(), AddrSpace::Constant);
+    // The default is the member's alone: a top-level buffer still takes its parameter's pointer
+    // space (`a_buffer_without_an_address_space_takes_its_pointer_s`), and one with no carrier at
+    // all is still `MissingKey` (`missing_key_is_refused`).
+}
+
 /// A role belongs to the stages that define it: a stage input, varying, builtin, or output of
 /// another stage is inconsistent ABI.
 #[test]

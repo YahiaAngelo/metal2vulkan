@@ -32,7 +32,7 @@ bb0:
 
 define %t11 @f3 "linked_sample" convergent memory(Ref, NoModRef, NoModRef) "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( Ref nocapture ) {
 bb0:
-  %i0 = tail call %t15 @f5 [air Texture(Texture { op: Sample { compare: false, lod: Level, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %a1, i1 1, <2 x i32> zeroinitializer, i1 1, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i0 = tail call %t15 @f5 [air Texture(Texture { op: Sample { compare: false, lod: Level, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, ptr addrspace(2) @g0, %a1, i1 1, <2 x i32> zeroinitializer, i1 1, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i1 = extractvalue <4 x float> %i0, 0
   ret %i1
 }

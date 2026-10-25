@@ -18,7 +18,7 @@ bb0:
   %i2 = load <4 x float>, %i1, align 16
   %i3 = shufflevector <2 x float> %i2, <4 x float> poison, <0, 1>
   %i4 = extractelement %i2, i64 2
-  %i5 = tail call %t12 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, %a1, %i3, i1 1, <2 x i32> zeroinitializer, i1 0, %i4, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i5 = tail call %t12 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, %a1, %i3, i1 1, <2 x i32> zeroinitializer, i1 0, %i4, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i6 = extractvalue <4 x float> %i5, 0
   %i7 = getelementptr inbounds <4 x float>, %a3, %i0
   store %i6, %i7, align 16
@@ -38,7 +38,7 @@ bb0:
   %i8 = insertelement <2 x float> poison, %i6, i64 0
   %i9 = shufflevector <2 x float> %i8, <2 x float> poison, <0, 0>
   %i10 = fmul reassoc nnan ninf nsz arcp contract afn <2 x float> %i9, %i7
-  %i11 = tail call %t12 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, %a2, %i10, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i11 = tail call %t12 @f4 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a1, %a2, %i10, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i12 = extractvalue <4 x float> %i11, 0
   ret %i12
 }

@@ -29,7 +29,7 @@ bb0:
   br %i11, bb1, bb2
 bb1:
   %i13 = load i16, %a1, align 2
-  tail call void @f5 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write) })](%a0, %i0, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, <2 x i16> zeroinitializer, %i13, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
+  tail call void @f5 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write), states_access: true })](%a0, %i0, i1 0, <2 x i16> zeroinitializer, <2 x i16> undef, <2 x i16> zeroinitializer, %i13, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
   br bb2
 bb2:
   ret void

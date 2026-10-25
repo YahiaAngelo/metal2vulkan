@@ -19,7 +19,7 @@ bb0:
   %i1 = insertelement <2 x float> c23, %i0, i64 0
   %i2 = fadd reassoc nnan ninf nsz arcp contract afn <2 x float> %i1, <2 x float> c24
   %i3 = fmul reassoc nnan ninf nsz arcp contract afn <2 x float> %i2, <2 x float> c25
-  %i4 = tail call %t10 @f2 [air Texture(Texture { op: SampleGrad { compare: false, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, %a1, %i3, <2 x float> c26, <2 x float> c27, float 0x0, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i4 = tail call %t10 @f2 [air Texture(Texture { op: SampleGrad { compare: false, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, %a1, %i3, <2 x float> c26, <2 x float> c27, float 0x0, i1 1, <2 x i32> zeroinitializer, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i5 = extractvalue <4 x float> %i4, 0
   %i6 = zext %a3 to i64
   %i7 = getelementptr inbounds <4 x float>, %a2, %i6

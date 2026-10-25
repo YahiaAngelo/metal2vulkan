@@ -51,10 +51,10 @@ bb0:
   %i0 = shufflevector <2 x float> %a0, <4 x float> poison, <0, 1>
   %i1 = tail call <2 x i32> @f3 [air Convert(Convert { dst: NumTy { elem: I32, lanes: 2 }, dst_kind: Unsigned, src: NumTy { elem: F32, lanes: 2 }, src_kind: Float, src_fp8: None })](%i0)
   %i2 = tail call ptr addrspace(2) @f10 [air Sampler(GetReadSampler)]()
-  %i3 = tail call %t21 @f11 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(ReadWrite) })](%a1, %i2, %i1, <2 x i32> zeroinitializer, i32 0, i32 3) arg0( Ref nocapture )
+  %i3 = tail call %t21 @f11 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(ReadWrite), states_access: true })](%a1, %i2, %i1, <2 x i32> zeroinitializer, i32 0, i32 3) arg0( Ref nocapture )
   %i4 = extractvalue <4 x float> %i3, 0
   %i5 = fadd reassoc nnan ninf nsz arcp contract afn <4 x float> %i4, <4 x float> c37
-  tail call void @f12 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(ReadWrite) })](%a1, %i1, %i5, i32 0, i32 3) arg0( nocapture )
+  tail call void @f12 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(ReadWrite), states_access: true })](%a1, %i1, %i5, i32 0, i32 3) arg0( nocapture )
   ret %i5
 }
 

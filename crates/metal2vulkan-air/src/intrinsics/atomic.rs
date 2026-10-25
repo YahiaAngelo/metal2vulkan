@@ -23,6 +23,14 @@
 //! AIR 2.9 one, which MSL 4.1's `_explicit(..., order, flags)` functions (MSL §6.16.4) and its
 //! non-explicit ones (`seq_cst` with every flag) fill.
 //!
+//! **Before AIR 2.0** (deployment target macOS 10.12 and earlier, iOS 10 and earlier): the
+//! trailing volatile flag is absent -- `i32 @air.atomic.global.add.u.i32(ptr addrspace(1), i32,
+//! i32 order, i32 scope)`. [`Atomic::stated_volatile`] is `false` for that form, and `volatile`
+//! is then `false`, which names the same memory operation: an atomic is never elided or merged,
+//! so Metal's `volatile` qualifier and LLVM's add nothing to it
+//! (`metal2vulkan::lower::access::atomic`). Only a 32-bit device or threadgroup atomic has the
+//! form: 64-bit and `float` atomics and thread atomics are all later than AIR 2.0.
+//!
 //! **Thread memory** (MSL 4.1, so AIR 2.9 only): `air.atomic.private.<op>` is an atomic on a
 //! `thread` object through a thread pointer, in the AIR 2.9 layout, with Apple's compiler passing
 //! scope `thread_scope_thread`. MSL 4.1 declares thread atomics of 32-bit integers and `float`
@@ -188,6 +196,9 @@ pub struct Atomic {
     /// The memories the order applies to: the `mem_flags` immediate of the AIR 2.9 form, `None`
     /// for the AIR 2.8 form, which has no such operand.
     pub flags: Option<MemFlags>,
+    /// Whether the declaration states the trailing volatile flag at all. AIR 2.0 added it; before
+    /// it the same operation is declared without one (the module docs), and `volatile` is `false`.
+    pub stated_volatile: bool,
 }
 
 impl Atomic {
@@ -245,6 +256,7 @@ impl Atomic {
             fetch: op != AtomicOp::Store,
             // A thread atomic exists in the AIR 2.9 form only.
             flags: private.then(MemFlags::default),
+            stated_volatile: true,
         })
     }
 
@@ -254,9 +266,23 @@ impl Atomic {
     /// memory is declared without its result (none is observed), so each has the two forms of its
     /// fetching declaration; a thread atomic has the AIR 2.9 form alone.
     pub(super) fn alternative(self) -> Option<Atomic> {
-        if self.flags.is_none() {
+        if self.flags.is_none() && self.stated_volatile {
             return Some(Atomic {
                 flags: Some(MemFlags::default()),
+                ..self
+            });
+        }
+        // The pre-AIR-2.0 form of the same declaration: no trailing volatile flag, and no
+        // `mem_flags` either, that operand being five emitter steps later. Only a 32-bit device
+        // or threadgroup atomic reaches it; the types and memories of the others are all later
+        // than AIR 2.0, so this is a test of the name's own type and memory, not of a version.
+        if self.stated_volatile
+            && self.ty == NumTy::scalar(Elem::I32)
+            && matches!(self.space, AtomicSpace::Global | AtomicSpace::Local)
+        {
+            return Some(Atomic {
+                flags: None,
+                stated_volatile: false,
                 ..self
             });
         }
@@ -290,9 +316,10 @@ impl Atomic {
                 if self.fetch { t } else { Operand::Void },
             ),
         };
-        let tail: &[Operand] = match self.flags {
-            Some(_) => &[i32s, flag],
-            None => &[flag],
+        let tail: &[Operand] = match (self.flags, self.stated_volatile) {
+            (Some(_), _) => &[i32s, flag],
+            (None, true) => &[flag],
+            (None, false) => &[],
         };
         // The longest is a compare-exchange's six leading operands and both trailing ones.
         let mut params = [Operand::Void; 8];
@@ -312,7 +339,10 @@ impl Atomic {
         };
         // The AIR 2.9 form's `mem_flags` follows the scope; the volatile flag is last.
         let flags_at = self.flags.map(|_| scope + 1);
-        let volatile = imm.flag(scope + 1 + usize::from(flags_at.is_some()))?;
+        let volatile = match self.stated_volatile {
+            true => imm.flag(scope + 1 + usize::from(flags_at.is_some()))?,
+            false => false,
+        };
         let (order, scope) = (imm.get(order)?, imm.get(scope)?);
         let failure = match failure {
             Some(i) => Some(imm.get(i)?),

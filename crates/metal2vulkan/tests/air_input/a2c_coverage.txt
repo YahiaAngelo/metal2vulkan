@@ -57,11 +57,11 @@ bb0:
   %i7 = shl i32 %i6, i32 1
   %i8 = zext %i7 to i64
   %i9 = getelementptr inbounds %t23, %a4, %i8, i32 0
-  %i10 = tail call i32 @f7 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i9, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i10 = tail call i32 @f7 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i9, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i11 = or i32 %i7, i32 1
   %i12 = zext %i11 to i64
   %i13 = getelementptr inbounds %t23, %a4, %i12, i32 0
-  %i14 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Or, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i13, %a1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i14 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Or, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i13, %a1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i15 = load <4 x float>, %a2, align 16
   %i16 = insertvalue %t3 undef %i15, 0
   ret %i16
@@ -81,11 +81,11 @@ bb0:
   %i7 = shl i32 %i6, i32 1
   %i8 = zext %i7 to i64
   %i9 = getelementptr inbounds %t23, %a4, %i8, i32 0
-  %i10 = tail call i32 @f7 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i9, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i10 = tail call i32 @f7 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i9, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i11 = or i32 %i7, i32 1
   %i12 = zext %i11 to i64
   %i13 = getelementptr inbounds %t23, %a4, %i12, i32 0
-  %i14 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Or, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i13, %a1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i14 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Or, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i13, %a1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i15 = load <4 x float>, %a2, align 16
   %i16 = load i32, %a5, align 4
   %i17 = insertvalue %t12 undef %i15, 0

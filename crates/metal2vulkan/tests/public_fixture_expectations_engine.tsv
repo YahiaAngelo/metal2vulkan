@@ -327,6 +327,18 @@ engine/a8r_targets.ll	a8r_half_vertex	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	
 engine/a8r_targets.ll	a8r_fill	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/a8r_targets.ll	a8r_dual	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{DualSourceBlending; AnyOf[[Feature(DualSrcBlend)]]}	Unsupported{DualSourceBlending; AnyOf[[Feature(DualSrcBlend)]]}	Unsupported{DualSourceBlending; AnyOf[[Feature(DualSrcBlend)]]}
 engine/a8r_targets.ll	a8r_fetch	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	ok	ok	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	ok	Unsupported{FramebufferFetch; AnyOf[[Feature(RasterizationOrderColorAttachmentAccess)], [Feature(FragmentShaderPixelInterlock)]]}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	Unsupported{FramebufferFetch; AnyOf[[Feature(RasterizationOrderColorAttachmentAccess)], [Feature(FragmentShaderPixelInterlock)]]}	ok	Unsupported{FramebufferFetch; AnyOf[[Feature(RasterizationOrderColorAttachmentAccess)], [Feature(FragmentShaderPixelInterlock), Feature(FragmentStoresAndAtomics)]]}
+engine/air_1_11_front_end.air.ll	a111_blit	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}
+engine/air_1_11_front_end.air.ll	a111_vs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_1_11_front_end.air.ll	a111_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_1_11_front_end.ll	a111_blit	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}
+engine/air_1_11_front_end.ll	a111_vs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_1_11_front_end.ll	a111_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_1_8_front_end.air.ll	a18_blit	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}
+engine/air_1_8_front_end.air.ll	a18_vs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_1_8_front_end.air.ll	a18_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_1_8_front_end.ll	a18_blit	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}
+engine/air_1_8_front_end.ll	a18_vs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_1_8_front_end.ll	a18_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/air_2_1_front_end.air.ll	a21_mip	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}
 engine/air_2_1_front_end.air.ll	a21_blit_vs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/air_2_1_front_end.air.ll	a21_blit_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
@@ -335,6 +347,24 @@ engine/air_2_1_front_end.ll	a21_mip	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/air_2_1_front_end.ll	a21_blit_vs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/air_2_1_front_end.ll	a21_blit_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/air_2_1_front_end.ll	a21_alpha_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_2_texture_status.air.ll	a22_reduce	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_2_texture_status.air.ll	a22_vs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_2_texture_status.air.ll	a22_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_2_texture_status.ll	a22_reduce	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_2_texture_status.ll	a22_vs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_2_texture_status.ll	a22_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_4_front_end.air.ll	a24_bundle_read	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}	ok	ok	ok	ok	ok	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}
+engine/air_2_4_front_end.air.ll	a24_vs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}	ok	ok	ok	ok	ok	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}
+engine/air_2_4_front_end.air.ll	a24_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{ArgumentBufferTextures; AnyOf[[Feature(RuntimeDescriptorArray), Feature(DescriptorBindingPartiallyBound), Feature(ShaderSampledImageArrayNonUniformIndexing), Feature(DescriptorBindingSampledImageUpdateAfterBind)]]}
+engine/air_2_4_front_end.ll	a24_bundle_read	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}	ok	ok	ok	ok	ok	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}
+engine/air_2_4_front_end.ll	a24_vs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}	ok	ok	ok	ok	ok	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{DereferenceLoadedPointer; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}
+engine/air_2_4_front_end.ll	a24_fs	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{ArgumentBufferTextures; AnyOf[[Feature(RuntimeDescriptorArray), Feature(DescriptorBindingPartiallyBound), Feature(ShaderSampledImageArrayNonUniformIndexing), Feature(DescriptorBindingSampledImageUpdateAfterBind)]]}
+engine/air_2_9_front_end.air.ll	a29_split_floats	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_9_front_end.air.ll	a29_atomics_and_barrier	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_9_front_end.air.ll	a29_read_texels	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}
+engine/air_2_9_front_end.ll	a29_split_floats	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_9_front_end.ll	a29_atomics_and_barrier	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/air_2_9_front_end.ll	a29_read_texels	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}	ok	NeedsInput{StorageTextureFormat { slot: SlotRef { stage: Kernel, class: Texture, index: 1 } }}
 engine/ani_cube_grad.air.ll	ani_cube_grad	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{CubeArray; AnyOf[[Feature(ImageCubeArray)]]}
 engine/ani_cube_grad.ll	ani_cube_grad	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{CubeArray; AnyOf[[Feature(ImageCubeArray)]]}
 engine/bary_weights.air.ll	bw_vertex	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok

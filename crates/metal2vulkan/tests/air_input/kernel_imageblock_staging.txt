@@ -147,7 +147,7 @@ bb0:
   %i15 = tail call i1 @f11 [air BoolReduce(BoolReduce { all: true, lanes: 2 })](%i14)
   br %i15, bb1, bb2
 bb1:
-  tail call void @f13 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 2 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write) })](%a0, %i10, i1 1, <2 x i16> zeroinitializer, <2 x i16> c49, <2 x i16> c50, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
+  tail call void @f13 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 2 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write), states_access: true })](%a0, %i10, i1 1, <2 x i16> zeroinitializer, <2 x i16> c49, <2 x i16> c50, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
   br bb2
 bb2:
   ret void
@@ -184,10 +184,10 @@ bb0:
 bb1:
   %i24 = tail call ptr addrspace(4) @f12 [air Imageblock(Data)](<2 x i16> c59, i32 0, i16 0)
   %i25 = lshr <2 x i16> %a4, <2 x i16> c50
-  tail call void @f14 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I16, lanes: 4 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write) })](%a0, %i24, i1 1, <2 x i16> zeroinitializer, %i25, <2 x i16> zeroinitializer, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
+  tail call void @f14 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: I16, lanes: 4 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write), states_access: true })](%a0, %i24, i1 1, <2 x i16> zeroinitializer, %i25, <2 x i16> zeroinitializer, i16 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
   %i27 = getelementptr inbounds i8, %i24, i64 8
   %i28 = add <2 x i16> %a4, <2 x i16> c60
-  tail call void @f15 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%a1, %i27, i1 1, <2 x i16> zeroinitializer, %i28, <2 x i32> c61, i32 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
+  tail call void @f15 [air Texture(Texture { op: WriteImageblockSlice, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write), states_access: true })](%a1, %i27, i1 1, <2 x i16> zeroinitializer, %i28, <2 x i32> c61, i32 0, i1 0, i32 2) arg0( nocapture ) arg1( nocapture )
   br bb2
 bb2:
   ret void

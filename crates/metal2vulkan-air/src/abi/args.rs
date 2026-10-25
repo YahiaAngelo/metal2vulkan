@@ -339,8 +339,19 @@ impl<'m> Cx<'m, '_> {
                 node.word = Some(ops.string(role_key)?.into());
             }
             (Key::Imageblock, Context::Input) => node.word = Some(ops.string(role_key)?.into()),
+            // An output's attachment, then its dual-source index where the node states one. AIR
+            // 1.11 and later always state it; AIR 1.8 and earlier state the attachment alone,
+            // there being no `[[index(n)]]` in that language version to state, so the operand
+            // after the attachment is the first of the trailing attribute keys. Which shape the
+            // node has is read from that operand's own kind -- an index is an integer and every
+            // attribute key is a string -- not from the recorded AIR version.
             (Key::RenderTarget, Context::Output) => {
-                node.target = Some((ops.abi_int(role_key)?, Some(ops.u32(role_key)?)));
+                let attachment = ops.abi_int(role_key)?;
+                let index = match ops.peek() {
+                    Some(Tok::Int { .. }) => Some(ops.u32(role_key)?),
+                    _ => None,
+                };
+                node.target = Some((attachment, index));
             }
             (Key::RenderTarget, Context::Input) => {
                 node.target = Some((ops.abi_int(role_key)?, None))
@@ -482,21 +493,32 @@ impl<'m> Cx<'m, '_> {
                     site,
                     &[BUFFER, ACCESS, &[Key::RasterOrderGroup]],
                 )?;
-                let space = match (a.space, pointer) {
-                    (Some(raw), _) => AddrSpace::from_raw(raw).ok(),
+                let space = match (a.space, pointer, indirect) {
+                    (Some(raw), _, _) => AddrSpace::from_raw(raw).ok(),
                     // An older compiler's buffer node states no address space (the AIR 2.2 of
                     // macOS 13's system libraries): the parameter's pointer type is the only
                     // carrier, and a node that states one must state that one
                     // (`check::role_type`), so it is the same answer. A thread-space pointer is an
-                    // `array_ref` of buffers, whose type does not carry its elements' space, and
-                    // an argument-buffer member has no parameter: both still need the key.
+                    // `array_ref` of buffers, whose type does not carry its elements' space, so it
+                    // still needs the key.
                     (
                         None,
                         Some(
                             s @ (AddrSpace::Device | AddrSpace::Constant | AddrSpace::Threadgroup),
                         ),
+                        _,
                     ) => Some(s),
-                    (None, _) => {
+                    // An argument buffer's member has no parameter to carry a space, and the
+                    // key arrived with AIR 2.5: before it, every emitter writes a buffer member
+                    // with none. The member's own pointer field in the holding struct is the
+                    // module's only other carrier, and the metadata reaches it by the struct's
+                    // type name alone, which is not a structural fact to decide on. Device space
+                    // is the answer that assumes nothing: Metal encodes a `device` and a
+                    // `constant` member identically (`setBuffer:offset:atIndex:`), the member's
+                    // own access already says whether the shader writes it, and device space is
+                    // the one that claims no uniform-block containment for it.
+                    (None, _, true) => Some(AddrSpace::Device),
+                    (None, _, false) => {
                         return Err(site.err(AbiError::MissingKey, Some(Key::AddressSpace.name())))
                     }
                 };

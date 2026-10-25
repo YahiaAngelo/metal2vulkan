@@ -38,7 +38,7 @@ bb0:
   %i16 = icmp eq %a1, i32 0
   br %i16, bb1, bb2
 bb1:
-  %i18 = tail call i32 @f4 [air Atomic(Atomic { space: Local, op: Sub, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Threadgroup, volatile: true, fetch: true, flags: None })](ptr addrspace(3) c29, i32 1, i32 0, i32 1, i1 1) arg0( nocapture )
+  %i18 = tail call i32 @f4 [air Atomic(Atomic { space: Local, op: Sub, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Threadgroup, volatile: true, fetch: true, flags: None, stated_volatile: true })](ptr addrspace(3) c29, i32 1, i32 0, i32 1, i1 1) arg0( nocapture )
   store i32 12648430, ptr addrspace(3) c33, align 16
   br bb2
 bb2:

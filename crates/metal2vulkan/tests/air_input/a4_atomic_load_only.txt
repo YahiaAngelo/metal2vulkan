@@ -10,7 +10,7 @@ c5 = %t8 [26, 5]
 define %t4 @f0 "a4_atomic_load_only" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="0" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( align 4 dereferenceable(4) nocapture "air-buffer-no-alias"="" ) %a1( Ref nocapture "air-buffer-no-alias"="" ) %a2( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = getelementptr inbounds %t10, %a0, i64 0, i32 0
-  %i1 = tail call i32 @f1 [air Atomic(Atomic { space: Global, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i0, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i1 = tail call i32 @f1 [air Atomic(Atomic { space: Global, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i0, i32 0, i32 2, i1 1) arg0( nocapture )
   %i2 = icmp ugt %i1, %a3
   br %i2, bb1, bb2
 bb1:

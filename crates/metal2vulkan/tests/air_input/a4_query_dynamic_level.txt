@@ -10,12 +10,12 @@ c7 = %t9 [26, 5]
 define %t4 @f0 "a4_query_dynamic_level" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="0" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a1( align 4 dereferenceable(4) Ref nocapture "air-buffer-no-alias"="" ) %a2( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = load i32, %a1, align 4
-  %i1 = tail call i32 @f1 [air Texture(Texture { op: Query(Width), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0, %i0) arg0( Ref nocapture )
+  %i1 = tail call i32 @f1 [air Texture(Texture { op: Query(Width), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None, states_access: true })](%a0, %i0) arg0( Ref nocapture )
   store %i1, %a2, align 4
-  %i3 = tail call i32 @f2 [air Texture(Texture { op: Query(Height), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0, %i0) arg0( Ref nocapture )
+  %i3 = tail call i32 @f2 [air Texture(Texture { op: Query(Height), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None, states_access: true })](%a0, %i0) arg0( Ref nocapture )
   %i4 = getelementptr inbounds i32, %a2, i64 1
   store %i3, %i4, align 4
-  %i6 = tail call i32 @f3 [air Texture(Texture { op: Query(NumMipLevels), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0) arg0( Ref nocapture )
+  %i6 = tail call i32 @f3 [air Texture(Texture { op: Query(NumMipLevels), image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: None, coord16: false, form: Current, status: true, access: None, states_access: true })](%a0) arg0( Ref nocapture )
   %i7 = getelementptr inbounds i32, %a2, i64 2
   store %i6, %i7, align 4
   ret void

@@ -237,6 +237,11 @@ pub struct Texture {
     pub status: bool,
     /// The access qualifier, for operations that carry one.
     pub access: Option<Access>,
+    /// Whether the declaration states the trailing access-qualifier immediate. AIR 2.0 added it
+    /// to every texture operation that has one; every emitter before it declares the same
+    /// operation without it, and [`Texture::access`] is then `None`. `true` for an operation
+    /// whose layout states none in either form.
+    pub states_access: bool,
 }
 
 /// What one texture operand position is.
@@ -703,6 +708,7 @@ impl Texture {
             form: Form::Current,
             status: true,
             access: None,
+            states_access: true,
         };
         // The `ulong` stems take a `ulong` texel, and the others none.
         let ulong_stem = matches!(op_name, OpName::UlongAtomic(_));
@@ -711,10 +717,11 @@ impl Texture {
     }
 
     /// The next declaration of the same name a module may have, searched in order: a read's, or
-    /// a 2D or 3D atomic's, legacy operand form, and then, for an operation whose result carries
-    /// a residency status, the AIR 2.1 form that states none. A read has all three (AIR 2.8's
-    /// sampler and offset, AIR 2.2's status, and AIR 2.1's bare texel); a sample or gather has
-    /// the status axis alone, and an atomic the operand axis alone.
+    /// a 2D or 3D atomic's, legacy operand form; then, for an operation whose result carries a
+    /// residency status, the AIR 2.1 form that states none; then the pre-AIR-2.0 form, which
+    /// states no trailing access qualifier. A read has all four (AIR 2.8's sampler and offset,
+    /// AIR 2.2's status, AIR 2.1's bare texel, and AIR 1.x's absent qualifier); a sample or
+    /// gather has the status and qualifier axes, and an atomic the operand and qualifier axes.
     pub(super) fn alternative(self) -> Option<Texture> {
         let legacy = match self.op {
             TexOp::Read => true,
@@ -727,8 +734,18 @@ impl Texture {
                 ..self
             });
         }
-        (self.status && self.states_status()).then_some(Texture {
-            status: false,
+        if self.status && self.states_status() {
+            return Some(Texture {
+                status: false,
+                ..self
+            });
+        }
+        // The pre-AIR-2.0 form of the same declaration: no trailing access-qualifier immediate.
+        // Reached only where the layout states one, so an operation that never carried it has no
+        // such form; the earlier axes are exhausted first, so a read reaches its legacy operand
+        // form and its bare-texel form before this one.
+        (self.states_access && self.layout().index(TexRole::Access).is_some()).then_some(Texture {
+            states_access: false,
             ..self
         })
     }
@@ -869,7 +886,7 @@ impl Texture {
                 l.push(R::LodMode, flag);
                 l.push(R::LodValue, f32s);
                 l.push_if(self.status, R::MinLodClamp, f32s);
-                l.push(R::Access, access);
+                l.push_if(self.states_access, R::Access, access);
             }
             TexOp::SampleGrad { compare, .. } => {
                 let grad = num(Elem::F32, sample_lanes);
@@ -886,7 +903,7 @@ impl Texture {
                     l.push(R::OffsetFlag, flag);
                     l.push(R::Offset, num(Elem::I32, sample_lanes));
                 }
-                l.push(R::Access, access);
+                l.push_if(self.states_access, R::Access, access);
             }
             TexOp::Gather {
                 component, compare, ..
@@ -902,7 +919,7 @@ impl Texture {
                     l.push(R::Offset, num(Elem::I32, sample_lanes));
                 }
                 l.push_if(component.is_some(), R::Component, access);
-                l.push(R::Access, access);
+                l.push_if(self.states_access, R::Access, access);
             }
             TexOp::Read => {
                 let current = self.form == Form::Current;
@@ -920,7 +937,7 @@ impl Texture {
                 } else if shape.dim != ImageDim::Buffer {
                     l.push(R::Lod, num(ci, 1));
                 }
-                l.push(R::Access, access);
+                l.push_if(self.states_access, R::Access, access);
             }
             TexOp::Write => {
                 l.push(R::Texture, tex);
@@ -931,7 +948,7 @@ impl Texture {
                 l.push_if(shape.array, R::Layer, num(ci, 1));
                 l.push(R::Value, texel);
                 l.push_if(shape.dim != ImageDim::Buffer, R::Lod, num(ci, 1));
-                l.push(R::Access, access);
+                l.push_if(self.states_access, R::Access, access);
             }
             TexOp::Atomic(op) => {
                 let has_offset =
@@ -954,7 +971,7 @@ impl Texture {
                 );
                 l.push(R::Order, i32s);
                 l.push_if(op == AtomicOp::CmpXchgWeak, R::FailureOrder, i32s);
-                l.push(R::Access, access);
+                l.push_if(self.states_access, R::Access, access);
             }
             TexOp::Fence | TexOp::IsNull => l.push(R::Texture, tex),
             TexOp::Query(q) => {
@@ -970,7 +987,7 @@ impl Texture {
                 l.push(R::Texture, tex);
                 l.push(R::Sampler, smp);
                 l.push(R::Coord, num(Elem::F32, sample_lanes));
-                l.push(R::Access, access);
+                l.push_if(self.states_access, R::Access, access);
             }
             TexOp::WriteImageblockSlice => {
                 let i16v2 = num(Elem::I16, 2);
@@ -986,7 +1003,7 @@ impl Texture {
                 l.push_if(shape.array, R::Layer, num(ci, 1));
                 l.push(R::Lod, num(ci, 1));
                 l.push(R::Opaque(8), num(Elem::I1, 1));
-                l.push(R::Access, access);
+                l.push_if(self.states_access, R::Access, access);
             }
         }
         l

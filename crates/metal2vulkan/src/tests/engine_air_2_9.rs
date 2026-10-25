@@ -9,6 +9,8 @@
 //!
 //! Each public `.ll` fixture with such a call is respelled in AIR 2.9 here: those operands
 //! inserted into every declaration and call, and the triple and `!air.version` moved to AIR 2.9.
+//! A fixture older than AIR 2.0 is left alone: its atomics state no volatile flag and its
+//! barriers no scope, so it has no AIR 2.9 spelling to compare against.
 //! Both spellings compile, entry by entry, on every committed profile to the same SPIR-V words
 //! (or the same refusal). The respelled modules keep their barrier declarations, so a barrier the
 //! lockstep pass inserts is built through the module's AIR 2.9 declaration; at least one respelled
@@ -117,10 +119,20 @@ fn is_air_2_9(text: &str) -> bool {
         .any(|l| l.starts_with("target triple = \"air64_v29-"))
 }
 
-/// `text` in AIR 2.9's spelling, or `None` when it calls no changed intrinsic or already is AIR
-/// 2.9.
+/// Whether module text `text` is AIR 2.x (its triple's), the spelling AIR 2.9 extends. Before
+/// AIR 2.0 a memory atomic states no volatile flag and a barrier no scope, so inserting an
+/// operand before the last one would write a shape no Metal compiler emits (`mem_flags` before a
+/// scope, an order before a flag set) rather than that module's AIR 2.9 spelling, which does not
+/// exist: AIR 2.9 states both.
+fn is_air_2(text: &str) -> bool {
+    text.lines()
+        .any(|l| l.starts_with("target triple = \"air64_v2"))
+}
+
+/// `text` in AIR 2.9's spelling, or `None` when it calls no changed intrinsic, already is AIR
+/// 2.9, or is older than AIR 2.0 ([`is_air_2`]).
 fn respell(text: &str) -> Option<String> {
-    if is_air_2_9(text) {
+    if is_air_2_9(text) || !is_air_2(text) {
         return None;
     }
     let mut changed = false;

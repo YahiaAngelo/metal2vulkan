@@ -45,9 +45,9 @@ bb0:
   %i27 = load <4 x float>, %i26, align 16
   %i28 = shufflevector <3 x float> %i27, <4 x float> poison, <0, 1, 2>
   %i29 = fmul reassoc nnan ninf nsz arcp contract afn <3 x float> %i28, %i22
-  %i30 = tail call %t11 @f1 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i16, %i23, %i29, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i30 = tail call %t11 @f1 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, ptr addrspace(2) @g0, %i16, %i23, %i29, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i31 = extractvalue <4 x float> %i30, 0
-  %i32 = tail call %t11 @f2 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, %i16, i32 1, %i23, %i29, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i32 = tail call %t11 @f2 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a1, ptr addrspace(2) @g0, %i16, i32 1, %i23, %i29, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i33 = extractvalue <4 x float> %i32, 0
   %i34 = shufflevector <2 x float> %i31, %i33, <0, 4>
   %i35 = zext %a4 to i64

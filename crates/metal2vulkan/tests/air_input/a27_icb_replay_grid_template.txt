@@ -73,7 +73,7 @@ bb0:
   %i60 = urem i32 %i57, %i59
   %i61 = zext %i60 to i64
   %i62 = getelementptr inbounds %t14, %a1, %i61, i32 0
-  %i63 = tail call i32 @f2 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: Some(MemFlags { device: false, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }) })](%i62, %i50, i32 0, i32 2, i32 0, i1 1) arg0( nocapture )
+  %i63 = tail call i32 @f2 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: Some(MemFlags { device: false, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }), stated_volatile: true })](%i62, %i50, i32 0, i32 2, i32 0, i1 1) arg0( nocapture )
   ret void
 }
 

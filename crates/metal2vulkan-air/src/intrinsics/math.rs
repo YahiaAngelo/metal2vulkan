@@ -8,7 +8,9 @@
 //!
 //! Two functions reach AIR as calls to Metal runtime routines instead, declarations Apple's
 //! compiler emits and its backend defines at pipeline creation: `frexp` as
-//! `___metal_frexp_<T>_pthread<I>(T, thread I*)` and `ilogb` as `___metal_ilogb_<T>(T, i32 mode)`,
+//! `___metal_frexp_<T>_pthread<I>(T, thread I*)` (AIR 2.9 spells the same operation
+//! `air.frexp.<T>(T, thread I*)` instead, and both read to one `Math`) and `ilogb` as
+//! `___metal_ilogb_<T>(T, i32 mode)`,
 //! `T` a `float` or `half` scalar or vector (`v<n>float`, `v<n>half`) and `I` its `int32` shape
 //! ([`Math::parse_routine`]). They decode into this family as [`MathFn::Frexp`] and
 //! [`MathFn::Ilogb`]; canonicalization replaces each call by the routine's measured answer in
@@ -294,6 +296,11 @@ pub(super) const TABLE: &[(&str, Domain, Shape)] = {
         ("ldexp", F(M::Ldexp), Ldexp),
         ("dot", F(M::Dot), Dot),
         ("sincos", F(M::SinCos), SinCos),
+        // AIR 2.9 (deployment target macOS 27) spells `frexp` as this intrinsic. Every earlier
+        // emitter outlines it as the runtime routine `___metal_frexp_<T>_pthread<I>`, which
+        // `parse_routine` reads to the same `Math`, so both spellings reach one expansion
+        // (`canon::routine`).
+        ("frexp", F(M::Frexp), Frexp),
         ("abs", S(M::Abs), Same(1)),
         ("abs_diff", S(M::AbsDiff), Same(2)),
         ("min", S(M::IMin), Same(2)),

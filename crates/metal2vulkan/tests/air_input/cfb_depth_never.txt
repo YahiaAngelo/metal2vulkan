@@ -30,7 +30,7 @@ bb0:
 define %t7 @f1 "cfb_dn_count_vertices" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-trapping-math"="true" "stack-protector-buffer-size"="8" %a1( nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = getelementptr inbounds %t18, %a1, i64 1, i32 0
-  %i1 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i1 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i2 = icmp eq %a0, i32 1
   %i3 = select float %i2, float 0x40400000, float 0xBF800000
   %i4 = icmp eq %a0, i32 2
@@ -44,21 +44,21 @@ bb0:
 define %t8 @f2 "cfb_dn_count" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-trapping-math"="true" "stack-protector-buffer-size"="8" %a1( nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = getelementptr inbounds %t18, %a1, i64 0, i32 0
-  %i1 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i1 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   ret <4 x float> c31
 }
 
 define %t8 @f3 "cfb_dn_count_early" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-trapping-math"="true" "stack-protector-buffer-size"="8" %a1( nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = getelementptr inbounds %t18, %a1, i64 0, i32 0
-  %i1 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i1 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   ret <4 x float> c31
 }
 
 define %t8 @f4 "cfb_dn_count_discard" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-trapping-math"="true" "stack-protector-buffer-size"="8" %a1( nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = getelementptr inbounds %t18, %a1, i64 0, i32 0
-  %i1 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i1 = tail call i32 @f8 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i0, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   %i2 = extractelement %a0, i64 0
   %i3 = tail call i32 @f5 [air Convert(Convert { dst: NumTy { elem: I32, lanes: 1 }, dst_kind: Unsigned, src: NumTy { elem: F32, lanes: 1 }, src_kind: Float, src_fp8: None })](%i2)
   %i4 = icmp eq %i3, i32 0

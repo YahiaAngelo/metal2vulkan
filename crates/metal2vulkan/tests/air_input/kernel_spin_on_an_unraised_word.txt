@@ -15,7 +15,7 @@ bb0:
   br %i2, bb3, bb1
 bb1:
   %i4 = phi i32 [%i8, bb2], [i32 0, bb0]
-  %i5 = tail call i32 @f1 [air Atomic(Atomic { space: Global, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i0, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i5 = tail call i32 @f1 [air Atomic(Atomic { space: Global, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i0, i32 0, i32 2, i1 1) arg0( nocapture )
   %i6 = icmp eq %i5, i32 0
   br %i6, bb2, bb3
 bb2:

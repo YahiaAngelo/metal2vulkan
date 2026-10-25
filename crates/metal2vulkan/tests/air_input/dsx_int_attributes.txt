@@ -174,7 +174,7 @@ bb9:
   br bb10
 bb10:
   %i81 = phi i1 [i1 0, bb8], [%i79, bb9]
-  %i82 = tail call %t28 @f12 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a11, %a12, %a1, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i82 = tail call %t28 @f12 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a11, %a12, %a1, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i83 = extractvalue <4 x half> %i82, 0
   %i84 = extractelement %i83, i64 0
   %i85 = extractelement %a0, i64 0

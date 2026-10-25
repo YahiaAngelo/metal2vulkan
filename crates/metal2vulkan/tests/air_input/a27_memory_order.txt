@@ -34,7 +34,7 @@ bb0:
   %i1 = icmp eq %a1, i32 0
   br %i1, bb1, bb2
 bb1:
-  tail call void @f6 [air Atomic(Atomic { space: Local, op: Store, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Threadgroup, volatile: false, fetch: false, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }) })](ptr addrspace(3) @g0, i32 0, i32 5, i32 1, i32 31, i1 0) arg0( nocapture )
+  tail call void @f6 [air Atomic(Atomic { space: Local, op: Store, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Threadgroup, volatile: false, fetch: false, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }), stated_volatile: true })](ptr addrspace(3) @g0, i32 0, i32 5, i32 1, i32 31, i1 0) arg0( nocapture )
   br bb2
 bb2:
   %i5 = mul i32 %a1, i32 3
@@ -47,9 +47,9 @@ bb2:
   %i12 = zext %i11 to i64
   %i13 = getelementptr inbounds %t3, ptr addrspace(3) @g1, i64 0, %i12
   %i14 = load i32, %i13, align 4
-  %i15 = tail call i32 @f7 [air Atomic(Atomic { space: Local, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Threadgroup, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }) })](ptr addrspace(3) @g0, %i14, i32 5, i32 1, i32 31, i1 0) arg0( nocapture )
+  %i15 = tail call i32 @f7 [air Atomic(Atomic { space: Local, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Threadgroup, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }), stated_volatile: true })](ptr addrspace(3) @g0, %i14, i32 5, i32 1, i32 31, i1 0) arg0( nocapture )
   tail call void @f4 [air Sync(Barrier { name: Threadgroup, flags: MemFlags { device: false, threadgroup: true, texture: false, threadgroup_imageblock: false, object_data: false }, order: Some(SeqCst), scope: Threadgroup, memory: Threadgroup })](i32 2, i32 5, i32 1) convergent
-  %i17 = tail call i32 @f8 [air Atomic(Atomic { space: Local, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Acquire, failure: None, scope: Threadgroup, volatile: false, fetch: true, flags: Some(MemFlags { device: false, threadgroup: true, texture: false, threadgroup_imageblock: false, object_data: false }) })](ptr addrspace(3) @g0, i32 2, i32 1, i32 2, i1 0) arg0( nocapture )
+  %i17 = tail call i32 @f8 [air Atomic(Atomic { space: Local, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Acquire, failure: None, scope: Threadgroup, volatile: false, fetch: true, flags: Some(MemFlags { device: false, threadgroup: true, texture: false, threadgroup_imageblock: false, object_data: false }), stated_volatile: true })](ptr addrspace(3) @g0, i32 2, i32 1, i32 2, i1 0) arg0( nocapture )
   %i18 = mul i32 %a1, i32 5
   %i19 = add i32 %i18, i32 2
   store %i19, %i8, align 4
@@ -68,24 +68,24 @@ bb2:
   %i33 = getelementptr inbounds %t28, %a0, i64 0, i32 1, %i32
   %i34 = load i32, %i33, align 4
   %i35 = getelementptr inbounds %t28, %a0, i64 0, i32 0, i64 0, i32 0
-  %i36 = tail call i32 @f9 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Release, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }) })](%i35, i32 1, i32 3, i32 2, i32 1, i1 0) arg0( nocapture )
+  %i36 = tail call i32 @f9 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Release, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }), stated_volatile: true })](%i35, i32 1, i32 3, i32 2, i32 1, i1 0) arg0( nocapture )
   %i37 = getelementptr inbounds %t28, %a0, i64 0, i32 0, i64 1, i32 0
-  %i38 = tail call i32 @f9 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }) })](%i37, %a1, i32 5, i32 2, i32 31, i1 0) arg0( nocapture )
+  %i38 = tail call i32 @f9 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }), stated_volatile: true })](%i37, %a1, i32 5, i32 2, i32 31, i1 0) arg0( nocapture )
   %i39 = getelementptr inbounds %t28, %a0, i64 0, i32 0, i64 2, i32 0
-  %i40 = tail call i32 @f10 [air Atomic(Atomic { space: Global, op: Max, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: false, threadgroup: false, texture: true, threadgroup_imageblock: false, object_data: false }) })](%i39, %a1, i32 0, i32 2, i32 4, i1 0) arg0( nocapture )
+  %i40 = tail call i32 @f10 [air Atomic(Atomic { space: Global, op: Max, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: false, threadgroup: false, texture: true, threadgroup_imageblock: false, object_data: false }), stated_volatile: true })](%i39, %a1, i32 0, i32 2, i32 4, i1 0) arg0( nocapture )
   %i41 = getelementptr inbounds %t28, %a0, i64 0, i32 0, i64 3, i32 0
-  %i42 = tail call i32 @f9 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Threadgroup, volatile: false, fetch: true, flags: Some(MemFlags { device: false, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }) })](%i41, i32 1, i32 0, i32 1, i32 0, i1 0) arg0( nocapture )
+  %i42 = tail call i32 @f9 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Threadgroup, volatile: false, fetch: true, flags: Some(MemFlags { device: false, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }), stated_volatile: true })](%i41, i32 1, i32 0, i32 1, i32 0, i1 0) arg0( nocapture )
   %i43 = and i32 %a1, i32 31
   %i44 = shl nuw i32 i32 1, %i43
   %i45 = getelementptr inbounds %t28, %a0, i64 0, i32 0, i64 4, i32 0
-  %i46 = tail call i32 @f11 [air Atomic(Atomic { space: Global, op: Or, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: AcqRel, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: false, threadgroup: false, texture: true, threadgroup_imageblock: false, object_data: false }) })](%i45, %i44, i32 4, i32 2, i32 4, i1 0) arg0( nocapture )
+  %i46 = tail call i32 @f11 [air Atomic(Atomic { space: Global, op: Or, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: AcqRel, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: false, threadgroup: false, texture: true, threadgroup_imageblock: false, object_data: false }), stated_volatile: true })](%i45, %i44, i32 4, i32 2, i32 4, i1 0) arg0( nocapture )
   %i47 = add i32 %a1, i32 16
   %i48 = zext %i47 to i64
   %i49 = add i32 %a1, i32 100
   %i50 = bitcast %i0 to ptr addrspace(0)
   store i32 7, %i0, align 4
   %i52 = getelementptr inbounds %t28, %a0, i64 0, i32 0, %i48, i32 0
-  %i53 = call i32 @f12 [air Atomic(Atomic { space: Global, op: CmpXchgWeak, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: AcqRel, failure: Some(Acquire), scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }) })](%i52, %i0, %i49, i32 4, i32 2, i32 2, i32 1, i1 0) arg0( nocapture ) arg1( nocapture )
+  %i53 = call i32 @f12 [air Atomic(Atomic { space: Global, op: CmpXchgWeak, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: AcqRel, failure: Some(Acquire), scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }), stated_volatile: true })](%i52, %i0, %i49, i32 4, i32 2, i32 2, i32 1, i1 0) arg0( nocapture ) arg1( nocapture )
   %i54 = icmp eq %i53, i32 7
   %i55 = load i32, %i0, align 4
   tail call void @f4 [air Sync(Barrier { name: Threadgroup, flags: MemFlags { device: true, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }, order: Some(Release), scope: Threadgroup, memory: Threadgroup })](i32 1, i32 3, i32 1) convergent
@@ -120,10 +120,10 @@ bb0:
   %i0 = zext %a1 to i64
   %i1 = shl i64 %i0, i64 33
   %i2 = getelementptr inbounds %t33, %a0, i64 0, i32 0, i32 0
-  tail call void @f13 [air Atomic(Atomic { space: Global, op: Max, sign: Some(Unsigned), ty: NumTy { elem: I64, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: false, fetch: false, flags: Some(MemFlags { device: true, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }) })](%i2, %i1, i32 0, i32 2, i32 1, i1 0) arg0( nocapture )
+  tail call void @f13 [air Atomic(Atomic { space: Global, op: Max, sign: Some(Unsigned), ty: NumTy { elem: I64, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: false, fetch: false, flags: Some(MemFlags { device: true, threadgroup: false, texture: false, threadgroup_imageblock: false, object_data: false }), stated_volatile: true })](%i2, %i1, i32 0, i32 2, i32 1, i1 0) arg0( nocapture )
   %i4 = tail call reassoc nnan ninf nsz arcp contract afn float @f2 [air Convert(Convert { dst: NumTy { elem: F32, lanes: 1 }, dst_kind: Float, src: NumTy { elem: I32, lanes: 1 }, src_kind: Unsigned, src_fp8: None })](%a1)
   %i5 = getelementptr inbounds %t33, %a0, i64 0, i32 1, i32 0
-  %i6 = tail call reassoc nnan ninf nsz arcp contract afn float @f14 [air Atomic(Atomic { space: Global, op: Add, sign: None, ty: NumTy { elem: F32, lanes: 1 }, order: SeqCst, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }) })](%i5, %i4, i32 5, i32 2, i32 31, i1 0) arg0( nocapture )
+  %i6 = tail call reassoc nnan ninf nsz arcp contract afn float @f14 [air Atomic(Atomic { space: Global, op: Add, sign: None, ty: NumTy { elem: F32, lanes: 1 }, order: SeqCst, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }), stated_volatile: true })](%i5, %i4, i32 5, i32 2, i32 31, i1 0) arg0( nocapture )
   ret void
 }
 
@@ -132,12 +132,12 @@ declare %t9 @f2 "air.convert.f.f32.u.i32" memory(NoModRef, NoModRef, NoModRef)
 define %t10 @f3 "a27_fragment_atomics" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="0" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = getelementptr inbounds %t2, %a0, i64 0, i32 0
-  %i1 = tail call i32 @f9 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }) })](%i0, i32 1, i32 5, i32 2, i32 31, i1 0) arg0( nocapture )
+  %i1 = tail call i32 @f9 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }), stated_volatile: true })](%i0, i32 1, i32 5, i32 2, i32 31, i1 0) arg0( nocapture )
   %i2 = getelementptr inbounds %t2, %a0, i64 1, i32 0
-  %i3 = tail call i32 @f15 [air Atomic(Atomic { space: Global, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }) })](%i2, i32 5, i32 2, i32 31, i1 0) arg0( nocapture )
+  %i3 = tail call i32 @f15 [air Atomic(Atomic { space: Global, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Device, volatile: false, fetch: true, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }), stated_volatile: true })](%i2, i32 5, i32 2, i32 31, i1 0) arg0( nocapture )
   %i4 = add i32 %i3, %i1
   %i5 = getelementptr inbounds %t2, %a0, i64 2, i32 0
-  tail call void @f16 [air Atomic(Atomic { space: Global, op: Store, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Device, volatile: false, fetch: false, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }) })](%i5, %i4, i32 5, i32 2, i32 31, i1 0) arg0( nocapture )
+  tail call void @f16 [air Atomic(Atomic { space: Global, op: Store, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: SeqCst, failure: None, scope: Device, volatile: false, fetch: false, flags: Some(MemFlags { device: true, threadgroup: true, texture: true, threadgroup_imageblock: true, object_data: true }), stated_volatile: true })](%i5, %i4, i32 5, i32 2, i32 31, i1 0) arg0( nocapture )
   ret void
 }
 

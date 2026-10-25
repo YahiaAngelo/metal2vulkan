@@ -900,14 +900,56 @@ fn markers_are_dropped_and_intrinsics_decode_once() {
     assert!(hints.is_some_and(|h| h.must_progress));
 }
 
+/// A declaration typed unlike every form of its intrinsic's signature is reported by name, at the
+/// function whose body calls it. Without the naming the report is a bitstream position alone,
+/// which is what an outside report of an AIR 2.1 library arrived as.
+#[test]
+fn a_declaration_mismatch_names_the_declaration_and_its_function() {
+    use crate::air::error::{DiagName, InputErrorKind, IntrinsicError};
+    // A `texture2d<float>::read` that returns a residency status (AIR 2.2 and later) and states
+    // no trailing access qualifier (AIR 1.x alone): a mixture of two emitter steps, which no
+    // Metal compiler writes and no form of the operation is.
+    let text = "declare { <4 x float>, i8 } @air.read_texture_2d.v4f32(ptr addrspace(1), <2 x i32>, i32)\n\
+         define void @sampleOne(ptr addrspace(1) %t, ptr addrspace(1) %o) {\n\
+         \x20 %c = call { <4 x float>, i8 } @air.read_texture_2d.v4f32(ptr addrspace(1) %t, <2 x i32> zeroinitializer, i32 0)\n\
+         \x20 %v = extractvalue { <4 x float>, i8 } %c, 0\n\
+         \x20 store <4 x float> %v, ptr addrspace(1) %o\n\
+         \x20 ret void\n}\n";
+    let Some(got) = decode_text(text) else {
+        eprintln!(
+            "SKIP a_declaration_mismatch_names_the_declaration_and_its_function: llvm-as not found"
+        );
+        return;
+    };
+    let Err(Error::InvalidInput(e)) = got else {
+        panic!("{got:?}");
+    };
+    assert_eq!(
+        e.kind,
+        InputErrorKind::Intrinsic(IntrinsicError::DeclaredSignatureMismatch {
+            name: DiagName::new("air.read_texture_2d.v4f32"),
+        }),
+    );
+    assert_eq!(
+        e.at.in_function().map(|(f, b, i)| (f.to_string(), b, i)),
+        Some(("sampleOne".to_owned(), None, None)),
+    );
+    // Both names reach the message a consumer and the command line print.
+    let shown = e.to_string();
+    assert!(shown.contains("air.read_texture_2d.v4f32"), "{shown}");
+    assert!(shown.contains("sampleOne"), "{shown}");
+}
+
 #[test]
 fn intrinsic_call_errors_are_typed() {
-    use crate::air::error::{InputErrorKind, IntrinsicError};
+    use crate::air::error::{DiagName, InputErrorKind, IntrinsicError};
     let cases = [
         (
             "declare float @air.fmax.f32(float)\n\
              define float @k(float %x) {\n  %r = call float @air.fmax.f32(float %x)\n  ret float %r\n}\n",
-            Some(IntrinsicError::SignatureMismatch),
+            Some(IntrinsicError::DeclaredSignatureMismatch {
+                name: DiagName::new("air.fmax.f32"),
+            }),
         ),
         (
             "declare i32 @air.clz.i32(i32, i1)\n\

@@ -43,7 +43,7 @@ bb0:
   br %i0, bb1, bb2
 bb1:
   %i2 = getelementptr inbounds %t19, %a0, i64 0, i32 0
-  %i3 = tail call i32 @f4 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i2, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i3 = tail call i32 @f4 [air Atomic(Atomic { space: Global, op: Add, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i2, i32 1, i32 0, i32 2, i1 1) arg0( nocapture )
   store %i3, ptr addrspace(3) @g0, align 4
   br bb2
 bb2:
@@ -57,7 +57,7 @@ bb4:
   %i11 = add i32 %i7, i32 4294967295
   %i12 = zext %i11 to i64
   %i13 = getelementptr inbounds %t19, %a1, %i12, i32 0
-  %i14 = tail call i32 @f5 [air Atomic(Atomic { space: Global, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i13, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i14 = tail call i32 @f5 [air Atomic(Atomic { space: Global, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i13, i32 0, i32 2, i1 1) arg0( nocapture )
   %i15 = and i32 %i14, i32 1
   %i16 = icmp eq %i15, i32 0
   br %i16, bb5, bb8
@@ -74,7 +74,7 @@ bb7:
   %i25 = add nuw i32 %i22, i32 1
   %i26 = tail call i32 @f3 [air Math(Math { f: IMin(Unsigned), precision: Precise, ty: NumTy { elem: I32, lanes: 1 } })](%i25, i32 64)
   %i27 = trunc %i26 to i16
-  %i28 = tail call i32 @f5 [air Atomic(Atomic { space: Global, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i13, i32 0, i32 2, i1 1) arg0( nocapture )
+  %i28 = tail call i32 @f5 [air Atomic(Atomic { space: Global, op: Load, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None, stated_volatile: true })](%i13, i32 0, i32 2, i1 1) arg0( nocapture )
   %i29 = and i32 %i28, i32 1
   %i30 = icmp eq %i29, i32 0
   br %i30, bb6, bb8, !llvm.loop LoopHints { unroll: Default, must_progress: true }
@@ -93,7 +93,7 @@ bb10:
   %i41 = shl i32 %i40, i32 1
   %i42 = add i32 %i41, i32 3
   %i43 = getelementptr inbounds %t19, %a1, %i39, i32 0
-  tail call void @f6 [air Atomic(Atomic { space: Global, op: Store, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: false, flags: None })](%i43, %i42, i32 0, i32 2, i1 1) arg0( nocapture )
+  tail call void @f6 [air Atomic(Atomic { space: Global, op: Store, sign: None, ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: false, flags: None, stated_volatile: true })](%i43, %i42, i32 0, i32 2, i1 1) arg0( nocapture )
   br bb11
 bb11:
   ret void

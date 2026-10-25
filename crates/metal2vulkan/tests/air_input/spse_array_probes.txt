@@ -42,7 +42,7 @@ bb1:
   %i16 = insertelement <2 x i32> undef, %i15, i64 0
   %i17 = insertelement %i16, %i13, i64 1
   %i18 = tail call ptr addrspace(2) @f1 [air Sampler(GetReadSampler)]()
-  %i19 = tail call %t12 @f2 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, %i18, %i17, %i4, <2 x i32> zeroinitializer, %i11, i32 0) arg0( Ref nocapture )
+  %i19 = tail call %t12 @f2 [air Texture(Texture { op: Read, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, %i18, %i17, %i4, <2 x i32> zeroinitializer, %i11, i32 0) arg0( Ref nocapture )
   %i20 = extractvalue i8 %i19, 1
   %i21 = extractvalue <4 x float> %i19, 0
   %i22 = shl i32 %a3, i32 1
@@ -61,7 +61,7 @@ bb1:
   store %i31, %i34, align 16
   br bb5
 bb2:
-  %i37 = tail call %t12 @f3 [air Texture(Texture { op: Sample { compare: false, lod: Level, offset: true }, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i6, %i4, i1 1, <2 x i32> zeroinitializer, i1 1, %i8, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i37 = tail call %t12 @f3 [air Texture(Texture { op: Sample { compare: false, lod: Level, offset: true }, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, ptr addrspace(2) @g0, %i6, %i4, i1 1, <2 x i32> zeroinitializer, i1 1, %i8, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i38 = extractvalue i8 %i37, 1
   %i39 = extractvalue <4 x float> %i37, 0
   %i40 = shl i32 %a3, i32 1
@@ -80,7 +80,7 @@ bb2:
   store %i49, %i52, align 16
   br bb5
 bb3:
-  %i55 = tail call %t12 @f3 [air Texture(Texture { op: Sample { compare: false, lod: Level, offset: true }, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g1, %i6, %i4, i1 1, <2 x i32> zeroinitializer, i1 1, %i8, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i55 = tail call %t12 @f3 [air Texture(Texture { op: Sample { compare: false, lod: Level, offset: true }, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, ptr addrspace(2) @g1, %i6, %i4, i1 1, <2 x i32> zeroinitializer, i1 1, %i8, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i56 = extractvalue i8 %i55, 1
   %i57 = extractvalue <4 x float> %i55, 0
   %i58 = shl i32 %a3, i32 1
@@ -99,7 +99,7 @@ bb3:
   store %i67, %i70, align 16
   br bb5
 bb4:
-  %i73 = tail call %t12 @f4 [air Texture(Texture { op: Gather { component: Some(X), compare: false, offset: true }, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i6, %i4, i1 1, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i73 = tail call %t12 @f4 [air Texture(Texture { op: Gather { component: Some(X), compare: false, offset: true }, image: ImageShape { dim: D2, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, ptr addrspace(2) @g0, %i6, %i4, i1 1, <2 x i32> zeroinitializer, i32 0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i74 = extractvalue i8 %i73, 1
   %i75 = extractvalue <4 x float> %i73, 0
   %i76 = shl i32 %a3, i32 1

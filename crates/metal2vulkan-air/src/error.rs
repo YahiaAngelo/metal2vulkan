@@ -498,6 +498,14 @@ pub enum IntrinsicError {
     },
     /// The call's signature does not match the intrinsic's typed signature.
     SignatureMismatch,
+    /// A declaration named `air.*` or `llvm.*` whose own type is not that intrinsic's signature,
+    /// so no call of it can be bound: another Metal compiler's spelling of the operation (an AIR
+    /// 2.1 texture read states no residency status, an AIR 1.11 atomic no volatile flag). Carries
+    /// the declaration's symbol; its location names the function whose body calls it.
+    DeclaredSignatureMismatch {
+        /// The declaration's symbol, without the `@`.
+        name: DiagName,
+    },
     /// An operand that must be an immediate is not a constant.
     ImmediateNotConstant,
 }

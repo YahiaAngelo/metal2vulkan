@@ -16,8 +16,8 @@ c13 = %t21 [27, 0]
 
 define %t4 @f0 "unk_read_depth_cube" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="64" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a2( Mod nocapture "air-buffer-no-alias"="" ) {
 bb0:
-  %i0 = tail call i32 @f2 [air Texture(Texture { op: Query(Width), image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0, i32 0) arg0( Ref nocapture )
-  %i1 = tail call i32 @f3 [air Texture(Texture { op: Query(Height), image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None })](%a0, i32 0) arg0( Ref nocapture )
+  %i0 = tail call i32 @f2 [air Texture(Texture { op: Query(Width), image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None, states_access: true })](%a0, i32 0) arg0( Ref nocapture )
+  %i1 = tail call i32 @f3 [air Texture(Texture { op: Query(Height), image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None, states_access: true })](%a0, i32 0) arg0( Ref nocapture )
   %i2 = urem i32 %a3, i32 6
   %i3 = udiv i32 %a3, i32 6
   %i4 = urem i32 %i3, %i0
@@ -28,22 +28,22 @@ bb0:
   %i9 = insertelement %i5, %i8, i64 1
   %i10 = mul i32 %i6, %i1
   %i11 = udiv i32 %a3, %i10
-  %i12 = tail call i32 @f4 [air Texture(Texture { op: Query(ArraySize), image: ImageShape { dim: Cube, array: true, ms: false, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None })](%a1) arg0( Ref nocapture )
+  %i12 = tail call i32 @f4 [air Texture(Texture { op: Query(ArraySize), image: ImageShape { dim: Cube, array: true, ms: false, depth: true }, texel: None, coord16: false, form: Current, status: true, access: None, states_access: true })](%a1) arg0( Ref nocapture )
   %i13 = urem i32 %i11, %i12
   %i14 = tail call ptr addrspace(2) @f5 [air Sampler(GetReadSampler)]()
-  %i15 = tail call %t15 @f6 [air Texture(Texture { op: Read, image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a0, %i14, i32 1, %i9, %i2, i32 0, i32 1) arg0( Ref nocapture )
+  %i15 = tail call %t15 @f6 [air Texture(Texture { op: Read, image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read), states_access: true })](%a0, %i14, i32 1, %i9, %i2, i32 0, i32 1) arg0( Ref nocapture )
   %i16 = extractvalue float %i15, 0
   %i17 = insertelement <4 x float> undef, %i16, i64 0
   %i18 = tail call <2 x i16> @f1 [air Convert(Convert { dst: NumTy { elem: I16, lanes: 2 }, dst_kind: Unsigned, src: NumTy { elem: I32, lanes: 2 }, src_kind: Unsigned, src_fp8: None })](%i9)
   %i19 = trunc %i2 to i16
-  %i20 = tail call %t15 @f7 [air Texture(Texture { op: Read, image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Read) })](%a0, %i14, i32 1, %i18, %i19, i16 0, i32 1) arg0( Ref nocapture )
+  %i20 = tail call %t15 @f7 [air Texture(Texture { op: Read, image: ImageShape { dim: Cube, array: false, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Read), states_access: true })](%a0, %i14, i32 1, %i18, %i19, i16 0, i32 1) arg0( Ref nocapture )
   %i21 = extractvalue float %i20, 0
   %i22 = insertelement %i17, %i21, i64 1
-  %i23 = tail call %t15 @f8 [air Texture(Texture { op: Read, image: ImageShape { dim: Cube, array: true, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read) })](%a1, %i14, i32 1, %i9, %i2, %i13, i32 0, i32 1) arg0( Ref nocapture )
+  %i23 = tail call %t15 @f8 [air Texture(Texture { op: Read, image: ImageShape { dim: Cube, array: true, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Read), states_access: true })](%a1, %i14, i32 1, %i9, %i2, %i13, i32 0, i32 1) arg0( Ref nocapture )
   %i24 = extractvalue float %i23, 0
   %i25 = insertelement %i22, %i24, i64 2
   %i26 = trunc %i13 to i16
-  %i27 = tail call %t15 @f9 [air Texture(Texture { op: Read, image: ImageShape { dim: Cube, array: true, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Read) })](%a1, %i14, i32 1, %i18, %i19, %i26, i16 0, i32 1) arg0( Ref nocapture )
+  %i27 = tail call %t15 @f9 [air Texture(Texture { op: Read, image: ImageShape { dim: Cube, array: true, ms: false, depth: true }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 1 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Read), states_access: true })](%a1, %i14, i32 1, %i18, %i19, %i26, i16 0, i32 1) arg0( Ref nocapture )
   %i28 = extractvalue float %i27, 0
   %i29 = insertelement %i25, %i28, i64 3
   %i30 = zext %a3 to i64

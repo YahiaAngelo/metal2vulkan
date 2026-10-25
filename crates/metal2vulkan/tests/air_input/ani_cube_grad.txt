@@ -29,13 +29,13 @@ bb0:
   %i12 = getelementptr inbounds <4 x float>, %a2, %i11
   %i13 = load <4 x float>, %i12, align 16
   %i14 = shufflevector <3 x float> %i13, <4 x float> poison, <0, 1, 2>
-  %i15 = tail call %t11 @f1 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a0, ptr addrspace(2) @g0, %i4, %i9, %i14, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i15 = tail call %t11 @f1 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a0, ptr addrspace(2) @g0, %i4, %i9, %i14, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i16 = extractvalue <4 x float> %i15, 0
   %i17 = shl i32 %a4, i32 1
   %i18 = zext %i17 to i64
   %i19 = getelementptr inbounds <4 x float>, %a3, %i18
   store %i16, %i19, align 16
-  %i21 = tail call %t11 @f2 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, %i4, i32 1, %i9, %i14, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i21 = tail call %t11 @f2 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a1, ptr addrspace(2) @g0, %i4, i32 1, %i9, %i14, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   %i22 = extractvalue <4 x float> %i21, 0
   %i23 = or i32 %i17, i32 1
   %i24 = zext %i23 to i64

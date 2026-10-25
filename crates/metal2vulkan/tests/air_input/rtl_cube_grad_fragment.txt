@@ -63,10 +63,10 @@ bb0:
   %i19 = icmp eq %i18, i32 0
   br %i19, bb1, bb2
 bb1:
-  %i21 = tail call %t14 @f4 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a1, ptr addrspace(2) @g0, %i6, %i11, %i16, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i21 = tail call %t14 @f4 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a1, ptr addrspace(2) @g0, %i6, %i11, %i16, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   br bb3
 bb2:
-  %i23 = tail call %t14 @f5 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%a2, ptr addrspace(2) @g0, %i6, i32 1, %i11, %i16, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i23 = tail call %t14 @f5 [air Texture(Texture { op: SampleGrad { compare: false, offset: false }, image: ImageShape { dim: Cube, array: true, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%a2, ptr addrspace(2) @g0, %i6, i32 1, %i11, %i16, float 0x0, i32 0) arg0( Ref nocapture ) arg1( Ref nocapture )
   br bb3
 bb3:
   %i25 = phi %t14 [%i21, bb1], [%i23, bb2]

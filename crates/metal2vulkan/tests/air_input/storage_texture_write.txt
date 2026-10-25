@@ -9,7 +9,7 @@ c18 = <4 x float> [0x3E800000, 0x3F000000, 0x3F400000, 0x3F800000]
 
 define %t5 @f0 "storage_texture_write" memory(ModRef, NoModRef, NoModRef) "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a0( nocapture ) {
 bb0:
-  tail call void @f1 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write) })](%a0, %a1, <4 x float> c18, i32 0, i32 2) arg0( nocapture )
+  tail call void @f1 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Write), states_access: true })](%a0, %a1, <4 x float> c18, i32 0, i32 2) arg0( nocapture )
   ret void
 }
 

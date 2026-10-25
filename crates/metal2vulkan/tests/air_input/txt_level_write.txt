@@ -17,7 +17,7 @@ bb0:
   %i4 = insertelement <4 x half> c20, %i1, i64 0
   %i5 = insertelement %i4, %i3, i64 1
   %i6 = load i16, %a1, align 2
-  tail call void @f2 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write) })](%a0, %a2, %i5, %i6, i32 2) arg0( nocapture )
+  tail call void @f2 [air Texture(Texture { op: Write, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F16, lanes: 4 }, sign: None }), coord16: true, form: Current, status: true, access: Some(Write), states_access: true })](%a0, %a2, %i5, %i6, i32 2) arg0( nocapture )
   ret void
 }
 

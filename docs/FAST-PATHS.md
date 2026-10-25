@@ -284,6 +284,17 @@ recorded here.
 Open differences from Metal that no note announces yet, and runtime costs still above the
 driver's. Each is open work.
 
+- **A sample or gather in an AIR 1.x library** (deployment target macOS 10.12 or earlier, iOS 10
+  or earlier) is refused (`Unsupported{NotRepresentable{HandleAsPointer}}`). From AIR 2.0 a
+  `constexpr sampler` is the module global `@__air_sampler_state`, whose packed word the ABI
+  decodes; before it the same sampler is the word cast inline at the call
+  (`inttoptr (i64 ... to ptr addrspace(2))`), in a packing that is not AIR 2.0's -- the default
+  sampler is `-9223372036854251447` at AIR 1.11 against the `-9188470239253757879` AIR 2.0 stores
+  -- and that layout is not pinned, so the call is refused rather than guessed. Reads, writes,
+  queries, atomics, render targets, function constants and argument buffers all translate at
+  every AIR version this toolchain emits (1.6 and up); pinning the older sampler word would close
+  the sample and gather too.
+
 - **A sparse tile mapped after a write covered it while unmapped** reads zero for us and Metal's
   unwritten pattern (`0xFFFFFFFF`) for Metal; an unmap-and-map round trip loses the texels the same
   way. The runtime zeroes a sparse texture's unmapped texels and every newly bound block, and

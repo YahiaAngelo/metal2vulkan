@@ -37,7 +37,9 @@
 //!
 //! A call to a declaration named `air.*`/`llvm.*` is decoded by `air::intrinsics`: each such
 //! declaration is classified once when its module record is read, and each call binds its immediate
-//! operands. Calls to the markers `llvm.lifetime.*`, `llvm.assume`, and
+//! operands. A declaration whose own type is not the intrinsic's signature binds no call:
+//! [`IntrinsicError::DeclaredSignatureMismatch`] names that declaration, at the function whose
+//! body calls it, so the report says which spelling of the operation was read and where. Calls to the markers `llvm.lifetime.*`, `llvm.assume`, and
 //! `llvm.experimental.noalias.scope.decl` are dropped: their operands are read and checked (the
 //! last one's `metadata` operand must name metadata), they take a record number, which
 //! attachments refer to, but no instruction. Metadata operands of any other call are refused.
@@ -61,7 +63,7 @@ use super::stream::{signed_vbr, Item, Stream};
 use super::types::{grow, BitcodeTypes};
 use super::ModuleValue;
 use crate::budget::Meter;
-use crate::error::{BitcodeError, InputError, InputErrorKind};
+use crate::error::{BitcodeError, DiagName, InputError, InputErrorKind, IntrinsicError, Location};
 use crate::error::{Error, Feature, Limit};
 use crate::intrinsics::{self, Bound, DeclClass};
 use crate::ir::{
@@ -168,6 +170,7 @@ pub(crate) fn decode(
         call_enums: Vec::new(),
         marker_consts: Vec::new(),
         ret,
+        func,
     };
     m.reserve(&mut d.local, params.len())?;
     for (i, &ty) in params.iter().enumerate() {
@@ -217,6 +220,8 @@ struct FnDecoder {
     /// The constant operands of the dropped marker calls, when the context keeps them.
     marker_consts: Vec<ConstId>,
     ret: TypeId,
+    /// The function this block defines, to name it where a declaration mismatch is reported.
+    func: FuncId,
 }
 
 /// A cursor over the operands of one record.
@@ -1441,6 +1446,17 @@ impl FnDecoder {
                 Ok(Bound::Air(op)) => Callee::Air { decl: f, op },
                 Ok(Bound::Llvm(op)) => Callee::Llvm { decl: f, op },
                 Ok(Bound::Unknown) => Callee::UnknownIntrinsic(f),
+                // A declaration typed unlike the intrinsic's signature is another Metal
+                // compiler's spelling of the operation, so the report names the declaration and
+                // the function that calls it rather than a bitstream position alone.
+                Err(IntrinsicError::SignatureMismatch) => {
+                    let kind =
+                        InputErrorKind::Intrinsic(IntrinsicError::DeclaredSignatureMismatch {
+                            name: self.symbol_name(cx, f),
+                        });
+                    let at = Location::function(self.symbol_name(cx, self.func), None, None);
+                    return Err(InputError::new(kind, at).into());
+                }
                 Err(e) => {
                     return Err(InputError::new(InputErrorKind::Intrinsic(e), s.location()).into())
                 }
@@ -1487,6 +1503,17 @@ impl FnDecoder {
     /// when it is a declaration named with the stable `air.`/`llvm.` ABI prefix (classified
     /// once per declaration by `air::intrinsics`). Any other callee is a call through a pointer
     /// with the call's function type.
+    /// The symbol of function `f`, for a diagnostic; `?` where the module has no such function
+    /// or its name is not interned.
+    fn symbol_name(&self, cx: &FnCx<'_>, f: FuncId) -> DiagName {
+        let bytes = cx
+            .funcs
+            .get(f)
+            .and_then(|f| cx.symbols.get(f.name))
+            .unwrap_or(b"?");
+        DiagName::new(String::from_utf8_lossy(bytes))
+    }
+
     fn callee(&self, cx: &FnCx<'_>, callee: Value, fn_ty: TypeId) -> Target {
         let func = match callee {
             Value::Const(c) => match cx.consts.get(c).map(|c| &c.value) {

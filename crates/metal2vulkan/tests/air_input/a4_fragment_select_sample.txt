@@ -16,7 +16,7 @@ bb0:
   %i2 = select ptr addrspace(1) %i1, %a1, %a2
   %i3 = shufflevector <2 x float> %a0, <4 x float> poison, <0, 1>
   %i4 = fmul reassoc nnan ninf nsz arcp contract afn <2 x float> %i3, <2 x float> c20
-  %i5 = tail call %t7 @f1 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample) })](%i2, %a3, %i4, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
+  %i5 = tail call %t7 @f1 [air Texture(Texture { op: Sample { compare: false, lod: Bias, offset: true }, image: ImageShape { dim: D2, array: false, ms: false, depth: false }, texel: Some(Texel { ty: NumTy { elem: F32, lanes: 4 }, sign: None }), coord16: false, form: Current, status: true, access: Some(Sample), states_access: true })](%i2, %a3, %i4, i1 1, <2 x i32> zeroinitializer, i1 0, float 0x0, float 0x0, i32 0) convergent arg0( Ref nocapture ) arg1( Ref nocapture )
   %i6 = extractvalue <4 x float> %i5, 0
   ret %i6
 }
