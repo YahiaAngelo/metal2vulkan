@@ -722,6 +722,15 @@ impl Texture {
     /// states no trailing access qualifier. A read has all four (AIR 2.8's sampler and offset,
     /// AIR 2.2's status, AIR 2.1's bare texel, and AIR 1.x's absent qualifier); a sample or
     /// gather has the status and qualifier axes, and an atomic the operand and qualifier axes.
+    ///
+    /// The chain is a list and not the product of the axes because each position implies the ones
+    /// the emitter added before it: a read's sampler and offset appear only with the status, and
+    /// the status only with the qualifier. So walking the axes newest first reaches every shape
+    /// an emitter wrote and no other, and a new axis belongs at the head of the chain, not in the
+    /// middle. The forms of one name must also stay distinguishable by function type alone --
+    /// otherwise the first match would answer for both and the choice would be a guess -- which
+    /// `families_tests::every_texture_form_is_recovered_from_its_own_declaration` holds over the
+    /// grammar.
     pub(super) fn alternative(self) -> Option<Texture> {
         let legacy = match self.op {
             TexOp::Read => true,

@@ -1413,6 +1413,217 @@ fn the_older_forms_without_a_residency_status_are_chosen_by_the_declaration() {
     assert!(older.alternative().is_none());
 }
 
+/// The oldest texture declarations Apple's compiler writes: no residency status, no min-LOD
+/// clamp, and no trailing access qualifier either.
+///
+/// The emitter moved two independent axes at two steps: the trailing access qualifier arrived at
+/// AIR 2.0, and the residency status with a sample's min-LOD clamp at AIR 2.2. A deployment
+/// target below both writes a declaration missing every one of those positions, and each axis
+/// has its own test above (`the_older_forms_without_a_residency_status_...`,
+/// `pre_air_2_0_states_no_access_qualifier_or_volatile_flag`), so what is under test here is the
+/// combination. Every declaration below is one Apple's compiler wrote for our own MSL.
+#[test]
+fn the_oldest_forms_state_no_status_no_clamp_and_no_access_qualifier() {
+    use TexRole as R;
+    let texture = |name: &str, decl: &str| match declared_air(name, decl) {
+        AirIntrinsic::Texture(t) => t,
+        other => panic!("{name} {decl}: {other:?}"),
+    };
+    let roles = |t: Texture| t.layout().positions().map(|(r, _)| r).collect::<Vec<_>>();
+    // Read from the modules `xcrun metal -c -mmacosx-version-min=10.12` (Apple metal 32023.921)
+    // wrote, which record `!air.version = !{i32 1, i32 11, i32 0}`. The same source at
+    // `-mmacosx-version-min=10.11` (AIR 1.8) and, through the iOS SDK, at
+    // `-mios-version-min=8.0` (AIR 1.6) declares every one of these shapes identically, so the
+    // whole range below AIR 2.0 is this one set.
+    let cases: &[(&str, &str)] = &[
+        (
+            "air.sample_texture_1d.v4f32",
+            "v4f32 (p1, p2, f32, i1, i32, i1, f32)",
+        ),
+        (
+            "air.sample_texture_1d_array.v4f32",
+            "v4f32 (p1, p2, f32, i32, i1, i32, i1, f32)",
+        ),
+        (
+            "air.sample_texture_2d.v4f32",
+            "v4f32 (p1, p2, v2f32, i1, v2i32, i1, f32)",
+        ),
+        (
+            "air.sample_texture_2d_grad.v4f32",
+            "v4f32 (p1, p2, v2f32, v2f32, v2f32, i1, v2i32)",
+        ),
+        (
+            "air.sample_texture_2d_array.v4f32",
+            "v4f32 (p1, p2, v2f32, i32, i1, v2i32, i1, f32)",
+        ),
+        (
+            "air.sample_texture_3d.v4f32",
+            "v4f32 (p1, p2, v3f32, i1, v3i32, i1, f32)",
+        ),
+        (
+            "air.sample_texture_cube.v4f32",
+            "v4f32 (p1, p2, v3f32, i1, f32)",
+        ),
+        (
+            "air.sample_texture_cube_array.v4f32",
+            "v4f32 (p1, p2, v3f32, i32, i1, f32)",
+        ),
+        (
+            "air.gather_texture_2d.v4f32",
+            "v4f32 (p1, p2, v2f32, i1, v2i32, i32)",
+        ),
+        (
+            "air.gather_texture_2d_array.v4f32",
+            "v4f32 (p1, p2, v2f32, i32, i1, v2i32, i32)",
+        ),
+        (
+            "air.gather_texture_cube.v4f32",
+            "v4f32 (p1, p2, v3f32, i32)",
+        ),
+        (
+            "air.gather_texture_cube_array.v4f32",
+            "v4f32 (p1, p2, v3f32, i32, i32)",
+        ),
+        (
+            "air.sample_depth_2d.f32",
+            "f32 (p1, p2, i32, v2f32, i1, v2i32, i1, f32)",
+        ),
+        (
+            "air.sample_compare_depth_2d.f32",
+            "f32 (p1, p2, i32, v2f32, f32, i1, v2i32, i1, f32)",
+        ),
+        (
+            "air.sample_depth_2d_array.f32",
+            "f32 (p1, p2, i32, v2f32, i32, i1, v2i32, i1, f32)",
+        ),
+        (
+            "air.sample_depth_cube.f32",
+            "f32 (p1, p2, i32, v3f32, i1, f32)",
+        ),
+        (
+            "air.gather_depth_2d.v4f32",
+            "v4f32 (p1, p2, i32, v2f32, i1, v2i32)",
+        ),
+        (
+            "air.gather_compare_depth_2d.f32",
+            "v4f32 (p1, p2, i32, v2f32, f32, i1, v2i32)",
+        ),
+        (
+            "air.gather_compare_depth_cube.f32",
+            "v4f32 (p1, p2, i32, v3f32, f32)",
+        ),
+        ("air.read_texture_1d.v4f32", "v4f32 (p1, i32, i32)"),
+        (
+            "air.read_texture_1d_array.v4f32",
+            "v4f32 (p1, i32, i32, i32)",
+        ),
+        ("air.read_texture_2d.v4f32", "v4f32 (p1, v2i32, i32)"),
+        ("air.read_texture_2d.s.v4i32", "v4i32 (p1, v2i32, i32)"),
+        ("air.read_texture_2d.u.v4i32", "v4i32 (p1, v2i32, i32)"),
+        (
+            "air.read_texture_2d_array.v4f32",
+            "v4f32 (p1, v2i32, i32, i32)",
+        ),
+        ("air.read_texture_3d.v4f32", "v4f32 (p1, v3i32, i32)"),
+        ("air.read_texture_cube.v4f32", "v4f32 (p1, v2i32, i32, i32)"),
+        (
+            "air.read_texture_cube_array.v4f32",
+            "v4f32 (p1, v2i32, i32, i32, i32)",
+        ),
+        ("air.read_texture_2d_ms.v4f32", "v4f32 (p1, v2i32, i32)"),
+        ("air.read_depth_2d.f32", "f32 (p1, i32, v2i32, i32)"),
+        (
+            "air.read_depth_2d_array.f32",
+            "f32 (p1, i32, v2i32, i32, i32)",
+        ),
+    ];
+    for (name, decl) in cases {
+        let t = texture(name, decl);
+        let roles = roles(t);
+        assert!(!t.status, "{name} {decl}: a residency status");
+        assert!(!t.states_access, "{name} {decl}: an access qualifier");
+        assert!(!roles.contains(&R::MinLodClamp), "{name} {decl}: a clamp");
+        assert!(!roles.contains(&R::Access), "{name} {decl}: a qualifier");
+        // A read of such a module takes the legacy operand positions as well: the sampler and
+        // the offset arrived at AIR 2.8, later than either of the other two.
+        if t.op == TexOp::Read {
+            assert_eq!(t.form, Form::Legacy, "{name} {decl}");
+            assert!(!roles.contains(&R::Sampler), "{name} {decl}: a sampler");
+            assert!(!roles.contains(&R::Offset), "{name} {decl}: an offset");
+        }
+    }
+    // The positions that are there keep their meaning and their order: a sample ends at the
+    // bias-or-level value, a gather at its component, a read at its level.
+    assert_eq!(
+        roles(texture(
+            "air.sample_texture_2d.v4f32",
+            "v4f32 (p1, p2, v2f32, i1, v2i32, i1, f32)"
+        )),
+        [
+            R::Texture,
+            R::Sampler,
+            R::Coord,
+            R::OffsetFlag,
+            R::Offset,
+            R::LodMode,
+            R::LodValue
+        ]
+    );
+    assert_eq!(
+        roles(texture(
+            "air.gather_texture_2d.v4f32",
+            "v4f32 (p1, p2, v2f32, i1, v2i32, i32)"
+        )),
+        [
+            R::Texture,
+            R::Sampler,
+            R::Coord,
+            R::OffsetFlag,
+            R::Offset,
+            R::Component
+        ]
+    );
+    assert_eq!(
+        roles(texture(
+            "air.read_texture_2d.v4f32",
+            "v4f32 (p1, v2i32, i32)"
+        )),
+        [R::Texture, R::Coord, R::Lod]
+    );
+    // A gradient sample's clamp sat between the gradients and the offset pair, so dropping it
+    // leaves the offset pair last.
+    assert_eq!(
+        roles(texture(
+            "air.sample_texture_2d_grad.v4f32",
+            "v4f32 (p1, p2, v2f32, v2f32, v2f32, i1, v2i32)"
+        )),
+        [
+            R::Texture,
+            R::Sampler,
+            R::Coord,
+            R::Dpdx,
+            R::Dpdy,
+            R::OffsetFlag,
+            R::Offset
+        ]
+    );
+    // Dropping one axis and not the other is a declaration no emitter wrote, and no form of
+    // these names: a status with no qualifier, and a qualifier with no status but a clamp.
+    for (name, decl) in [
+        (
+            "air.sample_texture_2d.v4f32",
+            "{v4f32} (p1, p2, v2f32, i1, v2i32, i1, f32, f32)",
+        ),
+        ("air.read_texture_2d.v4f32", "{v4f32} (p1, v2i32, i32)"),
+        (
+            "air.sample_texture_2d.v4f32",
+            "v4f32 (p1, p2, v2f32, i1, v2i32, i1, f32, f32)",
+        ),
+    ] {
+        assert_eq!(declared(name, decl), DeclClass::Mismatch, "{name} {decl}");
+    }
+}
+
 /// A 2D or 3D texture atomic's two forms: Xcode's AIR passes an offset after the coordinate (and
 /// layer), the AIR macOS 26.6's Metal on x86-64 hands its device omits it. The declaration picks
 /// the form; a 1D, 1D array or buffer atomic has one form, without an offset.
@@ -1816,6 +2027,141 @@ fn texture_grammar_admits_only_observed_shapes() {
         "air.sample_surface_2d.v4f32",    // unknown object kind
     ] {
         assert_eq!(classify_self(name), DeclClass::Unknown, "{name}");
+    }
+}
+
+/// The declaration is what chooses a texture operation's operand form, over the whole grammar.
+///
+/// Each name's forms are a chain ([`Texture::alternative`]) walked newest first: the current
+/// form, then a read's or a 2D or 3D atomic's legacy operand positions, then the form that states
+/// no residency status, then the one that states no trailing access qualifier. The emitter added
+/// them in the opposite order and each shape implies the ones before it -- AIR 2.8's sampler and
+/// offset only ever appear with AIR 2.2's status, which only ever appears with AIR 2.0's
+/// qualifier -- so the chain is exactly the set of shapes some emitter wrote, and the chain's
+/// length is the number of axes the operation has.
+///
+/// Reading each form back is what makes the selection honest and version-free: declared by
+/// itself, a form must classify as *itself*. If two forms of one name ever shared a function
+/// type, the first in the chain would answer for both and the choice would be a guess. This holds
+/// for every spelling the grammar admits, not only for the declarations that have been observed.
+#[test]
+fn every_texture_form_is_recovered_from_its_own_declaration() {
+    let texels = [
+        "",
+        ".v4f32",
+        ".v4f16",
+        ".s.v4i32",
+        ".u.v4i16",
+        ".u.v4i64",
+        ".f32",
+        ".f16",
+        ".i16.v4f32",
+        ".i16.s.v4i32",
+    ];
+    let mut forms = 0;
+    let mut chains = 0;
+    for &(stem, _, textures, depths) in TEX_OPS {
+        for (kind, dims) in [("texture", textures), ("depth", depths)] {
+            for dim in dims {
+                for texel in texels {
+                    let name = format!("air.{stem}_{kind}_{dim}{texel}");
+                    let Some(first) = Texture::parse(name.strip_prefix("air.").unwrap()) else {
+                        continue;
+                    };
+                    chains += 1;
+                    let chain: Vec<Texture> =
+                        std::iter::successors(Some(first), |t| t.alternative()).collect();
+                    // The chain is exactly the axes this operation has: its current form, a
+                    // read's or a 2D or 3D atomic's legacy operand positions, a residency status
+                    // where the result carries one, and the trailing access qualifier where the
+                    // layout states one.
+                    let legacy = match first.op {
+                        TexOp::Read => true,
+                        TexOp::Atomic(_) => {
+                            matches!(first.image.dim, ImageDim::D2 | ImageDim::D3)
+                        }
+                        _ => false,
+                    };
+                    let status = matches!(
+                        first.op,
+                        TexOp::Sample { .. }
+                            | TexOp::SampleGrad { .. }
+                            | TexOp::Gather { .. }
+                            | TexOp::Read
+                    );
+                    let axes = usize::from(legacy)
+                        + usize::from(status)
+                        + usize::from(first.layout().index(TexRole::Access).is_some());
+                    assert_eq!(
+                        chain.len(),
+                        1 + axes,
+                        "{name}: {} forms for {axes} axes",
+                        chain.len()
+                    );
+                    for (i, &form) in chain.iter().enumerate() {
+                        let decl = texture_declaration(form);
+                        let got = match declared(&name, &decl) {
+                            DeclClass::Air(AirIntrinsic::Texture(t)) => t,
+                            other => panic!("{name} form {i} ({decl}): {other:?}"),
+                        };
+                        assert_eq!(
+                            got, form,
+                            "{name} form {i} ({decl}) was answered by another form of the same \
+                             name: the declaration does not choose between them"
+                        );
+                        forms += 1;
+                    }
+                }
+            }
+        }
+    }
+    // The grammar is wide and most names have more than one form, so a parse that stopped
+    // admitting spellings could not pass quietly.
+    assert!(chains > 400, "{chains} chains");
+    assert!(forms > chains * 2, "{forms} forms over {chains} chains");
+}
+
+/// `t`'s signature spelled in the tokens [`declared`] reads, so a form can be declared by itself.
+fn texture_declaration(t: Texture) -> String {
+    let sig = t.layout().signature();
+    let params = sig
+        .params()
+        .iter()
+        .map(|&p| operand_token(p))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{} ({params})", operand_token(sig.ret))
+}
+
+/// One operand as a [`ty`] token.
+fn operand_token(op: Operand) -> String {
+    match op {
+        Operand::Void => "void".to_string(),
+        Operand::Num(n) => num_token(n),
+        Operand::WithStatus(n) => format!("{{{}}}", num_token(n)),
+        Operand::Ptr(space) => format!("p{}", space as u8),
+        Operand::Handle(h) => format!("p{}", h.space() as u8),
+        Operand::Imm(ImmKind::Bool) => "i1".to_string(),
+        Operand::Imm(ImmKind::I32) => "i32".to_string(),
+        Operand::IntersectionResult(_) => panic!("not a texture operand"),
+    }
+}
+
+fn num_token(n: NumTy) -> String {
+    let elem = match n.elem {
+        Elem::I1 => "i1",
+        Elem::I8 => "i8",
+        Elem::I16 => "i16",
+        Elem::I32 => "i32",
+        Elem::I64 => "i64",
+        Elem::F16 => "f16",
+        Elem::BF16 => "bf16",
+        Elem::F32 => "f32",
+    };
+    if n.lanes == 1 {
+        elem.to_string()
+    } else {
+        format!("v{}{elem}", n.lanes)
     }
 }
 
