@@ -546,7 +546,14 @@ impl StageIo {
     /// Every vertex attribute the function reads, by attribute index, with its declared numeric
     /// class and the fetch it was compiled under: fixed function for an `Attribute` input
     /// variable, the listed fetch for a pulled one.
+    ///
+    /// A fixed-function entry's `narrow_float` is reported as the module depends on it, which is
+    /// only for an attribute read as a 32-bit `float`
+    /// (`link::vertex::narrow_float_of_f32_reads`): a `half`-declared attribute's module is the
+    /// same either way, so it reads as clear whatever the variable records, and link's
+    /// recomputation of the projection agrees with it.
     pub fn attributes(&self) -> BTreeMap<u32, (IoNumeric, VertexFetch)> {
+        let f32_reads = self.f32_attributes();
         let mut out = BTreeMap::new();
         for v in &self.inputs {
             if let IoRole::Attribute {
@@ -556,7 +563,12 @@ impl StageIo {
             {
                 out.insert(
                     index,
-                    (v.ty.numeric, VertexFetch::FixedFunction { narrow_float }),
+                    (
+                        v.ty.numeric,
+                        VertexFetch::FixedFunction {
+                            narrow_float: narrow_float && f32_reads.contains(&index),
+                        },
+                    ),
                 );
             }
         }
@@ -564,6 +576,24 @@ impl StageIo {
             out.insert(p.index, (p.ty.numeric, p.fetch));
         }
         out
+    }
+
+    /// The vertex attributes the function reads in fixed function as a 32-bit `float` (`float`,
+    /// `float2`, `float3`, `float4`), which is where a narrow-float format's widening is
+    /// canonicalized (`link::vertex::narrow_float_of_f32_reads`). A `half`-declared attribute is
+    /// not among them, and neither is a pulled attribute, whose decode the module holds whole.
+    pub fn f32_attributes(&self) -> std::collections::BTreeSet<u32> {
+        self.inputs
+            .iter()
+            .filter_map(|v| match v.role {
+                IoRole::Attribute { index, .. }
+                    if v.ty.numeric == IoNumeric::Float && v.ty.source_bits == 32 =>
+                {
+                    Some(index)
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// The type variable `v` is declared with: its `ty`, but for a color output of dual-source

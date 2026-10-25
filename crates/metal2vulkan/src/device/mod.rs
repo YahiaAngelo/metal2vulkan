@@ -70,7 +70,7 @@ pub use policy::{
     FloatMathsPolicy, HalfBlendPolicy, HalfRoundingPolicy, HalfTexelBitsPolicy,
     HeapCompressionPolicy, MultisampleDepthTwinPolicy, NanMinMaxPolicy, RenderLoweringPolicy,
     ResolvePolicy, RoundingOrderPolicy, SamplingPolicy, TexelConversionPolicy, TileStorePolicy,
-    Unorm8LinearFilterPolicy, YCbCrFilterPolicy,
+    Unorm8LinearFilterPolicy, VertexNormalizedPolicy, YCbCrFilterPolicy,
 };
 pub(crate) use profile::whole_point_size;
 pub use profile::{DeviceProfile, SpirvValidation};

@@ -11,7 +11,7 @@ use crate::device::{
     HalfBlendPolicy, HalfRoundingPolicy, HalfTexelBitsPolicy, HeapCompressionPolicy,
     MultisampleDepthTwinPolicy, NanMinMaxPolicy, RenderLoweringPolicy, ResolvePolicy,
     RoundingOrderPolicy, SamplingPolicy, TexelConversionPolicy, TileStorePolicy,
-    Unorm8LinearFilterPolicy, YCbCrFilterPolicy,
+    Unorm8LinearFilterPolicy, VertexNormalizedPolicy, YCbCrFilterPolicy,
 };
 use crate::pipeline::PrecisionNote;
 use std::collections::BTreeSet;
@@ -66,6 +66,7 @@ fn choices() -> Vec<Choice> {
         ycbcr_filter: _,
         float_maths: _,
         texel_conversion: _,
+        vertex_normalized: _,
         half_rounding: _,
         nan_and_min_max: _,
         rounding_order: _,
@@ -91,6 +92,7 @@ fn choices() -> Vec<Choice> {
         choice!(p.ycbcr_filter: YCbCrFilterPolicy { Device, Exact }),
         choice!(p.float_maths: FloatMathsPolicy { Native, Exact }),
         choice!(p.texel_conversion: TexelConversionPolicy { Device, Exact }),
+        choice!(p.vertex_normalized: VertexNormalizedPolicy { Device, Exact }),
         choice!(p.half_rounding: HalfRoundingPolicy { Native, Exact }),
         choice!(p.nan_and_min_max: NanMinMaxPolicy { Native, Exact }),
         choice!(p.rounding_order: RoundingOrderPolicy { Native, Exact }),

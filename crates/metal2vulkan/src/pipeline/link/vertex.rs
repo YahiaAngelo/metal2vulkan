@@ -51,6 +51,21 @@
 //!    position, where the function reads the vertex its index names. The layouts it pulls are not a
 //!    pulled-vertex-buffer variant's (`variant_pulled` keeps item 7's).
 //!
+//! 9. a **normalized** format (the 8- and 16-bit `Normalized` formats of either sign,
+//!    `UChar4Normalized_BGRA`, `Int1010102Normalized`, `UInt1010102Normalized`) is pulled where
+//!    the profile asks for Metal's own division (`VertexNormalizedPolicy::Exact`,
+//!    [`normalized_exactly`]): Metal divides a code by its own maximum, correctly rounded, and
+//!    `lower::stage_io::fetch`'s `div_exact` computes that in integer arithmetic, while a driver
+//!    that multiplies by the reciprocal in fixed-function input is one `f32` ulp off at some
+//!    codes. Under the default the device's `UNORM` or `SNORM` conversion delivers it, which is
+//!    the conversion Vulkan states and Metal states, and every such format then shares the one
+//!    fixed-function module (`docs/FAST-PATHS.md`).
+//!
+//! A fixed-function entry then keeps of the format only what the module's own instructions depend
+//! on, which is `narrow_float` and nothing else, and that bit only for an attribute the function
+//! reads as a 32-bit `float` ([`narrow_float_of_f32_reads`]): every other format the device
+//! fetches in fixed function compiles one module, whatever its encoding, offset or stride.
+//!
 //! The projection is part of the vertex function's compile key; link recomputes it from the
 //! function's stage-IO contract and refuses a stage compiled under another one
 //! ([`vertex_input_state`]), so a stage compiled with fixed-function input for a profile without
@@ -58,6 +73,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::device::policy::VertexNormalizedPolicy;
 use crate::device::requirements::VkFeature;
 use crate::device::DeviceProfile;
 use crate::error::{DescriptorError, Error, InternalError, InternalKind};
@@ -81,8 +97,14 @@ use crate::vk;
 
 /// How attribute `attribute` of `format` meets a variable of class `declared` (item 1 of the
 /// module docs): the Vulkan format fixed-function input would deliver it in, and whether it can
-/// (not a signed-integer format into the `uint` variable every integer attribute is declared as,
-/// which is pulled), or the class refusals of `fetch::class_match`.
+/// (not an unnormalized signed-integer format into the `uint` variable every integer attribute is
+/// declared as, which Vulkan's numeric-type match does not allow and which is pulled and
+/// sign-extended in the shader), or the class refusals of `fetch::class_match`.
+///
+/// A signed **normalized** format is not that case: it is a float-class format (`Encoding`'s
+/// `is_float`), so `fetch::class_match` admits it to a `float` variable alone and refuses it to
+/// an integer one, and Vulkan's `SNORM` vertex formats deliver floats. Item 9 of the module docs
+/// decides who converts it.
 fn class_format(
     format: VertexFormat,
     declared: IoNumeric,
@@ -92,7 +114,14 @@ fn class_format(
     match class_match(e, declared == IoNumeric::Float, attribute)? {
         ClassMatch::Same => Ok((
             vk_vertex_format(format)?,
-            !matches!(e, Encoding::Int { signed: true, .. }),
+            !matches!(
+                e,
+                Encoding::Int {
+                    signed: true,
+                    normalized: false,
+                    ..
+                }
+            ),
         )),
         ClassMatch::IntToFloat => vk_scaled_vertex_format(format)
             .map(|f| (f, true))
@@ -103,6 +132,26 @@ fn class_format(
                 ))
             }),
     }
+}
+
+/// Whether `format` is a normalized format whose conversion the shader must compute (item 9 of
+/// the module docs): the profile asks for Metal's normalized vertex conversion
+/// (`VertexNormalizedPolicy::Exact`) and the format's codes are divided by their own maximum --
+/// the 8- and 16-bit `Normalized` formats of either sign, `UChar4Normalized_BGRA`, and the two
+/// `1010102Normalized` words. Under the default the device's fixed-function `UNORM` or `SNORM`
+/// conversion delivers it, which Vulkan states as Metal states it.
+fn normalized_exactly(format: VertexFormat, p: &DeviceProfile) -> Result<bool, Error> {
+    if p.fields().vertex_normalized != VertexNormalizedPolicy::Exact {
+        return Ok(false);
+    }
+    Ok(matches!(
+        encoding(format)?,
+        Encoding::Int {
+            normalized: true,
+            ..
+        } | Encoding::Bgra8Unorm
+            | Encoding::Rgb10A2 { .. }
+    ))
 }
 
 /// Whether Vulkan's fixed-function attribute address can be aligned for `format` at `offset` in
@@ -156,6 +205,7 @@ fn resolve<'a>(
             _ => false,
         };
         let pulled = !fits
+            || normalized_exactly(attr.format, p)?
             || (beyond_stride
                 && p.fields()
                     .enabled
@@ -282,6 +332,29 @@ pub fn vertex_fetch_projection_for(
     Ok(out)
 }
 
+/// Clear `narrow_float` on every fixed-function attribute of `projection` that `f32_read` does
+/// not hold.
+///
+/// The bit asks the function to canonicalize the device's widening of a narrow-float format, and
+/// `lower::stage_io::plan` emits that canonicalization only where the attribute's declared form is
+/// a 32-bit `float`: a `half`-declared attribute keeps the fetched code's own bits, as Metal's
+/// `half` attribute does, whatever the format was. So the bit changes no instruction of such a
+/// stage, and carrying it in the compile key would make one program two keys
+/// (`tests::engine_vertex_variants`). Both sides of the key apply this: the compile
+/// (`pipeline::compile::lower_inputs`, from the specialized entry's parameter forms) and link's
+/// recomputation ([`vertex_input_state`], from the stage's own declared types), so a stage
+/// compiled under one is linked under the same.
+pub fn narrow_float_of_f32_reads(
+    projection: &mut VertexFetchProjection,
+    f32_read: impl Fn(u32) -> bool,
+) {
+    for (&a, fetch) in &mut projection.attributes {
+        if let VertexFetch::FixedFunction { narrow_float } = fetch {
+            *narrow_float = *narrow_float && f32_read(a);
+        }
+    }
+}
+
 /// The projection entry of a resolved attribute. A fixed-function entry carries whether the Metal
 /// format's components are floats narrower than 32 bits, which the function canonicalizes after
 /// the device's widening (`VertexFetch::FixedFunction`); the rest of the format is `VertexAttribute`
@@ -311,11 +384,19 @@ pub fn vertex_input_state(
     let used = vs.io.attributes();
     let numeric: BTreeMap<u32, IoNumeric> = used.iter().map(|(a, (n, _))| (*a, *n)).collect();
     let (resolved, moved) = resolve(desc, &numeric, p, pulled_vertex_buffers, pull_every)?;
+    let f32_reads = vs.io.f32_attributes();
     for (a, (_, fetch)) in &used {
         // The stage was compiled under another projection (a `Compiled` stage source whose
         // `LowerInputs` do not fit this descriptor).
         let got = match resolved.get(a) {
-            Some(r) => Some(fetch_of(r)?),
+            Some(r) => {
+                let mut got = fetch_of(r)?;
+                // The same narrowing the compile applied, from the stage's declared types.
+                if let VertexFetch::FixedFunction { narrow_float } = &mut got {
+                    *narrow_float = *narrow_float && f32_reads.contains(a);
+                }
+                Some(got)
+            }
             None => None,
         };
         if got != Some(*fetch) {

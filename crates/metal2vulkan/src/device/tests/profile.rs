@@ -307,13 +307,14 @@ fn below_1_2_and_contradictory_policies_are_refused() {
 }
 
 /// Each of the policy's choices between the device's answer and Metal's, with a function that
-/// flips it alone: the maths functions, the texel conversions, the `half` rounding, the NaN and
-/// minimum and maximum, the rounding order, the 16-bit float blend of a `half` output, and the
-/// filter of a two-plane YCbCr texture.
-fn exactness_flips() -> [(&'static str, fn(DevicePolicy) -> DevicePolicy); 7] {
+/// flips it alone: the maths functions, the texel conversions, a normalized vertex attribute's
+/// conversion, the `half` rounding, the NaN and minimum and maximum, the rounding order, the
+/// 16-bit float blend of a `half` output, and the filter of a two-plane YCbCr texture.
+fn exactness_flips() -> [(&'static str, fn(DevicePolicy) -> DevicePolicy); 8] {
     use crate::device::{
         FloatMathsPolicy as F, HalfBlendPolicy as B, HalfRoundingPolicy as H, NanMinMaxPolicy as N,
-        RoundingOrderPolicy as R, TexelConversionPolicy as T, YCbCrFilterPolicy as Y,
+        RoundingOrderPolicy as R, TexelConversionPolicy as T, VertexNormalizedPolicy as V,
+        YCbCrFilterPolicy as Y,
     };
     [
         ("float_maths", |p| DevicePolicy {
@@ -327,6 +328,13 @@ fn exactness_flips() -> [(&'static str, fn(DevicePolicy) -> DevicePolicy); 7] {
             texel_conversion: match p.texel_conversion {
                 T::Device => T::Exact,
                 T::Exact => T::Device,
+            },
+            ..p
+        }),
+        ("vertex_normalized", |p| DevicePolicy {
+            vertex_normalized: match p.vertex_normalized {
+                V::Device => V::Exact,
+                V::Exact => V::Device,
             },
             ..p
         }),
@@ -392,7 +400,11 @@ fn metal_s_own_answers_key_the_same_under_either_choice() {
             fp(flip(base)) == fp(base),
             !matches!(
                 name,
-                "texel_conversion" | "half_blend" | "nan_and_min_max" | "ycbcr_filter"
+                "texel_conversion"
+                    | "vertex_normalized"
+                    | "half_blend"
+                    | "nan_and_min_max"
+                    | "ycbcr_filter"
             ),
             "{name}"
         );

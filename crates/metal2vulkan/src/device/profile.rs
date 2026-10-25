@@ -453,6 +453,9 @@ pub struct ProfileFields {
     pub isolation: GuestIsolation,
     /// Whether a texel's value is the device's conversion or Metal's (the policy's).
     pub texel_conversion: crate::device::policy::TexelConversionPolicy,
+    /// Whether a normalized vertex attribute is converted by fixed-function vertex input or
+    /// pulled and divided exactly in the shader (the policy's).
+    pub vertex_normalized: crate::device::policy::VertexNormalizedPolicy,
     /// Whether a `half4` output of a module without fast math blends into a 16-bit float
     /// attachment in the device's blend or in Metal's, computed by the function (the policy's).
     pub half_blend: crate::device::policy::HalfBlendPolicy,

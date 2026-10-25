@@ -342,6 +342,7 @@ fn derive_fields(
         containment,
         isolation: policy.isolation,
         texel_conversion: policy.texel_conversion,
+        vertex_normalized: policy.vertex_normalized,
         half_blend: policy.half_blend,
         half_texel_bits: policy.half_texel_bits,
         // Metal's where a form is measured to be Metal's or the policy asks for Metal's rounding;

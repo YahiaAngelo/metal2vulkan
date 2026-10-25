@@ -1558,10 +1558,13 @@ pub enum VertexFetch {
     ///
     /// `narrow_float`: the Metal format's components are floats narrower than 32 bits (a `half`
     /// format, or `FloatRG11B10`), which the device's vertex input widens to a `float` attribute
-    /// with a widening of its own. Metal's fetch answers its canonical NaN there, so a function
-    /// that reads such an attribute as `float` canonicalizes the value it loads
-    /// (`lower::stage_io`); the attribute's own encoding is link-time state, and this bit is what
-    /// the compile key carries of it.
+    /// with a widening of its own, **and** the function reads the attribute as a 32-bit `float`.
+    /// Metal's fetch answers its canonical NaN there, so such a read canonicalizes the value it
+    /// loads (`lower::stage_io`); a `half`-declared attribute keeps the fetched code's own bits,
+    /// as Metal's `half` attribute does, so the bit is clear for one whatever the format was
+    /// (`link::vertex::narrow_float_of_f32_reads`) and no variant of it is keyed on the format.
+    /// The attribute's own encoding is link-time state, and this bit is what the compile key
+    /// carries of it.
     FixedFunction { narrow_float: bool },
     /// Fetched in the shader from a buffer, decoding this Metal format.
     ///
