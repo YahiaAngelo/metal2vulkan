@@ -311,8 +311,8 @@ use super::pipeline::{
 };
 use super::rate_mapped_pass::{self, RateMappedPass};
 use super::render_pass::{
-    self, check_memoryless, AspectTarget, Attachment, DepthStencilTarget, PassLayout,
-    RenderPassDescriptor, RenderPassProblem, Target, MAX_COLOR_ATTACHMENTS,
+    self, AspectTarget, Attachment, DepthStencilTarget, PassLayout, RenderPassDescriptor,
+    RenderPassProblem, Target, MAX_COLOR_ATTACHMENTS,
 };
 use super::render_state::{self, DepthBiasRecord, EncoderState, ViewportList, MAX_VIEWPORTS};
 use super::render_state::{Compensation, DepthBiasEffect, WrittenDepthClamp};
@@ -11866,7 +11866,21 @@ fn late_store(
         }
         _ => action,
     };
-    check_memoryless(call, which, memoryless, None, action)?;
+    // A memoryless attachment holds no memory, so the pass takes the descriptor's `Store` and
+    // `StoreAndMultisampleResolve` as plain Metal takes them
+    // (`render_pass::memoryless_actions`); a late one is still refused
+    // (`RenderPassProblem::MemorylessStore`), its own answer unmeasured.
+    if memoryless
+        && matches!(
+            action,
+            StoreAction::Store | StoreAction::StoreAndMultisampleResolve
+        )
+    {
+        return Err(store_problem(
+            call,
+            RenderPassProblem::MemorylessStore(which),
+        ));
+    }
     // One that does not resolve where the attachment resolves leaves the resolve texture
     // untouched and stores the attachment by the action, as plain Metal does where its
     // validation stops it (color, depth and stencil alike): the caller drops

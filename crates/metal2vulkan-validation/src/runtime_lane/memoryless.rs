@@ -504,9 +504,12 @@ fn memoryless_textures_are_refused_as_metal_refuses_them() {
         let texture = ms_array.unwrap_or_else(|error| panic!("ms_array: {error:?}"));
         assert_eq!(texture.storage_mode(), StorageMode::Memoryless);
     }
-    // Passes: `Load` (`load_load`, `depth_load`), a store (`default_store`,
-    // `pass_memoryless_depth_store`, `stencil_store`, `msaa_store_and_resolve`) and a memoryless
-    // resolve texture (`pass_memoryless_resolve_target`) are refused when the encoder opens.
+    // Passes: a memoryless attachment holds no memory, so the pass takes its `Load` and `Store`
+    // as `DontCare` and its `StoreAndMultisampleResolve` as its resolve alone, as plain Metal
+    // takes them (`render_pass::memoryless_actions`): each of those opens exactly as the pass of
+    // the action it renders under does (`load_load`, `depth_load`, `default_store`,
+    // `pass_memoryless_depth_store`, `stencil_store`, `msaa_store_and_resolve`). A memoryless
+    // resolve texture (`pass_memoryless_resolve_target`) is refused when the encoder opens.
     let open = |descriptor: &RenderPassDescriptor| {
         lane.queue
             .command_buffer()
@@ -516,23 +519,22 @@ fn memoryless_textures_are_refused_as_metal_refuses_them() {
     };
     let call = "render_command_encoder";
     let target = memoryless_single(&lane, rgba8);
-    let mut load = color_pass(&target, None, StoreAction::DontCare, (0, 0));
+    let dont_care = color_pass(&target, None, StoreAction::DontCare, (0, 0));
+    assert_eq!(open(&dont_care), Ok(()));
+    let mut load = dont_care.clone();
     load.color_attachments[0].load_action = LoadAction::Load;
-    assert_eq!(
-        open(&load),
-        pass_problem(call, RenderPassProblem::MemorylessLoad(c0))
-    );
+    assert_eq!(open(&load), open(&dont_care), "load_load");
     let mut default_store = RenderPassDescriptor::new();
     default_store.color_attachments[0].texture = Some(target.clone());
     default_store.color_attachments[0].load_action = LoadAction::Clear;
     assert_eq!(
-        open(&default_store),
-        pass_problem(call, RenderPassProblem::MemorylessStore(c0))
+        default_store.color_attachments[0].store_action,
+        StoreAction::Store
     );
-    assert_eq!(
-        open(&color_pass(&target, None, StoreAction::DontCare, (0, 0))),
-        Ok(())
-    );
+    let mut cleared = default_store.clone();
+    cleared.color_attachments[0].store_action = StoreAction::DontCare;
+    assert_eq!(open(&default_store), open(&cleared), "default_store");
+    assert_eq!(open(&cleared), Ok(()));
     let msaa = memoryless_msaa(&lane, rgba8);
     let resolve = lane.single(rgba8);
     assert_eq!(
@@ -542,7 +544,13 @@ fn memoryless_textures_are_refused_as_metal_refuses_them() {
             StoreAction::StoreAndMultisampleResolve,
             (0, 0)
         )),
-        pass_problem(call, RenderPassProblem::MemorylessStore(c0))
+        open(&color_pass(
+            &msaa,
+            Some(&resolve),
+            StoreAction::MultisampleResolve,
+            (0, 0)
+        )),
+        "msaa_store_and_resolve"
     );
     assert_eq!(
         open(&color_pass(
@@ -563,23 +571,26 @@ fn memoryless_textures_are_refused_as_metal_refuses_them() {
         descriptor.depth_attachment.store_action = store;
         descriptor
     };
+    let depth_dont_care = with_depth(LoadAction::DontCare, StoreAction::DontCare);
     assert_eq!(
         open(&with_depth(LoadAction::Load, StoreAction::DontCare)),
-        pass_problem(call, RenderPassProblem::MemorylessLoad(Attachment::Depth))
+        open(&depth_dont_care),
+        "depth_load"
     );
     assert_eq!(
         open(&with_depth(LoadAction::Clear, StoreAction::Store)),
-        pass_problem(call, RenderPassProblem::MemorylessStore(Attachment::Depth))
+        open(&with_depth(LoadAction::Clear, StoreAction::DontCare)),
+        "pass_memoryless_depth_store"
     );
     let mut with_stencil = color_pass(&color, None, StoreAction::Store, (0, 0));
     with_stencil.stencil_attachment.texture = Some(stencil.clone());
     with_stencil.stencil_attachment.store_action = StoreAction::Store;
+    let mut stencil_dont_care = with_stencil.clone();
+    stencil_dont_care.stencil_attachment.store_action = StoreAction::DontCare;
     assert_eq!(
         open(&with_stencil),
-        pass_problem(
-            call,
-            RenderPassProblem::MemorylessStore(Attachment::Stencil)
-        )
+        open(&stencil_dont_care),
+        "stencil_store"
     );
 
     // Late store actions (`late_store`, `late_store_and_resolve`, `late_depth_store`) are

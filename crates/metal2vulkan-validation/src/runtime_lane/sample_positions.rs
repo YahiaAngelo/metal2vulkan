@@ -1688,15 +1688,19 @@ fn custom_sample_depth_store_stores_as_store() {
     // As `Store` with a resolve texture: the texture is left untouched and the depth stored, as
     // plain Metal does.
     assert_eq!(lane.run(&pass, |_| Ok(())), Ok(()), "csds_depth_resolve");
+    // A memoryless depth attachment holds no memory, so the `Store` this stores as becomes
+    // `DontCare`, as plain Metal takes it (`render_pass::memoryless_actions`): the pass opens as
+    // the one of `DontCare` does.
+    let memoryless_depth = lane.texture(float, 4, true);
     let mut pass = DepthPass::new();
-    pass.depth = Some(lane.texture(float, 4, true));
+    pass.depth = Some(memoryless_depth.clone());
     pass.depth_store = custom;
+    let mut dont_care = DepthPass::new();
+    dont_care.depth = Some(memoryless_depth);
+    dont_care.depth_store = StoreAction::DontCare;
     assert_eq!(
         lane.run(&pass, |_| Ok(())),
-        Err(invalid(
-            encoder_call,
-            RenderPassProblem::MemorylessStore(Attachment::Depth)
-        )),
+        lane.run(&dont_care, |_| Ok(())),
         "csds_memoryless"
     );
 

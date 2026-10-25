@@ -110,7 +110,7 @@ impl TableFacts {
     }
 
     /// `setBufferOffset:atIndex:` and its stride form, as
-    /// `ArgumentTable::set_buffer_offset_with_stride` refuses it in a render stage's table.
+    /// `ArgumentTable::set_buffer_offset_with_stride` takes and refuses it.
     pub(super) fn set_buffer_offset(
         &mut self,
         call: &'static str,
@@ -135,7 +135,10 @@ impl TableFacts {
                 *at = offset;
                 Ok(())
             }
-            Bound::Nothing | Bound::Null => Err(invalid(call, Problem::NoBufferBound { index })),
+            // Nothing bound keeps no offset, in a render stage's table as in a compute one: the
+            // index stays unbound and the draw reads zeros, as plain Metal's does
+            // (`ArgumentTable::set_buffer_offset_with_stride`).
+            Bound::Nothing | Bound::Null => Ok(()),
         }
     }
 
@@ -220,4 +223,44 @@ pub(super) fn check_samplers<'a>(
         check_device(device, call, sampler.device())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `setBufferOffset:atIndex:` at an index that binds nothing, and at one whose
+    /// visible-function table an earlier offset made the null table, keeps no offset and leaves
+    /// the index as it was, as the stage table itself does
+    /// (`ArgumentTable::take_buffer_offset`): plain Metal keeps no offset there and the draw reads
+    /// zeros, byte for byte as it reads an index never bound (an Apple M3 Max under macOS 27.0.1,
+    /// that method's own doc).
+    #[test]
+    fn an_offset_at_an_unbound_index_keeps_nothing() {
+        let mut facts = TableFacts::default();
+        for index in [0u32, 7, 30] {
+            for offset in [0u64, 64, u64::MAX] {
+                assert_eq!(
+                    facts.set_buffer_offset("set_vertex_buffer_offset", offset, index),
+                    Ok(()),
+                    "nothing bound at {index}, offset {offset}"
+                );
+            }
+        }
+        // Nothing is bound, so nothing reads past any offset and no table is bound.
+        assert!(!facts.holds_past(0));
+        assert!(!facts.holds_tables());
+        // The null table an offset made of a visible-function table stays the null table.
+        facts.buffers[3] = Bound::Null;
+        assert_eq!(
+            facts.set_buffer_offset("set_vertex_buffer_offset", 64, 3),
+            Ok(())
+        );
+        assert!(matches!(facts.buffers[3], Bound::Null));
+        assert!(facts.holds_tables());
+        // An index past the table is still refused, so the test reads a real check.
+        assert!(facts
+            .set_buffer_offset("set_vertex_buffer_offset", 0, BUFFER_SLOTS)
+            .is_err());
+    }
 }

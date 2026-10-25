@@ -1,9 +1,48 @@
 //! The debug builds' check that a stage table brought in place is the table read whole
 //! (`ArgumentTable::check_reading`, `argument_table.rs`), which compares a sampler as it prints
-//! without printing it (`same_as_printed`).
+//! without printing it (`same_as_printed`); and the offset a table takes at an index with no
+//! buffer bound, which a render stage's table answers as a compute one does.
 
-use super::super::argument_table::same_as_printed;
+use super::super::argument_table::{same_as_printed, ArgumentTable};
 use metal2vulkan::bind::{BoundSampler, SamplerDescriptor, StageTable};
+
+/// `setBufferOffset:atIndex:`, and its stride form, at an index with no buffer bound: a render
+/// stage's table answers exactly as a compute one does, and neither keeps anything
+/// (`ArgumentTable::take_buffer_offset`). Plain Metal keeps no offset there and the draw reads
+/// zeros, byte for byte as it reads an index never bound (an Apple M3 Max under macOS 27.0.1, the
+/// method's own doc).
+#[test]
+fn an_offset_at_an_unbound_index_answers_alike_in_both_tables() {
+    const CALL: &str = "set_vertex_buffer_offset";
+    let mut render = ArgumentTable::default();
+    let mut compute = ArgumentTable::compute();
+    // Index 0, one in the middle of the table, and the last index a table has.
+    for index in [0u32, 7, 30] {
+        for (offset, stride) in [
+            (0u64, None),
+            (64, None),
+            (16, Some(32u32)),
+            (u64::MAX, None),
+        ] {
+            let answers = [&mut render, &mut compute]
+                .map(|table| table.take_buffer_offset(CALL, offset, stride, index));
+            assert_eq!(answers[0], Ok(()), "render {index} {offset} {stride:?}");
+            assert_eq!(
+                answers[0], answers[1],
+                "render and compute differ at {index} {offset} {stride:?}"
+            );
+        }
+    }
+    // Neither bound anything, kept an offset, nor kept a stride: a later `setBuffer:offset:` at
+    // the index states its own.
+    for table in [&render, &compute] {
+        assert!(table.buffers.is_empty());
+        assert!(table.attribute_strides.is_empty());
+        assert!(table.function_tables.is_empty());
+        assert!(table.null_tables.is_empty());
+        assert!(table.bytes.is_empty());
+    }
+}
 
 /// The field names of a value's `{:?}` print, `Name { a: .., b: .. }`, at its top level.
 fn field_names(printed: &str) -> Vec<String> {

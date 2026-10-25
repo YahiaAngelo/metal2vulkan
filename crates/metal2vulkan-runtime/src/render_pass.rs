@@ -51,8 +51,10 @@
 //!   them before `end_encoding`, which begins the pass. A depth attachment's
 //!   `CustomSampleDepthStore`, the descriptor's or a late one, stores as `Store` does: Metal stores
 //!   the same samples, with custom sample positions and without, at one sample and four (a probe,
-//!   the M3 Max and an M4), and stops what it stops of `Store` (a memoryless texture, a resolve
-//!   texture, a late one over a known action). Its validation also stops the store action option
+//!   the M3 Max and an M4), and stops what it stops of `Store` (a resolve texture, a late one
+//!   over a known action). A memoryless attachment holds no memory, so the pass takes its `Load`
+//!   and `Store` as `DontCare` and its `StoreAndMultisampleResolve` as its resolve alone, as plain
+//!   Metal takes them ([`memoryless_actions`]). Its validation also stops the store action option
 //!   `CustomSamplePositions` under it, which Metal without validation takes as it takes it under
 //!   `Store`: the runtime gives that answer (rule 7). A color or stencil attachment's is refused
 //!   ([`RenderPassProblem::CustomSampleDepthStore`]; Metal's own check, with and without
@@ -67,7 +69,7 @@
 //!   the pass renders that many layers of every attachment from its slice (a cube's face;
 //!   [`PassLayout::layers`]), loading, clearing and storing those layers alone, and each attachment
 //!   must hold them ([`RenderPassProblem::ArrayLengthPastSlices`], a 2D texture's one slice too:
-//!   plain Metal writes the missing layers into the memory after the texture). A draw whose vertex
+//!   plain Metal races them into the slices it has, texel by texel). A draw whose vertex
 //!   function writes `[[render_target_array_index]]` renders the layer it names, a 2D array view's
 //!   layer in a layered Vulkan framebuffer; one that writes none renders the first. A length of 0
 //!   or 1 renders the slice alone, whatever index a vertex function writes: at a length of 0 plain
@@ -514,20 +516,19 @@ pub enum RenderPassProblem {
     /// Basis: unknown (measured through Metal's validation alone; plain Metal's own answer for a
     /// stencil resolve by `DepthResolvedSample` without a depth attachment is unmeasured).
     DepthResolvedSampleWithoutDepthResolve,
-    /// A memoryless attachment loaded with `Load` (measured: "Memoryless attachment cannot be
-    /// loaded as it have no memory to load from").
+    /// A memoryless attachment given a late `Store` or `StoreAndMultisampleResolve` by the
+    /// encoder's `set_color_store_action`, `set_depth_store_action` or
+    /// `set_stencil_store_action`. The descriptor's own is taken, and stores nowhere: a memoryless
+    /// attachment holds no memory, so the pass stores it as `DontCare` and resolves a
+    /// `StoreAndMultisampleResolve` alone, as plain Metal does.
     ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal makes the encoder for a
-    /// memoryless attachment loaded with `Load` and the pass ends, its validation alone saying
-    /// "Memoryless attachment cannot be loaded as it have no memory to load from").
-    MemorylessLoad(Attachment),
-    /// A memoryless attachment stored with `Store` or `StoreAndMultisampleResolve`, the
-    /// descriptor's (measured: "Memoryless attachment content cannot be stored in memory") or
-    /// the encoder's late one (measured: "storeAction unsupported for Memoryless attachment").
-    ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal makes the encoder for a
-    /// memoryless attachment stored with `Store` and `endEncoding` returns, its validation alone
-    /// saying "Memoryless attachment content cannot be stored in memory").
+    /// Basis: metal-takes (an Apple M3 Max under macOS 27.0.1: the descriptor's `Store` on a
+    /// memoryless attachment runs — the pass drew 4096 fragments, `endEncoding` returned and the
+    /// command buffer completed with no error, and Metal's End Encoding Validation alone said
+    /// `endEncoding called with store action unsupported for Memoryless attachment.` — so this
+    /// refusal of the same condition, held at the late setter instead, reaches past plain Metal
+    /// too; the setter call's own answer is unmeasured. `MTL_DEBUG_LAYER_ERROR_MODE=assert` ends
+    /// the program at that message).
     MemorylessStore(Attachment),
     /// A memoryless resolve texture (measured: "resolveTexture must not be Memoryless").
     ///
@@ -613,15 +614,21 @@ pub enum RenderPassProblem {
     },
     /// The attachment's slice (a cube's face) plus the pass's `renderTargetArrayLength`, 2 or
     /// more, lies past its texture's slices: Metal's validation holds every attachment to the
-    /// length, a 2D texture's one slice among them (measured: "slice + renderTargetArrayLength is
-    /// 3, but the texture only has 2 slices"). Plain Metal's answer is not defined: it clears and
-    /// draws a missing layer into the memory after the texture (a cube's seventh face and a
-    /// depth array's fifth slice landed in the next texture of a heap, on an M3 Max and an M4),
-    /// and a 2D texture's pass stored another word on a second run.
+    /// length, a 2D texture's one slice among them (measured:
+    /// `slice + renderTargetArrayLength is 2, but the texture only has 1 slices.`). Plain Metal
+    /// runs the pass and answers no one value: the missing layer lands in the slices the texture
+    /// has, racing the layers it holds texel by texel.
     ///
-    /// Basis: metal-takes (an M3 Max and an M4: plain Metal clears and draws the missing layer into
-    /// the memory after the texture — a cube's seventh face and a depth array's fifth slice landed
-    /// in the next texture of a heap — rather than refusing).
+    /// Basis: metal-takes (plain Metal takes the input, so the refusal reaches past it, but what
+    /// it renders is not one answer to match. An Apple M3 Max under macOS 27.0.1,
+    /// `renderTargetArrayLength` 2 over a 1-slice 2D texture placed in a heap, two instances each
+    /// writing `[[render_target_array_index]]`, four fresh processes: the pass completed with no
+    /// error and 8192 fragments every time, and slice 0 read `ff8040ff` twice and `00ff80ff`
+    /// twice, over 13312, 13312, 13824 and 12288 nonzero bytes of 16384 — three counts from four
+    /// runs. A 4096-byte guard buffer placed immediately after the texture in the same heap was
+    /// untouched (all `0xee`) in every run, so nothing is written past the texture. The legal
+    /// 2-slice array is exact and stable over the same four runs — slice 1 `00ff80ff`, 12288
+    /// nonzero bytes each time — as is `renderTargetArrayLength` 1 over one slice.)
     ArrayLengthPastSlices {
         /// The attachment.
         attachment: Attachment,
@@ -1264,30 +1271,84 @@ fn check_planes(
     })
 }
 
-/// Metal's checks of `which` attachment's `load` (`None` for a late store action) and `store` where
-/// its texture is `memoryless` (a Metal probe on an M4): a pass neither loads nor stores one.
-/// `DontCare` and `Clear` loads and `DontCare`, `MultisampleResolve` and `Unknown` stores pass.
-pub(super) fn check_memoryless(
-    call: &'static str,
-    which: Attachment,
-    memoryless: bool,
-    load: Option<LoadAction>,
+/// The load and store actions a memoryless attachment renders under, in place of `load` and
+/// `store`. It holds no memory, so a `Load` reads nothing and a `Store` writes nowhere, exactly as
+/// `DontCare` does, and a `StoreAndMultisampleResolve` is its resolve alone. [`layout`] takes a
+/// descriptor's actions this way ([`taken_actions`]), so every later stage sees an action a
+/// memoryless attachment can hold.
+///
+/// Plain Metal takes both actions (an Apple M3 Max under macOS 27.0.1, each case three times with
+/// Metal's API validation off in a fresh process and once with it on): the encoder is made, the
+/// pass runs — 3 vertices and 4096 fragments counted by atomics in the vertex and fragment
+/// functions — `endEncoding` returns, the command buffer completes with no error, three canary
+/// command buffers after it run their 24 threads, and a `Shared` color attachment beside the
+/// memoryless one holds the draw's `00ff00ff` while the memoryless one's `Store` disturbs nothing.
+/// A fragment reading `[[color(0)]]` of the memoryless attachment reads `0x00000000` under `Load`,
+/// where that same read under `Clear` of `(0.2, 0.4, 0.6, 1)` reads `0xff996633` and a prefilled
+/// `Shared` attachment under `Load` reads `0x11223344`.
+///
+/// Metal's API validation alone objects, and `MTL_DEBUG_LAYER_ERROR_MODE=assert` ends the program
+/// at its message: `Memoryless attachment cannot be loaded as it have no memory to load from.` for
+/// the load, and `Memoryless attachment content cannot be stored in memory.` with
+/// `endEncoding called with store action unsupported for Memoryless attachment.` for the store.
+pub(super) fn memoryless_actions(
+    load: LoadAction,
     store: StoreAction,
-) -> Result<(), Error> {
-    if !memoryless {
-        return Ok(());
+) -> (LoadAction, StoreAction) {
+    let load = match load {
+        LoadAction::Load => LoadAction::DontCare,
+        other => other,
+    };
+    let store = match store {
+        StoreAction::Store => StoreAction::DontCare,
+        StoreAction::StoreAndMultisampleResolve => StoreAction::MultisampleResolve,
+        other => other,
+    };
+    (load, store)
+}
+
+/// Whether [`layout`] takes any of `descriptor`'s load or store actions as another one
+/// ([`taken_actions`]), which alone needs a descriptor of its own.
+fn takes_other_actions(descriptor: &RenderPassDescriptor) -> bool {
+    let d = &descriptor.depth_attachment;
+    let s = &descriptor.stencil_attachment;
+    let moves = |texture: &Option<Texture>, load: LoadAction, store: StoreAction| {
+        texture.as_ref().is_some_and(memoryless) && memoryless_actions(load, store) != (load, store)
+    };
+    d.store_action == StoreAction::CustomSampleDepthStore
+        || moves(&d.texture, d.load_action, d.store_action)
+        || moves(&s.texture, s.load_action, s.store_action)
+        || descriptor
+            .color_attachments
+            .iter()
+            .any(|c| moves(&c.texture, c.load_action, c.store_action))
+}
+
+/// A memoryless attachment's load and store actions in place, as it renders under them
+/// ([`memoryless_actions`]); any other attachment's as they are.
+fn take_memoryless(texture: &Option<Texture>, load: &mut LoadAction, store: &mut StoreAction) {
+    if texture.as_ref().is_some_and(memoryless) {
+        (*load, *store) = memoryless_actions(*load, *store);
     }
-    let problem = |p| invalid(call, Problem::RenderPass(p));
-    if load == Some(LoadAction::Load) {
-        return Err(problem(RenderPassProblem::MemorylessLoad(which)));
+}
+
+/// `descriptor` with each attachment's load and store actions as the pass takes them: a depth
+/// attachment's `CustomSampleDepthStore` as `Store` (a probe: Metal stores the same samples, with
+/// custom sample positions and without), then a memoryless attachment's as
+/// [`memoryless_actions`] gives them.
+fn taken_actions(descriptor: &RenderPassDescriptor) -> RenderPassDescriptor {
+    let mut taken = descriptor.clone();
+    let d = &mut taken.depth_attachment;
+    if d.store_action == StoreAction::CustomSampleDepthStore {
+        d.store_action = StoreAction::Store;
     }
-    if matches!(
-        store,
-        StoreAction::Store | StoreAction::StoreAndMultisampleResolve
-    ) {
-        return Err(problem(RenderPassProblem::MemorylessStore(which)));
+    take_memoryless(&d.texture, &mut d.load_action, &mut d.store_action);
+    let s = &mut taken.stencil_attachment;
+    take_memoryless(&s.texture, &mut s.load_action, &mut s.store_action);
+    for c in &mut taken.color_attachments {
+        take_memoryless(&c.texture, &mut c.load_action, &mut c.store_action);
     }
-    Ok(())
+    taken
 }
 
 /// Whether `texture` is memoryless.
@@ -1434,18 +1495,16 @@ pub(super) fn layout(
     let device = maker.device();
     let foreign = || invalid(call, Problem::ForeignObject);
     let not_yet = || Error::NotImplemented(RuntimeGap::Render);
-    // A depth attachment's `CustomSampleDepthStore` stores as `Store` does (a probe: Metal stores
-    // the same samples, with and without custom positions), so the pass is the one of `Store`; a
-    // color or stencil attachment's is refused (the module docs).
-    let stored;
-    let descriptor = match descriptor.depth_attachment.store_action {
-        StoreAction::CustomSampleDepthStore => {
-            let mut store = descriptor.clone();
-            store.depth_attachment.store_action = StoreAction::Store;
-            stored = store;
-            &stored
+    // Each attachment's load and store actions as the pass takes them ([`taken_actions`]): a
+    // depth attachment's `CustomSampleDepthStore` as `Store` (a color or stencil attachment's is
+    // refused, the module docs), and a memoryless attachment's as it renders under them.
+    let taken;
+    let descriptor = match takes_other_actions(descriptor) {
+        true => {
+            taken = taken_actions(descriptor);
+            &taken
         }
-        _ => descriptor,
+        false => descriptor,
     };
     // One entry each color attachment: room for them all at once, so no color target moves.
     let mut colors: Vec<Option<ColorTarget>> =
@@ -1522,13 +1581,6 @@ pub(super) fn layout(
                 (stood, Some(own))
             }
         };
-        check_memoryless(
-            call,
-            which,
-            memoryless,
-            Some(color.load_action),
-            color.store_action,
-        )?;
         // A color attachment's store action options change nothing, as plain Metal's
         // (`sample_positions.rs`). A single-sampled one resolves as a copy of its texels
         // (`resolve::color_copy`).
@@ -2017,13 +2069,6 @@ fn depth_stencil(
                     Problem::RenderPass(RenderPassProblem::ClearDepth),
                 ));
             }
-            check_memoryless(
-                call,
-                Attachment::Depth,
-                memoryless(texture),
-                Some(d.load_action),
-                d.store_action,
-            )?;
             Some(target)
         }
         None => None,
@@ -2071,13 +2116,6 @@ fn depth_stencil(
                 texture,
                 (s.level, s.slice, s.depth_plane),
                 descriptor.render_target_array_length,
-            )?;
-            check_memoryless(
-                call,
-                Attachment::Stencil,
-                memoryless(texture),
-                Some(s.load_action),
-                s.store_action,
             )?;
             Some(target)
         }
@@ -2306,45 +2344,63 @@ mod tests {
         }
     }
 
-    /// A memoryless attachment is neither loaded nor stored (a Metal probe on an M4); the other
-    /// actions pass, and every action passes for an attachment that is not memoryless.
+    /// A memoryless attachment renders under the actions plain Metal gives it, never refused: it
+    /// holds no memory, so `Load` reads nothing and `Store` writes nowhere, as `DontCare` does,
+    /// and `StoreAndMultisampleResolve` is its resolve alone ([`memoryless_actions`]). Every one
+    /// of the three load actions by the six store actions.
     #[test]
-    fn memoryless_attachments_are_neither_loaded_nor_stored() {
-        let call = "render_command_encoder";
-        let which = Attachment::Depth;
-        for load in [LoadAction::Clear, LoadAction::DontCare] {
-            for store in [
-                StoreAction::DontCare,
-                StoreAction::MultisampleResolve,
-                StoreAction::Unknown,
-            ] {
-                assert_eq!(
-                    check_memoryless(call, which, true, Some(load), store),
-                    Ok(())
+    fn a_memoryless_attachment_renders_under_the_actions_metal_gives_it() {
+        use LoadAction::{Clear, DontCare as NoLoad, Load};
+        use StoreAction::{
+            CustomSampleDepthStore, DontCare as NoStore, MultisampleResolve, Store,
+            StoreAndMultisampleResolve, Unknown,
+        };
+        // The two actions a memoryless attachment cannot hold, and what it holds in their place.
+        assert_eq!(memoryless_actions(Load, Store), (NoLoad, NoStore));
+        assert_eq!(
+            memoryless_actions(Load, StoreAndMultisampleResolve),
+            (NoLoad, MultisampleResolve)
+        );
+        let stores = [
+            NoStore,
+            Store,
+            MultisampleResolve,
+            StoreAndMultisampleResolve,
+            Unknown,
+            CustomSampleDepthStore,
+        ];
+        for load in [NoLoad, Load, Clear] {
+            for store in stores {
+                let took = memoryless_actions(load, store);
+                // Whatever the descriptor asks, the pass neither loads nor stores it.
+                assert_ne!(took.0, Load, "{load:?} {store:?}");
+                assert!(
+                    !matches!(took.1, Store | StoreAndMultisampleResolve),
+                    "{load:?} {store:?}"
                 );
+                // And nothing else moves: an action it can hold is the one it renders under.
+                if load != Load && !matches!(store, Store | StoreAndMultisampleResolve) {
+                    assert_eq!(took, (load, store), "{load:?} {store:?}");
+                }
             }
         }
-        let load = check_memoryless(
-            call,
-            which,
-            true,
-            Some(LoadAction::Load),
-            StoreAction::DontCare,
-        );
+    }
+
+    /// A descriptor needs one of its own only where the pass takes an action as another, and a
+    /// depth attachment's `CustomSampleDepthStore` is the pass of `Store`.
+    #[test]
+    fn a_descriptor_of_its_own_is_the_one_whose_actions_move() {
+        let plain = RenderPassDescriptor::new();
+        assert!(!takes_other_actions(&plain));
+        let mut custom = RenderPassDescriptor::new();
+        custom.depth_attachment.store_action = StoreAction::CustomSampleDepthStore;
+        assert!(takes_other_actions(&custom));
         assert_eq!(
-            load.map_err(problem),
-            Err(RenderPassProblem::MemorylessLoad(which))
+            taken_actions(&custom).depth_attachment.store_action,
+            StoreAction::Store
         );
-        for store in [StoreAction::Store, StoreAction::StoreAndMultisampleResolve] {
-            assert_eq!(
-                check_memoryless(call, which, true, None, store).map_err(problem),
-                Err(RenderPassProblem::MemorylessStore(which))
-            );
-            assert_eq!(
-                check_memoryless(call, which, false, Some(LoadAction::Load), store),
-                Ok(())
-            );
-        }
+        // A color attachment's default `Store` without a texture is no attachment's action.
+        assert_eq!(plain.color_attachments[0].store_action, StoreAction::Store);
     }
 
     /// Metal's defaults (probe 1 on an M4).

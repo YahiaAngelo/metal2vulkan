@@ -25,12 +25,14 @@
 //! core, whichever slot binds it: a bind before each draw, and a draw that binds objects an
 //! earlier draw of the encoder bound, retain nothing of their own.
 //!
-//! A compute encoder's table differs in two answers, as plain Metal's compute encoder gave them
-//! on an M4 where its API validation asserts: it holds a buffer bound past
-//! its length, which a dispatch refuses only where the kernel reads the slot (a read there is past
-//! the buffer: memory decides it), and it takes an offset set at an index with no buffer as no
-//! change. A render stage's table refuses both at the call, as Metal's validation does; plain
-//! Metal's render forms are not measured.
+//! A compute encoder's table differs in one answer, as plain Metal's compute encoder gave it on an
+//! M4 where its API validation asserts: it holds a buffer bound past its length, which a dispatch
+//! refuses only where the kernel reads the slot (a read there is past the buffer: memory decides
+//! it). A render stage's table refuses that at the call, as Metal's validation does; plain Metal's
+//! render form is not measured.
+//!
+//! An offset set at an index with no buffer bound is no change in either, as plain Metal's render
+//! and compute encoders both take it ([`ArgumentTable::take_buffer_offset`]).
 
 use super::address_map::SamplerMaps;
 use super::binding::bound_sampler;
@@ -134,7 +136,7 @@ impl AtBindViews {
 #[derive(Default)]
 pub(super) struct ArgumentTable {
     /// A compute encoder's table ([`ArgumentTable::compute`]): it holds buffers bound past their
-    /// length and takes an offset at an index with no buffer as no change (the module docs).
+    /// length (the module docs).
     compute: bool,
     /// Each buffer with its bind offset; a visible-function table's words at offset 0.
     pub(super) buffers: BTreeMap<u32, (Buffer, u64)>,
@@ -636,9 +638,9 @@ impl ArgumentTable {
     /// vertex form at 4 to 24; a second offset keeps it null; Metal's debug layer raises an
     /// exception there), and so does the runtime. At an index holding inline bytes, they read as
     /// zeros at any offset until the index is bound again, as plain Metal reads them (an M4).
-    /// Refused: an index past the table, no buffer bound at the index in a render stage's table (a
-    /// compute table's index with none keeps no offset), and in a render stage's table an offset
-    /// past the buffer's length.
+    /// At an index with no buffer bound it keeps no offset, in a render stage's table as in a
+    /// compute one ([`take_buffer_offset`](Self::take_buffer_offset)). Refused: an index past the
+    /// table, and in a render stage's table an offset past a bound buffer's length.
     pub(super) fn set_buffer_offset(
         &mut self,
         core: &mut EncoderCore,
@@ -695,13 +697,42 @@ impl ArgumentTable {
             }
             return Ok(());
         }
+        self.take_buffer_offset(call, offset, stride, index)
+    }
+
+    /// `setBufferOffset:attributeStride:atIndex:` at an index that binds a buffer, or binds
+    /// nothing at all, with `stride`
+    /// ([`set_buffer_offset_with_stride`](Self::set_buffer_offset_with_stride)'s inline bytes and
+    /// visible-function tables are its own). It needs no encoder, since nothing here is retained
+    /// or let go, so one test reads both tables' answer.
+    ///
+    /// Nothing bound keeps no offset, in a render stage's table as in a compute one: the index
+    /// stays unbound, a later `setBuffer:offset:atIndex:` states its own offset, and a draw or a
+    /// dispatch before that reads zeros, byte for byte as it reads an index never bound.
+    ///
+    /// An Apple M3 Max under macOS 27.0.1, three runs with Metal's API validation off in a fresh
+    /// process and one with it on: `setVertexBufferOffset:64 atIndex:0` with nothing bound at 0
+    /// returned, the draw ran its 3 vertices and 4096 fragments, the command buffer completed with
+    /// no error, and the vertex function read `0x00000000` from `src[0]` — the same word a draw
+    /// with no setter at all read, where the setter over a bound buffer read that buffer's word at
+    /// 64, `0x22222222`. Metal's API validation alone objects, and
+    /// `MTL_DEBUG_LAYER_ERROR_MODE=assert` ends the program there:
+    /// `index(0) must have an existing buffer.` for the setter, then
+    /// `Vertex Function(vread): missing Buffer binding at index 0 for src[0].` for the draw, which
+    /// the never-bound run raises on its own.
+    ///
+    /// Refused: an offset past a bound buffer's length in a render stage's table, which a compute
+    /// one holds (the module docs).
+    pub(super) fn take_buffer_offset(
+        &mut self,
+        call: &'static str,
+        offset: u64,
+        stride: Option<u32>,
+        index: u32,
+    ) -> Result<(), Error> {
         let compute = self.compute;
-        let bound = match self.buffers.get_mut(&index) {
-            Some(entry) => entry,
-            // Plain Metal's compute encoder keeps no offset where no buffer is bound: a later
-            // `setBuffer:offset:atIndex:` states its own (`set_offset_unbound_then_bind`).
-            None if compute => return Ok(()),
-            None => return Err(invalid(call, Problem::NoBufferBound { index })),
+        let Some(bound) = self.buffers.get_mut(&index) else {
+            return Ok(());
         };
         let length = bound.0.length();
         if offset > length && !compute {
