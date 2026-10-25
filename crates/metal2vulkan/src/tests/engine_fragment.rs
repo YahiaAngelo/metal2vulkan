@@ -4191,7 +4191,10 @@ fn sum_placements(bc: &[u8], entry: &str) -> Vec<Placement> {
                 })
         })
         .collect();
-    let facts = Facts::of(body, &mut m).expect("facts");
+    let Some(facts) = Facts::of(body, &mut m).expect("facts") else {
+        // No block of the body discards, so every sum in it is placed as Metal places it.
+        return counts.into_iter().map(|_| Placement::Moved).collect();
+    };
     let placed = counts
         .into_iter()
         .map(

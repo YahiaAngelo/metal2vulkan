@@ -284,6 +284,23 @@ recorded here.
 Open differences from Metal that no note announces yet, and runtime costs still above the
 driver's. Each is open work.
 
+- **A function linked from a module that declares function constants** is refused
+  (`Unsupported{Linking; NotImplemented}` at a surviving call to the stub, `canon::link`), keyed on
+  the module declaring any constant at all. Metal is narrower: it refuses only an *unresolved*
+  constant the linked code reaches. Measured on an Apple M3 Max under macOS 27.0.1, one compute
+  pipeline per shape, the visible function in `MTLLinkedFunctions.functions` and the linked module
+  declaring `[[function_constant(0)]]`: the function not reading it creates and runs, from
+  `newFunctionWithName:` and from `newFunctionWithName:constantValues:` alike; the function reading
+  it creates and runs from `newFunctionWithName:constantValues:` and is refused from
+  `newFunctionWithName:` with "cannot lower module with unresolved function constants". So three of
+  those four shapes are ours to close, and a specialized `MTLFunction` is how Metal resolves them
+  before linking. The values are already at the site (`LinkedName::constants`); closing it means
+  binding them and folding the linked module before the import, then refusing only a constant the
+  reached code reads with no value bound. A dynamic library of such a module is blocked the same
+  way, and the same device answers that `newDynamicLibrary:` refuses the module whose exported code
+  reads the constant and accepts the one where nothing reads it; a pipeline importing from the
+  accepted library is **unmeasured**.
+
 - **A sample or gather in an AIR 1.x library** (deployment target macOS 10.12 or earlier, iOS 10
   or earlier) is refused (`Unsupported{NotRepresentable{HandleAsPointer}}`). From AIR 2.0 a
   `constexpr sampler` is the module global `@__air_sampler_state`, whose packed word the ABI

@@ -46,8 +46,10 @@ pub enum Placement {
 }
 
 /// The structural facts `placement` reads, computed once per body.
+///
+/// The dominator and post-dominator trees own their answers, so the control-flow graph they were
+/// built from is released as soon as they exist: nothing here reads it again.
 pub struct Facts {
-    cfg: Cfg<BlockId>,
     dom: DomTree<BlockId>,
     pdom: PostDomTree<BlockId>,
     /// The blocks holding a `discard_fragment` call.
@@ -55,33 +57,50 @@ pub struct Facts {
 }
 
 impl Facts {
-    /// The facts of `body`.
-    pub fn of(body: &Body, m: &mut Meter) -> Result<Facts, Error> {
-        let cfg = Cfg::build(body, m)?;
-        let dom = DomTree::compute(&cfg, m)?;
-        let pdom = PostDomTree::compute(&cfg, m)?;
-        let discards = body
+    /// The facts of `body`, or `None` when no block of it calls `discard_fragment`. The placement
+    /// answers where a discard lies relative to an operation, so a body with no discard needs no
+    /// graph: the blocks are scanned first and nothing is built when the scan finds none.
+    pub fn of(body: &Body, m: &mut Meter) -> Result<Option<Facts>, Error> {
+        let discards: BTreeSet<BlockId> = body
             .blocks
             .iter()
             .filter(|&(b, _)| body.block_insts(b).any(|(_, i)| is_discard(&i.kind)))
             .map(|(b, _)| b)
             .collect();
-        Ok(Facts {
-            cfg,
+        if discards.is_empty() {
+            return Ok(None);
+        }
+        let (dom, pdom) = {
+            let cfg = Cfg::build(body, m)?;
+            let built = trees(&cfg, m);
+            m.release(cfg.ledger_bytes());
+            built?
+        };
+        Ok(Some(Facts {
             dom,
             pdom,
             discards,
-        })
+        }))
     }
 
     /// Return the facts' ledger charge.
     pub fn release(self, m: &mut Meter) {
-        m.release(self.cfg.ledger_bytes() + self.dom.ledger_bytes() + self.pdom.ledger_bytes());
+        m.release(self.dom.ledger_bytes() + self.pdom.ledger_bytes());
     }
+}
 
-    /// Whether `body` has a discard at all.
-    pub fn has_discard(&self) -> bool {
-        !self.discards.is_empty()
+/// The dominator and post-dominator trees of `cfg`. On error nothing stays charged for them.
+fn trees(
+    cfg: &Cfg<BlockId>,
+    m: &mut Meter,
+) -> Result<(DomTree<BlockId>, PostDomTree<BlockId>), Error> {
+    let dom = DomTree::compute(cfg, m)?;
+    match PostDomTree::compute(cfg, m) {
+        Ok(pdom) => Ok((dom, pdom)),
+        Err(e) => {
+            m.release(dom.ledger_bytes());
+            Err(e)
+        }
     }
 }
 
@@ -398,8 +417,10 @@ pub(super) fn expand(body: Body, m: &mut Meter) -> Result<Body, Error> {
     let mut body = body;
     let mut rounds = 0usize;
     loop {
-        let facts = Facts::of(&body, m)?;
-        if !facts.has_discard() || rounds > facts.discards.len() {
+        let Some(facts) = Facts::of(&body, m)? else {
+            return Ok(body);
+        };
+        if rounds > facts.discards.len() {
             facts.release(m);
             return Ok(body);
         }

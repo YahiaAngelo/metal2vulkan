@@ -787,6 +787,23 @@ fn plan(
     if l.abi.linkage_signature.is_some() {
         return Ok(Err(not_implemented(name, "air.signature")));
     }
+    // Metal links a function from a module that declares function constants: what it refuses is
+    // an UNRESOLVED constant the linked code reaches. Measured on an Apple M3 Max under macOS
+    // 27.0.1, one compute pipeline per shape, the visible function in
+    // `MTLLinkedFunctions.functions` and the linked module declaring `[[function_constant(0)]]`:
+    //
+    //   the visible function does not read it, `newFunctionWithName:`                created, ran
+    //   the visible function does not read it, `newFunctionWithName:constantValues:`  created, ran
+    //   the visible function reads it, `newFunctionWithName:`                         refused,
+    //       "error: cannot lower module with unresolved function constants"
+    //   the visible function reads it, `newFunctionWithName:constantValues:`          created, ran
+    //
+    // A specialized `MTLFunction` therefore resolves the module's constants before linking, and a
+    // constant nothing the import reaches reads costs nothing. This refuses on the module
+    // declaring any constant at all, which is wider than Metal in three of those four shapes. The
+    // values are already here (`LinkedName::constants`, the specialized function's); closing the
+    // gap means binding them and folding the linked module before the import, then refusing only
+    // a constant `reach` keeps with no value bound.
     if !l.abi.function_constants.is_empty() {
         return Ok(Err(not_implemented(name, "air.function_constants")));
     }
@@ -1566,6 +1583,15 @@ fn exports<'a>(
             by_name.insert(name, (Item::Global(id), g.visibility));
         }
     }
+    // A dynamic library has nowhere to bind a function constant: `newDynamicLibrary:` takes no
+    // constant values. Measured on an Apple M3 Max under macOS 27.0.1, a library source declaring
+    // `[[function_constant(0)]]`: `newDynamicLibrary:` refuses outright, "cannot lower module with
+    // unresolved function constants", when the code it exports reads the constant, and succeeds
+    // when nothing reads it. So the reading shape cannot reach this at all, and what blocking the
+    // exports of a module that declares any constant costs is the other shape: a library Metal
+    // makes, whose exports read no constant. The import's reach set (`reach`) is what would
+    // separate them. What a pipeline importing from such a library then does is unmeasured: the
+    // probe got the library made but not a symbol resolved through it.
     let blocked = if code.abi.linkage_signature.is_some() {
         Some("air.signature")
     } else if !code.abi.function_constants.is_empty() {

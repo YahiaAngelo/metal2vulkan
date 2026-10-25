@@ -3,7 +3,7 @@
 
 use super::discard_sink::{expand, placement, Facts, Placement};
 use crate::budget::{Budget, Meter};
-use crate::graph::{Cfg, DomTree};
+use crate::graph::{Cfg, DomTree, PostDomTree};
 use crate::intrinsics::AirIntrinsic;
 use crate::ir::build::{FunctionBuilder, ModuleBuilder};
 use crate::ir::{
@@ -120,7 +120,10 @@ fn find(body: &Body, name: &str) -> (BlockId, InstId) {
 /// The placement of the body's first `simd_sum`.
 fn placed(body: &Body) -> Placement {
     let mut m = meter();
-    let facts = Facts::of(body, &mut m).unwrap();
+    let Some(facts) = Facts::of(body, &mut m).unwrap() else {
+        // No block of the body discards, so no discard follows the operation.
+        return Placement::NoDiscard;
+    };
     let (b, op) = find(body, "air.simd_sum.s.i32");
     let placed = placement(&facts, body, op, b);
     facts.release(&mut m);
@@ -393,7 +396,7 @@ fn the_other_reductions_are_unmeasured() {
         f.ret(None);
     });
     let mut m = meter();
-    let facts = Facts::of(&b, &mut m).unwrap();
+    let facts = Facts::of(&b, &mut m).unwrap().expect("the body discards");
     let (home, op) = find(&b, "air.simd_max.s.i32");
     assert_eq!(placement(&facts, &b, op, home), Placement::Unknown);
     facts.release(&mut m);
@@ -425,4 +428,78 @@ fn a_count_with_no_discard_after_it_stays() {
         f.ret(None);
     });
     assert_eq!(placed(&b), Placement::NoDiscard);
+}
+
+/// A fragment body with no discard costs no graph: the placement answers from where a discard
+/// lies relative to an operation, so [`Facts::of`] scans the blocks for one before it builds
+/// anything, and [`expand`] over such a body counts no work and charges no bytes at all.
+#[test]
+fn a_body_with_no_discard_builds_no_graph() {
+    let b = body(|f, t| {
+        let one = f.module().const_int(t.i32t, 1);
+        let zero = f.module().const_int(t.i32t, 0);
+        // A branch that rejoins, and a simdgroup count: every shape the placement looks at,
+        // without a discard anywhere.
+        let c = eq(f, t, f.arg(0), zero);
+        let arm = f.block();
+        let join = f.block();
+        f.cond_br(c, arm, join);
+        f.switch_to(arm);
+        sum(f, t, one);
+        f.br(join);
+        f.switch_to(join);
+        sum(f, t, one);
+        f.ret(None);
+    });
+    let mut m = meter();
+    assert!(
+        Facts::of(&b, &mut m).unwrap().is_none(),
+        "a body with no discard has no facts"
+    );
+    assert_eq!(m.work(), 0, "no discard, so no graph was walked");
+    assert_eq!(m.ledger_peak(), 0, "no discard, so no graph was charged");
+    let kept = expand(b, &mut m).unwrap();
+    assert_eq!(m.work(), 0, "sinking a body with no discard walks nothing");
+    assert_eq!(
+        m.ledger_peak(),
+        0,
+        "sinking a body with no discard charges nothing"
+    );
+    assert_eq!(kept.blocks.len(), 3, "the body came back as it went in");
+}
+
+/// A body that does discard builds the graph once, and the control-flow graph the two trees were
+/// built from is not retained: what stays charged while the facts live is the two trees alone.
+#[test]
+fn the_facts_retain_the_trees_and_not_the_graph() {
+    let b = body(|f, t| {
+        let one = f.module().const_int(t.i32t, 1);
+        let zero = f.module().const_int(t.i32t, 0);
+        sum(f, t, one);
+        let c = eq(f, t, f.arg(0), zero);
+        guarded(f, t, c);
+        f.ret(None);
+    });
+    // What the graph and the two trees cost, charged on a meter of their own.
+    let (graph_bytes, tree_bytes) = {
+        let mut m = meter();
+        let cfg = Cfg::build(&b, &mut m).unwrap();
+        let dom = DomTree::compute(&cfg, &mut m).unwrap();
+        let pdom = PostDomTree::compute(&cfg, &mut m).unwrap();
+        (cfg.ledger_bytes(), dom.ledger_bytes() + pdom.ledger_bytes())
+    };
+    assert!(graph_bytes > 0, "the graph costs something to hold");
+    let mut m = meter();
+    let facts = Facts::of(&b, &mut m).unwrap().expect("the body discards");
+    let held = m.ledger();
+    assert_eq!(
+        held, tree_bytes as u64,
+        "the facts hold the two trees and nothing else; the graph's {graph_bytes} bytes are gone"
+    );
+    assert!(
+        m.ledger_peak() >= held + graph_bytes as u64,
+        "the graph was charged while the trees were built"
+    );
+    facts.release(&mut m);
+    assert_eq!(m.ledger(), 0, "the facts released everything they charged");
 }

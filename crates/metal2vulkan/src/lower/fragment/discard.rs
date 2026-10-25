@@ -491,7 +491,10 @@ fn counted_before(body: &Body, before: &[(InstId, BlockId)], m: &mut Meter) -> R
     if before.is_empty() {
         return Ok(false);
     }
-    let facts = Facts::of(body, m)?;
+    let Some(facts) = Facts::of(body, m)? else {
+        // No block of the body discards, so none of `before` runs before one.
+        return Ok(false);
+    };
     let unknown = before
         .iter()
         .any(|&(op, b)| placement(&facts, body, op, b) != Placement::Counted);
