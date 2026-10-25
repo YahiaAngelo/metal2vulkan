@@ -287,7 +287,18 @@ driver's. Each is open work.
 - **GPU writes into read-only memory are dropped only through a bound buffer slot.** A shader's
   stores through a slot bound to memory whose GPU writes Metal drops (no-copy memory of its private
   option bit 24, or pages replaced read-only) are now dropped in the shader, gated on a uniform
-  per-draw and per-dispatch word (`SpecKey::DroppedStoreSlots`). Four shapes stay open. A store
+  per-draw and per-dispatch word (`SpecKey::DroppedStoreSlots`). Five shapes stay open, the fifth
+  this crate's own: the guard is a branch, and the branch moves what Apple's fast-math library
+  answers. `air.fast_asinh.f32` and `air.fast_acosh.f32` expand to different last bits depending on
+  the basic block their call sits in, and the guard sinks every value a guarded store consumes into
+  that block. Over the math case's 1024 operand pairs on an M3 Max under macOS 27.0.1, 34 of 2048
+  `asinh` and `acosh` answers move by one or two ulps, and where `x + sqrt(x*x +- 1)` cancels (a
+  large negative `x`, or `acosh` just above 1) the move carries to `NaN` against a finite answer; no
+  other function moves and the precise entry does not move at all
+  (`runtime_lane::driver_deviations::float_functions_the_device_answers_are_metals`, red since the
+  guard landed). The exact form is measured: the same word and the same bit test, written as a
+  selected store address instead of a branch, answer all 2048 exactly. The four that follow are
+  Metal's own. A store
   through an address loaded out of an argument buffer or a pointer names no slot and no bit, so the
   word does not reach it; an atomic is not gated, because what Metal's atomics do to such memory is
   unmeasured; a blit fill and a visibility result are not a shader's stores and the runtime does not
@@ -470,8 +481,11 @@ driver's. Each is open work.
   every one, because the footprint is arithmetic over the descriptor and no image decides it. A
   texture, a view, a copy, a read and a write of one stay refused `NotImplemented(Format)`: no
   Vulkan format holds the bytes (an ASTC 4x2 or 8x4 block) or their reads and writes are not
-  measured yet. A **multisample** descriptor of one is refused there too, its layout unmeasured:
-  Metal's validation may stop such a descriptor, so none was asked.
+  measured yet. The two packed 10-bit ones are the only members plain Metal makes a texture of in
+  `Memoryless` storage and in no mode that holds memory (an Apple M3 Max, macOS 27.0.1,
+  `conformance/probes/packed10_texture_alone.m`), so that one is this crate's refusal of the format
+  and not Metal's nil. A **multisample** descriptor of one is refused there too, its layout
+  unmeasured: Metal's validation may stop such a descriptor, so none was asked.
   `ARGB8Unorm_sRGB` is the one of them whose gap is not the bytes: they are `ARGB8Unorm`'s, which
   this crate holds, and no Vulkan format applies the sRGB transfer function to the three channels
   Metal's does -- every Vulkan `_SRGB` format encodes the word's low three and leaves the fourth

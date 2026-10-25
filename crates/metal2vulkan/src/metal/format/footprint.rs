@@ -139,8 +139,11 @@ pub fn footprint(pf: PixelFormat) -> Option<Footprint> {
             Some(Footprint::TwoPlanes)
         }
         // `R10Unorm_PACKED` and `RG10Unorm_PACKED`: Metal takes a descriptor naming either and
-        // makes no texture of it in any type, so the query answers 0 bytes. A packed 10-bit code
-        // crosses byte boundaries, so there is no element size to count and Metal counts none.
+        // makes no texture of it in any type in a mode that holds memory, so the query answers 0
+        // bytes. A packed 10-bit code crosses byte boundaries, so there is no element size to count
+        // and Metal counts none. `Memoryless` storage is the one mode where
+        // `newTextureWithDescriptor:` answers a texture of either, which is why this crate's
+        // refusal there names the format and is its own gap rather than Metal's nil.
         P::R10UnormPACKED | P::RG10UnormPACKED => Some(Footprint::NoTexture),
         _ => None,
     }
