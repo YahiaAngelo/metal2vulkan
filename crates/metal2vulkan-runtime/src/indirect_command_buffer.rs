@@ -385,10 +385,14 @@ pub enum IndirectCommandBufferProblem {
     /// attribute stride, `setThreadgroupMemoryLength:atIndex:`, `setStageInRegion:`,
     /// `setImageblockWidth:height:`, `resetWithRange:` of an empty range, the execution in a pass
     /// which paints nothing, `optimizeIndirectCommandBuffer:`, the blit copy in either direction,
-    /// and the argument-buffer encoding, to the same ID bytes a `Draw` buffer encodes to. The
-    /// argument-buffer encoding and the blit copy are still refused, in `argument_encoder.rs` and
-    /// `blit_indirect.rs`, and reach past Metal there. The read-back is a runtime extension and
-    /// has no Metal call to measure).
+    /// and the argument-buffer encoding, whose word is the buffer's own place among the device's
+    /// indirect command buffers, assigned in creation order and decided by no command type: two
+    /// buffers encoded side by side take two different IDs whichever types they hold, and the
+    /// earlier reading that a buffer of no types encodes a `Draw` buffer's bytes held only because
+    /// each shape made one buffer in its own process. The runtime takes both of those calls: the
+    /// encoding writes that ID, and the copy beside a buffer of a disagreeing type completes and
+    /// moves nothing, which is what Metal moves in the one direction a public call can read. The
+    /// read-back is a runtime extension and has no Metal call to measure).
     NoCommandTypes,
     /// A range of commands not inside the buffer: for `reset_with_range`, one that starts at or
     /// past its size (an empty one too, but the empty one at the size) or ends past it; for the
