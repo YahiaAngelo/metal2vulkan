@@ -35,7 +35,7 @@ Columns:
 | Rate maps the compile layer does not compile | 5 | 5 | 0 | 0 | 4 | 1 | 0 |
 | The translation deadline | 1 | 1 | 0 | 0 | 0 | 1 | 0 |
 | What a call did wrong | 66 | 66 | 0 | 0 | 0 | 0 | 0 |
-| What a call did wrong, in detail | 166 | 150 | 0 | 0 | 0 | 0 | 0 |
+| What a call did wrong, in detail | 165 | 150 | 0 | 0 | 0 | 0 | 0 |
 
 ## Totals by basis
 
@@ -49,7 +49,7 @@ Columns:
 | Rate maps the compile layer does not compile | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 5 |
 | The translation deadline | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
 | What a call did wrong | 22 | 3 | 5 | 0 | 10 | 9 | 17 | 0 |
-| What a call did wrong, in detail | 56 | 27 | 26 | 0 | 31 | 26 | 0 | 0 |
+| What a call did wrong, in detail | 56 | 27 | 25 | 0 | 31 | 26 | 0 | 0 |
 
 ## 1. Translator and front-end refusals (`Unsupported`: a `Feature` and its `Needs`)
 
@@ -467,7 +467,6 @@ Columns:
 | `RenderPassProblem::ResolveSize` | A color resolve level reaches past the attachment, which loads with `Load` or `DontCare` (measured | every device (a public call's own check of its arguments) | `metal-takes`: an Apple M3 Max, macOS 27.0.1: plain Metal completes a pass whose 128 by 128 resolve texture reaches past its 64 by 64 4-sample attachment, with no error, resolving the 64 by 64 overlap and leaving the texels at x 64 to 67 at the value they held, so the refusal reaches past Metal | 3: `crates/metal2vulkan-runtime/src/resolve.rs (color)`, `crates/metal2vulkan-runtime/src/resolve.rs (color_copy)` (+1) | `-` |
 | `RenderPassProblem::DepthStencilResolveMix` | The depth and stencil attachments are one texture whose stencil resolves alone (`MultisampleResolve`) while its depth is stored | every device (a public call's own check of its arguments) | `metal-takes`: an Apple M3 Max, macOS 27.0.1: plain Metal completes such a pass over a 4-sample `Depth32Float_Stencil8` texture with no error, resolves the stencil — the resolve texture reads the cleared 7 — and stores the depth at its clear value in every sample, as the pass that stores both does, the clear depths 0.5 and 0.25 read back apart. The layout pattern an earlier probe reported over the depth did not reproduce in that shape, so the refusal reaches past Metal | 2: `crates/metal2vulkan-runtime/src/render.rs (set_aspect_store_action)`, `crates/metal2vulkan-runtime/src/resolve.rs (depth_stencil)` | `-` |
 | `RenderPassProblem::DepthResolvedSampleWithoutDepthResolve` | The stencil resolves with `DepthResolvedSample` without a depth attachment, whose filter picks its sample (measured; with a depth attachment that... | every device (a public call's own check of its arguments) | `unknown`: measured through Metal's validation alone; plain Metal's own answer for a stencil resolve by `DepthResolvedSample` without a depth attachment is unmeasured | 1: `crates/metal2vulkan-runtime/src/resolve.rs (depth_stencil)` | `-` |
-| `RenderPassProblem::MemorylessStore` | A memoryless attachment given a late `Store` or `StoreAndMultisampleResolve` by the encoder's `set_color_store_action`, `set_depth_store_action`... | every device (a public call's own check of its arguments) | `metal-takes`: an Apple M3 Max under macOS 27.0.1: the descriptor's `Store` on a memoryless attachment runs — the pass drew 4096 fragments, `endEncoding` returned and the command buffer completed with no error, and Metal's End Encoding Validation alone said `endEncoding called with store action unsupported for Memoryless attachment.` — so this refusal of the same condition, held at the late setter instead, reaches past plain Metal too; the setter call's own answer is unmeasured. `MTL_DEBUG_LAYER_ERROR_MODE=assert` ends the program at that message | 0 | `-` |
 | `RenderPassProblem::MemorylessResolve` | A memoryless resolve texture (measured | every device (a public call's own check of its arguments) | `metal-documented`: Metal asserts "resolveTexture must not be Memoryless" | 1: `crates/metal2vulkan-runtime/src/resolve.rs (destination)` | `-` |
 | `RenderPassProblem::TileSize` | A tile size other than 16x16, 32x16 and 32x32, or a tile with one side 0 (measured | every device (a public call's own check of its arguments) | `metal-documented`: Metal asserts "Invalid tile dimensions (8, 8)", for which plain Metal answers its encoder nil | 1: `crates/metal2vulkan-runtime/src/tile_pass.rs (check)` | `-` |
 | `RenderPassProblem::TileSizeAtSamples` | A 32x32 tile at 4 samples (measured | every device (a public call's own check of its arguments) | `metal-measured`: an M4: plain Metal faults there — its command buffer fails, or it makes no encoder — for a 32 by 32 tile at 4 samples | 1: `crates/metal2vulkan-runtime/src/tile_pass.rs (check)` | `-` |

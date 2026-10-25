@@ -11730,7 +11730,6 @@ variant	metal2vulkan-runtime::RenderPassProblem::DefaultRasterSampleCount	Defaul
 variant	metal2vulkan-runtime::RenderPassProblem::DepthResolvedSampleWithoutDepthResolve	DepthResolvedSampleWithoutDepthResolve
 variant	metal2vulkan-runtime::RenderPassProblem::DepthStencilResolveMix	DepthStencilResolveMix
 variant	metal2vulkan-runtime::RenderPassProblem::MemorylessResolve	MemorylessResolve(Attachment)
-variant	metal2vulkan-runtime::RenderPassProblem::MemorylessStore	MemorylessStore(Attachment)
 variant	metal2vulkan-runtime::RenderPassProblem::NoAttachment	NoAttachment(Attachment)
 variant	metal2vulkan-runtime::RenderPassProblem::NoTargets	NoTargets
 variant	metal2vulkan-runtime::RenderPassProblem::PerSampleStorage	PerSampleStorage { bytes: u64 }

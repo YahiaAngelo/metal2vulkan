@@ -593,8 +593,14 @@ fn memoryless_textures_are_refused_as_metal_refuses_them() {
         "stencil_store"
     );
 
-    // Late store actions (`late_store`, `late_store_and_resolve`, `late_depth_store`) are
-    // refused when set; `DontCare` (`late_dontcare`, `late_depth_dontcare`) is taken.
+    // Late store actions. A memoryless attachment holds no memory, so the encoder's setter takes
+    // `Store` as `DontCare` and `StoreAndMultisampleResolve` as its resolve alone, exactly as the
+    // descriptor's own action is taken (`render_pass::memoryless_actions`), which is what plain
+    // Metal does (`probes/memoryless_late_store_action.m` on an Apple M3 Max under macOS 27.0.1,
+    // one shape a process, every shape graded at the commit). Each of the three setters is held to
+    // answer exactly as the action it moves to answers (`late_store`, `late_store_and_resolve`,
+    // `late_depth_store`), and that action to be taken (`late_dontcare`, `late_resolve`,
+    // `late_depth_dontcare`).
     let late = |descriptor: &RenderPassDescriptor,
                 set: &dyn Fn(&mut RenderCommandEncoder) -> Result<(), Error>|
      -> Result<(), Error> {
@@ -606,10 +612,9 @@ fn memoryless_textures_are_refused_as_metal_refuses_them() {
     assert_eq!(
         late(&unknown, &|e| e
             .set_color_store_action(StoreAction::Store, 0)),
-        pass_problem(
-            "set_color_store_action",
-            RenderPassProblem::MemorylessStore(c0)
-        )
+        late(&unknown, &|e| e
+            .set_color_store_action(StoreAction::DontCare, 0)),
+        "late_store"
     );
     assert_eq!(
         late(&unknown, &|e| e
@@ -622,19 +627,22 @@ fn memoryless_textures_are_refused_as_metal_refuses_them() {
             StoreAction::StoreAndMultisampleResolve,
             0
         )),
-        pass_problem(
-            "set_color_store_action",
-            RenderPassProblem::MemorylessStore(c0)
-        )
+        late(&unknown_msaa, &|e| e
+            .set_color_store_action(StoreAction::MultisampleResolve, 0)),
+        "late_store_and_resolve"
+    );
+    assert_eq!(
+        late(&unknown_msaa, &|e| e
+            .set_color_store_action(StoreAction::MultisampleResolve, 0)),
+        Ok(())
     );
     let unknown_depth = with_depth(LoadAction::Clear, StoreAction::Unknown);
     assert_eq!(
         late(&unknown_depth, &|e| e
             .set_depth_store_action(StoreAction::Store)),
-        pass_problem(
-            "set_depth_store_action",
-            RenderPassProblem::MemorylessStore(Attachment::Depth)
-        )
+        late(&unknown_depth, &|e| e
+            .set_depth_store_action(StoreAction::DontCare)),
+        "late_depth_store"
     );
     assert_eq!(
         late(&unknown_depth, &|e| e

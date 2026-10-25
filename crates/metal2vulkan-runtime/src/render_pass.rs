@@ -516,20 +516,6 @@ pub enum RenderPassProblem {
     /// Basis: unknown (measured through Metal's validation alone; plain Metal's own answer for a
     /// stencil resolve by `DepthResolvedSample` without a depth attachment is unmeasured).
     DepthResolvedSampleWithoutDepthResolve,
-    /// A memoryless attachment given a late `Store` or `StoreAndMultisampleResolve` by the
-    /// encoder's `set_color_store_action`, `set_depth_store_action` or
-    /// `set_stencil_store_action`. The descriptor's own is taken, and stores nowhere: a memoryless
-    /// attachment holds no memory, so the pass stores it as `DontCare` and resolves a
-    /// `StoreAndMultisampleResolve` alone, as plain Metal does.
-    ///
-    /// Basis: metal-takes (an Apple M3 Max under macOS 27.0.1: the descriptor's `Store` on a
-    /// memoryless attachment runs — the pass drew 4096 fragments, `endEncoding` returned and the
-    /// command buffer completed with no error, and Metal's End Encoding Validation alone said
-    /// `endEncoding called with store action unsupported for Memoryless attachment.` — so this
-    /// refusal of the same condition, held at the late setter instead, reaches past plain Metal
-    /// too; the setter call's own answer is unmeasured. `MTL_DEBUG_LAYER_ERROR_MODE=assert` ends
-    /// the program at that message).
-    MemorylessStore(Attachment),
     /// A memoryless resolve texture (measured: "resolveTexture must not be Memoryless").
     ///
     /// Basis: metal-documented (Metal asserts "resolveTexture must not be Memoryless").
