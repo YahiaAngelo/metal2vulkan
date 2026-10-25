@@ -25,7 +25,7 @@ use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor
 use std::path::Path;
 
 /// The fixture's render descriptor, one `RGBA8Unorm` target.
-fn descriptor(device: &Device) -> RenderPipelineDescriptor {
+pub(super) fn descriptor(device: &Device) -> RenderPipelineDescriptor {
     let ll = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../metal2vulkan-validation/fixtures/public/engine/ubo_bind_offsets.ll");
     let bitcode = metal2vulkan_devtools::llvm_assemble(&ll).unwrap();
@@ -47,7 +47,7 @@ fn descriptor(device: &Device) -> RenderPipelineDescriptor {
 
 /// How many descriptor keys `device` built, and the other work a creation does: a removal of
 /// repeated key building moves the first and leaves the rest where they were.
-fn built(device: &Device) -> [u64; 6] {
+pub(super) fn built(device: &Device) -> [u64; 6] {
     let c = device.work_counts();
     [
         c.descriptor_keys_built,

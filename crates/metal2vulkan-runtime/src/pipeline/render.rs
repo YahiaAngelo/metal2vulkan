@@ -224,6 +224,20 @@ pub(crate) struct Program {
     /// [`GraphicsState::descriptor_key`], which is the only way to it: a second build of one
     /// state's key cannot be written through this path, so nothing has to check that it is not.
     descriptor_key: OnceLock<PipelineKey>,
+    /// The key of the descriptor its variants compile from ([`GraphicsState::compiled_key`]),
+    /// built when a draw first compiles a variant of its own.
+    ///
+    /// Unset for a state drawn whole, which compiles from the descriptor it draws as: that
+    /// state's one key is [`Program::descriptor_key`], and `compiled_key` reads it. A twin of a
+    /// color group compiles from the descriptor it was made from and draws as its group's colors
+    /// alone (`drawn`), two descriptors the key tells apart, so it holds a key of each: a
+    /// compile is keyed by the descriptor it compiles, a question by the descriptor it asks of.
+    compiled_key: OnceLock<PipelineKey>,
+    /// The key of the descriptor its capture forms compile from
+    /// ([`GraphicsState::capture_key`]), built when the first form translates: one descriptor,
+    /// `descriptor` without its fragment stage or attachment formats ([`capture_descriptor`]),
+    /// for every form of every variant, so every form after the first builds none.
+    capture_key: OnceLock<PipelineKey>,
     /// Its part of the pipeline creation log, while the log is on (`creation_log.rs`).
     log: Option<StateLog>,
     /// Its variants' capture forms (`VariantKey::captured_positions`), as capture replay asked for
@@ -1783,6 +1797,8 @@ impl GraphicsState {
                 label,
                 texture_accesses: TextureAccessMemo::new(),
                 descriptor_key: key.map_or_else(OnceLock::new, OnceLock::from),
+                compiled_key: OnceLock::new(),
+                capture_key: OnceLock::new(),
                 captures: Mutex::new(Lru::counted(CAPTURES)),
                 settled: Mutex::new(VecDeque::with_capacity(SETTLED)),
                 last_pipelines: Mutex::new(VecDeque::with_capacity(LAST_PIPELINES)),
@@ -1852,6 +1868,43 @@ impl GraphicsState {
                 StateDescriptor::Mesh(descriptor) => mesh_descriptor_key(device, descriptor),
             }
         })
+    }
+
+    /// The key of the descriptor the state's variants compile from, built once and held
+    /// ([`Program::compiled_key`]): what a draw's compile of another variant looks its pipeline
+    /// up under, as its creation's compiles looked theirs up under the key the creation built.
+    ///
+    /// Not [`descriptor_key`](Self::descriptor_key) for a twin of a color group, which draws as
+    /// its group's color attachments alone and compiles from the descriptor it was made from:
+    /// its two descriptors differ in their color attachments, and in
+    /// `supportIndirectCommandBuffers`, which the twin's descriptor clears -- both fields the
+    /// key reads. Keying a compile by the descriptor it does not compile would look it up in
+    /// another descriptor's entries, so each key stays with its own descriptor.
+    pub(crate) fn compiled_key(&self) -> &PipelineKey {
+        // A state drawn whole compiles from the descriptor it draws as: one descriptor, one key.
+        if self.0.drawn.is_none() {
+            return self.descriptor_key();
+        }
+        self.0.compiled_key.get_or_init(|| {
+            let device = &self.0.device;
+            match &self.0.descriptor {
+                StateDescriptor::Vertex(descriptor) => render_descriptor_key(device, descriptor),
+                StateDescriptor::Mesh(descriptor) => mesh_descriptor_key(device, descriptor),
+            }
+        })
+    }
+
+    /// The key of `capture`, the descriptor the state's capture forms compile from
+    /// ([`capture_descriptor`] of its own), built once and held ([`Program::capture_key`]).
+    ///
+    /// Its own descriptor's key names another descriptor: a capture form compiles without the
+    /// fragment stage and the attachment formats, every field of which the key reads. `capture`
+    /// is fixed for the state's life -- the form a replay asks for is a fact of the variant's
+    /// key, not of the descriptor -- so the forms of every variant are keyed by this one key.
+    pub(crate) fn capture_key(&self, capture: &RenderPipelineDescriptor) -> &PipelineKey {
+        self.0
+            .capture_key
+            .get_or_init(|| render_descriptor_key(&self.0.device, capture))
     }
 
     /// The state a patch draw an indirect command scales runs on (`None` for a state that does
@@ -2250,13 +2303,10 @@ impl GraphicsState {
                 let outcome = Arc::new(OnceLock::new());
                 let translating = Capture::Translating(Arc::clone(&outcome));
                 lock(&self.0.captures).insert(key.clone(), translating, 1);
-                let mut descriptor = descriptor.clone();
-                descriptor.fragment = None;
-                descriptor.color_attachments = Default::default();
-                descriptor.depth_format = None;
-                descriptor.stencil_format = None;
-                descriptor.alpha_to_coverage = false;
-                descriptor.alpha_to_one = false;
+                let descriptor = capture_descriptor(descriptor);
+                // Built here, on the program's thread, where its one descriptor is: every later
+                // form's translation takes this key rather than building the same digest again.
+                let descriptor_key = *self.capture_key(&descriptor);
                 let key = key.clone();
                 let keeping = self
                     .0
@@ -2274,7 +2324,6 @@ impl GraphicsState {
                     let translated = {
                         let sources = Sources::later(&device);
                         let entries = device.shared().shader_cache.memo.stage_entries();
-                        let descriptor_key = render_descriptor_key(&device, &descriptor);
                         RenderVariant::compiled(
                             &sources,
                             &descriptor,
@@ -2323,7 +2372,7 @@ impl GraphicsState {
                 descriptor,
                 key,
                 self.0.device.shared().shader_cache.memo.stage_entries(),
-                &render_descriptor_key(&self.0.device, descriptor),
+                self.compiled_key(),
             ),
             // A mesh render pipeline is compiled as it is asked for, past the memo, the archives
             // and the disk cache, which hold the other render pipelines.
@@ -2339,6 +2388,22 @@ impl GraphicsState {
         others.insert(key.clone(), Arc::clone(&variant), 1);
         Ok(variant)
     }
+}
+
+/// The descriptor a state's capture forms compile from: `descriptor` without its fragment
+/// function, color, depth or stencil formats, and without alpha-to-coverage or alpha-to-one -- a
+/// pipeline of the vertex stage alone that rasterizes into a pass without attachments
+/// (`GraphicsState::capture_variant`). It is the same descriptor for every form of every variant
+/// of the state, so [`GraphicsState::capture_key`] keys all of them by its one key.
+fn capture_descriptor(descriptor: &RenderPipelineDescriptor) -> RenderPipelineDescriptor {
+    let mut descriptor = descriptor.clone();
+    descriptor.fragment = None;
+    descriptor.color_attachments = Default::default();
+    descriptor.depth_format = None;
+    descriptor.stencil_format = None;
+    descriptor.alpha_to_coverage = false;
+    descriptor.alpha_to_one = false;
+    descriptor
 }
 
 /// The base variant of each color group of the state of `descriptor` whose creation compiled
@@ -2471,9 +2536,10 @@ impl RenderVariant {
     /// linked, all under one budget. A refusal is the compile layer's.
     ///
     /// `descriptor_key` is `descriptor`'s own key (`render_descriptor_key`), which the caller
-    /// built: a creation compiles its base, its large-buffer form and each of its color groups'
-    /// bases, all of one descriptor, so it builds that key once and every one of them looks its
-    /// pipeline up under it.
+    /// built or holds: a creation compiles its base, its large-buffer form and each of its color
+    /// groups' bases, all of one descriptor, so it builds that key once and every one of them
+    /// looks its pipeline up under it; a state holds the key of each descriptor its later
+    /// compiles are of (`GraphicsState::compiled_key`, `capture_key`), so a draw builds none.
     fn compiled(
         sources: &Sources<'_>,
         descriptor: &RenderPipelineDescriptor,
