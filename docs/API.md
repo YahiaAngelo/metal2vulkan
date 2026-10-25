@@ -3128,12 +3128,16 @@ each item named states the rule in full.
   `residual_form_makings`). On MoltenVK every key is its residual form (the two forms measured
   alike there), so a state's draws at every bind offset take the one pipeline its creation made.
 - **A dispatch's `VkPipeline` is made while the dispatch goes on**, the same way: one pipeline per
-  threadgroup size and edge region, made on the pool. A compute state's creation makes one first:
-  its predicted region's, a threadgroup of the descriptor's `requiredThreadsPerThreadgroup`, else
-  of `threadExecutionWidth` by `maxTotalThreadsPerThreadgroup / threadExecutionWidth` (Apple's
-  guide's size), each uniform view read at its residual; a dispatch of that region takes it, as
-  does one whose key differs only in reading a view at its bind offset alone while its own is made
-  (`WorkCounts::creation_pipelines_made`, `creation_pipelines_drawn`). A tile dispatch's pipeline
+  threadgroup size and edge region, made on the pool. A compute state whose descriptor states
+  `requiredThreadsPerThreadgroup` -- the threadgroup every dispatch of the state must have -- makes
+  one at its creation: its predicted region's, at that size, each uniform view read at its
+  residual; a dispatch of that region takes it, as does one whose key differs only in reading a
+  view at its bind offset alone while its own is made
+  (`WorkCounts::creation_dispatch_pipelines_made`, `creation_dispatch_pipelines_drawn`). A state
+  whose descriptor requires no threadgroup size makes none at its creation: the size is the
+  dispatch's own call and nothing in the request answers it, and a pipeline guessed from the state
+  instead was taken by no dispatch at all over the whole conformance suite (141 made, 0 taken,
+  against the render-side prediction's 764 of 794 in the same run). A tile dispatch's pipeline
   is made on the pool too, its pass recorded once it is made, the making ranked from the dispatch
   as one a committed command buffer waits for (`WorkCounts::tile_pipelines_pooled`); a failed
   making fails the command buffer, as a draw's does, `FailedPipeline` naming the dispatch by its

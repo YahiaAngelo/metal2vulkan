@@ -19,12 +19,14 @@
 
 use super::blit_holds::{device, Scratch, WAIT};
 use crate::{
-    BlitOption, Buffer, CommandQueue, Device, LoadAction, Origin, PipelineOptions,
-    RenderPassDescriptor, RenderPipelineState, ResourceOptions, ScissorRect, Size, StoreAction,
-    Texture, TextureDescriptor,
+    BlitOption, Buffer, CommandQueue, ComputePipelineState, Device, LoadAction, Origin,
+    PipelineOptions, RenderPassDescriptor, RenderPipelineState, ResourceOptions, ScissorRect, Size,
+    StoreAction, Texture, TextureDescriptor,
 };
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureUsage};
-use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
+use metal2vulkan::pipeline::{
+    ColorAttachmentDescriptor, ComputePipelineDescriptor, RenderPipelineDescriptor, StageSource,
+};
 use std::path::Path;
 
 /// The target's side, in pixels.
@@ -74,6 +76,25 @@ fn state(device: &Device) -> RenderPipelineState {
     descriptor.color_attachments[0] = Some(ColorAttachmentDescriptor::new(PixelFormat::RGBA8Unorm));
     device
         .new_render_pipeline_state(&descriptor, &PipelineOptions::default())
+        .unwrap()
+}
+
+/// The threadgroup a kernel state of [`kernel_state`] requires, and so the one its creation
+/// predicts a region for: 32 by 1 by 1, which the Vulkan floor's
+/// `maxComputeWorkGroupInvocations` of 128 allows on any venue and the kernel runs whole.
+const PREDICTED_THREADS: [u32; 3] = [32, 1, 1];
+
+/// A compute state of `function` whose descriptor requires [`PREDICTED_THREADS`] per threadgroup.
+///
+/// A creation predicts a region only where the descriptor requires a threadgroup, since nothing
+/// else in the request says what a dispatch will ask for (`pipeline/dispatch_making.rs`), so a
+/// test of the prediction states one.
+fn kernel_state(device: &Device, function: &crate::Function) -> ComputePipelineState {
+    let mut descriptor =
+        ComputePipelineDescriptor::new(StageSource::Function(function.function_descriptor()));
+    descriptor.required_threads_per_threadgroup = Some(PREDICTED_THREADS);
+    device
+        .new_compute_pipeline_state(&descriptor, &PipelineOptions::default())
         .unwrap()
 }
 
@@ -492,7 +513,7 @@ fn first_draws_make_no_second_pipeline_where_views_are_read_at_their_residual() 
 
 /// Whether a compute state's creation-time prediction (`pipeline/dispatch_making.rs`) can serve a
 /// `dispatchThreads:`, the call Metal programs reach for. The prediction's region is a
-/// `dispatchThreadgroups:` of one threadgroup of Apple's guide's size; this dispatches
+/// `dispatchThreadgroups:` of one threadgroup of the size the descriptor requires; this dispatches
 /// `dispatchThreads:` over a grid of exactly that size, so the threads per threadgroup, the
 /// bindings and the specialization are the predicted ones and only the call differs. The counts
 /// say which: a prediction drawn, or a region handed to the pool and a second `VkPipeline` made.
@@ -505,21 +526,15 @@ fn a_dispatch_threads_over_the_predicted_threadgroup_reads_what_the_prediction_s
         .new_function_with_name("ubo_offsets_kernel")
         .unwrap();
     let before = idle(&device);
-    let state = device
-        .new_compute_pipeline_state_with_function(&function, &PipelineOptions::default())
-        .unwrap();
+    let state = kernel_state(&device, &function);
     let created = idle(&device);
     assert_eq!(
         created.creation_pipelines_made - before.creation_pipelines_made,
         1,
         "the creation made its predicted region's pipeline"
     );
-    let width = state.thread_execution_width();
-    let threads = Size::new(
-        u64::from(width),
-        u64::from(state.max_total_threads_per_threadgroup() / width),
-        1,
-    );
+    let [width, height, depth] = PREDICTED_THREADS;
+    let threads = Size::new(u64::from(width), u64::from(height), u64::from(depth));
     let data = constants();
     let constants = device
         .new_buffer_with_bytes(&data, ResourceOptions::shared())
@@ -552,14 +567,14 @@ fn a_dispatch_threads_over_the_predicted_threadgroup_reads_what_the_prediction_s
 }
 
 /// A compute state's creation makes the `VkPipeline` of its predicted region, a threadgroup of
-/// Apple's guide's size (`pipeline/dispatch_making.rs`), as Metal compiles at creation and its
-/// first dispatch compiles nothing. With the device's pool held, a dispatch of that size reading
-/// its constants at offset 0 and one reading them as inline bytes are recorded at once, and their
-/// command buffer completes while the pool is still held: where the device reads every uniform
-/// view at its residual their key is the creation's, and nothing is made, begun or handed over;
-/// elsewhere their key reads the view at its bind offset alone, and they take the creation's
-/// pipeline, its residual form, while their own key, handed to the pool once, is made there. The
-/// kernel reads its constants either way.
+/// the size its descriptor requires (`pipeline/dispatch_making.rs`), as Metal compiles at
+/// creation and its first dispatch compiles nothing. With the device's pool held, a dispatch of
+/// that size reading its constants at offset 0 and one reading them as inline bytes are recorded
+/// at once, and their command buffer completes while the pool is still held: where the device
+/// reads every uniform view at its residual their key is the creation's, and nothing is made,
+/// begun or handed over; elsewhere their key reads the view at its bind offset alone, and they
+/// take the creation's pipeline, its residual form, while their own key, handed to the pool once,
+/// is made there. The kernel reads its constants either way.
 #[test]
 fn a_compute_state_s_creation_makes_its_first_dispatch_s_pipeline() {
     let scratch = Scratch::new("uniform-kernel-creation");
@@ -569,9 +584,7 @@ fn a_compute_state_s_creation_makes_its_first_dispatch_s_pipeline() {
         .new_function_with_name("ubo_offsets_kernel")
         .unwrap();
     let before = idle(&device);
-    let state = device
-        .new_compute_pipeline_state_with_function(&function, &PipelineOptions::default())
-        .unwrap();
+    let state = kernel_state(&device, &function);
     let created = idle(&device);
     assert_eq!(
         (
@@ -581,12 +594,8 @@ fn a_compute_state_s_creation_makes_its_first_dispatch_s_pipeline() {
         (1, 1),
         "pipelines the creation made"
     );
-    let width = state.thread_execution_width();
-    let threads = Size::new(
-        u64::from(width),
-        u64::from(state.max_total_threads_per_threadgroup() / width),
-        1,
-    );
+    let [width, height, depth] = PREDICTED_THREADS;
+    let threads = Size::new(u64::from(width), u64::from(height), u64::from(depth));
     let data = constants();
     let constants = device
         .new_buffer_with_bytes(&data, ResourceOptions::shared())

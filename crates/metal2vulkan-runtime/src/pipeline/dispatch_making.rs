@@ -13,14 +13,14 @@
 //!   alike, its pass recorded later (`render/pending_tile.rs`). Its specialized notices are announced
 //!   at the dispatch that hands the making over, on the program's thread, naming what it binds: the
 //!   pool decides nothing the program sees.
-//! - **The predicted region, made at the creation.** Metal compiles a compute state inside
-//!   `newComputePipelineState`, and its first dispatch compiles nothing. The creation makes the
-//!   `VkPipeline` of the region a first dispatch is predicted to take
-//!   ([`Variant::make_at_creation`]): a `dispatchThreadgroups:` on the base variant, planned for
-//!   nothing bound but Metal's default sampler at each runtime sampler slot that does not compare
-//!   (as a render state's prediction, `predicted.rs`), at the descriptor's
-//!   `requiredThreadsPerThreadgroup` where it states one, else at the size Apple's guide to
-//!   threadgroup sizes ("Calculating Threadgroup and Grid Sizes") computes from the state
+//! - **The predicted region, made at the creation, where the request states its threadgroup.**
+//!   Metal compiles a compute state inside `newComputePipelineState`, and its first dispatch
+//!   compiles nothing. Where the descriptor states `requiredThreadsPerThreadgroup`, that size is
+//!   the threadgroup every dispatch of the state must have, so the local size of a first
+//!   dispatch's region is part of the request itself. The creation then makes that
+//!   region's `VkPipeline` ([`Variant::make_at_creation`]): a `dispatchThreadgroups:` on the base
+//!   variant, planned for nothing bound but Metal's default sampler at each runtime sampler slot
+//!   that does not compare (as a render state's prediction, `predicted.rs`), at that size
 //!   ([`predicted_threads`]). A dispatch whose region has that key takes the pipeline made; one
 //!   whose key differs from it only where it reads a uniform view at its bind offset alone takes
 //!   it too, at once, while its own key is made on the pool, nothing waiting for it, as a draw
@@ -32,18 +32,28 @@
 //!   drop, which Metal's never does. Its specialized notices wait for the first dispatch that
 //!   takes it, which announces them naming what it binds. A creation inside a host step, a tile
 //!   function's state and a stand-in compile make nothing here.
-//! - **What the prediction cannot know.** The guess is the threadgroup size and nothing else, so a
-//!   state whose dispatches choose their own size pays its per-pipeline compile twice: once here
-//!   and once on the pool. A creation cannot know the size, and no better guess reaches it. It
-//!   cannot know either whether the dispatch will be a `dispatchThreads:` with a ragged edge,
-//!   whose interior and edge regions are two local sizes and so two keys of which the prediction
-//!   can hold at most one; nor what the dispatch will bind, which decides its variant
+//! - **Where the request states no threadgroup, the creation predicts nothing**, because nothing
+//!   in the request answers what the dispatch will ask for. The local size is the dispatch's own
+//!   call, and a size guessed from the state instead -- Apple's guide to threadgroup sizes
+//!   ("Calculating Threadgroup and Grid Sizes") computes `threadExecutionWidth` across by
+//!   `maxTotalThreadsPerThreadgroup / threadExecutionWidth` down, which is `[32, 32, 1]` on an M3
+//!   -- is a `VkPipeline` only a dispatch that happens to choose it can take. **Measured over the
+//!   whole conformance suite on an M3 Max, one in-set run of all 1,121 cases: 141 such pipelines
+//!   made in 106 cases and 0 taken by any dispatch**, while the same run's render prediction
+//!   (`predicted.rs`) was taken 764 times in 794. The committed recordings' own 8-run census
+//!   reads the same thing from the other side: 0 of 461 taken over the 277 rows that dispatch and
+//!   do not draw (`cost.rs`'s `the_creation_prediction`). So the guess is not made, and the first
+//!   dispatch hands its region's making to the pool as it did before, waiting for nothing.
+//! - **What the prediction still cannot know**, where the request does state the threadgroup. It
+//!   cannot know whether the dispatch will be a `dispatchThreads:` with a ragged edge, whose
+//!   interior and edge regions are two local sizes and so two keys of which the prediction can
+//!   hold at most one; nor what the dispatch will bind, which decides its variant
 //!   (`VariantKey::extended_range` and `VariantKey::swizzled_storage` read the bound texture's
 //!   pixel format and swizzle, `bind::plan::resources`), so for a kernel whose dispatches all
 //!   bind a texture the prediction's base variant is one no dispatch takes and its stage's
-//!   `VkShaderModule` is a module of its own. Where the dispatches do follow Apple's guide the
-//!   prediction holds and the pool makes nothing. `creation_pipelines_made` against
-//!   `creation_pipelines_drawn` is the measure of it.
+//!   `VkShaderModule` is a module of its own. `creation_dispatch_pipelines_made` against
+//!   `creation_dispatch_pipelines_drawn` is the measure of it, apart from the render
+//!   prediction's own pair.
 //! - **Kept by the state** (`piece_holds.rs`). What a piece needs (its variant and its making's
 //!   ticket) is kept by the state, never by the pool's thread; the state's release stops a piece
 //!   not started, its making failing, and a dispatch that took it (of another state of the variant)
@@ -205,8 +215,9 @@ impl Variant {
     /// Make, on this thread, the `VkPipeline` of the region a first dispatch of a state of
     /// `descriptor` on this variant, its base, is predicted to take (the module docs), where no
     /// caller made or began it: its notices wait for the first dispatch that takes it. A
-    /// prediction the plan refuses, or that runs on another variant, makes nothing; a failed
-    /// making is not kept and refuses nothing, its dispatch meeting it as before.
+    /// descriptor that requires no threadgroup size predicts no region at all, and a prediction
+    /// the plan refuses or that runs on another variant makes nothing; a failed making is not
+    /// kept and refuses nothing, its dispatch meeting it as before.
     pub(super) fn make_at_creation(&self, device: &Device, descriptor: &ComputePipelineDescriptor) {
         if crate::exit_guard::in_host_step() {
             return;
@@ -232,23 +243,22 @@ impl Variant {
 
     /// The key of the region of the predicted first dispatch of `descriptor` on this variant
     /// (the module docs): one `dispatchThreadgroups:` threadgroup of [`predicted_threads`],
-    /// planned for [`predicted_bindings`]. `None` where it plans or instantiates no region, or
-    /// runs on another variant (a threadgroup the kernel's simd tier cannot run whole).
+    /// planned for [`predicted_bindings`]. `None` where `descriptor` requires no threadgroup
+    /// size, so the request names none to predict; and where it plans or instantiates no region,
+    /// or runs on another variant (a threadgroup the kernel's simd tier cannot run whole).
     fn predicted_region(
         &self,
         device: &Device,
         descriptor: &ComputePipelineDescriptor,
     ) -> Option<RegionKey> {
+        // The threadgroup first, before anything is planned: where the request states none there
+        // is no region to predict, and the plan below would be built for a key nobody makes.
+        let threads_per_group = predicted_threads(descriptor.required_threads_per_threadgroup)?;
         let state = predicted_bindings(&self.pipeline);
         let plan = self.plan(device, &state.shape()).ok()?;
-        let info = &self.pipeline.metal_info;
         let dispatch = Dispatch::Threadgroups {
             groups: [1, 1, 1],
-            threads_per_group: predicted_threads(
-                descriptor.required_threads_per_threadgroup,
-                info.thread_execution_width,
-                info.max_total_threads_per_threadgroup,
-            ),
+            threads_per_group,
         };
         if plan.dispatch_variant(&dispatch).ok()? != self.key {
             return None;
@@ -312,19 +322,12 @@ impl ComputePipelineState {
 
 /// The threads per threadgroup a first dispatch of a state is predicted to take (the module
 /// docs): its descriptor's `requiredThreadsPerThreadgroup` (`required`) where it states one,
-/// which every dispatch takes; else the size Apple's guide to threadgroup sizes computes from the
-/// state's `threadExecutionWidth` (`width`) and `maxTotalThreadsPerThreadgroup` (`total`),
-/// `width` threads across by `total / width` down (one row of `total` where that is narrower
-/// than `width`).
-fn predicted_threads(required: Option<[u32; 3]>, width: u32, total: u32) -> [u32; 3] {
-    if let Some(required) = required.filter(|size| size.iter().all(|&axis| axis > 0)) {
-        return required;
-    }
-    let (width, total) = (width.max(1), total.max(1));
-    match total < width {
-        true => [total, 1, 1],
-        false => [width, total / width, 1],
-    }
+/// which is then the threadgroup of every dispatch of the state; `None` where it states none
+/// (Metal's all-zero size requires nothing), because the size is then the dispatch's own call and
+/// no part of the request answers it. A size with one zero axis never reaches here: the creation
+/// refuses it before the compile (`additions::check_kernel`, `RequiredThreadsProblem::EmptyAxis`).
+fn predicted_threads(required: Option<[u32; 3]>) -> Option<[u32; 3]> {
+    super::additions::required_size(required)
 }
 
 /// What the predicted first dispatch of `pipeline`'s kernel binds (the module docs): Metal's
@@ -349,16 +352,16 @@ fn predicted_bindings(pipeline: &ComputePipeline) -> BindState {
 mod tests {
     use super::predicted_threads;
 
-    /// The predicted threadgroup: a required size as it stands; else Apple's guide's
-    /// `threadExecutionWidth` by `maxTotalThreadsPerThreadgroup / threadExecutionWidth`, or one
-    /// row of the total where that is narrower than the width.
+    /// The predicted threadgroup is the required size and nothing else: a state whose descriptor
+    /// requires none predicts no region at all, so the creation makes no `VkPipeline` for a
+    /// threadgroup the request never named. Measured over the whole conformance suite, such a
+    /// guess was taken by 0 dispatches of 141 made (the module docs).
     #[test]
-    fn the_predicted_threadgroup_is_the_required_one_or_apple_s_guide_s() {
-        assert_eq!(predicted_threads(Some([8, 8, 1]), 32, 1024), [8, 8, 1]);
-        assert_eq!(predicted_threads(None, 32, 1024), [32, 32, 1]);
-        assert_eq!(predicted_threads(None, 32, 896), [32, 28, 1]);
-        assert_eq!(predicted_threads(None, 32, 16), [16, 1, 1]);
-        // Metal's zero size requires nothing.
-        assert_eq!(predicted_threads(Some([0, 0, 0]), 32, 256), [32, 8, 1]);
+    fn the_predicted_threadgroup_is_the_required_one_and_nothing_is_predicted_without_one() {
+        assert_eq!(predicted_threads(Some([8, 8, 1])), Some([8, 8, 1]));
+        assert_eq!(predicted_threads(Some([1, 1, 1])), Some([1, 1, 1]));
+        assert_eq!(predicted_threads(None), None);
+        // Metal's all-zero size requires nothing, so it predicts nothing either.
+        assert_eq!(predicted_threads(Some([0, 0, 0])), None);
     }
 }

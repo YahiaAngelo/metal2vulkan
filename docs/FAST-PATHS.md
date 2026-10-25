@@ -285,6 +285,18 @@ recorded here.
 Open differences from Metal that no note announces yet, and runtime costs still above the
 driver's. Each is open work.
 
+- **Command queues past the device's `VkQueue`s share one, so one's command buffers wait behind
+  another's whole command buffer where Metal's wait only inside one command.** Measured on Metal's
+  own API on an Apple M3 Max: a side command queue completed one command buffer behind a single
+  2.50 s dispatch, waiting its whole duration, and 11,335 to 12,992 behind the same 2.5 s of work
+  as 256 dispatches, none waiting past 3.8 ms. So Metal holds an unrelated queue for one long
+  command and for nothing else, while one `VkQueue` runs its submissions in order and cannot
+  schedule a sharing queue out of them. A device now lends the round robin every queue its families
+  have past the two reserved for presenting, at least four and at most sixteen, which on a graphics
+  family of sixteen gives fourteen; a device whose families have none to spare -- MoltenVK's four
+  families of one queue, a single-graphics-queue device -- still shares, and the sharing is counted
+  (`WorkCounts::queues_sharing_a_vk_queue`). Not announced.
+
 - **GPU writes into read-only memory are dropped only through a bound buffer slot.** A shader's
   stores through a slot bound to memory whose GPU writes Metal drops (no-copy memory of its private
   option bit 24, or pages replaced read-only) are now dropped in the shader, gated on a uniform
@@ -493,10 +505,17 @@ driver's. Each is open work.
   every one, because the footprint is arithmetic over the descriptor and no image decides it. A
   texture, a view, a copy, a read and a write of one stay refused `NotImplemented(Format)`: no
   Vulkan format holds the bytes (an ASTC 4x2 or 8x4 block) or their reads and writes are not
-  measured yet. The two packed 10-bit ones are the only members plain Metal makes a texture of in
-  `Memoryless` storage and in no mode that holds memory (an Apple M3 Max, macOS 27.0.1,
-  `conformance/probes/packed10_texture_alone.m`), so that one is this crate's refusal of the format
-  and not Metal's nil. A **multisample** descriptor of one is refused there too, its layout
+  measured yet. Plain Metal lays out no image storage for the two packed 10-bit
+  ones and makes a texture from every creator that needs none -- a placement heap's offset, the
+  shared creator in `Private`, a buffer's and an IOSurface plane's own bytes, and `Memoryless` --
+  so the refusal from each of those is this crate's own and not Metal's nil; the device's own
+  creator and an automatic heap, the two that would have to lay the image out, answer nil (an Apple
+  M3 Max, macOS 27.0.1, `conformance/probes/packed10_texture_alone.m`). Their reads are a stream of
+  10-bit codes that no Vulkan format holds, and none of that is built: no image is made, so
+  sampling, a blit, `getBytes:` and a render pass of one are all unbuilt behind the same refusal.
+  The code layout is derived in `metal/format/packed_codes.rs` and is **not** held to a texel: the
+  two measured anchors fix codes 0 and 1 only, and a padded 32-bit word and an unpadded bitstream
+  first differ at `R10Unorm_PACKED`'s texel 3, which nothing has measured. A **multisample** descriptor of one is refused there too, its layout
   unmeasured: Metal's validation may stop such a descriptor, so none was asked.
   `ARGB8Unorm_sRGB` is the one of them whose gap is not the bytes: they are `ARGB8Unorm`'s, which
   this crate holds, and no Vulkan format applies the sRGB transfer function to the three channels

@@ -2728,6 +2728,7 @@ field	metal2vulkan-runtime::WorkCounts.provoking_listed_draws	pub provoking_list
 field	metal2vulkan-runtime::WorkCounts.query_result_copies_recorded	pub query_result_copies_recorded: u64
 field	metal2vulkan-runtime::WorkCounts.queue_drains	pub queue_drains: u64
 field	metal2vulkan-runtime::WorkCounts.queue_submissions	pub queue_submissions: u64
+field	metal2vulkan-runtime::WorkCounts.queues_sharing_a_vk_queue	pub queues_sharing_a_vk_queue: u64
 field	metal2vulkan-runtime::WorkCounts.reading_draws_snapshotted	pub reading_draws_snapshotted: u64
 field	metal2vulkan-runtime::WorkCounts.reencodes_refused	pub reencodes_refused: u64
 field	metal2vulkan-runtime::WorkCounts.registrations_waited	pub registrations_waited: u64

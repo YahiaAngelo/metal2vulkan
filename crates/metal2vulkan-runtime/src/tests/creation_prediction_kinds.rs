@@ -18,6 +18,19 @@
 //! predicts nothing at all would read zero for both kinds and make the "the other kind did not
 //! move" assertion vacuous.
 //!
+//! # Which compute creations predict at all
+//!
+//! A compute state predicts a region only where its descriptor states
+//! `requiredThreadsPerThreadgroup`, which Metal then makes the threadgroup of every dispatch of
+//! the state (`pipeline/dispatch_making.rs`). So the compute leg states one, and a third leg
+//! creates the same kernel's state **without** one and holds the kind's count still: a guess at
+//! the threadgroup where the request names none was taken by 0 dispatches of 141 made over the
+//! whole conformance suite, so it is not made.
+//!
+//! Every reading here is a delta across one creation on this test's own device, never a
+//! device-wide total: a total would be moved by anything else the process did and would pass with
+//! the behaviour put back.
+//!
 //! The assertion is a count, never a time: it is a fact of the structure, so it holds on any host
 //! under any load. The device takes a shader cache directory of its own, empty, so no run reads a
 //! pipeline an earlier run stored.
@@ -30,6 +43,7 @@
 use super::blit_holds::{device, Scratch};
 use super::descriptor_key_once::descriptor;
 use crate::{PipelineOptions, WorkCounts};
+use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
 use std::path::Path;
 
 /// The two predictions' makings, and the whole count: render made, dispatch made, all made.
@@ -82,14 +96,20 @@ fn the_render_and_dispatch_predictions_are_counted_apart() {
         )
         .new_function_with_name("scale_and_offset")
         .unwrap();
+    // The threadgroup every dispatch of the state must take, so the region of its first dispatch
+    // is part of the request and the creation makes that region's pipeline.
+    let mut descriptor =
+        ComputePipelineDescriptor::new(StageSource::Function(function.function_descriptor()));
+    descriptor.required_threads_per_threadgroup = Some([32, 1, 1]);
     let _compute = device
-        .new_compute_pipeline_state_with_function(&function, &options)
+        .new_compute_pipeline_state(&descriptor, &options)
         .unwrap();
     let after_compute = made(&device.work_counts());
     let compute = moved(after_render, after_compute);
     assert!(
         compute[1] > 0,
-        "a compute creation must make its predicted pipeline at all, not {} times",
+        "a compute creation whose descriptor requires a threadgroup must make its predicted \
+         pipeline at all, not {} times",
         compute[1]
     );
     assert_eq!(
@@ -101,5 +121,25 @@ fn the_render_and_dispatch_predictions_are_counted_apart() {
         compute[2], compute[1],
         "the whole count moved {} where the dispatch prediction moved {}",
         compute[2], compute[1]
+    );
+
+    // And the same kernel with no required threadgroup: nothing in the request says what the
+    // dispatch will ask for, so nothing is predicted. Read as the delta across this one creation.
+    let _unrequired = device
+        .new_compute_pipeline_state_with_function(&function, &options)
+        .unwrap();
+    let after_unrequired = made(&device.work_counts());
+    let unrequired = moved(after_compute, after_unrequired);
+    assert_eq!(
+        unrequired[1], 0,
+        "a compute creation whose descriptor requires no threadgroup made {} predicted \
+         pipeline(s) for a threadgroup the request never named; such a guess was taken by 0 \
+         dispatches of 141 made over the whole conformance suite",
+        unrequired[1]
+    );
+    assert_eq!(
+        unrequired[2], 0,
+        "the whole count moved {} over a creation that predicts nothing",
+        unrequired[2]
     );
 }
