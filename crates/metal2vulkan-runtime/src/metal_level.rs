@@ -205,8 +205,8 @@ impl MetalLevel {
 
     /// Whether the release's Metal describes `pf`: `MTLPixelFormatGetInfoForDevice` answers a
     /// format for it ([`pixel_format_info`](Self::pixel_format_info), the level's measured table,
-    /// which holds no row for `Invalid` or for a value the release's descriptor does not know). Its
-    /// validation stops every texture of a format it does not describe ("has invalid pixelFormat"),
+    /// which holds no row for `Invalid` or for a value the release's descriptor does not know).
+    /// Plain Metal ends its process over every texture of a format the release describes none of,
     /// and its alignment queries assert on one, which the runtime answers alike (`Invalid`,
     /// `TextureProblem::NotAFormat` and `BufferTextureProblem::NotLinear`), and so does its render
     /// pipeline descriptor's validation for an attachment of one ("is not a valid MTLPixelFormat",

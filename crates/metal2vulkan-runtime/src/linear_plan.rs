@@ -58,12 +58,14 @@
 //!   takes and reports its descriptor's storage, CPU cache and hazard tracking modes (its default
 //!   hazard tracking mode resolved to tracked), whatever the surface's memory or the buffer
 //!   standing for it: `Shared` and `Managed`, each CPU cache mode and each hazard tracking mode are
-//!   made silently, and read and write the surface's bytes. Metal's validation asserts on `Private`
-//!   and `Memoryless` ("IOSurface textures must use MTLStorageModeManaged or
+//!   made silently, and read and write the surface's bytes. Metal's API validation layer asserts on
+//!   `Private` and `Memoryless` ("IOSurface textures must use MTLStorageModeManaged or
 //!   MTLStorageModeShared"); a plain run makes both, and a `Private` one's GPU and CPU read and
-//!   write the surface's bytes as a `Shared` one's do, so the runtime makes it too. What a
-//!   `Memoryless` one does is unmeasured, so the runtime refuses it as validation does
-//!   ([`BufferTextureProblem::Options`]).
+//!   write the surface's bytes as a `Shared` one's do, so the runtime makes it too. A plain run
+//!   makes a `Memoryless` one too, whose CPU reaches the plane's bytes while its GPU uses fail the
+//!   command buffer and a render pass into it stores nothing; the runtime holds no form that
+//!   answers all three, so it refuses that texture
+//!   ([`BufferTextureProblem::Options`], which carries the measurement).
 //! - **The CPU** (`getBytes`, `replaceRegion`) reads and writes the plane where the surface lays it
 //!   out: from its offset, rows `bytesPerRow` apart.
 //! - **The GPU** (a blit's reads and writes, a copy to or from another texture, a kernel's
@@ -174,9 +176,19 @@ pub enum BufferTextureProblem {
         /// The descriptor's level count.
         count: u32,
     },
-    /// An IOSurface plane's `Memoryless` storage. Metal's validation asserts on it ("IOSurface
-    /// textures must use MTLStorageModeManaged or MTLStorageModeShared"); a plain run makes the
-    /// texture, but what its GPU and CPU do with it is unmeasured. A texture made through
+    /// An IOSurface plane's `Memoryless` storage. Metal's API validation layer asserts on it
+    /// ("IOSurface textures must use MTLStorageModeManaged or MTLStorageModeShared"); plain Metal
+    /// makes the texture, the layer off, and answers `Memoryless` with the descriptor's usage, CPU
+    /// cache and hazard tracking modes, over a flat surface and over a planar one's plane alike.
+    /// Its CPU reaches the plane's bytes as a `Shared` one's does (`getBytes` reads them,
+    /// `replaceRegion` writes them); every GPU use measured fails the command buffer instead
+    /// (status `Error`, `MTLCommandBufferErrorInvalidResource`: a kernel's `write()`, a kernel's
+    /// `read()` and a blit out of the texture, the plane's bytes left as they were and the
+    /// read-back zero); and a render pass that clears and draws into it completes and stores
+    /// nothing, where a `Shared` or a `Private` texture over the same plane stores its texels (an
+    /// M3 Max under macOS 27.0.1). The runtime refuses the texture: it holds no form that makes
+    /// the object, serves its CPU exactly and fails the command buffer of every GPU use, and the
+    /// GPU uses beyond those three are unmeasured. A texture made through
     /// `newTextureWithDescriptor:offset:bytesPerRow:` takes the buffer's options whatever its
     /// descriptor names, and a plane its descriptor's other modes.
     Options,

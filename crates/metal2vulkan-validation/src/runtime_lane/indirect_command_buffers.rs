@@ -2219,7 +2219,8 @@ fn render_commands_read_back_what_was_set() {
 /// refused typed: an index past the descriptor's counts, a state without
 /// `supportIndirectCommandBuffers`, a state or buffer where the buffer inherits it, no instances,
 /// and a barrier on a buffer without mesh draws; so is a compute command of a render buffer, while
-/// a render command of a buffer of dispatches answers as plain Metal's. A compute encoder's
+/// a render command of a buffer whose commands are dispatches answers as plain Metal's, its
+/// command types dispatches alone or dispatches beside draws alike. A compute encoder's
 /// execution of render commands, which Metal's validation lets through, is a gap. A vertex buffer's
 /// stride without dynamic strides is dropped and the buffer set, as plain Metal's.
 #[test]
@@ -2272,6 +2273,44 @@ fn render_setters_refuse_what_metal_refuses() {
             kind("draw_indexed_primitives")
         );
         assert_unset(&command(&compute, 0));
+        // A buffer of dispatches beside draws gives one too, and answers setter for setter as the
+        // buffer of dispatches alone does: plain Metal answers the same for both.
+        let mut beside = compute_descriptor();
+        beside.command_types = beside
+            .command_types
+            .union(IndirectCommandType::DRAW)
+            .union(IndirectCommandType::DRAW_INDEXED);
+        let mixed = icb(device, &beside, 2);
+        let of_mixed = mixed.indirect_render_command_at(0).unwrap();
+        of_mixed
+            .draw_primitives(PrimitiveType::Point, 0, 1, 1, 0)
+            .unwrap();
+        of_mixed.set_vertex_buffer(Some(&buffer), 0, 0).unwrap();
+        of_mixed.set_fragment_buffer(Some(&buffer), 0, 0).unwrap();
+        of_mixed.set_barrier().unwrap();
+        of_mixed.clear_barrier().unwrap();
+        assert_eq!(
+            of_mixed.set_render_pipeline_state(&supported).unwrap_err(),
+            kind("set_render_pipeline_state")
+        );
+        assert_eq!(of_mixed.reset().unwrap_err(), kind("reset"));
+        assert_eq!(
+            of_mixed
+                .draw_indexed_primitives(
+                    PrimitiveType::Point,
+                    1,
+                    IndexType::UInt16,
+                    &buffer,
+                    0,
+                    1,
+                    0,
+                    0
+                )
+                .unwrap_err(),
+            kind("draw_indexed_primitives")
+        );
+        assert_unset(&command(&mixed, 0));
+        mixed.indirect_compute_command_at(0).unwrap();
         assert_eq!(
             made.indirect_render_command_at(2).unwrap_err(),
             icb_problem(

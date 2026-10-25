@@ -283,9 +283,10 @@ fn a_device_answers_at_or_below_its_host() {
 
 /// A texture of a format the device's level describes none of is stopped as `Invalid` is, from
 /// every creator and the heap size query, before every other rule; one of a format it describes
-/// is not (Metal's validation stops it, "has invalid pixelFormat": our probes; at macOS 27.0.1 on
-/// the M3 Max). The 16 formats from 630 to 645 are stopped at both levels, as the M3 Max stops them
-/// at both releases.
+/// is not (plain Metal ends its process over it, `newTextureWithDescriptor:` and the heap size
+/// query alike, the API validation layer off: our probes, an M3 Max under macOS 27.0.1). The 16
+/// formats from 630 to 645 are stopped at both levels, as the M3 Max stops them at both
+/// releases.
 #[test]
 fn a_level_stops_textures_of_the_formats_it_describes_none_of() {
     let creators = [

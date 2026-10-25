@@ -281,7 +281,7 @@ message text. The ones a consumer meets most:
 
 | Variant | Means |
 |---|---|
-| `Invalid(Invalid)` | What Metal's validation stops, ending the process: `call` names the method, `problem` the typed `Problem`. A program that runs on Metal never makes it. |
+| `Invalid(Invalid)` | Misuse plain Metal itself refuses, ending its process or failing the call: `call` names the method, `problem` the typed `Problem`. A program that runs on Metal never makes it. |
 | `Nil(Nil)` | What plain Metal answers nil for, the process going on. |
 | `MetalError(MetalError)` | What plain Metal answers nil for with an `NSError`: Metal's `domain`, `code` and description as measured, for a consumer to pass on. |
 | `Unproven(Unproven)` | What the runtime cannot prove plain Metal's answer for. A consumer that answers as Metal stops its guest, naming the problem. |

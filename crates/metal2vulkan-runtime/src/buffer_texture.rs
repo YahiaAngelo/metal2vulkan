@@ -362,7 +362,9 @@ impl Buffer {
     /// ([`AppleOnly::SurfaceClientDirection`](super::AppleOnly::SurfaceClientDirection)); what
     /// Metal stops (`Invalid`, with a [`TextureProblem`](super::TextureProblem) or a
     /// [`BufferTextureProblem`](super::BufferTextureProblem): a type other than 2D, more than one
-    /// level, `Memoryless` storage (unmeasured), a pitch below the row, a surface without planes at
+    /// level, `Memoryless` storage (whose measurement is
+    /// [`BufferTextureProblem::Options`](super::BufferTextureProblem::Options)'s), a pitch below
+    /// the row, a surface without planes at
     /// another pitch or offset, a plane past the buffer); rows that overlap on Metal's GPU, of more
     /// than 16 bytes at a `bytes_per_row` whose multiple of 16 below it is shorter than the row,
     /// where Metal's writes depend on their order (`NotImplemented(OverlappingSurfaceRows)`); GPU

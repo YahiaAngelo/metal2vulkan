@@ -35,6 +35,56 @@ fn of(texture_type: TextureType, extent: [u64; 3]) -> TextureDescriptor {
     }
 }
 
+/// A side past the type's largest is refused whatever the pixel format. Plain Metal's descriptor
+/// validation asserts on the extent alone, naming no format
+/// ([`TextureProblem::PastLargestSide`]: 16385 measured in `RGBA8Unorm`, `R8Unorm`,
+/// `Depth32Float` and `BC1_RGBA`, in `Private`, `Shared` and `Managed` storage), so of every
+/// format a level describes and whose 2D texture no earlier rule stops, one texel past 16384 is
+/// `PastLargestSide` and the side itself is not.
+#[test]
+fn a_side_past_the_largest_is_refused_whatever_the_format() {
+    let stop = || Refused::Stops(TextureProblem::PastLargestSide { max: 16384 });
+    for level in MetalLevel::ALL {
+        let rules = TextureRules {
+            sample_counts: APPLE_SAMPLE_COUNTS,
+            level,
+        };
+        for &pf in PixelFormat::ALL {
+            if !level.describes(pf) {
+                continue;
+            }
+            let fits = TextureDescriptor {
+                pixel_format: pf,
+                ..of(TextureType::Type2D, [16384, 16, 1])
+            };
+            // Only a format whose 2D texture passes every rule before the extent's says anything
+            // about the extent's rule.
+            if matches!(
+                fits.check_made(Creator::Device, rules),
+                Err(Refused::Stops(_))
+            ) {
+                continue;
+            }
+            assert_ne!(
+                fits.check_made(Creator::Device, rules),
+                Err(stop()),
+                "{level:?} {pf:?} at the largest side"
+            );
+            for extent in [[16385, 16, 1], [16, 16385, 1]] {
+                let past = TextureDescriptor {
+                    pixel_format: pf,
+                    ..of(TextureType::Type2D, extent)
+                };
+                assert_eq!(
+                    past.check_made(Creator::Device, rules),
+                    Err(stop()),
+                    "{level:?} {pf:?} at {extent:?}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn the_default_is_metals() {
     let d = TextureDescriptor::default();

@@ -396,8 +396,8 @@ impl TextureDescriptor {
         let ty = self.texture_type;
         let multisample = matches!(ty, T::Type2DMultisample | T::Type2DMultisampleArray);
         let pf = self.pixel_format;
-        // Metal's validation stops a texture of a format its release describes none of as it
-        // stops `Invalid` ("has invalid pixelFormat"; the device's creator), before any other rule.
+        // Plain Metal ends its process over a texture of a format its release describes none of,
+        // as it does over `Invalid`, before any other rule (`TextureProblem::NotAFormat`).
         if !rules.level.describes(pf) {
             return Err(TextureProblem::NotAFormat.into());
         }
@@ -627,8 +627,8 @@ pub(super) struct TextureLayout {
     pub(super) samples: u32,
 }
 
-/// A texture descriptor Metal's validation stops ([`Error::Invalid`]), or plain Metal answers nil
-/// for ([`Error::Nil`]: [`NoTextureOfFormat`](Self::NoTextureOfFormat),
+/// A texture descriptor plain Metal itself refuses, ending its process ([`Error::Invalid`]), or
+/// answers nil for ([`Error::Nil`]: [`NoTextureOfFormat`](Self::NoTextureOfFormat),
 /// [`Unspecialized`](Self::Unspecialized), and a two-plane extended-range cube's
 /// [`TypeForFormat`](Self::TypeForFormat)).
 ///
@@ -638,8 +638,17 @@ pub(super) struct TextureLayout {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextureProblem {
     /// `Invalid`, or a format the device's Metal level describes none of
-    /// ([`MetalLevel::describes`](crate::MetalLevel::describes)): Metal's validation stops
-    /// either ("has invalid pixelFormat").
+    /// ([`MetalLevel::describes`](crate::MetalLevel::describes)): plain Metal's own descriptor
+    /// validation ends its process over either, the API validation layer off.
+    /// `newTextureWithDescriptor:` and `heapTextureSizeAndAlignWithDescriptor:` both assert in
+    /// `-[MTLTextureDescriptorInternal validateWithDevice:]` ("MTLTextureDescriptor has invalid
+    /// pixelFormat (255)") for `Invalid`, for `Depth24Unorm_Stencil8` and for `X24_Stencil8`, the
+    /// two an Apple GPU's Metal describes none of, while `X32_Stencil8` beside them is described
+    /// and made; `setPixelFormat:` takes each of those three values and reads it back, and ends
+    /// the process itself on a raw value no release names ("pixelFormat (999) is not a valid
+    /// MTLPixelFormat"). That one assertion lists every rule the descriptor broke at once, so
+    /// which of them the runtime names is its own choice: the process ends either way (an M3 Max
+    /// under macOS 27.0.1).
     NotAFormat,
     /// A width, height or depth of 0.
     ZeroExtent,
@@ -716,8 +725,16 @@ pub enum TextureProblem {
     /// [`Device::heap_texture_size_and_align`]: crate::Device::heap_texture_size_and_align
     NoTextureOfFormat,
     /// A width, height or depth past the largest side Metal makes the type with, `max`: 16384
-    /// for every type but a 3D texture and a texture buffer, 2048 for a 3D one (Metal's
-    /// validation stops it, whatever the format; an M4 under macOS 27.0.1).
+    /// for every type but a 3D texture and a texture buffer, 2048 for a 3D one, 2^28 texels for a
+    /// texture buffer. Plain Metal's own descriptor validation ends its process over one, the API
+    /// validation layer off: one texel past the side asserts in `-[MTLTextureDescriptorInternal
+    /// validateWithDevice:]` ("MTLTextureDescriptor has width (16385) greater than the maximum
+    /// allowed size of 16384"), at `newTextureWithDescriptor:` and at
+    /// `heapTextureSizeAndAlignWithDescriptor:` alike, for every texture type (1D, 1D array, 2D, 2D
+    /// array, 2D multisample, 2D multisample array, cube, cube array, 3D and texture buffer), in
+    /// `RGBA8Unorm`, `R8Unorm`, `Depth32Float` and `BC1_RGBA`, in `Private`, `Shared` and
+    /// `Managed` storage, and far past it (32768 on a 2D texture); the side itself is made for
+    /// every type (an M3 Max under macOS 27.0.1).
     PastLargestSide {
         /// The largest side of the type.
         max: u64,

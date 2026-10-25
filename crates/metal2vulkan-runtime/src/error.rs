@@ -7,9 +7,11 @@
 //! **A misuse ends Metal's process, or Metal answers nil**. Two kinds tell a program's misuses
 //! apart by what plain Metal does with them, and both name the call and its [`Problem`]:
 //!
-//! - [`Error::Invalid`]: Metal's validation ends the process (its descriptor validation, which
-//!   plain Metal runs too, or its API validation layer where plain Metal's answer is not one the
-//!   runtime gives). A program that would run on Metal never meets one.
+//! - [`Error::Invalid`]: plain Metal itself refuses the call: it ends its process, raises, or
+//!   fails the creation with an `NSError`. A program that would run on Metal never meets one.
+//!   Metal's API validation layer is not Metal: that the layer stops a call justifies nothing
+//!   here, and each [`Problem`] names what plain Metal does with it. Where plain Metal takes
+//!   something the layer stops, the runtime takes it too.
 //! - [`Error::Nil`]: plain Metal answers nil (no object, no error), and the process goes on;
 //!   its API validation layer may stop the call too. A program may meet one and carry on, as on
 //!   Metal.
@@ -60,8 +62,8 @@ use std::path::PathBuf;
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
-    /// What Metal's validation stops, ending the process: the call and the problem (the
-    /// module's docs).
+    /// Misuse plain Metal itself refuses, ending its process or failing the call: the call and
+    /// the problem (the module's docs).
     Invalid(Invalid),
     /// A device or translator gap, naming what is missing.
     Unsupported(Unsupported),
@@ -360,8 +362,8 @@ impl fmt::Display for DriverSetting {
 
 impl std::error::Error for Error {}
 
-/// A call Metal's validation stops, ending the process (the module's docs). One plain Metal answers
-/// nil for is a [`Nil`].
+/// A call plain Metal itself refuses, ending its process or failing the creation (the module's
+/// docs). One plain Metal answers nil for is a [`Nil`].
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Invalid {
@@ -379,8 +381,7 @@ impl Invalid {
 }
 
 /// A call plain Metal answers nil for, the process going on (the module's docs): its API
-/// validation layer may stop it too. One Metal's validation ends the process for is an
-/// [`Invalid`].
+/// validation layer may stop it too. One plain Metal itself refuses is an [`Invalid`].
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Nil {
@@ -662,9 +663,15 @@ pub enum Problem {
     /// inputPrimitiveTopology is ..."; measured on an M3 Max and an M4).
     PointSizeTopology,
     /// `new_render_pipeline_state`: a tessellation pipeline made with
-    /// `supportIndirectCommandBuffers` whose factor scale is enabled. Metal's validation stops it
-    /// ("pipelines with tessellationFactorScaleEnabled = YES are not compatible with indirect
-    /// command buffers", measured on an M4).
+    /// `supportIndirectCommandBuffers` whose factor scale is enabled. Plain Metal ends its process
+    /// over it, the API validation layer off: `-[_MTLRenderPipelineState
+    /// initWithDevice:pipelineStateDescriptor:]` asserts "Render Pipeline Descriptor Validation /
+    /// pipelines with tessellationFactorScaleEnabled = YES are not compatible with indirect
+    /// command buffers", where the same pipeline with either one alone is made and draws its
+    /// patches (an M3 Max under macOS 27.0.1). Metal reads its flat
+    /// `tessellationFactorScaleEnabled` alone, and asserts for a pipeline of no tessellation state
+    /// too; the runtime's descriptor keeps that flag inside its `tessellation`, so a caller cannot
+    /// ask for that pair.
     IndirectScaledTessellation,
     /// `new_compute_pipeline_state`: a kernel the compile layer already compiled
     /// (`StageSource::Compiled`). Metal's descriptor takes a function, and a state compiles its

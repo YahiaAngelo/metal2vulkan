@@ -1038,7 +1038,7 @@ that holds only under some bound values is in `specialized_notes`;
 notes a plan reaches. Section 9 lists every note.
 
 **The runtime's errors** are its own type, `metal2vulkan_runtime::Error`, which tells apart what
-Metal's validation stops (`Invalid`), what plain Metal answers nil for (`Nil`, `MetalError`), what
+plain Metal itself refuses (`Invalid`), what plain Metal answers nil for (`Nil`, `MetalError`), what
 the device lacks (`Unsupported`), what the runtime has not built (`NotImplemented`) and the
 translator's errors (`Compile`). Its [README](../crates/metal2vulkan-runtime/README.md#errors)
 lists them.

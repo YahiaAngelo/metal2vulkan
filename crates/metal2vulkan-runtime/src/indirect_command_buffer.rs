@@ -410,7 +410,15 @@ pub enum IndirectCommandBufferProblem {
         /// The most the runtime binds.
         limit: u32,
     },
-    /// A command at or past the buffer's size.
+    /// A command at or past the buffer's size. Plain Metal checks no bound there, the API
+    /// validation layer off: `indirectComputeCommandAtIndex:` and `indirectRenderCommandAtIndex:`
+    /// give a command for any index, every setter of it returns, and the write lands where that
+    /// index's record would be, past the buffer's records. What it lands on is not defined and
+    /// turns on the index: on a buffer of 4 commands, writing index 4 left command 0 dispatching
+    /// nothing, while writing index 100 left command 0 dispatching as before, and index 2^40
+    /// returned from its setters too (an M3 Max under macOS 27.0.1, a buffer of
+    /// `ConcurrentDispatch` and one of `Draw` alike). The runtime holds no bytes there and will
+    /// not guess what Metal overwrote, so it refuses the call.
     CommandIndex {
         /// The command's index.
         index: u64,
@@ -454,8 +462,14 @@ pub enum IndirectCommandBufferProblem {
         /// The buffer's length.
         length: u64,
     },
-    /// A compute command of a buffer of render command types, or a render command of one of
-    /// compute types (the first ends Metal's process, validation stops the second).
+    /// A compute command of a buffer whose commands are render ones, or a setter plain Metal does
+    /// not ignore on a render command of a buffer whose commands are dispatches. Plain Metal ends
+    /// its process at each, the API validation layer off: `indirectComputeCommandAtIndex:` on a
+    /// buffer of draws, and `setRenderPipelineState:`, `drawIndexedPrimitives:` and `reset` on
+    /// such a render command (SIGBUS, SIGBUS and SIGSEGV on an M3 Max under macOS 27.0.1, on a
+    /// buffer of dispatches alone and one of dispatches beside draws alike). The getter itself is
+    /// not refused there: Metal gives the command, as the runtime does
+    /// (`IndirectRenderCommand`'s `of_compute`).
     CommandKind,
     /// An executed command's kernel or vertex buffer at `index` set without an attribute stride
     /// (the plain setter, the stride form at `MTLAttributeStrideStatic`, or a kernel's plain
@@ -1544,7 +1558,8 @@ impl IndirectCommandBuffer {
     }
 
     /// `indirectComputeCommandAtIndex:`: command `index`'s setters. Refused (`Invalid`): an index
-    /// at or past the size, as Metal's validation stops it; a buffer of render command types
+    /// at or past the size, which plain Metal takes and writes past its records
+    /// (`CommandIndex`); a buffer of render command types
     /// (`CommandKind`), which ends Metal's process. A `Private` buffer's commands are encoded
     /// here too, as plain Metal encodes, reads back and runs them where its validation stops the
     /// call (an M3 Max and an M4).
@@ -1558,10 +1573,10 @@ impl IndirectCommandBuffer {
     }
 
     /// `indirectRenderCommandAtIndex:`: command `index`'s setters. Refused (`Invalid`) as
-    /// [`indirect_compute_command_at`](Self::indirect_compute_command_at) is, and for a buffer of
-    /// dispatches beside draws (`CommandKind`), which ends Metal's process at the command's
-    /// first setter or breaks its other commands. A buffer of dispatches alone gives one, as plain
-    /// Metal does where its validation stops the call, whose setters do what Metal's do there.
+    /// [`indirect_compute_command_at`](Self::indirect_compute_command_at) is, but never for the
+    /// buffer's command types: a buffer whose commands are dispatches gives one, as plain Metal
+    /// does, whose setters do what Metal's do there (`IndirectRenderCommand`'s `of_compute`),
+    /// whether its command types are dispatches alone or dispatches beside draws.
     pub fn indirect_render_command_at(&self, index: u64) -> Result<IndirectRenderCommand, Error> {
         const CALL: &str = "indirect_render_command_at";
         let index = self.command_at(CALL, index, true)?;
@@ -1596,13 +1611,14 @@ impl IndirectCommandBuffer {
         matches!(self.0.records, CommandDescriptor::Render { .. })
     }
 
-    /// Refuse, for `call`, a buffer whose commands are not of the kind `render` says
-    /// (`Invalid`, `IndirectCommandBufferProblem::CommandKind`), but a render command of a
-    /// buffer of dispatches alone, which plain Metal gives (`IndirectRenderCommand`'s
-    /// `of_compute`).
+    /// Refuse, for `call`, a compute command of a buffer whose commands are render ones
+    /// (`Invalid`, `IndirectCommandBufferProblem::CommandKind`): plain Metal ends its process
+    /// there. A render command of a buffer whose commands are dispatches is given, as plain
+    /// Metal gives one (`IndirectRenderCommand`'s `of_compute`), whether the buffer's command
+    /// types are dispatches alone or dispatches beside draws: Metal answers the same for both,
+    /// setter for setter.
     fn check_kind(&self, call: &'static str, render: bool) -> Result<(), Error> {
-        let dispatches_alone = !self.0.descriptor.command_types.intersects(RENDER_TYPES);
-        if self.is_render() != render && !(render && dispatches_alone) {
+        if self.is_render() && !render {
             return Err(problem(call, IndirectCommandBufferProblem::CommandKind));
         }
         Ok(())
@@ -3976,12 +3992,15 @@ impl IndirectRenderCommand {
         &self.icb.0.descriptor
     }
 
-    /// Whether it is a command of a buffer of dispatches, which plain Metal gives where its
-    /// validation stops `indirectRenderCommandAtIndex:`: the setters it ignores there do nothing
-    /// (`draw_primitives`, `set_vertex_buffer`, `set_fragment_buffer`, `set_barrier`,
-    /// `clear_barrier`; the buffer's commands read back and run as before), and the others are
-    /// refused (`CommandKind`): `set_render_pipeline_state`, `draw_indexed_primitives` and `reset`
-    /// end its process, and the rest were not measured.
+    /// Whether it is a command of a buffer whose commands are dispatches, which plain Metal
+    /// gives: the setters it ignores there do nothing (`draw_primitives`, `set_vertex_buffer`,
+    /// `set_fragment_buffer`, `set_barrier`, `clear_barrier`; the buffer's commands read back and
+    /// run as before), and the others are refused (`CommandKind`): `set_render_pipeline_state`,
+    /// `draw_indexed_primitives` and `reset` end its process, and the rest were not measured.
+    /// A buffer of dispatches beside draws answers exactly as one of dispatches alone, setter for
+    /// setter (an M3 Max under macOS 27.0.1, the API validation layer off: each of those five
+    /// returned and left both compute commands dispatching, `draw_indexed_primitives` and
+    /// `set_render_pipeline_state` raised SIGBUS and `reset` SIGSEGV, on each buffer alike).
     fn of_compute(&self) -> bool {
         !self.icb.is_render()
     }
