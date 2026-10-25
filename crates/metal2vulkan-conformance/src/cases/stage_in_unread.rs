@@ -18,7 +18,7 @@
 //! # What a row varies, and what it must not move
 //!
 //! The **read set** is fixed in every row: the five attributes `stage_in_fetch_wide` declares,
-//! each at its own format and offset inside one 64-byte element of [`SOURCE`], whose layout steps
+//! each at its own format and offset inside one 64-byte element of `SOURCE`, whose layout steps
 //! by the thread's x position at rate 1. Those five, that layout, the grid, the stage-in region
 //! and the source bytes are the same in all rows, so a row's answer is a function of the swept
 //! part alone.
@@ -30,7 +30,7 @@
 //! |---|---|
 //! | format | `UInt`, `Float4`, `UChar4Normalized`, `Half2`, `Int4`, `Short2`, `UInt1010102Normalized`, `Invalid` |
 //! | offset in the element | 0, 4, 32, 48 |
-//! | buffer | the read attributes' own ([`SOURCE`]), or one of two of its own ([`SPARE_A`], [`SPARE_B`]) |
+//! | buffer | the read attributes' own (`SOURCE`), or one of two of its own (`SPARE_A`, `SPARE_B`) |
 //! | its layout's step | constant at rate 0, thread position in grid x at rate 1 and at rate 3, in grid y at rate 1, x indexed, y indexed |
 //! | its layout's stride | a fixed 64, a fixed 16, `MTLBufferLayoutStrideDynamic` |
 //! | the descriptor's index fields | `MTLIndexTypeUInt16` and `UInt32`, at two index buffer indices |
@@ -70,10 +70,10 @@
 //!
 //! # Safety
 //!
-//! One dispatch a row, of [`THREADS`] threads in one threadgroup — eight, inside the smallest
+//! One dispatch a row, of `THREADS` threads in one threadgroup — eight, inside the smallest
 //! `maxTotalThreadsPerThreadgroup` any venue reports and inside one simdgroup — and no grid is
 //! derived from a device limit. The stage-in region is the grid's own size, so no fetch is clamped.
-//! Every **read** attribute's bytes lie inside its element and every element inside [`SOURCE`]
+//! Every **read** attribute's bytes lie inside its element and every element inside `SOURCE`
 //! (`tests::every_read_fetch_lies_inside_its_buffer`); every attribute a row sets, read or not,
 //! lies inside its layout's stride where that stride is fixed, every buffer index a row names past
 //! the two the kernel declares is one no run binds, and every attribute and buffer index is inside
@@ -129,11 +129,11 @@ const SLOTS: u32 = 31;
 /// smallest threadgroup limit any venue reports.
 const THREADS: u32 = 8;
 
-/// Bytes one element of [`SOURCE`] takes, which is its layout's stride: the five read attributes
+/// Bytes one element of `SOURCE` takes, which is its layout's stride: the five read attributes
 /// and eight bytes between the `half2` and the `int4` that no fetch of the read set reads.
 const ELEMENT: u32 = 64;
 
-/// Elements [`SOURCE`] holds: more than the grid walks, so no fetch of any stride under test
+/// Elements `SOURCE` holds: more than the grid walks, so no fetch of any stride under test
 /// leaves it.
 const SOURCE_ELEMENTS: u32 = 64;
 
@@ -208,7 +208,7 @@ impl Read {
         }
     }
 
-    /// The byte offset of its bytes inside one element of [`SOURCE`], in every row.
+    /// The byte offset of its bytes inside one element of `SOURCE`, in every row.
     fn offset(self) -> u32 {
         match self {
             Read::Float4 => 0,
@@ -269,7 +269,7 @@ fn source_layout() -> StageInLayout {
 
 // ---- The buffers -------------------------------------------------------------------------------
 
-/// Element `e` of [`SOURCE`], as sixteen 32-bit words.
+/// Element `e` of `SOURCE`, as sixteen 32-bit words.
 ///
 /// Each read attribute's bytes are a value of its own that moves with the element, so a fetch that
 /// read the wrong element, the wrong offset or the wrong attribute shows in every word of the
@@ -303,7 +303,7 @@ fn element(e: u32) -> [u32; 16] {
     words
 }
 
-/// [`SOURCE`]'s bytes: [`SOURCE_ELEMENTS`] elements of [`ELEMENT`] bytes.
+/// `SOURCE`'s bytes: [`SOURCE_ELEMENTS`] elements of [`ELEMENT`] bytes.
 fn source() -> Vec<u8> {
     (0..SOURCE_ELEMENTS)
         .flat_map(|e| element(e).into_iter().flat_map(u32::to_le_bytes))
@@ -472,7 +472,7 @@ const STRIDES: [(&str, Option<u32>); 3] = [
     ("dynamic", None),
 ];
 
-/// A spare layout at [`SPARE_A`] of a fixed 64-byte stride stepped by the thread's x position at
+/// A spare layout at `SPARE_A` of a fixed 64-byte stride stepped by the thread's x position at
 /// rate 1: the layout the single-axis rows state where the axis they sweep is not the layout's.
 fn plain_spare(buffer: u32) -> Spare {
     Spare {
@@ -943,7 +943,7 @@ mod tests {
     use crate::attribute_coding::shape;
     use std::collections::BTreeSet;
 
-    /// The bytes [`SOURCE`] holds, for the guard that bounds every read fetch.
+    /// The bytes `SOURCE` holds, for the guard that bounds every read fetch.
     const SOURCE_BYTES: usize = (SOURCE_ELEMENTS * ELEMENT) as usize;
 
     /// The bytes a format occupies in one element, read from the SDK enumerator's own name.
@@ -1017,7 +1017,7 @@ mod tests {
         }
     }
 
-    /// Every read attribute's fetch lies inside [`SOURCE`], over the whole grid.
+    /// Every read attribute's fetch lies inside `SOURCE`, over the whole grid.
     ///
     /// This is the case for the module's safety claim, computed from the read set rather than
     /// asserted beside it.
@@ -1240,7 +1240,7 @@ mod tests {
         assert_eq!(first.stage_input().layouts, vec![source_layout()]);
     }
 
-    /// Each element of [`SOURCE`] holds a value of its own for every read attribute, and the
+    /// Each element of `SOURCE` holds a value of its own for every read attribute, and the
     /// element's own filler nowhere a read attribute reads.
     ///
     /// So a row's answer names the element its fetch walked, and a fetch that read the gap between
