@@ -510,8 +510,28 @@ impl GraphicsContent {
         key: &GraphicsKey,
         depth_bias: Option<bool>,
     ) -> [Hash256; 4] {
+        Part::ALL.map(|part| self.part_named(part, objects, pipeline, key, depth_bias))
+    }
+
+    /// The digest of `part`'s state alone, as [`named`](Self::named) describes every part's: one
+    /// part, so a caller that wants two of the four names the two.
+    ///
+    /// A record is two of them ([`record`](Self::record)) and computing all four cost it the two
+    /// it throws away -- six `Debug` formats of fifteen, the vertex input's and the colour
+    /// attachments' among them -- at every making of every pipeline. Each part's digest starts
+    /// its own [`Making`], so naming one says nothing about another and the two a record keeps
+    /// are byte for byte what the whole array held.
+    fn part_named(
+        &self,
+        part: Part,
+        objects: &VariantObjects,
+        pipeline: &RenderPipeline,
+        key: &GraphicsKey,
+        depth_bias: Option<bool>,
+    ) -> Hash256 {
         use metal2vulkan::vk::ShaderStage;
         let graphics = &pipeline.graphics;
+        // The variant's own, worked out once for it (`VariantObjects::parts_content`).
         let content = objects.parts_content(pipeline);
         let stages = |fragment: bool| {
             pipeline
@@ -545,19 +565,24 @@ impl GraphicsContent {
                 })
                 .collect::<Vec<_>>()
         };
-        let multisample = (
-            graphics.rasterization_samples,
-            graphics.sample_shading,
-            graphics.alpha_to_coverage,
-            graphics.alpha_to_one,
-            graphics.sample_mask,
-            &key.sample_positions,
-        );
-        let named = |part: Part| Making::new(part.kind()).text(&graphics.dynamic_states);
+        let multisample = || {
+            (
+                graphics.rasterization_samples,
+                graphics.sample_shading,
+                graphics.alpha_to_coverage,
+                graphics.alpha_to_one,
+                graphics.sample_mask,
+                &key.sample_positions,
+            )
+        };
+        let named = Making::new(part.kind()).text(&graphics.dynamic_states);
         // The vertex input part takes no pass; the others are made against it.
-        let passed = |part: Part| named(part).text(&key.pass);
-        [
-            named(Part::VertexInput)
+        let named = match part {
+            Part::VertexInput => named,
+            _ => named.text(&key.pass),
+        };
+        match part {
+            Part::VertexInput => named
                 .text(&(
                     &pipeline.vertex_input,
                     &key.strides,
@@ -565,7 +590,7 @@ impl GraphicsContent {
                     key.primitive_restart,
                 ))
                 .finish(),
-            passed(Part::PreRasterization)
+            Part::PreRasterization => named
                 .digest(&content.layout)
                 .text(&stages(false))
                 .text(&(
@@ -581,22 +606,22 @@ impl GraphicsContent {
                     &graphics.tessellation,
                 ))
                 .finish(),
-            passed(Part::FragmentShader)
+            Part::FragmentShader => named
                 .digest(&content.layout)
                 .text(&stages(true))
                 .text(&key.fixed.depth_stencil)
-                .text(&multisample)
+                .text(&multisample())
                 .finish(),
-            passed(Part::FragmentOutput)
+            Part::FragmentOutput => named
                 .text(&(
                     &graphics.color_attachments,
                     key.fixed.masks_color,
                     key.pass.fetch_inputs,
                     graphics.logic_op,
                 ))
-                .text(&multisample)
+                .text(&multisample())
                 .finish(),
-        ]
+        }
     }
 
     /// What names the record of a making of `pipeline` (the variant's compiled pipeline) for
@@ -630,7 +655,11 @@ impl GraphicsContent {
         pipeline: &RenderPipeline,
         key: &GraphicsKey,
     ) -> Making {
-        let [_, pre_rasterization, fragment, _] = self.named(objects, pipeline, key, None);
+        // Its two parts that hold shaders, and not the two it would throw away
+        // ([`part_named`](Self::part_named)).
+        let pre_rasterization =
+            self.part_named(Part::PreRasterization, objects, pipeline, key, None);
+        let fragment = self.part_named(Part::FragmentShader, objects, pipeline, key, None);
         objects
             .making("graphics")
             .digest(&pre_rasterization)
@@ -1116,9 +1145,14 @@ impl VariantObjects {
         // Its record is named by what reaches the driver's conversion of one of its stages
         // (`GraphicsContent::record`), so a sweep over blend state or the fragment output
         // interface is one record and one cache.
+        let named = split.then(std::time::Instant::now);
         let making = content.record(self, pipeline, key);
+        if let Some(at) = named {
+            creation_log::note(|| "record".to_owned(), at.elapsed());
+        }
         // The diagnostics the device's driver is measured to report as it makes this pipeline,
         // withheld inside its creation alone (`driver_facts.rs`).
+        let awaited = split.then(std::time::Instant::now);
         let properties = self.device.properties();
         let expected: Vec<_> = (properties.driver_facts.iter())
             .flat_map(|fact| {
@@ -1140,6 +1174,9 @@ impl VariantObjects {
             }
             Some(_) => (super::budget::program_turn(), None),
         };
+        if let Some(at) = awaited {
+            creation_log::note(|| "turn".to_owned(), at.elapsed());
+        }
         let started = std::time::Instant::now();
         let (created, withheld) = crate::driver_facts::expecting(expected, || {
             content.with_infos(self, render_pass.raw, |infos| match libraries {
@@ -1153,6 +1190,9 @@ impl VariantObjects {
                     let info = infos.whole();
                     let count = info.stage_count as usize;
                     reported_stages = if count <= REPORTED_STAGES { count } else { 0 };
+                    if split {
+                        creation_log::note(|| "infos".to_owned(), started.elapsed());
+                    }
                     let making_at = split.then(std::time::Instant::now);
                     let _ = creation_log::take_record();
                     // With what the driver reports of the making: a pipeline found in its
@@ -1193,6 +1233,7 @@ impl VariantObjects {
         shared.counts.driver_diagnostics_withheld(withheld);
         let (raw, linked) = created?;
         let created_in = started.elapsed();
+        let kept_at = split.then(std::time::Instant::now);
         if content.blend_flags.contains(
             vk::PipelineColorBlendStateCreateFlags::RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXT,
         ) {
@@ -1215,6 +1256,9 @@ impl VariantObjects {
             linked,
         }
         .kept_at(self, Place::Graphics(Box::new(key.clone())));
+        if let Some(at) = kept_at {
+            creation_log::note(|| "kept".to_owned(), at.elapsed());
+        }
         if let Notices::Now(formats) = notices {
             self.device.degrade_specialized(
                 &self.specialized,

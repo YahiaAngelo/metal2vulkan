@@ -130,6 +130,25 @@
 // minutes-long gap, so it is neither a one-off nor a permanent warm cache. Discard the first
 // arrangement of any batch over a module this size.
 //
+// BOTH OF THOSE LAST TWO PARAGRAPHS HAVE SINCE BEEN CHECKED ON METAL'S OWN API, with no Vulkan in
+// the process, by `metal_pipeline_marginal_cost.m`. Read it for the figures; what it changes here:
+//
+//   - `pipelineCompile` BEING 32 IS THE FLOOR, and now for a stated reason. Metal recompiles the
+//     fragment stage for every distinct blend state: 32 distinct blend states over one function
+//     pair cost 32 fragment recompiles through `newRenderPipelineStateWithDescriptor:` too, at 3.1
+//     to 8.6 SECONDS each over a 2000-statement fragment against 27 us over a trivial one. The cost
+//     follows the fragment function, which is what a recompile does. Blending reaches an Apple
+//     GPU's fragment epilogue, so it is part of the fragment program. The only cheap answer Metal
+//     has for a family is an IDENTICAL descriptor, which it memoises at 5 to 11 us.
+//   - THE 8.3-SECOND FIRST-PROCESS ANOMALY IS EXPLAINED AND IS NOT MOLTENVK'S. MTLCompilerService
+//     keys its compiled output on the AIR and keeps it ACROSS PROCESSES. Every process of a batch
+//     here hands the driver the same SPIR-V, so the same MSL and the same AIR: the first pays real
+//     compiles and every later one reads that cache. The sibling probe isolates the mechanism by a
+//     one-character change -- its nonce in a live constant against a comment, nothing else
+//     differing -- and reads a distinct blend state at 4052 us cold against 27 us warm over a
+//     trivial fragment, 150x, where this probe's 8.3 s against 1 ms is 8000x over a module 960
+//     times larger. So it is not an anomaly to discard: it is a cache, and a probe that wants a
+//     COLD Metal compile must vary a live constant, not a comment.
 // BUILD AND RUN:
 //   clang -O2 -o /tmp/pcab \
 //     -I/opt/homebrew/opt/molten-vk/include -I/opt/homebrew/opt/vulkan-headers/include \
