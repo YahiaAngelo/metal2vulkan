@@ -23,20 +23,36 @@ The numerator is two derived sets, which are different claims and are kept apart
 render vocabulary, say) is counted in neither: some case puts it to Metal, but which case is not a
 property of the text, so it is reported in its own column and is neither compared nor missing.
 
+A case states most values by a Metal type's own variant, but not all of them: the suite has enums
+of its own for what a case asks a resource for, and a storage mode is written `Storage::Private`
+and never `MTLStorageModePrivate`. `vocabulary` reads those spellings off the vocabulary enum's own
+declaration -- each variant opens its doc with the Metal enumerator it is -- so a case naming one
+counts as a case naming the value. Without it `shared_creator_formats`' exhaustive sweep of all
+four storage modes over 24 recorded cells counted for nothing and `MTLStorageMode` read `0 of 4`.
+
 # What the floor is made of
 
 Every column here is a floor, and the honest thing is to say what of rather than only that it is
-one. Two things, and as far as has been measured no third:
+one. Three things, and as far as has been measured no fourth:
 
 1. **A value a case states as a raw ordinal**, which the next section is about. Measured where it
    can be: the document lists each type a recorded module names and states no value of by name,
    which is how a sweep over `0..n` reads, so the floor has a work list and not just a warning.
 2. **A spelling of a value that `_stated_in` does not read.** A name written in a shape the
    reading does not cover is counted nowhere and looks exactly like a value no case reaches.
-   `_stated_in` lists every shape read and `_resolved` is the one rule they all go through, so a
-   shape not on that list is the floor. Two have been found, both by someone checking a printed
-   count against the code rather than by this file, which is the evidence for taking the unknown
+   `_stated_in` lists every shape read, `_resolved` is the one rule the type-keyed ones go
+   through, and `vocabulary` is the one rule the suite's own spellings go through, so a shape on
+   neither list is the floor. Three have been found, each by someone checking a printed count
+   against the code rather than by this file, which is the evidence for taking the unknown
    seriously rather than calling it small.
+3. **A value a case reaches by naming a shared item rather than a value.** `vocabulary` reads the
+   suite's own **enums**, because a variant of one is a value's name under another spelling. A
+   shared `const` or `fn` is not: `heap_facts` and `resource_facts` sweep `MTLPurgeableState`
+   through `heap_query::purgeable_pairs()` and `MTLCPUCacheMode` through its `CACHE_MODES`, and
+   nothing in those modules' text names a state or a cache mode. Following a name to the item it
+   imports would be a resolution of the suite's text and not a spelling of a value, so it is not
+   read here and those values stay in the *shared only* column, which is where the document says
+   a value some case reaches and no module can be credited with belongs.
 
 What is **not** part of the floor, because it is measured: the generated denominator (every type
 `regen-metal-enums` covers, by `ENUMS`, `OPTIONS` or `TABLE_ONLY`), the `#[cfg(test)]` exclusion,
@@ -746,10 +762,230 @@ def _resolved(held: Type, tail: str, metal_spelling: bool) -> set[tuple[str, str
     return out
 
 
-def _stated_in(text: str, by_rust: dict[str, Type], by_metal: dict[str, Type]):
+#: The suite's shared sources, where its own vocabulary is declared: everything under the crate's
+#: `src` but the case modules, the test trees and the binaries.
+SHARED = "crates/metal2vulkan-conformance/src"
+
+
+def shared_sources(root: Path) -> list[tuple[str, str, str]]:
+    """Each shared source as `(path as the crate sees it, its text, `without_tests` of it)`.
+
+    One reading for the two things that walk these files -- the vocabulary below and the *shared*
+    column -- so the two cannot disagree about which file is shared, and neither re-reads 2.6 MB
+    of source the other already has. The raw text is kept because a vocabulary enum's
+    **declaration** is in its doc comments, which `without_tests` blanks: what a case states is
+    read off code, what the vocabulary *is* is read off the declaration.
+    """
+    src = root / SHARED
+    out: list[tuple[str, str, str]] = []
+    for path in sorted(src.rglob("*.rs")):
+        held = path.relative_to(src)
+        if held.parts[0] in ("cases", "tests", "bin") or held.name == "tests.rs":
+            continue
+        text = path.read_text()
+        out.append((str(held), text, without_tests(text)))
+    return out
+
+
+#: One enum of the suite's own vocabulary: a `pub` or `pub(crate)` enum of a shared source. A case
+#: names a value of it by its variant, so this is the item the spelling below is read off.
+VOCABULARY = re.compile(r"\bpub(?:\s*\([^)]*\))?\s+enum\s+([A-Za-z_]\w*)\s*\{")
+
+#: What a variant's **first** doc line declares it to be: an inline code span that **opens** the
+#: line, holding one Metal enumerator or several of one type joined by `|`. Opening the line is the
+#: `_opens_the_doc` discipline in the small -- a name part-way through a sentence is prose about a
+#: value ("unlike `MTLStorageModePrivate`, this one is ours") and declares nothing.
+DECLARES = re.compile(r"^`(MTL\w+(?:\s*\|\s*MTL\w+)*)`")
+
+#: An attribute, so a variant's own name is the first identifier after it rather than one of
+#: `#[cfg(feature = "x")]`'s.
+ATTRIBUTE = re.compile(r"#\s*\[")
+
+
+def _chunks(source: str, blank: str) -> list[tuple[str, str]]:
+    """An enum body's depth-0 comma-separated chunks, each as `(its text, its blanked text)`.
+
+    A variant with a payload holds commas of its own (`Rect { width: u32, height: u32 }`), and a
+    field of it is spelled exactly like a variant, so splitting on every comma would read a field
+    as a variant and report a complete vocabulary as one whose variants are not all declared. The
+    depth counter is what keeps a payload inside its variant.
+    """
+    out: list[tuple[str, str]] = []
+    depth = 0
+    start = 0
+    for i, char in enumerate(blank):
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            out.append((source[start:i], blank[start:i]))
+            start = i + 1
+    if source[start:].strip():
+        out.append((source[start:], blank[start:]))
+    return out
+
+
+def _variant(source: str, blank: str) -> tuple[str, str] | None:
+    """One chunk read as `(the variant's name, what its first doc line says)`, or `None`.
+
+    The name is the first identifier of the blanked chunk once its attributes are skipped, so
+    neither a comment nor a `#[cfg(...)]`'s own words can be it. The doc line is the first
+    non-empty one of the chunk's `///` block, read off the **raw** text, which is where a
+    declaration lives.
+    """
+    i = 0
+    n = len(blank)
+    while True:
+        while i < n and blank[i].isspace():
+            i += 1
+        if ATTRIBUTE.match(blank, i) is None:
+            break
+        depth = 0
+        while i < n:
+            if blank[i] in "([{":
+                depth += 1
+            elif blank[i] in ")]}":
+                depth -= 1
+                if depth == 0:
+                    i += 1
+                    break
+            i += 1
+    name = re.match(r"[A-Za-z_]\w*", blank[i:])
+    if name is None:
+        return None
+    said = ""
+    for line in source.splitlines():
+        line = line.strip()
+        if not line.startswith("///"):
+            continue
+        held = line[3:].strip()
+        if held:
+            said = held
+            break
+    return name.group(0), said
+
+
+def _declares(said: str, of_name: dict[str, tuple[str, str]]) -> set[tuple[str, str]] | None:
+    """The values a variant's first doc line declares it to be, or `None` for no declaration.
+
+    `None` and the empty set are different answers. `None` is "this line declares nothing", which
+    is every variant whose doc is prose; the empty set says the line **is** a declaration and
+    names a value of no generated type, which its caller refuses rather than reading as absent.
+    """
+    found = DECLARES.match(said)
+    if found is None:
+        return None
+    out: set[tuple[str, str]] = set()
+    for part in found.group(1).split("|"):
+        held = of_name.get(part.strip())
+        if held is None:
+            return set()
+        out.add(held)
+    return out
+
+
+def vocabulary(
+    sources: list[tuple[str, str, str]], types: dict[str, Type]
+) -> dict[str, dict[str, frozenset[tuple[str, str]]]]:
+    """The suite's own enums that spell a Metal enum, by enum name and variant.
+
+    This is the fifth spelling `_stated_in` reads, and the one a reader cannot see in a case: a
+    case states a storage mode as `Storage::Private`, never as `MTLStorageModePrivate`, so without
+    this mapping the exhaustive sweep in `shared_creator_formats` counted for nothing and
+    `MTLStorageMode` read `0 of 4` while all four were being put to Metal in 24 cells.
+
+    It is derived from the vocabulary enum's **own declaration** rather than kept as a table of
+    string pairs: a variant whose first doc line opens with the Metal enumerator it spells declares
+    the value, and `Storage`, `Plane`, `TextureRole`, `StageAsked` and `Dispatching` each say so on
+    each of their variants. `DECLARES` reads one enumerator or several of one type joined by `|`,
+    because the suite's vocabulary collapses an option set's combinations into variants of their
+    own (`TextureRole::ReadWrite`, `StageAsked::VertexAndFragment`), and a combination is as much a
+    declaration as a single bit.
+
+    Four things are refused, each a way the mapping can be **wrong** rather than absent:
+
+    - a variant of a spelling enum whose first doc line declares nothing. That is the one that
+      makes the mapping fail where it is incomplete: a vocabulary that gains a variant nobody gave
+      a Metal spelling would otherwise go on reading as a closed sweep of the values it still
+      covers, which is the defect this whole function exists to fix, one variant smaller;
+    - a Metal-shaped declaration naming a value no generated type holds -- a typo, or an
+      enumerator the SDK renamed;
+    - two Metal types across one enum's variants, which is no spelling of either;
+    - two variants declaring the very same values, which is one spelling written twice.
+
+    An enum **no** variant of which declares anything is not a spelling and is passed over in
+    silence: that is most of the suite's shared enums, and so is one that spells a Metal type with
+    no generated value list (`MTLSparseTextureMappingMode`), since this axis has no denominator for
+    it and says so rather than guessing.
+    """
+    of_name = {metal: (held.metal, metal) for held in types.values() for metal in held.names}
+    for held in types.values():
+        for name, canonical in held.aliases.items():
+            of_name.setdefault(name, (held.metal, canonical))
+    out: dict[str, dict[str, frozenset[tuple[str, str]]]] = {}
+    for where, source, blank in sources:
+        for head in VOCABULARY.finditer(blank):
+            # `block` holds the braces; the body is what they hold, so a chunk's depth starts at 0
+            # and a depth-0 comma is a variant's.
+            start, end = metal_leg.block(blank, head.end() - 1)
+            body = slice(start + 1, end - 1)
+            held = [_variant(*chunk) for chunk in _chunks(source[body], blank[body])]
+            read = {
+                found[0]: _declares(found[1], of_name) for found in held if found is not None
+            }
+            declared = {one: values for one, values in read.items() if values}
+            if not declared:
+                continue
+            name = head.group(1)
+            failed = sorted(one for one, values in read.items() if values == set())
+            if failed:
+                raise SystemExit(
+                    f"{where}: {name} spells a Metal enum, and its {', '.join(failed)} declares "
+                    "an enumerator no generated value list holds -- a typo, an enumerator the SDK "
+                    "renamed, or a second Metal type in one spelling"
+                )
+            silent = sorted(one for one, values in read.items() if values is None)
+            if silent:
+                raise SystemExit(
+                    f"{where}: {name} spells a Metal enum, and its {', '.join(silent)} says which "
+                    "value on no line of its own -- open that variant's doc with the Metal "
+                    "enumerator it is, as its siblings do, so a case naming it is counted. The "
+                    "option-space axis reads this declaration and nothing else"
+                )
+            metal = {one for values in declared.values() for one, _ in values}
+            if len(metal) != 1:
+                raise SystemExit(
+                    f"{where}: {name}'s variants declare values of {', '.join(sorted(metal))} -- "
+                    "one enum of the suite's vocabulary spells one Metal type"
+                )
+            seen: dict[frozenset[tuple[str, str]], str] = {}
+            for one, values in sorted(declared.items()):
+                key = frozenset(values)
+                if key in seen:
+                    raise SystemExit(
+                        f"{where}: {name}'s {seen[key]} and {one} declare the same value of "
+                        f"{metal.pop()} -- one spelling written twice"
+                    )
+                seen[key] = one
+            if name in out:
+                raise SystemExit(
+                    f"{where}: a second {name} spelling a Metal enum; the suite's vocabulary has "
+                    "one declaration a name, since a case names the value by the name alone"
+                )
+            out[name] = {one: frozenset(values) for one, values in declared.items()}
+    return out
+
+
+def _stated_in(
+    text: str,
+    by_rust: dict[str, Type],
+    by_metal: dict[str, Type],
+    by_vocab: dict[str, dict[str, frozenset[tuple[str, str]]]],
+):
     """The `(Metal type, value)` pairs `text` names, in every spelling the suite uses.
 
-    The suite names a Metal value three ways, and all three have to be read:
+    The suite names a Metal value four ways, and all four have to be read:
 
     - through the tree's own type, `BlendFactor::SourceAlpha` — and `rotated_targets.rs` writes
       `use BlendFactor as F;` and then every factor as `F::SourceAlpha`, so a derivation reading
@@ -761,6 +997,10 @@ def _stated_in(text: str, by_rust: dict[str, Type], by_metal: dict[str, Type]):
       TransparentBlack};`, after which the module writes the variants bare and names
       `SamplerBorderColor::` nowhere. `border_swizzles` sweeps all three border colours in nine
       samplers written that way, and a reading of `Head::Tail` alone finds none of them.
+    - through the suite's **own vocabulary**, `Storage::Private`, which `vocabulary` reads off the
+      variant's own declaration of the Metal enumerator it spells. A case states a storage mode no
+      other way, so without this the exhaustive four-mode sweep of `shared_creator_formats`
+      counted for nothing at all.
 
     A `use` is taken as the module naming the value, and the bare name is not looked for
     afterwards. That is sound here and nowhere else: an import nothing uses is a warning, warnings
@@ -771,7 +1011,7 @@ def _stated_in(text: str, by_rust: dict[str, Type], by_metal: dict[str, Type]):
     """
     alias: dict[str, str] = {}
     for found in re.finditer(r"\b([A-Za-z_]\w*)\s+as\s+([A-Za-z_]\w*)\b", text):
-        if found.group(1) in by_rust:
+        if found.group(1) in by_rust or found.group(1) in by_vocab:
             alias[found.group(2)] = found.group(1)
     out: set[tuple[str, str]] = set()
     for found in re.finditer(r"\b([A-Za-z_]\w*)::([A-Za-z_]\w*)\b", text):
@@ -782,22 +1022,29 @@ def _stated_in(text: str, by_rust: dict[str, Type], by_metal: dict[str, Type]):
         held = by_metal.get(head)
         if held is not None:
             out |= _resolved(held, tail, True)
+        spelled = by_vocab.get(alias.get(head, head))
+        if spelled is not None:
+            out |= spelled.get(tail, frozenset())
     # The braced form, which the loop above cannot see: after `::` comes `{` and not a name. The
     # path may be qualified (`metal2vulkan::metal::TextureSwizzle::{..}`), so the type is its last
     # segment, and each item may be renamed, in which case what names the value is the name
     # imported and not the local one.
     for found in re.finditer(r"\buse\s+([A-Za-z_][\w:]*?)\s*::\s*\{([^{}]*)\}", text):
         head = found.group(1).split("::")[-1].strip()
+        imports = [item.split(" as ")[0].strip() for item in found.group(2).split(",")]
         for held, metal_spelling in (
             (by_rust.get(alias.get(head, head)), False),
             (by_metal.get(head), True),
         ):
             if held is None:
                 continue
-            for item in found.group(2).split(","):
-                imported = item.split(" as ")[0].strip()
+            for imported in imports:
                 if imported:
                     out |= _resolved(held, imported, metal_spelling)
+        spelled = by_vocab.get(alias.get(head, head))
+        if spelled is not None:
+            for imported in imports:
+                out |= spelled.get(imported, frozenset())
     return out
 
 
@@ -818,15 +1065,24 @@ def _types_named_in(text: str, held: dict[str, Type]) -> set[str]:
     return found
 
 
-def stated(root: Path, types: dict[str, Type], ran: set[str]):
+def stated(
+    root: Path,
+    types: dict[str, Type],
+    ran: set[str],
+    by_vocab: dict[str, dict[str, frozenset[tuple[str, str]]]],
+    sources: list[tuple[str, str, str]],
+):
     """The values each case module names, and the ones only the suite's shared sources name.
 
     `ran` is the case modules with at least one committed recording of an answer Metal ran; a
     module not in it puts nothing to Metal however much its text names.
+
+    `by_vocab` is the suite's own spellings, and `sources` the shared sources they were read off,
+    so the *shared* column below reads exactly the files the vocabulary came from.
     """
     by_rust = {held.rust: held for held in types.values()}
     by_metal = {held.metal: held for held in types.values()}
-    src = root / "crates/metal2vulkan-conformance/src"
+    src = root / SHARED
     in_effect: dict[tuple[str, str], set[str]] = {}
     # Each module to the types its text is about, so a type a module names and states no value of
     # can be reported as one whose depth is unreadable here rather than as one nothing reaches.
@@ -835,18 +1091,15 @@ def stated(root: Path, types: dict[str, Type], ran: set[str]):
         if path.stem not in ran:
             continue
         text = without_tests(path.read_text())
-        stated_here = _stated_in(text, by_rust, by_metal)
+        stated_here = _stated_in(text, by_rust, by_metal, by_vocab)
         for pair in stated_here:
             in_effect.setdefault(pair, set()).add(path.stem)
         said = {metal for metal, _ in stated_here}
         for metal in _types_named_in(text, types) - said:
             about.setdefault(metal, set()).add(path.stem)
     shared: set[tuple[str, str]] = set()
-    for path in sorted(src.rglob("*.rs")):
-        held = path.relative_to(src)
-        if held.parts[0] in ("cases", "tests", "bin") or held.name == "tests.rs":
-            continue
-        shared |= _stated_in(without_tests(path.read_text()), by_rust, by_metal)
+    for _, _, text in sources:
+        shared |= _stated_in(text, by_rust, by_metal, by_vocab)
     return in_effect, shared, about
 
 
@@ -1032,7 +1285,13 @@ def inventory(
     held = dict(types)
     for metal, rust, names in hand:
         held[metal] = Type(metal, rust, "by hand", [(name, name) for name in names])
-    effect, shared, about = stated(root, held, ran)
+    # The suite's own spellings, read off the shared sources once and handed to the reading, so a
+    # case naming `Storage::Private` is read as naming `MTLStorageModePrivate`. Resolved against
+    # `types` rather than `held`: a hand-modelled type with no generated table has no SDK
+    # enumerator for a variant's doc to declare, so there is nothing for this to key on.
+    sources = shared_sources(root)
+    vocab = vocabulary(sources, types)
+    effect, shared, about = stated(root, held, ran, vocab, sources)
     read_back, at_a_site = answered(root, types)
     unreachable = read_unreachable(root)
     for metal, value in unreachable:
@@ -1112,6 +1371,13 @@ def inventory(
         "at_a_site": at_a_site,
         "in_effect": effect,
         "unreachable": unreachable,
+        # The suite's own enums that spell a Metal enum, as `{spelling: {variant: [values]}}`. The
+        # document prints how many Metal types are reached this way, because a spelling nobody
+        # declared is the one floor this fix replaced a defect with.
+        "vocabulary": {
+            name: {one: sorted(values) for one, values in sorted(held.items())}
+            for name, held in sorted(vocab.items())
+        },
         # The pairs axis. Checked against the sources each row names, and a floor by every crossing
         # the suite holds and nobody declared.
         "crossings": crossings(root, types, effect, ran_cases),

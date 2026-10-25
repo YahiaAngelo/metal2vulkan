@@ -535,6 +535,165 @@ class BracedUse(unittest.TestCase):
         self.assertEqual(axis(root, {"blends"})["in_effect"], [])
 
 
+class Vocabulary(unittest.TestCase):
+    """The suite's own enums, which are how a case names a value it never spells.
+
+    `shared_creator_formats` sweeps all four `MTLStorageMode` values over 24 recorded cells and
+    writes every one of them `Storage::Private`, because `Storage` is the suite's own word for
+    where a resource lives. The axis read `0 of 4` and put all four in *shared only*, which looks
+    exactly like a type nothing reaches -- and the document's own caveat had warned that a spelling
+    it does not read would read that way.
+
+    So the mapping is derived from the vocabulary enum's declaration: each variant opens its doc
+    with the Metal enumerator it spells. Every test below asserts both directions, and four of them
+    are the ways the mapping can be **wrong** rather than absent, since a mapping that credits a
+    value nothing set would be a worse defect than the one it replaced.
+    """
+
+    #: The suite's own enum for one Metal type, declared variant by variant. `Both` is the shape
+    #: `TextureRole::ReadWrite` and `StageAsked::VertexAndFragment` have: one variant of the
+    #: vocabulary for a combination of an option set's values.
+    SHARED = """\
+/// Where a case asks for a thing.
+pub enum Where {
+    /// `MTLThingAlpha`: the first.
+    Alpha,
+    /// `MTLThingBeta`.
+    Beta,
+    /// `MTLThingAlpha | MTLThingBeta`: both at once, which Metal takes as one argument.
+    Both,
+}
+"""
+
+    def test_a_case_naming_the_suite_s_own_variant_states_the_metal_value(self):
+        root = tree({"blends": "fn go() { ask(Where::Beta); }"}, shared=self.SHARED)
+        self.assertEqual(axis(root, {"blends"})["in_effect"], ["MTLThingBeta"])
+
+    def test_a_variant_declaring_a_combination_states_every_value_in_it(self):
+        root = tree({"blends": "fn go() { ask(Where::Both); }"}, shared=self.SHARED)
+        row = axis(root, {"blends"})
+        self.assertEqual(row["in_effect"], ["MTLThingAlpha", "MTLThingBeta"])
+
+    def test_a_renamed_import_of_the_suite_s_own_enum_is_read(self):
+        text = "use Where as W;\nfn go() { ask(W::Alpha); }"
+        root = tree({"blends": text}, shared=self.SHARED)
+        self.assertEqual(axis(root, {"blends"})["in_effect"], ["MTLThingAlpha"])
+
+    def test_a_braced_use_of_the_suite_s_own_enum_is_read(self):
+        text = "use crate::side::Where::{Alpha, Beta};\nlet pair = [Alpha, Beta];\n"
+        root = tree({"blends": text}, shared=self.SHARED)
+        self.assertEqual(axis(root, {"blends"})["in_effect"], ["MTLThingAlpha", "MTLThingBeta"])
+
+    def test_the_declaration_alone_states_nothing(self):
+        # The direction that matters most: the declaration is a doc comment of a **shared** source,
+        # and a comment is not the suite putting a value to Metal. A reading that credited the
+        # declaration would report every spelled type as fully swept the moment it was declared.
+        row = axis(tree({}, shared=self.SHARED), set())
+        self.assertEqual(row["compared"], [])
+        self.assertEqual(row["shared"], [])
+        self.assertEqual(row["missing"], row["values"])
+
+    def test_a_variant_named_bare_with_no_import_states_nothing(self):
+        root = tree({"blends": "fn go() { ask(Beta); }"}, shared=self.SHARED)
+        self.assertEqual(axis(root, {"blends"})["in_effect"], [])
+
+    def test_a_module_with_no_metal_run_states_nothing(self):
+        text = "fn go() { ask(Where::Beta); }"
+        self.assertEqual(axis(tree({"blends": text}, shared=self.SHARED), set())["in_effect"], [])
+
+    def test_a_cfg_test_enum_is_no_vocabulary(self):
+        # A unit test's own enum must not become a spelling: `without_tests` blanks it, so the
+        # declaration is not there to read and a case naming its variant states nothing.
+        held = "#[cfg(test)]\nmod tests {\n" + self.SHARED + "}\n"
+        root = tree({"blends": "fn go() { ask(Where::Beta); }"}, shared=held)
+        self.assertEqual(axis(root, {"blends"})["in_effect"], [])
+
+    def test_an_enum_declaring_nothing_is_no_vocabulary_and_fails_nothing(self):
+        # The negative control for the completeness check below: most of the suite's shared enums
+        # declare no Metal value at all, and they must be passed over rather than refused.
+        held = "pub enum Shape {\n    /// A square.\n    Square,\n    Round,\n}\n"
+        root = tree({"blends": "fn go() { ask(Shape::Round); }"}, shared=held)
+        self.assertEqual(axis(root, {"blends"})["in_effect"], [])
+
+    def test_a_metal_name_part_way_through_a_doc_declares_nothing(self):
+        # Prose about a value is not a declaration of being it. A rule that read the name anywhere
+        # in the line would make `Loose::Other` name `MTLThingAlpha`, which no case ever set.
+        held = (
+            "pub enum Loose {\n"
+            "    /// `MTLThingAlpha`.\n    Alpha,\n"
+            "    /// Unlike `MTLThingAlpha`, this one is ours.\n    Other,\n"
+            "}\n"
+        )
+        with self.assertRaises(SystemExit) as held_here:
+            option_space.inventory(tree({}, shared=held), {})
+        self.assertIn("Other", str(held_here.exception))
+
+    def test_a_variant_with_no_declaration_fails(self):
+        # The check the whole mapping rests on. A vocabulary that gains a variant nobody gave a
+        # Metal spelling would otherwise go on reading as a closed sweep of the values it still
+        # covers, which is this axis's defect one variant smaller -- so the generator stops.
+        held = self.SHARED.replace("}\n", "    Gamma,\n}\n")
+        with self.assertRaises(SystemExit) as found:
+            option_space.inventory(tree({}, shared=held), {})
+        self.assertIn("Gamma", str(found.exception))
+
+    def test_a_declaration_of_no_generated_value_fails(self):
+        # A typo, or an enumerator the SDK renamed: the variant looks declared and resolves to
+        # nothing, so a case naming it would be credited with no value and nobody would know.
+        held = self.SHARED.replace("`MTLThingBeta`", "`MTLThingBetaa`")
+        with self.assertRaises(SystemExit) as found:
+            option_space.inventory(tree({}, shared=held), {})
+        self.assertIn("Beta", str(found.exception))
+
+    def test_two_metal_types_in_one_enum_fail(self):
+        held = self.SHARED.replace("`MTLThingBeta`", "`MTLSpreadLeft`")
+        with self.assertRaises(SystemExit) as found:
+            option_space.inventory(tree({}, shared=held), {})
+        self.assertIn("MTLSpread", str(found.exception))
+
+    def test_two_variants_declaring_the_same_value_fail(self):
+        held = self.SHARED.replace("/// `MTLThingBeta`.", "/// `MTLThingAlpha`.")
+        with self.assertRaises(SystemExit) as found:
+            option_space.inventory(tree({}, shared=held), {})
+        self.assertIn("same value", str(found.exception))
+
+    def test_a_payload_s_field_is_not_read_as_an_undeclared_variant(self):
+        # `_chunks` splits on depth-0 commas only. A field of a variant's payload is spelled
+        # exactly like a variant, so splitting on every comma would read `Rows` as a variant
+        # nobody declared and refuse a vocabulary that is complete.
+        held = self.SHARED.replace(
+            "    /// `MTLThingAlpha | MTLThingBeta`: both at once, which Metal takes as one"
+            " argument.\n    Both,\n",
+            "    /// `MTLThingGamma`: a shape of its own.\n"
+            "    Shaped { Rows: u32, Columns: u32 },\n",
+        )
+        text = "fn go() { ask(Where::Shaped { Rows: 1, Columns: 2 }); }"
+        root = tree({"blends": text}, shared=held)
+        self.assertEqual(axis(root, {"blends"})["in_effect"], ["MTLThingGamma"])
+
+    def test_an_aliased_enumerator_declaration_resolves_to_the_canonical_value(self):
+        # A deprecated spelling names the value it is an alias of, the way a recording holding one
+        # does: `MTLPipelineOptionBindingInfo` is the headers' newer name for bit 1, and a
+        # vocabulary declared with it must credit the value and not read as a typo.
+        held = (
+            "pub enum Keeping {\n"
+            "    /// `MTLKeptFirst`.\n    First,\n"
+            "    /// `MTLKeptOldSecond`.\n    Second,\n"
+            "}\n"
+        )
+        root = tree({"blends": "fn go() { ask(Keeping::Second); }"}, shared=held)
+        found = option_space.inventory(root, runs({"blends"}))
+        row = next(one for one in found["rows"] if one["metal"] == "MTLKept")
+        self.assertEqual(row["in_effect"], ["MTLKeptSecond"])
+
+    def test_the_spellings_are_reported_by_enum_and_variant(self):
+        held = option_space.inventory(tree({}, shared=self.SHARED), {})
+        self.assertEqual(
+            held["vocabulary"]["Where"]["Both"],
+            [("MTLThing", "MTLThingAlpha"), ("MTLThing", "MTLThingBeta")],
+        )
+
+
 class Table(unittest.TestCase):
     """The generated enumerator table is the denominator for a type the tree declares by hand.
 

@@ -40,10 +40,12 @@ use crate::transcript::{Node, NodeName, Observed, Value};
 /// a case states here is also something it observes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dispatching {
-    /// `computeCommandEncoder`, whose dispatches run in the order they were encoded.
+    /// `MTLDispatchTypeSerial`: `computeCommandEncoder`, whose dispatches run in the order
+    /// they were encoded.
     Serial,
-    /// `computeCommandEncoderWithDispatchType:MTLDispatchTypeConcurrent`, where the dispatches may
-    /// overlap and a case that chains one into the next **must** put a barrier between them.
+    /// `MTLDispatchTypeConcurrent`: `computeCommandEncoderWithDispatchType:`, where the
+    /// dispatches may overlap and a case that chains one into the next **must** put a
+    /// barrier between them.
     Concurrent,
 }
 

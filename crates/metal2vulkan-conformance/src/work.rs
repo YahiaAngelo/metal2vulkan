@@ -227,9 +227,11 @@ pub enum TextureKind {
 /// states the one it means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Plane {
-    /// Every byte of the texture's own format, with no option.
+    /// `MTLBlitOptionNone`: every byte of the texture's own format, with no option.
     Whole,
+    /// `MTLBlitOptionDepthFromDepthStencil`: the depth plane of a combined format.
     Depth,
+    /// `MTLBlitOptionStencilFromDepthStencil`: the stencil plane of a combined format.
     Stencil,
     /// `MTLBlitOptionRowLinearPVRTC`: a PVRTC texture's blocks lie row by row, `bytes_per_row`
     /// apart, instead of in the block order Metal otherwise uses.

@@ -45,7 +45,7 @@ Its limits, measured rather than asserted:
 | distinct SDK items the Metal leg reaches, of any status | 798 |
 | of those, reached only where this cannot name the family | 2 |
 | ledger rows (a case whose gap is recorded) | 291 |
-| declared crossings of the option space (pairs put to Metal at once) | 24 |
+| declared crossings of the option space (pairs put to Metal at once) | 25 |
 | declared crossings that are no pair of it (a boolean or numeric field, or one type in two slots) | 30 |
 
 A tolerance names a **site of a transcript**, not an item, so the last two rows are read as written: a case that loosens one site of its own transcript may compare every other field of it exactly, and this derivation cannot tell which of a case's fields came from which Metal call. Where the distinction matters, read the case.
@@ -67,10 +67,11 @@ A value is **compared** where either of two things holds, which are different cl
 What this axis cannot see, measured rather than asserted:
 
 - **A value Metal answers as a bare ordinal.** A transcript holds a `uint`, and nothing in it says which enum the number belongs to, so only a site that records the enumerator's **name** is read. The *answered* column is a floor by every site that records an ordinal instead.
-- **A spelling of a value this derivation does not read.** Both numerators read names, and a name written in a shape the reading does not cover is counted nowhere and looks exactly like a value no case reaches. Four shapes are read: a variant beside its type, `objc2`'s own spelling, a renaming `use`, and a braced `use` whose variants the module then writes bare. A fifth shape would be invisible the same way, so every count here is a floor by that unknown — and the two shapes already found were each caught by someone checking a count against the code, not by this derivation, so the unknown is not small on the evidence.
+- **A spelling of a value this derivation does not read.** Both numerators read names, and a name written in a shape the reading does not cover is counted nowhere and looks exactly like a value no case reaches. Five shapes are read: a variant beside its type, `objc2`'s own spelling, a renaming `use`, a braced `use` whose variants the module then writes bare, and a variant of the suite's **own vocabulary** whose declaration names the Metal enumerator it spells (`Storage::Private` is `MTLStorageModePrivate`). A sixth shape would be invisible the same way, so every count here is a floor by that unknown — and all three shapes found so far were caught by someone checking a count against the code, not by this derivation, so the unknown is not small on the evidence.
+- **A value the suite reaches through a shared item rather than a spelling** — the vocabulary read above is of enums, and a value a case reaches by naming a shared **constant** or **function** is attributed to no case: `heap_facts` and `resource_facts` sweep `MTLPurgeableState` through `heap_query`'s `purgeable_pairs()` and `MTLCPUCacheMode` through its `CACHE_MODES`, and both read as *shared only* below. Following a name to the item it imports is a resolution of the suite's text and not a spelling of a value, so the two are kept apart and this one is not read.
 - **A value a case states as a raw ordinal.** A case may hand the Metal leg an enum's ordinal as a number — a sweep over `0..n` rather than over named variants — and no reading of the text can say which value a computed number is. So *in effect*, and the *stated* column of the hand-modelled table below, are floors by every sweep written that way: a type they report short of its values may in fact be swept exhaustively, and the case is what says so. Read the case before taking a row of the work list as work.
 - **Which case put a value in effect.** The unit is the case module, as it is for the items axis: a value named anywhere in a module whose cases include a Metal run counts for that module, even where one of its cases names it and the rest do not.
-- **A value only the suite's shared sources name** — 23 of them. Some case puts it to Metal through the render or texture vocabulary, but which case is not a property of the text, so it is neither compared nor missing and has its own column.
+- **A value only the suite's shared sources name** — 15 of them. Some case puts it to Metal through the render or texture vocabulary, but which case is not a property of the text, so it is neither compared nor missing and has its own column.
 - **Combinations.** Every column here is per value. A type whose values are all compared says nothing about the pairs and triples of them, which is where most of the behaviour an implementation can get wrong lives. *By crossing* below counts what a case states together, in two numbers kept apart: the pairs of this option space, and the crossings that are no pair of it — an enum with a boolean or numeric field, a type with itself in two slots. Each is a floor by every crossing nobody declared.
 - **Metal's API validation is excluded.** Its complaints name enumerators, and the suite records that leg and never compares it, so reading it would count Apple's prose as a comparison. So are the cost and timing tables: a site name there is what was measured, not an answer that was compared.
 - **A `#[cfg(test)]` item is excluded.** One of the suite's unit tests names four blend factors to assert that no case uses them; counting those would have this report the opposite of what the code says.
@@ -81,12 +82,13 @@ What this axis cannot see, measured rather than asserted:
 | their values | 757 |
 | of those, unreachable: no case can put them to Metal | 51 |
 | so reachable by some case | 706 |
-| values compared | 663 |
-| share of the reachable compared | 94% |
-| values only the suite's shared sources name | 23 |
+| values compared | 671 |
+| share of the reachable compared | 95% |
+| values only the suite's shared sources name | 15 |
 | values no source names and no recording holds | 20 |
-| types every reachable value of which is compared | 40 |
-| types no value of which is compared | 6 |
+| of the types above, those the suite also spells through its own vocabulary | 5 |
+| types every reachable value of which is compared | 43 |
+| types no value of which is compared | 4 |
 
 The share is weakly informative on its own: `MTLPixelFormat`, `MTLDataType`, `MTLAttributeFormat`, `MTLVertexFormat` hold 506 of the 757 values between them, so an aggregate over types this uneven is mostly theirs. The per-type table is the one to read.
 
@@ -106,10 +108,7 @@ Deepest gap first, which is the order the work list reads in. *answered*, *at a 
 | `MTLFunctionType` | 7 | 6 | 6 | 0 | 0 | 0 | 0 | 1 |
 | `MTLResourceUsage` | 3 | 2 | 0 | 0 | 2 | 0 | 0 | 1 |
 | `MTLCommandBufferStatus` | 6 | 0 | 0 | 0 | 0 | 6 | 0 | 0 |
-| `MTLStorageMode` | 4 | 0 | 0 | 0 | 0 | 4 | 0 | 0 |
 | `MTLPurgeableState` | 4 | 1 | 0 | 0 | 1 | 3 | 0 | 0 |
-| `MTLBlitOption` | 4 | 2 | 0 | 2 | 0 | 2 | 0 | 0 |
-| `MTLDispatchType` | 2 | 0 | 0 | 0 | 0 | 2 | 0 | 0 |
 | `MTLSparseTextureRegionAlignmentMode` | 2 | 0 | 0 | 0 | 0 | 2 | 0 | 0 |
 | `MTLCPUCacheMode` | 2 | 1 | 0 | 0 | 1 | 1 | 0 | 0 |
 | `MTLHeapType` | 3 | 2 | 0 | 0 | 2 | 1 | 0 | 0 |
@@ -118,10 +117,12 @@ Deepest gap first, which is the order the work list reads in. *answered*, *at a 
 | `MTLBindingAccess` | 3 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
 | `MTLBlendFactor` | 20 | 20 | 10 | 0 | 20 | 0 | 0 | 0 |
 | `MTLBlendOperation` | 6 | 6 | 5 | 0 | 6 | 0 | 0 | 0 |
+| `MTLBlitOption` | 4 | 4 | 0 | 2 | 4 | 0 | 0 | 0 |
 | `MTLColorWriteMask` | 7 | 7 | 0 | 0 | 7 | 0 | 0 | 0 |
 | `MTLCompareFunction` | 8 | 8 | 0 | 0 | 8 | 0 | 0 | 0 |
 | `MTLCullMode` | 3 | 3 | 0 | 0 | 3 | 0 | 0 | 0 |
 | `MTLDepthClipMode` | 2 | 2 | 0 | 0 | 2 | 0 | 0 | 0 |
+| `MTLDispatchType` | 2 | 2 | 0 | 0 | 2 | 0 | 0 | 0 |
 | `MTLFunctionOptions` | 5 | 5 | 4 | 0 | 5 | 0 | 0 | 0 |
 | `MTLHazardTrackingMode` | 3 | 3 | 0 | 0 | 3 | 0 | 0 | 0 |
 | `MTLIndexType` | 2 | 2 | 0 | 2 | 2 | 0 | 0 | 0 |
@@ -141,6 +142,7 @@ Deepest gap first, which is the order the work list reads in. *answered*, *at a 
 | `MTLSamplerReductionMode` | 3 | 3 | 0 | 0 | 3 | 0 | 0 | 0 |
 | `MTLSparsePageSize` | 3 | 3 | 0 | 0 | 3 | 0 | 0 | 0 |
 | `MTLStencilOperation` | 8 | 8 | 0 | 0 | 8 | 0 | 0 | 0 |
+| `MTLStorageMode` | 4 | 4 | 0 | 0 | 4 | 0 | 0 | 0 |
 | `MTLStoreAction` | 6 | 6 | 0 | 6 | 6 | 0 | 0 | 0 |
 | `MTLStoreActionOptions` | 2 | 2 | 0 | 0 | 2 | 0 | 0 | 0 |
 | `MTLTessellationControlPointIndexType` | 3 | 3 | 2 | 1 | 2 | 0 | 0 | 0 |
@@ -183,10 +185,10 @@ What this axis cannot see, stated rather than implied:
 
 | | |
 |---|---|
-| pairs of the option space declared | 24 |
-| distinct pairs of Metal types crossed | 23 |
-| types in at least one such pair | 25 |
-| types with two or more values compared and in no crossing of **either** table | 20 |
+| pairs of the option space declared | 25 |
+| distinct pairs of Metal types crossed | 24 |
+| types in at least one such pair | 26 |
+| types with two or more values compared and in no crossing of **either** table | 21 |
 
 | case module | cell | crossed | what only the cross decides |
 |---|---|---|---|
@@ -211,6 +213,7 @@ What this axis cannot see, stated rather than implied:
 | `sampler_crossings` | its cases | `MTLSamplerMinMagFilter` x `MTLSamplerMipFilter` | which level a sampler reads when the LOD clamp raises the requested one, and with which of the two filters -- `NotMipmapped` ignores the clamp outright, and the two mip filters pick their level and then their filter. The filter sweep samples at texel centres where a linear footprint is one texel, and the mip sweep pins both filters to nearest and says so, so neither can tell the three rules apart |
 | `sampler_crossings` | `sampler-compare-filter-pairs` | `MTLCompareFunction` x `MTLSamplerMinMagFilter` | whether Metal filters the comparison's **results** or compares a filtered depth. Sixteen cells of every comparison against a nearest and a linear filter, sampled where four texels carry the footprint at weights of a quarter each and at 9/16, 3/16, 3/16 and 1/16: the comparison sweep samples at texel centres, where a linear footprint is one texel and all eight comparisons read the same under either rule |
 | `shader_stencil` | `stencil-output` | `MTLCompareFunction` x `MTLStencilOperation` | which operation a fragment's `[[stencil]]` output fires, under a state whose two faces carry different comparisons and different operations: a side that fired the pass operation where the comparison failed writes a byte the comparison alone and the operation alone both allow |
+| `shared_creator_formats` | `shared-creator-padded-format-storage` | `MTLStorageMode` x `MTLPixelFormat` | which of the two a nil from `newSharedTextureWithDescriptor:` belongs to. Six formats by four storage modes, 24 cells: nil at `Shared`, `Managed` and `Memoryless` and a texture at `Private`, alike for the four padded 10-bit formats and for `RGBA8Unorm` and `R16Uint` as controls. The removed runtime rule read the format axis alone off a probe that had asked at `Shared` while its comment said `Private`, and answered nil for four formats at every mode; a storage sweep at one format could not tell that nil from a format's own, and a format sweep at one mode is the misreading itself |
 | `stencil_resolved_sample` | `resolve-stencil-depth-resolved-sample` | `MTLMultisampleStencilResolveFilter` x `MTLMultisampleDepthResolveFilter` | which sample's stencil a combined attachment's resolve texture holds. Under `Sample0` it is sample 0's whatever the depth filter, and under `DepthResolvedSample` it is the stencil of the sample the depth filter took: `sample-0-between` answers 0x33 under all three depth filters on one stencil filter and 0x33, 0x11 and 0x55 on the other. A side that read the stencil filter and ignored the depth filter, or took the depth-picked sample whatever the stencil filter, is right on four of the six cells and wrong on two, and neither value's own sweep reaches them |
 | `texture_descriptor_pairs` | `texture-pairs-usage-crossings` | `MTLTextureUsage` x `MTLPixelFormat` | which crossings of a usage with a format Metal's texture descriptor takes, and what it makes of them. `ShaderWrite` on `BC1_RGBA`, on `ASTC_4x4_LDR` and on `Depth32Float` each answer a texture of usage 0x3 and `RenderTarget` on the two block-compressed formats one of 0x4, where `ShaderAtomic` is fatal on every format but `R32Uint`: so the descriptor is where a guess puts the refusal and the pair is what says Metal does not put it there |
 | `texture_descriptor_pairs` | `texture-pairs-usage-crossings` | `MTLTextureUsage` x `MTLTextureType` | whether a usage bit that bars lossless compression bars it in every texture type. A 1D texture of 5000 texels answers 32768 bytes under `ShaderRead` and under `ShaderRead | PixelFormatView` alike, because its height is 1 and no usage of it is ever compressed, where the same two usages part by 128 bytes on a 64 by 64 2D texture -- so the usage sweep in one type reads as the bit always moving the footprint |
@@ -282,6 +285,7 @@ The work list of this axis, and the shape of the answer to *is the depth suffici
 - **`MTLFunctionOptions`**, 5 of 5 compared
 - **`MTLRenderStages`**, 5 of 5 compared
 - **`MTLStepFunction`**, 5 of 9 compared
+- **`MTLBlitOption`**, 4 of 4 compared
 - **`MTLPrimitiveTopologyClass`**, 4 of 4 compared
 - **`MTLBindingAccess`**, 3 of 3 compared
 - **`MTLHazardTrackingMode`**, 3 of 3 compared
@@ -290,8 +294,8 @@ The work list of this axis, and the shape of the answer to *is the depth suffici
 - **`MTLSamplerReductionMode`**, 3 of 3 compared
 - **`MTLSparsePageSize`**, 3 of 3 compared
 - **`MTLVisibilityResultMode`**, 3 of 3 compared
-- **`MTLBlitOption`**, 2 of 4 compared
 - **`MTLDepthClipMode`**, 2 of 2 compared
+- **`MTLDispatchType`**, 2 of 2 compared
 - **`MTLHeapType`**, 2 of 3 compared
 - **`MTLResourceUsage`**, 2 of 3 compared
 - **`MTLStoreActionOptions`**, 2 of 2 compared
@@ -328,16 +332,13 @@ The work list. A name here is a value of Metal's that no committed recording hol
 
 And the values only the suite's shared sources name, which some case reaches and this cannot attribute:
 
-- **`MTLBlitOption`**: `MTLBlitOptionNone`, `MTLBlitOptionRowLinearPVRTC`
 - **`MTLCPUCacheMode`**: `MTLCPUCacheModeWriteCombined`
 - **`MTLCommandBufferStatus`**: `MTLCommandBufferStatusNotEnqueued`, `MTLCommandBufferStatusEnqueued`, `MTLCommandBufferStatusCommitted`, `MTLCommandBufferStatusScheduled`, `MTLCommandBufferStatusCompleted`, `MTLCommandBufferStatusError`
-- **`MTLDispatchType`**: `MTLDispatchTypeSerial`, `MTLDispatchTypeConcurrent`
 - **`MTLHeapType`**: `MTLHeapTypeSparse`
 - **`MTLIndirectCommandType`**: `MTLIndirectCommandTypeDrawMeshThreads`
 - **`MTLPipelineOption`**: `MTLPipelineOptionArgumentInfo`
 - **`MTLPurgeableState`**: `MTLPurgeableStateNonVolatile`, `MTLPurgeableStateVolatile`, `MTLPurgeableStateEmpty`
 - **`MTLSparseTextureRegionAlignmentMode`**: `MTLSparseTextureRegionAlignmentModeOutward`, `MTLSparseTextureRegionAlignmentModeInward`
-- **`MTLStorageMode`**: `MTLStorageModeShared`, `MTLStorageModeManaged`, `MTLStorageModePrivate`, `MTLStorageModeMemoryless`
 
 ### Metal types with no generated value list
 

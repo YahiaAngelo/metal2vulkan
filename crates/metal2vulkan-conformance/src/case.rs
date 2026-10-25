@@ -111,7 +111,8 @@ pub enum TextureRole {
     Read,
     /// `MTLTextureUsageShaderWrite`: a texture a kernel writes.
     Write,
-    /// Both, as [`Side::texture_2d`] makes one.
+    /// `MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite`: both, as
+    /// [`Side::texture_2d`] makes one.
     ReadWrite,
     /// `MTLTextureUsageRenderTarget`: a texture a pass renders into, and nothing else. A tile
     /// function's implicit imageblock is its pass's attachments, so a tile case's targets carry

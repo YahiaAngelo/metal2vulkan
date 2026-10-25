@@ -979,6 +979,14 @@ def write_other_crossings(w, other, slots, fields, with_slots, with_fields) -> N
 def write_option_space(w, space) -> None:
     """The second axis: of each Metal enum's and option set's values, which the suite compared."""
     rows = space["rows"]
+    # The Metal types the suite spells through its own enums, which is the count behind the fifth
+    # shape read below: a floor nobody can see in a case, so the document says how wide it is.
+    spelled = {
+        metal
+        for held in space["vocabulary"].values()
+        for values in held.values()
+        for metal, _ in values
+    }
     values = sum(len(row["values"]) for row in rows)
     compared = sum(len(row["compared"]) for row in rows)
     shared = sum(len(row["shared"]) for row in rows)
@@ -1040,12 +1048,22 @@ def write_option_space(w, space) -> None:
     w(
         "- **A spelling of a value this derivation does not read.** Both numerators read names, "
         "and a name written in a shape the reading does not cover is counted nowhere and looks "
-        "exactly like a value no case reaches. Four shapes are read: a variant beside its type, "
-        "`objc2`'s own spelling, a renaming `use`, and a braced `use` whose variants the module "
-        "then writes bare. A fifth shape would be invisible the same way, so every count here is "
-        "a floor by that unknown — and the two shapes already found were each caught by someone "
-        "checking a count against the code, not by this derivation, so the unknown is not small "
-        "on the evidence."
+        "exactly like a value no case reaches. Five shapes are read: a variant beside its type, "
+        "`objc2`'s own spelling, a renaming `use`, a braced `use` whose variants the module then "
+        "writes bare, and a variant of the suite's **own vocabulary** whose declaration names the "
+        "Metal enumerator it spells (`Storage::Private` is `MTLStorageModePrivate`). A sixth "
+        "shape would be invisible the same way, so every count here is a floor by that unknown — "
+        "and all three shapes found so far were caught by someone checking a count against the "
+        "code, not by this derivation, so the unknown is not small on the evidence."
+    )
+    w(
+        f"- **A value the suite reaches through a shared item rather than a spelling** — the "
+        "vocabulary read above is of enums, and a value a case reaches by naming a shared "
+        "**constant** or **function** is attributed to no case: `heap_facts` and `resource_facts` "
+        "sweep `MTLPurgeableState` through `heap_query`'s `purgeable_pairs()` and "
+        "`MTLCPUCacheMode` through its `CACHE_MODES`, and both read as *shared only* below. "
+        "Following a name to the item it imports is a resolution of the suite's text and not a "
+        "spelling of a value, so the two are kept apart and this one is not read."
     )
     w(
         "- **A value a case states as a raw ordinal.** A case may hand the Metal leg an enum's "
@@ -1095,6 +1113,10 @@ def write_option_space(w, space) -> None:
     w(f"| share of the reachable compared | {100.0 * compared / reachable:.0f}% |")
     w(f"| values only the suite's shared sources name | {shared} |")
     w(f"| values no source names and no recording holds | {missing} |")
+    w(
+        "| of the types above, those the suite also spells through its own vocabulary "
+        f"| {len(spelled)} |"
+    )
     # "every REACHABLE value", because `MTLPixelFormat` has 266 compared and 35 that no case can
     # put to Metal, and calling that "every value compared" would be false of the type.
     whole = sum(1 for row in rows if not row["missing"] and not row["shared"])
