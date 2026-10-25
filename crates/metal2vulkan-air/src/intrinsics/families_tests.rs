@@ -1205,12 +1205,13 @@ fn read_forms_are_chosen_by_the_declaration() {
     assert_eq!(roles(l), [R::Texture, R::Coord, R::Lod, R::Access]);
 }
 
-/// AIR 2.1 states no residency status on a sample, gather, or read: the result is the texel alone
-/// rather than `{T, i8}`, and a sample carries no min-LOD-clamp position. AIR 2.2 added both in
-/// one step. The declaration picks the form, as it does a read's or an atomic's operand
-/// positions; a read of an AIR 2.1 module has the legacy operand form as well.
+/// Every AIR up to 2.1 states no residency status on a sample, gather, or read: the result is the
+/// texel alone rather than `{T, i8}`, and a sample carries no min-LOD-clamp position. AIR 2.2
+/// added both in one step. The declaration picks the form, as it does a read's or an atomic's
+/// operand positions, so one case covers the range; a read of such a module has the legacy
+/// operand form as well.
 #[test]
-fn the_air_2_1_forms_without_a_residency_status_are_chosen_by_the_declaration() {
+fn the_older_forms_without_a_residency_status_are_chosen_by_the_declaration() {
     use TexRole as R;
     let texture = |name: &str, decl: &str| match declared_air(name, decl) {
         AirIntrinsic::Texture(t) => t,
@@ -1219,7 +1220,8 @@ fn the_air_2_1_forms_without_a_residency_status_are_chosen_by_the_declaration() 
     let roles = |t: Texture| t.layout().positions().map(|(r, _)| r).collect::<Vec<_>>();
     // Every declaration below is one `xcrun metal -std=macos-metal2.1
     // -mmacosx-version-min=10.14` (Apple metal 32023.921) writes, which records
-    // `!air.version = !{i32 2, i32 1, i32 0}` and the triple `air64_v21`.
+    // `!air.version = !{i32 2, i32 1, i32 0}` and the triple `air64_v21`; the same shapes appear
+    // at every lower deployment target the compiler accepts, down to `air64_v18`.
     let cases: &[(&str, &str)] = &[
         // Sampling: no status, and no min-LOD clamp after the bias-or-level value.
         (

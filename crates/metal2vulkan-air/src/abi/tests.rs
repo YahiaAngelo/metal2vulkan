@@ -741,12 +741,13 @@ fn vertex_and_fragment_interfaces_decode() {
     );
 }
 
-/// AIR 2.1 restates the MSL member's interpolation qualifier on `air.vertex_output` as well as on
-/// the fragment input that receives it, and restates it partly (a `[[centroid_perspective]]`
-/// output carries `air.centroid` alone). AIR 2.2 and later write the same module without the
-/// keys, so a vertex output decodes with or without them, and to the same role either way.
+/// Every AIR up to 2.1 restates the MSL member's interpolation qualifier on `air.vertex_output` as
+/// well as on the fragment input that receives it, and restates it partly (a
+/// `[[centroid_perspective]]` output carries `air.centroid` alone). AIR 2.2 and later write the
+/// same module without the keys, so a vertex output decodes with or without them, and to the same
+/// role either way. Which keys are present is read from the node, so one case covers the range.
 #[test]
-fn a_vertex_output_accepts_the_interpolation_keys_air_2_1_states_on_it() {
+fn a_vertex_output_accepts_the_interpolation_keys_older_air_states_on_it() {
     let vertex_output = |keys: &[&'static str]| {
         let mut b = ModuleBuilder::new();
         let f32t = b.float();
@@ -2182,7 +2183,7 @@ fn function_constants_decode_and_are_checked() {
     );
     // Not an initializer global: one the host does not write, one that is not `constant` (which
     // the reading analysis takes for granted), and one outside the constant address space. Each
-    // is refused in the section AIR 2.2 writes and in the AIR 2.1 shape with none.
+    // is refused in the section AIR 2.5 writes and in the earlier shape with none.
     for section in [Some(Section::FcInitializer), None] {
         let cases: [(AddrSpace, bool, bool); 3] = [
             (AddrSpace::Constant, true, false),

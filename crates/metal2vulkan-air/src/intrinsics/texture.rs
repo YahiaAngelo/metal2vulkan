@@ -19,11 +19,12 @@
 //!   i32 access)`.
 //! - a sample, gather, or read **states a residency status** ([`Texture::status`]) from AIR 2.2
 //!   on: its result is `{T, i8}`, the texel and Metal's residency byte, and a sample carries the
-//!   min-LOD-clamp position above. An AIR 2.1 declaration of the same name states neither: it
-//!   returns the texel alone and a sample has no clamp position. The declaration picks the form,
-//!   as it does for a read's or an atomic's operand positions. The two changed in one emitter
-//!   step, and no module has been seen with one without the other, so the mixtures stay unknown:
-//!   a current-form read (with the sampler and offset) without the status is not a form of it.
+//!   min-LOD-clamp position above. Every AIR up to 2.1 states neither: such a declaration returns
+//!   the texel alone and its sample has no clamp position. The declaration picks the form, as it
+//!   does for a read's or an atomic's operand positions, so the whole range below 2.2 needs no
+//!   case of its own. The two changed in one emitter step, and no module has been seen with one
+//!   without the other, so the mixtures stay unknown: a current-form read (with the sampler and
+//!   offset) without the status is not a form of it.
 //! - **write** `void (tex, coord, [cube: face], [array: layer], texel, [not buffer: lod],
 //!   i32 access)`.
 //! - a read's or write's texel is `f32` or `f16`, `s`/`u` `i32` or `i16`, or, for Metal's

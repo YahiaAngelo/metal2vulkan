@@ -905,14 +905,16 @@ impl<'m> Cx<'m, '_> {
                 }
             }
             Key::VertexOutput => {
-                // AIR 2.1 restates the MSL member's interpolation qualifier on the vertex output
-                // as well as on the fragment input that receives it, and restates it partly: a
-                // `[[centroid_perspective]]` output carries `air.centroid` with no
+                // Every AIR up to 2.1 restates the MSL member's interpolation qualifier on the
+                // vertex output as well as on the fragment input that receives it, and restates
+                // it partly: a `[[centroid_perspective]]` output carries `air.centroid` with no
                 // `air.perspective`, where its fragment input carries both. AIR 2.2 and later
                 // write the same module without the keys. Interpolation is the fragment input's
-                // (`ParamRole::FragmentInput`, which states it in full and is what the
-                // rasterizer is set from); a vertex stage neither interpolates nor observes it,
-                // so the keys are read here and carried nowhere.
+                // (`ParamRole::FragmentInput`, which states it in full at every version and is
+                // what the rasterizer is set from); a vertex stage neither interpolates nor
+                // observes it, so the keys are read here and carried nowhere. Which keys are
+                // present is read from the node, never from the recorded version, so the whole
+                // range this covers needs no case of its own.
                 a.allow(self.meter, site, &[&[Key::Shared], INTERPOLATION])?;
                 let key = kept_bytes(n.word.as_deref().unwrap_or_default(), self.meter)?;
                 OutputRole::VertexOutput(UserKey(key))

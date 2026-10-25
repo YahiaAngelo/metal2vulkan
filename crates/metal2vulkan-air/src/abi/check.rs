@@ -77,9 +77,10 @@ pub(super) fn module(
             .ok_or_else(|| site.err(AbiError::BadValue, key))?;
         // The host supplies the value, so the initializer is `undef` and the object is written
         // from outside the module before execution starts. Apple's emitter also places the
-        // object in `air.fc_initializer` from AIR 2.2 on, and in no section in AIR 2.1, so the
-        // section is not part of the test: the `!air.function_constants` record is what names
-        // the global, and these are the properties the binding needs of it.
+        // object in `air.fc_initializer` from AIR 2.5 on, and in no section from AIR 2.0 to 2.4,
+        // so the section is not part of the test: the `!air.function_constants` record is what
+        // names the global, and these are the properties the binding needs of it. The record
+        // itself is byte-identical from AIR 2.0 to 2.9; only this attribute of the global moves.
         let undef = g
             .init
             .and_then(|c| m.consts().get(c))
