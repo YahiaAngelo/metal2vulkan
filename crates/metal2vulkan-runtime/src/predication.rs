@@ -581,10 +581,10 @@ impl Unit {
     /// ([`Predication::step_holding`]), and every other field a record leaves — its open blocks,
     /// its kill, its run, its droppable range's anchor and held steps, its check word and its
     /// carried loop bodies — is set only through one, which the assertion below holds it to. Its
-    /// range's `work` alone is not: a dispatch Metal emitted sets it, and it is read only where
-    /// an unbalanced record with no anchor sets [`left`](Unit::left), which
-    /// [`alone`](Predication::alone) excludes ([`unbalanced`](Predication::unbalanced) sets the
-    /// two together, and [`resume`](Predication::resume) asserts it).
+    /// range's `work` alone is not, so a fresh unit can hold it where a unit begun anew would
+    /// not: a dispatch Metal emitted sets it. Its one reader,
+    /// [`resume`](Predication::resume), is an encoder whose own encoding laid the work it reads,
+    /// or one of a unit [`alone`](Predication::alone) excludes, which is the argument there.
     fn fresh(&self) -> bool {
         let fresh = self.counter.is_none();
         // What `alone` rests on: a unit with no step laid carries nothing a unit begun anew
@@ -944,11 +944,14 @@ impl Predication {
         if !unit.stack.is_empty() || !unit.range.dropping {
             return Ok((None, false));
         }
-        // The work this reads is the encoder's own, or a later encoder's of the unit: where no
-        // anchor reset the range, the unbalanced record that set `dropping` already set `left`
-        // for any work Metal emitted before it, which `alone` excludes. So an encoder `alone`
-        // answers for reads only work its own encoding laid down.
-        debug_assert!(unit.range.anchor.is_some() || unit.left || !unit.range.work);
+        // The range runs from its anchor to this record, so the work it holds is what Metal
+        // emitted before the record that dropped it and what the encoders since laid down: a
+        // dispatch encoded after that record lies in the range too, and is one Metal emits. An
+        // encoder [`alone`](Self::alone) reads only work its own encoding laid down: the work
+        // from before the drop set [`left`](Unit::left), which `alone` excludes
+        // ([`unbalanced`](Self::unbalanced) sets the two together), and the work since was laid
+        // by the encoder that laid the `Drop` step or a later one of the unit, of which `alone`
+        // keeps only the encoder its unit ended with.
         let dead = !unit.range.work;
         let record = self.step(uploads, device, (None, None), |counter| {
             PredicationStep::new(counter, PredicationOp::Resume)

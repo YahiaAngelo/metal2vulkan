@@ -27,6 +27,9 @@
 //!   buffer up to, the heap's bytes past a buffer placed in a heap, and zero, announced, where
 //!   Metal reads memory unrelated to the buffer.
 
+use super::host_memory::Seen;
+use super::rebind_reach::{buffer_len, buffer_over, deallocated, pages};
+use super::rebinds::rebind;
 use super::{
     buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device,
     validated_device_with, Messages, ScratchCache, WAIT,
@@ -47,6 +50,7 @@ use metal2vulkan_runtime::{
     LoadAction, MetalLevel, Origin, PipelineOptions, Problem, RenderPassDescriptor,
     ResourceOptions, Size, StoreAction, TextureDescriptor,
 };
+use std::sync::Arc;
 
 /// The kernels: `prd_mark` adds 1 to word `t[0]` of `log`; `prd_put` writes `v[0]` into word 0
 /// of `w`; `prd_mark_group` adds its threadgroup's width to word `t[0]` of `log` (it observes
@@ -638,6 +642,95 @@ fn streams_run_what_metal_ran() {
             wrong.len(),
             measured.len(),
             wrong.join("\n")
+        );
+    });
+}
+
+/// A compute encoder whose first record is unbalanced with nothing dispatched before it drops its
+/// unit from the unit's start, and the dispatches it encodes after that record lie in the dropped
+/// range too (it runs to the next record): the range holds work Metal emitted, so the block the
+/// next record opens is live rather than killed from its start. Such an encoder encodes again
+/// exactly where a rebind encodes it again (`Predication::alone`: its unit laid no loop and left
+/// no work out, and the work its `Resume` reads its own encoding laid down). The measured stream
+/// `h147` (`In T1 T2 I1 T3 E T4`) marking into a no-copy buffer rebound after the commit and
+/// before the first submission: the new pages hold the marks Metal ran (T3 and T4, not T1 or T2),
+/// the old pages none, and the rebind encoded the encoder again, refusing nothing.
+#[test]
+fn a_drop_from_a_unit_s_start_then_a_dispatch_encodes_its_encoder_again_exactly() {
+    on_device(|device| {
+        let mark = kernel(device, "prd_mark", false);
+        let word = buffer_with(device, &bytes(&[1, 0, 0, 0])).unwrap();
+        // Each mapping lives with its deallocator, which notes its first 16 bytes as it runs.
+        let seen = Arc::new(Seen::default());
+        let Some(log) = buffer_over(device, pages(buffer_len(), 0, &[0; 16]), &seen) else {
+            return;
+        };
+        let queue = device.new_command_queue().unwrap();
+        let gate = device.new_shared_event().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        command_buffer
+            .encode_wait_for_event(EventRef::from(&gate), 1)
+            .unwrap();
+        let before = device.work_counts();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        let mark_at = |encoder: &mut ComputeCommandEncoder, tag: u32| {
+            encoder.set_compute_pipeline_state(&mark).unwrap();
+            encoder.set_bytes(&tag.to_le_bytes(), 0).unwrap();
+            encoder.set_buffer(Some(&log), 0, 1).unwrap();
+            encoder.dispatch_threads(one(), one()).unwrap();
+        };
+        // `In T1 T2 I1 T3 E T4`: a Start on a nil buffer with no block open is unbalanced and
+        // drops the unit from its start to the next record, T1 and T2 with it; the If then holds,
+        // as the range held work, and T3 and T4 run.
+        encoder.encode_start_if(None, 0, EQUAL, 0).unwrap();
+        mark_at(&mut encoder, 1);
+        mark_at(&mut encoder, 2);
+        encoder.encode_start_if(Some(&word), 0, EQUAL, 1).unwrap();
+        mark_at(&mut encoder, 3);
+        assert_eq!(encoder.encode_end_if(), Ok(true));
+        mark_at(&mut encoder, 4);
+        encoder.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        let fresh = Arc::new(Seen::default());
+        let rebound = rebind(&log, pages(buffer_len(), 0, &[0; 16]), &fresh);
+        assert_eq!(rebound, Ok(()), "the rebind");
+        gate.set_signaled_value(1);
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        let after = device.work_counts();
+        let marks = |bytes: &[u8], tags: usize| -> Vec<u32> {
+            (bytes.chunks(4).take(tags))
+                .map(|w| u32::from_le_bytes(w.try_into().unwrap()))
+                .collect()
+        };
+        let new_pages = marks(&read_buffer(&log, 0, 20).unwrap(), 5);
+        // The old pages go once nothing holds them: the first encoding was never submitted, so
+        // the 16 bytes the deallocator records hold none of its marks.
+        deallocated(&seen);
+        let old_pages = marks(&seen.bytes.lock().unwrap(), 4);
+        assert_eq!(
+            (
+                command_buffer.status(),
+                command_buffer.error(),
+                new_pages,
+                old_pages,
+                after.encoders_reencoded - before.encoders_reencoded,
+                after.reencodes_refused - before.reencodes_refused,
+            ),
+            (
+                CommandBufferStatus::Completed,
+                None,
+                vec![0, 0, 0, 1, 1],
+                vec![0, 0, 0, 0],
+                1,
+                0,
+            ),
+            "(status, error, the new pages' marks 0 to 4, the old pages' 0 to 3, encoders encoded \
+             again, refused)"
+        );
+        eprintln!(
+            "PRD-REENCODE {}: `In T1 T2 I1 T3 E T4` encoded again by a rebind ran T3 and T4, not \
+             T1 or T2",
+            device.name()
         );
     });
 }
