@@ -18,7 +18,10 @@
 //! functions under the fetch state of a pipeline of the attachment formats its cases use, which the
 //! interlocked storage form needs, and each whose cases draw multisampled (`exf_fetch_blend`,
 //! `exf_fetch_count`, `msf_fetch_ms`) the same state at four samples, compiled under
-//! `multisampled`: the per-sample forms.
+//! `multisampled`: the per-sample forms. `engine/tob_renders` adds the snapshot of its own-pixel
+//! texture read (`tob_read` under `LoweringInputs::snapshot_textures`) in the form that holds a
+//! 16-bit float texel's code and in one of narrower codes: the two-draw copy-and-read form, which
+//! the entry alone, compiled without the input, never reaches.
 //!
 //! A cell is the first 64 bits of SHA-256 over the final SPIR-V words of the subject's stage
 //! modules (each prefixed by its word count), or the typed outcome class of a refusal, so a new
@@ -46,8 +49,10 @@
 //! `air.gather_texture*` or `air.calculate_*` intrinsic) under every exact form
 //! (`pipeline::testing::EXACT_SAMPLING`: Metal's sampler emulated, `SamplingPolicy::Exact`, and
 //! `DevicePolicy::exact_answers`), whose output the default policy's native device sampling never
-//! reaches. Its profiles' fingerprints are those of that policy. The bless writes both tables, under
-//! the same rule.
+//! reaches. Its profiles' fingerprints are those of that policy, and its snapshot rows carry the
+//! copy's half-bits arm, which the slot's unsigned integer alias feeds under
+//! `HalfTexelBitsPolicy::Exact` and the default policy does not take. The bless writes both
+//! tables, under the same rule.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -66,8 +71,8 @@ use crate::pipeline::testing::{
 };
 use crate::pipeline::{
     ColorAttachmentDescriptor, ComputePipelineDescriptor, FramebufferFetchInputs,
-    FunctionDescriptor, LoweringInputs, RenderPipelineDescriptor, SlotClass, SlotRef, Stage,
-    StageSource, StorageImageClass, TileRenderPipelineDescriptor, VertexAttributeDescriptor,
+    FunctionDescriptor, LoweringInputs, RenderPipelineDescriptor, SlotClass, SlotRef, SnapshotForm,
+    Stage, StageSource, StorageImageClass, TileRenderPipelineDescriptor, VertexAttributeDescriptor,
     VertexBufferLayoutDescriptor, VertexDescriptor,
 };
 use crate::Budget;
@@ -165,6 +170,16 @@ enum Subject {
         entry: &'static str,
         formats: &'static [PixelFormat],
         samples: u32,
+    },
+    /// Fragment `entry` compiled under a snapshot of its texture slot 0 in `form`
+    /// (`LoweringInputs::snapshot_textures`), linked alone: the two-draw copy-and-read form a draw
+    /// that reads a texture its own subpass renders takes, which the entry alone, compiled without
+    /// the input, never reaches. Under the exact table's policy the slot also takes an unsigned
+    /// integer alias beside its image, so a form that holds a 16-bit code carries the copy's
+    /// half-bits arm as well (`lower::fragment`'s `snapshot::fetches_half_bits`).
+    Snapshot {
+        entry: &'static str,
+        form: SnapshotForm,
     },
     /// The module does not decode: its refusal class in every column.
     Undecodable(String),
@@ -273,6 +288,10 @@ fn pipelines(fixture: &str) -> Vec<(String, Subject)> {
             [1, 4].map(|samples| fetch_subject(entry, &[PixelFormat::RGBA32Float], samples))
         })
         .collect(),
+        "engine/tob_renders.ll" => [SnapshotForm::Half, SnapshotForm::Unorm8]
+            .into_iter()
+            .map(|form| snapshot_subject("tob_read", form))
+            .collect(),
         "engine/multisample.ll" => [
             "multisample_center_at_sample",
             "multisample_sampled_varying",
@@ -320,7 +339,20 @@ fn fetch_subject(
     )
 }
 
+fn snapshot_subject(entry: &'static str, form: SnapshotForm) -> (String, Subject) {
+    (
+        format!("snapshot {entry} as {form:?}"),
+        Subject::Snapshot { entry, form },
+    )
+}
+
 const STORAGE_FIXTURE: &str = "engine/storage_texture_write.ll";
+
+/// The fixture and entry whose snapshot subjects the tables take, and the form that carries the
+/// copy's half-bits arm under the exact table's policy ([`check_snapshot_half_bits`]).
+const SNAPSHOT_FIXTURE: &str = "engine/tob_renders.ll";
+const SNAPSHOT_ENTRY: &str = "tob_read";
+const SNAPSHOT_HALF_FORM: SnapshotForm = SnapshotForm::Half;
 
 fn storage_subject(format: PixelFormat) -> String {
     format!("compute storage_texture_write, texture 0 as {format:?}")
@@ -634,6 +666,13 @@ fn compiled(lib: &Library, subject: &Subject, dev: &Device) -> Result<Vec<Vec<u3
             let c = dev.compile_function(&f, &inputs, &b)?;
             Ok(vec![link_standalone(c.artifact(), dev.profile())?.1])
         }
+        Subject::Snapshot { entry, form } => {
+            let mut inputs = LoweringInputs::new();
+            inputs.snapshot_textures.insert(snapshot_slot(), *form);
+            let f = FunctionDescriptor::new(lib.function(entry)?);
+            let c = dev.compile_function(&f, &inputs, &b)?;
+            Ok(vec![link_standalone(c.artifact(), dev.profile())?.1])
+        }
         Subject::Undecodable(_) | Subject::Unassembled => {
             unreachable!("a subject without a library compiles nothing")
         }
@@ -643,6 +682,15 @@ fn compiled(lib: &Library, subject: &Subject, dev: &Device) -> Result<Vec<Vec<u3
 fn storage_slot() -> SlotRef {
     SlotRef {
         stage: Stage::Kernel,
+        class: SlotClass::Texture,
+        index: 0,
+    }
+}
+
+/// The fragment texture slot a snapshot subject reads through its snapshot.
+fn snapshot_slot() -> SlotRef {
+    SlotRef {
+        stage: Stage::Fragment,
         class: SlotClass::Texture,
         index: 0,
     }
@@ -808,6 +856,8 @@ fn committed(golden: Golden) -> Option<Table> {
 struct Observed {
     table: Table,
     skipped: BTreeSet<String>,
+    /// The loaded fixtures, so a check beside the table can recompile a subject of one.
+    fixtures: Vec<Fixture>,
 }
 
 fn observe(golden: Golden, devices: &[(String, Device)]) -> Observed {
@@ -850,6 +900,7 @@ fn observe(golden: Golden, devices: &[(String, Device)]) -> Observed {
     Observed {
         table: Table { profiles, rows },
         skipped,
+        fixtures,
     }
 }
 
@@ -949,6 +1000,49 @@ fn check_storage_pair(observed: &Table, devices: &[(String, Device)]) -> usize {
     swizzled
 }
 
+/// The snapshot subject of the half-bits form reaches the copy's half-bits arm on a committed
+/// profile under the exact table's policy: its module fetches the slot twice, the copy's two
+/// exclusive arms, one of them through the slot's unsigned integer alias (an image of unsigned
+/// integer sampled type), as `engine_snapshot_exact` reads it on a whole render variant.
+///
+/// Without this the table's cells would still move with the lowering and still re-bless, but
+/// nothing would say the arm is what they cover: a change that made the arm unreachable would
+/// read as an ordinary re-bless.
+fn check_snapshot_half_bits(fixtures: &[Fixture], devices: &[(String, Device)]) -> usize {
+    let fixture = fixtures
+        .iter()
+        .find(|f| f.name == SNAPSHOT_FIXTURE)
+        .unwrap_or_else(|| panic!("no {SNAPSHOT_FIXTURE} fixture"));
+    let Some(lib) = fixture.library.as_ref() else {
+        return 0;
+    };
+    let subject = Subject::Snapshot {
+        entry: SNAPSHOT_ENTRY,
+        form: SNAPSHOT_HALF_FORM,
+    };
+    let mut armed = 0;
+    for (stem, dev) in devices {
+        // A profile without the pixel interlock, or whose memory model the form does not reach,
+        // refuses the snapshot: its cell is that refusal, and it carries no arm.
+        let Ok(modules) = compiled(lib, &subject, dev) else {
+            continue;
+        };
+        let fetches: Vec<bool> = modules
+            .iter()
+            .flat_map(|m| super::engine_snapshot_exact::fetched_sampled_types(m))
+            .collect();
+        let integer = fetches.iter().filter(|alias| **alias).count();
+        assert_eq!(
+            (fetches.len(), integer),
+            (2, 1),
+            "{stem}: the {SNAPSHOT_HALF_FORM:?} snapshot of {SNAPSHOT_ENTRY} must fetch the slot \
+             twice under exact answers, once through its unsigned integer alias: {fetches:?}"
+        );
+        armed += 1;
+    }
+    armed
+}
+
 #[test]
 fn golden_hashes_match_the_table() {
     let devices = devices(DEFAULT.policy);
@@ -969,6 +1063,14 @@ fn golden_hashes_match_the_table() {
 fn exact_golden_hashes_match_the_table() {
     let devices = devices(EXACT.policy);
     let observed = observe(EXACT, &devices);
+    if !observed.skipped.contains(SNAPSHOT_FIXTURE) {
+        let armed = check_snapshot_half_bits(&observed.fixtures, &devices);
+        assert!(
+            armed > 0,
+            "no committed profile reaches the copy's half-bits arm, which the \
+             {SNAPSHOT_HALF_FORM:?} snapshot rows are here to cover"
+        );
+    }
     matches_the_table(EXACT, &devices, &observed);
 }
 
@@ -1069,6 +1171,7 @@ fn a_stale_cell_names_the_key_that_moved_and_not_an_unmoved_cell() {
     let observed = |fp: &str, cell: &str| Observed {
         table: table(fp, "src", cell),
         skipped: BTreeSet::new(),
+        fixtures: Vec::new(),
     };
 
     // The profile re-keyed and the cell did not: the two fingerprints, and no word about a cell.
@@ -1178,6 +1281,7 @@ fn only_a_cell_changed_under_its_key_needs_a_bump() {
     let observed = |t: Table, skipped: &[&str]| Observed {
         table: t,
         skipped: skipped.iter().map(|s| (*s).to_owned()).collect(),
+        fixtures: Vec::new(),
     };
     let base = table("s", "f", &[("a.ll", "h1")]);
     let d = diff(&base, &observed(table("s", "f", &[("a.ll", "h2")]), &[]));

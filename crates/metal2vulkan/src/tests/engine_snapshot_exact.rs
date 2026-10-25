@@ -317,7 +317,7 @@ fn the_copy_of_a_snapshot_slot_refuses_a_form_its_fetch_s_lanes_do_not_hold() {
 
 /// Each `OpImageFetch` of module `words`, with whether the image it fetches has an unsigned
 /// integer sampled type: a slot's unsigned integer alias view, as against its own float image.
-fn fetched_sampled_types(words: &[u32]) -> Vec<bool> {
+pub(super) fn fetched_sampled_types(words: &[u32]) -> Vec<bool> {
     use crate::spirv_binary::{parse_bytes, Operand};
     use crate::spv::Op;
     let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
