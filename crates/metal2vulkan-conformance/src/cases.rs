@@ -154,6 +154,7 @@ pub mod sampler_crossings;
 pub mod sampler_filtering;
 pub mod scheduled_handlers;
 pub mod shader_stencil;
+pub mod shared_creator_formats;
 pub mod shared_events;
 pub mod shared_exponent_storage;
 pub mod simdgroup_lockstep;
@@ -544,6 +545,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(pass_sequence_actions::all());
     cases.extend(render_residency::all());
     cases.extend(frame_chains::boxed());
+    cases.extend(shared_creator_formats::all());
     cases
 }
 
