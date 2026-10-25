@@ -4,6 +4,7 @@ use crate::coverage::{Leg, ROBUSTNESS_FEATURES};
 use crate::engine::{committed_profiles, load_description};
 use metal2vulkan::device::ApiVersion;
 use metal2vulkan::device::Device;
+use std::collections::BTreeMap;
 
 /// A chain that supports every member.
 fn all_supported() -> FeatureChain {
@@ -22,19 +23,112 @@ fn every_extension() -> Available {
     )
 }
 
-/// What a device described by `description` supports, as a chain: every member it lists, and
-/// every member no vocabulary names.
-fn supported_by(description: &DeviceDescription) -> FeatureChain {
+/// What a committed profile states that the engine's vocabulary cannot carry, by the names the
+/// Vulkan registry uses: a `DeviceDescription` holds only the vocabulary, so a member with no
+/// [`VkFeature`] ([`Member::registry`]) and an extension name with no [`VkExtension`] are read
+/// from the profile's own capture here. Every feature member of every capability block, each
+/// supported where any block states it so, and every extension name.
+struct Capture {
+    members: BTreeMap<String, bool>,
+    extensions: BTreeSet<String>,
+}
+
+impl Capture {
+    /// Committed profile `stem`'s capture.
+    fn of(stem: &str) -> Capture {
+        let path = crate::engine::profiles_dir().join(format!("{stem}.json"));
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let json: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let blocks = json["capabilities"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{}: no capability block", path.display()));
+        assert!(!blocks.is_empty(), "{}: no capability", path.display());
+        let mut members: BTreeMap<String, bool> = BTreeMap::new();
+        let mut extensions = BTreeSet::new();
+        for block in blocks.values() {
+            if let Some(names) = block["extensions"].as_object() {
+                extensions.extend(names.keys().cloned());
+            }
+            for structure in block["features"]
+                .as_object()
+                .into_iter()
+                .flat_map(|features| features.values())
+            {
+                for (name, value) in structure.as_object().into_iter().flatten() {
+                    if let Some(stated) = value.as_bool() {
+                        let supported = members.entry(name.clone()).or_default();
+                        *supported = *supported || stated;
+                    }
+                }
+            }
+        }
+        Capture {
+            members,
+            extensions,
+        }
+    }
+
+    /// Whether the capture states the member the registry calls `name` supported. A member no
+    /// block states is not supported: a capture holds every member of every structure it read, so
+    /// an absent one is a structure the device does not expose (the requirement documents,
+    /// `roadmap-2022` and `vk12-floor`, state almost none).
+    fn states(&self, name: &str) -> bool {
+        self.members.get(name).copied().unwrap_or(false)
+    }
+
+    /// Whether the capture lists the device extension `name`.
+    fn lists(&self, name: &CStr) -> bool {
+        self.extensions
+            .contains(name.to_str().expect("every extension name is UTF-8"))
+    }
+}
+
+/// What a device described by `description` supports, as a chain: every member the description
+/// lists, and every member the engine's vocabulary does not name as `capture`, the device's own,
+/// states it. Claiming the latter supported would model a device no profile describes:
+/// `moltenvk-m3` states `sparseBinding` and every line-rasterization member false, and
+/// `swiftshader` states `textureCompressionASTC_HDR` false.
+fn supported_by(description: &DeviceDescription, capture: &Capture) -> FeatureChain {
     let mut chain = FeatureChain::default();
     for member in MEMBERS {
-        if member
-            .feature
-            .is_none_or(|feature| description.features.contains(&feature))
-        {
+        let supported = match member.feature {
+            Some(feature) => description.features.contains(&feature),
+            None => capture.states(registry_name(member)),
+        };
+        if supported {
             member.set(&mut chain);
         }
     }
     chain
+}
+
+/// The registry name of a member the engine's vocabulary does not name
+/// (`a_member_the_vocabulary_does_not_name_carries_its_registry_name` holds every such row to
+/// having one).
+fn registry_name(member: &Member) -> &'static str {
+    member.registry.unwrap_or_else(|| {
+        panic!(
+            "{:?}.{} has no feature and no registry name",
+            member.structure, member.name
+        )
+    })
+}
+
+/// A device the committed profile `stem` describes, as a context at `version` models it: what it
+/// supports ([`supported_by`]) and what it lists ([`listed_at`]), both read from the profile's own
+/// capture where the vocabulary cannot carry them.
+fn modelled(
+    stem: &str,
+    description: &DeviceDescription,
+    version: ApiVersion,
+) -> (FeatureChain, Available) {
+    let capture = Capture::of(stem);
+    (
+        supported_by(description, &capture),
+        listed_at(version, description, &capture),
+    )
 }
 
 /// `description` as a context's query reads it: at the instance's API 1.2, so a feature only a
@@ -54,26 +148,125 @@ fn excluded(feature: VkFeature) -> bool {
     NOT_ENABLED.iter().any(|(named, _)| *named == feature)
 }
 
-/// The extensions a device described by `description` lists: every name whose vocabulary
-/// extension it reports, and the names the vocabulary does not carry (a Khronos profile's
-/// description keeps only the vocabulary).
-fn listed_by(description: &DeviceDescription) -> Available {
-    listed_at(ApiVersion::V1_2, description)
-}
-
-/// [`listed_by`], as a context at `version` sees the list.
-fn listed_at(version: ApiVersion, description: &DeviceDescription) -> Available {
+/// The extensions a device described by `description` lists, as a context at `version` sees them:
+/// every name whose vocabulary extension the description reports, and every name the vocabulary
+/// does not carry that `capture`, the device's own, lists (a `DeviceDescription` keeps only the
+/// vocabulary, so those two names are read there).
+fn listed_at(version: ApiVersion, description: &DeviceDescription, capture: &Capture) -> Available {
     Available::at(
         version,
         EXTENSIONS
             .iter()
-            .filter(|extension| {
-                extension
-                    .vocabulary
-                    .is_none_or(|name| description.extensions.contains(&name))
+            .filter(|extension| match extension.vocabulary {
+                Some(name) => description.extensions.contains(&name),
+                None => capture.lists(extension.name),
             })
             .map(|extension| extension.name.to_owned()),
     )
+}
+
+/// Every member the engine's vocabulary does not name carries its registry name, and no member it
+/// names carries one. That name is the only way a model of a device can read what the device
+/// states about the member, so a `None` row without one is a member nothing can report
+/// unsupported. The executor's own names are those rows' ([`ExecutorFeature::name`]), and every
+/// name is one some committed capture states, so a misspelling cannot read as an unsupported
+/// member on every device.
+#[test]
+fn a_member_the_vocabulary_does_not_name_carries_its_registry_name() {
+    let mut unnamed = 0;
+    let mut names = BTreeSet::new();
+    for member in MEMBERS {
+        match (member.feature, member.registry) {
+            (Some(feature), Some(name)) => {
+                panic!("{feature:?} is in the vocabulary and carries the registry name {name:?}")
+            }
+            (Some(_), None) => {}
+            (None, None) => panic!(
+                "{:?}.{} has no feature and no registry name",
+                member.structure, member.name
+            ),
+            (None, Some(name)) => {
+                assert!(names.insert(name), "{name} is two members' registry name");
+                unnamed += 1;
+            }
+        }
+        if let Some(executor) = member.executor {
+            assert_eq!(
+                Some(executor.name()),
+                member.registry,
+                "{:?}.{}",
+                member.structure,
+                member.name
+            );
+        }
+    }
+    assert_eq!(unnamed, 12, "members the vocabulary does not name");
+    // Every one of them is a name some committed capture states: a misspelled name would read as
+    // a device that does not support the member, on every device.
+    let captures: Vec<Capture> = committed_profiles()
+        .unwrap()
+        .iter()
+        .map(|stem| Capture::of(stem))
+        .collect();
+    for name in names {
+        assert!(
+            captures
+                .iter()
+                .any(|capture| capture.members.contains_key(name)),
+            "no committed profile's capture states {name:?}: the registry spells it otherwise, so \
+             every model reads the member as unsupported"
+        );
+    }
+}
+
+/// No context enables a member its device does not report: the invariant the enable lists keep on
+/// a real device, where `supported` is the driver's own `VkPhysicalDeviceFeatures2`
+/// ([`FeatureChain::query`]), held here over every committed profile, both kinds of context and
+/// both legs. `vkCreateDevice` fails with `VK_ERROR_FEATURE_NOT_PRESENT` over a feature it is
+/// asked for and the device does not support, so a context whose chain sets a member the queried
+/// chain does not report opens no device at all.
+#[test]
+fn no_context_enables_a_member_the_device_does_not_report() {
+    use super::super::profiles::ProfileRestriction;
+    let mut checked = 0;
+    for stem in committed_profiles().unwrap() {
+        let restriction = ProfileRestriction::committed(&stem).unwrap();
+        let version = restriction.context_version();
+        for (kind, description, version) in [
+            (
+                "device",
+                at_1_2(load_description(&stem).unwrap()),
+                ApiVersion::V1_2,
+            ),
+            ("restricted", restriction.read_at(version), version),
+        ] {
+            let (supported, available) = modelled(&stem, &description, version);
+            for leg in [Leg::Stated, Leg::RobustnessOff] {
+                let mut enables = engine_list(
+                    old_engine_list(&supported, &available),
+                    &description,
+                    &supported,
+                    &available,
+                    leg,
+                )
+                .unwrap_or_else(|error| panic!("{stem} {kind} {leg:?}: {error}"));
+                enable_generated_commands(&mut enables, &supported, &available);
+                for member in MEMBERS {
+                    if member.is_set(&enables.chain) {
+                        assert!(
+                            member.is_set(&supported),
+                            "{stem} {kind} {leg:?}: the context enables {:?}.{}, which the device \
+                             does not report",
+                            member.structure,
+                            member.name
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 1000, "{checked} enabled members checked");
 }
 
 #[test]
@@ -303,8 +496,7 @@ fn the_new_list_enables_the_recommendation_but_the_excluded() {
     assert!(!stems.is_empty());
     for stem in stems {
         let description = at_1_2(load_description(&stem).unwrap());
-        let supported = supported_by(&description);
-        let available = listed_by(&description);
+        let (supported, available) = modelled(&stem, &description, ApiVersion::V1_2);
         let old = enabled_set(&old_engine_list(&supported, &available));
         opened_description(description.clone(), &old)
             .unwrap_or_else(|error| panic!("{stem}: the old list: {error}"));
@@ -372,11 +564,10 @@ fn the_new_list_enables_the_recommendation_but_the_excluded() {
 fn the_stated_leg_enables_what_the_description_states_or_names_it_unmet() {
     let leg_of = |stem: &str, unreported: Option<VkFeature>| {
         let description = at_1_2(load_description(stem).unwrap());
-        let mut supported = supported_by(&description);
+        let (mut supported, available) = modelled(stem, &description, ApiVersion::V1_2);
         if let Some(feature) = unreported {
             *(member_of(feature).unwrap().write)(&mut supported) = vk::FALSE;
         }
-        let available = listed_by(&description);
         engine_list(
             old_engine_list(&supported, &available),
             &description,
@@ -431,8 +622,7 @@ fn the_stated_leg_enables_what_the_description_states_or_names_it_unmet() {
 fn the_new_list_enables_extended_dynamic_state_where_the_device_lists_it() {
     let lists = |stem: &str| {
         let description = at_1_2(load_description(stem).unwrap());
-        let supported = supported_by(&description);
-        let available = listed_by(&description);
+        let (supported, available) = modelled(stem, &description, ApiVersion::V1_2);
         let old = enabled_set(&old_engine_list(&supported, &available));
         assert!(!old.features.contains(&F::ExtendedDynamicState), "{stem}");
         let enables = engine_list(
@@ -491,8 +681,7 @@ fn the_new_list_enables_extended_dynamic_state_where_the_device_lists_it() {
 fn the_new_list_enables_extended_dynamic_state2_where_the_device_lists_it() {
     let lists = |stem: &str| {
         let description = at_1_2(load_description(stem).unwrap());
-        let supported = supported_by(&description);
-        let available = listed_by(&description);
+        let (supported, available) = modelled(stem, &description, ApiVersion::V1_2);
         let enables = engine_list(
             old_engine_list(&supported, &available),
             &description,
@@ -556,8 +745,7 @@ fn the_new_list_with_the_stated_robustness_keeps_the_co_enable_rules() {
     let mut held = Vec::new();
     for stem in committed_profiles().unwrap() {
         let description = at_1_2(load_description(&stem).unwrap());
-        let supported = supported_by(&description);
-        let available = listed_by(&description);
+        let (supported, available) = modelled(&stem, &description, ApiVersion::V1_2);
         let enables = engine_list(
             old_engine_list(&supported, &available),
             &description,
@@ -602,8 +790,7 @@ fn the_new_list_with_the_stated_robustness_keeps_the_co_enable_rules() {
 #[test]
 fn a_disagreeing_description_is_refused() {
     let description = at_1_2(load_description("lavapipe").unwrap());
-    let supported = supported_by(&description);
-    let available = listed_by(&description);
+    let (supported, available) = modelled("lavapipe", &description, ApiVersion::V1_2);
     let mut unreported = supported;
     *(member_of(F::ShaderInt64).unwrap().write)(&mut unreported) = vk::FALSE;
     let error = engine_list(
@@ -647,8 +834,7 @@ fn the_new_list_enables_sparse_images_where_the_device_supports_them() {
         assert!(member.feature.is_none());
     }
     let description = at_1_2(load_description("lavapipe").unwrap());
-    let supported = supported_by(&description);
-    let available = listed_by(&description);
+    let (supported, available) = modelled("lavapipe", &description, ApiVersion::V1_2);
     assert!(executor_features(&old_engine_list(&supported, &available)).is_empty());
     let list = |supported: &FeatureChain| {
         engine_list(
@@ -689,8 +875,7 @@ fn the_new_list_enables_sparse_images_where_the_device_supports_them() {
 #[test]
 fn the_moltenvk_context_opens_full_subgroups_and_the_memory_model() {
     let description = at_1_2(load_description("moltenvk-m3").unwrap());
-    let supported = supported_by(&description);
-    let available = listed_by(&description);
+    let (supported, available) = modelled("moltenvk-m3", &description, ApiVersion::V1_2);
     let opened = |set: &EnableSet| {
         derived_profile(opened_description(description.clone(), set).unwrap()).unwrap()
     };
@@ -779,8 +964,7 @@ fn the_opened_contexts_enable_their_lists() {
 #[test]
 fn an_enabled_shader_fma_is_in_the_opened_description() {
     let description = at_1_2(load_description("moltenvk-m3").unwrap());
-    let supported = supported_by(&description);
-    let available = listed_by(&description);
+    let (supported, available) = modelled("moltenvk-m3", &description, ApiVersion::V1_2);
     let enables = engine_list(
         old_engine_list(&supported, &available),
         &description,
@@ -819,8 +1003,7 @@ fn depth_range_unrestricted_is_enabled_where_the_device_lists_it() {
             listed,
             "{stem}"
         );
-        let supported = supported_by(&description);
-        let available = listed_by(&description);
+        let (supported, available) = modelled(stem, &description, ApiVersion::V1_2);
         for leg in [Leg::Stated, Leg::RobustnessOff] {
             let enables = engine_list(
                 old_engine_list(&supported, &available),
@@ -1068,8 +1251,7 @@ fn a_restricted_context_enables_the_recommendation_at_its_profiles_version() {
             at_1_2.push(stem.clone());
         }
         let description = restriction.read_at(version);
-        let supported = supported_by(&description);
-        let available = listed_at(version, &description);
+        let (supported, available) = modelled(&stem, &description, version);
         for leg in [Leg::Stated, Leg::RobustnessOff] {
             let enables = engine_list(
                 old_engine_list(&supported, &available),
@@ -1515,8 +1697,7 @@ fn opened_chains() -> Vec<(String, Vec<String>)> {
             ("restricted", restriction.read_at(version), version),
         ];
         for (kind, description, version) in contexts {
-            let supported = supported_by(&description);
-            let available = listed_at(version, &description);
+            let (supported, available) = modelled(&stem, &description, version);
             for leg in [Leg::Stated, Leg::RobustnessOff] {
                 let mut enables = engine_list(
                     old_engine_list(&supported, &available),

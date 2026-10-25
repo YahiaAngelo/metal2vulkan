@@ -860,13 +860,14 @@ pub(super) enum ExecutorFeature {
 }
 
 impl ExecutorFeature {
-    /// The member's Vulkan name.
-    pub(super) const fn name(self) -> &'static str {
-        match self {
-            ExecutorFeature::SparseBinding => "sparseBinding",
-            ExecutorFeature::SparseResidencyImage2D => "sparseResidencyImage2D",
-            ExecutorFeature::SparseResidencyImage3D => "sparseResidencyImage3D",
-        }
+    /// The member's name in the Vulkan registry, from its row ([`Member::registry`]): no
+    /// `ExecutorFeature` is in the engine's vocabulary, so its row carries the name.
+    pub(super) fn name(self) -> &'static str {
+        MEMBERS
+            .iter()
+            .find(|member| member.executor == Some(self))
+            .and_then(|member| member.registry)
+            .expect("every executor feature has a row carrying its registry name")
     }
 }
 
@@ -877,6 +878,12 @@ pub(super) struct Member {
     pub(super) name: &'static str,
     /// The engine's name for the member, when its vocabulary has one.
     pub(super) feature: Option<VkFeature>,
+    /// The member's name in the Vulkan registry, carried for exactly the members the engine's
+    /// vocabulary does not name ([`Member::feature`] is `None`). A device states such a member by
+    /// this name alone: no `DeviceDescription` can carry it, so a model of a device reads it from
+    /// the device's own capture by this name (`tests::Capture`), and a `None` row without one
+    /// would be a member nothing could ever report as unsupported.
+    pub(super) registry: Option<&'static str>,
     /// The executor's own name for it, when an engine context enables it for the executor's
     /// objects ([`ExecutorFeature`]).
     pub(super) executor: Option<ExecutorFeature>,
@@ -894,18 +901,21 @@ impl Member {
     }
 }
 
-/// Defines [`MEMBERS`] from `structure.field.member => feature` rows, each with an optional
-/// `, executor` name.
+/// Defines [`MEMBERS`] from `structure.field.member => feature` rows. A row whose feature is
+/// `None` carries `, registry = "<its Vulkan name>"` ([`Member::registry`]), and one an engine
+/// context enables for the executor's own objects carries `, executor = <name>` after it.
 macro_rules! members {
     ($($structure:ident . $field:ident . $member:ident => $feature:expr
-        $(, $executor:expr)?;)*) => {
+        $(, registry = $registry:literal)?
+        $(, executor = $executor:expr)?;)*) => {
         /// Every member a context reads or writes, each once: the one table that enables a
         /// feature and names what was enabled.
         pub(super) const MEMBERS: &[Member] = &[$(Member {
             structure: Structure::$structure,
             name: stringify!($member),
             feature: $feature,
-            executor: members!(@executor $($executor)?),
+            registry: members!(@optional $($registry)?),
+            executor: members!(@optional $($executor)?),
             read: {
                 fn read(chain: &FeatureChain) -> vk::Bool32 {
                     chain.$field.$member
@@ -920,11 +930,11 @@ macro_rules! members {
             },
         },)*];
     };
-    (@executor) => {
+    (@optional) => {
         None
     };
-    (@executor $executor:expr) => {
-        Some($executor)
+    (@optional $value:expr) => {
+        Some($value)
     };
 }
 
@@ -976,9 +986,11 @@ members! {
     Core.core.full_draw_index_uint32 => Some(F::FullDrawIndexUint32);
     Core.core.shader_tessellation_and_geometry_point_size =>
         Some(F::ShaderTessellationAndGeometryPointSize);
-    Core.core.sparse_binding => None, X::SparseBinding;
-    Core.core.sparse_residency_image2_d => None, X::SparseResidencyImage2D;
-    Core.core.sparse_residency_image3_d => None, X::SparseResidencyImage3D;
+    Core.core.sparse_binding => None, registry = "sparseBinding", executor = X::SparseBinding;
+    Core.core.sparse_residency_image2_d => None, registry = "sparseResidencyImage2D",
+        executor = X::SparseResidencyImage2D;
+    Core.core.sparse_residency_image3_d => None, registry = "sparseResidencyImage3D",
+        executor = X::SparseResidencyImage3D;
     V11.v11.storage_buffer16_bit_access => Some(F::StorageBuffer16BitAccess);
     V11.v11.uniform_and_storage_buffer16_bit_access => Some(F::UniformAndStorageBuffer16BitAccess);
     V11.v11.storage_push_constant16 => Some(F::StoragePushConstant16);
@@ -1121,7 +1133,8 @@ members! {
     Maintenance8.maintenance8.maintenance8 => Some(F::Maintenance8);
     ShaderFma.shader_fma.shader_fma_float16 => Some(F::ShaderFmaFloat16);
     ShaderFma.shader_fma.shader_fma_float32 => Some(F::ShaderFmaFloat32);
-    FloatControls2.float_controls2.shader_float_controls2 => None;
+    FloatControls2.float_controls2.shader_float_controls2 => None,
+        registry = "shaderFloatControls2";
     Maintenance5.maintenance5.maintenance5 => Some(F::Maintenance5);
     BorderColorSwizzle.border_color_swizzle.border_color_swizzle => Some(F::BorderColorSwizzle);
     BorderColorSwizzle.border_color_swizzle.border_color_swizzle_from_image =>
@@ -1136,16 +1149,22 @@ members! {
     ListRestart.list_restart.primitive_topology_patch_list_restart =>
         Some(F::PrimitiveTopologyPatchListRestart);
     ProvokingVertex.provoking_vertex.provoking_vertex_last => Some(F::ProvokingVertexLast);
-    ProvokingVertex.provoking_vertex.transform_feedback_preserves_provoking_vertex => None;
+    ProvokingVertex.provoking_vertex.transform_feedback_preserves_provoking_vertex => None,
+        registry = "transformFeedbackPreservesProvokingVertex";
     LineRasterization.line_rasterization.bresenham_lines => Some(F::BresenhamLines);
-    LineRasterization.line_rasterization.rectangular_lines => None;
-    LineRasterization.line_rasterization.smooth_lines => None;
-    LineRasterization.line_rasterization.stippled_bresenham_lines => None;
-    LineRasterization.line_rasterization.stippled_rectangular_lines => None;
-    LineRasterization.line_rasterization.stippled_smooth_lines => None;
+    LineRasterization.line_rasterization.rectangular_lines => None,
+        registry = "rectangularLines";
+    LineRasterization.line_rasterization.smooth_lines => None, registry = "smoothLines";
+    LineRasterization.line_rasterization.stippled_bresenham_lines => None,
+        registry = "stippledBresenhamLines";
+    LineRasterization.line_rasterization.stippled_rectangular_lines => None,
+        registry = "stippledRectangularLines";
+    LineRasterization.line_rasterization.stippled_smooth_lines => None,
+        registry = "stippledSmoothLines";
     MeshShader.mesh_shader.task_shader => Some(F::TaskShader);
     MeshShader.mesh_shader.mesh_shader => Some(F::MeshShader);
-    AstcHdr.astc_hdr.texture_compression_astc_hdr => None;
+    AstcHdr.astc_hdr.texture_compression_astc_hdr => None,
+        registry = "textureCompressionASTC_HDR";
     RayQuery.ray_query.ray_query => Some(F::RayQuery);
     Acceleration.acceleration_structure.acceleration_structure => Some(F::AccelerationStructure);
     ExtendedDynamicState.extended_dynamic_state.extended_dynamic_state =>
@@ -1177,7 +1196,8 @@ members! {
         Some(F::SeparateStencilMaskRef);
     PortabilitySubset.portability_subset.image_view_format_swizzle =>
         Some(F::ImageViewFormatSwizzle);
-    GeneratedCommands.generated_commands.device_generated_commands => None;
+    GeneratedCommands.generated_commands.device_generated_commands => None,
+        registry = "deviceGeneratedCommands";
 }
 
 /// The engine's vocabulary features [`engine_list`] never enables, each with why. None of
@@ -1604,8 +1624,9 @@ pub(super) fn enable_runtime_probe(
 /// [`Leg::Stated`], none in [`Leg::RobustnessOff`]. Each recommended extension is enabled by the
 /// first name the device lists for it, each recommended feature by its member (chaining its
 /// structure through an enabled extension), and each member no vocabulary names
-/// (`textureCompressionASTC_HDR`, `maintenance5`) where an enabled extension exposes its structure
-/// and the device supports it; and each [`ExecutorFeature`] where the device supports it.
+/// (`textureCompressionASTC_HDR` and the rest, by their registry names, [`Member::registry`])
+/// where an enabled extension exposes its structure and the device supports it; and each
+/// [`ExecutorFeature`] where the device supports it.
 ///
 /// A stated robustness feature the feature chain does not report, or whose structure no enabled
 /// extension exposes, is not an error: no robustness feature is enabled then, and the stated ones
