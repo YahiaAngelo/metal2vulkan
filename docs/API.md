@@ -1135,17 +1135,18 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   depth twin among them, is `heap-depth-stencil-apart` instead. A texture the device binds no image
   of to the heap's memory where the heap places it: its optimal image takes no memory type of the
   heap's and no linear image of the device serves (a `Shared` heap's depth texture on MoltenVK), or
-  the heap lies over host pages that no linear image over them serves. And a heap's
-  `RGB10A8_2P_XR10` texture, or its sRGB twin, of a 1D, 2D, 1D array, 2D array or 3D type, of one
-  sample, whose moves fit the device: its image holds each texel's colour word and alpha byte side
-  by side where Metal keeps two planes in the heap's bytes, so the image is a shadow of those planes
-  (a mipmapped one's levels past the first, and a 1D array's texels, lie in the image alone:
-  `heap-two-plane-layout`). Where Metal's layout of the texture in the heap's bytes is measured and
-  the moves fit the device, the first two shadow Metal's tiles there (the texture's elements, a
-  multisample texture's samples) rather than its rows, and so do two textures that would otherwise
-  need no shadow: one whose image the driver keeps GPU-optimized where Metal's texture is not
-  (`DriverFact::DepthStencilImagesStayGpuOptimized`), and a multisample texture whose image lies in
-  memory of its own. Cost: its texels are copied into an image before each use and back after each
+  the heap lies over host pages that no linear image over them serves, or its images ask more than
+  Metal's answer for the texture (every 4:2:2 texture among them) and a shadow of its rows serves.
+  And a heap's `RGB10A8_2P_XR10` texture, or its sRGB twin, of a 1D, 2D, 1D array, 2D array or 3D
+  type, of any level count, of one sample, whose moves fit the device: its image holds each texel's
+  colour word and alpha byte side by side where Metal keeps two planes in the heap's bytes, so the
+  image is a shadow of those planes (a mipmapped one's levels past the first, and a 1D array's
+  texels, lie in the image alone: `heap-two-plane-layout`). Where Metal's layout of the texture in
+  the heap's bytes is measured and the moves fit the device, the first two shadow Metal's tiles
+  there (the texture's elements, a multisample texture's samples) rather than its rows, and so do
+  two textures that would otherwise need no shadow: one whose image the driver keeps GPU-optimized
+  where Metal's texture is not (`DriverFact::DepthStencilImagesStayGpuOptimized`), and a
+  multisample texture whose image lies in memory of its own. Cost: its texels are copied into an image before each use and back after each
   write (over a buffer's bytes but a tracked private buffer's, kept before a write and merged back
   after it). A render pass that loads it as an attachment, takes it in no other way and draws under
   scissors copies in only the texels inside them (`WorkCounts::shadow_texels_copied_in`). Over a

@@ -252,14 +252,30 @@ degradations! {
         /// holding no byte past them; or the buffer is over the caller's `VkBuffer`, whose memory
         /// backs no image of the runtime's. Also a heap's texture over host pages imported as
         /// dma-bufs where the device makes no image over a dma-buf of the texture's own pages (the
-        /// notice names why). Also a heap's depth or stencil texture on a device whose driver lays
-        /// such images apart from their memory
-        /// ([`metal2vulkan::device::DriverFact::DepthStencilImagesLieApart`]): its image is a
-        /// shadow of the heap's bytes in its range. Also a heap's 2D texture of one level of
-        /// `RGB10A8_2P_XR10` or its sRGB twin: its image is a shadow of its two planes in the
-        /// heap's bytes, where Metal lays them out. Also a texture of a plain format in a heap over
-        /// host pages: its image is a shadow of its elements tiled in the heap's bytes, where Metal
-        /// lays them out.
+        /// notice names why). A heap's texture is a shadow of the heap's bytes in its range in
+        /// three more shapes, each announced with its own reason (`texture/heap.rs`). A
+        /// single-sample depth or stencil texture held with no depth twin, whose texels fit the
+        /// bytes its image takes, on a device whose driver lays such images apart from the memory
+        /// they are bound to
+        /// ([`metal2vulkan::device::DriverFact::DepthStencilImagesLieApart`]): one no such shadow
+        /// serves, a multisampled one or a depth twin among them, lies apart from those bytes
+        /// instead (`heap-depth-stencil-apart`). A texture the device binds no image of to the
+        /// heap's memory where the heap places it: its optimal image takes no memory type of the
+        /// heap's and no linear image of the device serves (a `Shared` heap's depth texture on
+        /// MoltenVK), or the heap lies over host pages that no linear image over them serves, or
+        /// its images ask more than Metal's answer for the texture (every 4:2:2 texture among
+        /// them) and a shadow of its rows serves. And a heap's `RGB10A8_2P_XR10` texture, or its
+        /// sRGB twin, of a 1D, 2D, 1D array, 2D array or 3D type, of any level count, of one
+        /// sample, whose moves fit the device: its image holds each texel's colour word and alpha
+        /// byte side by side where Metal keeps two planes in the heap's bytes, so the image is a
+        /// shadow of those planes (a mipmapped one's levels past the first, and a 1D array's
+        /// texels, lie in the image alone: `heap-two-plane-layout`). Where Metal's layout of the
+        /// texture in the heap's bytes is measured and the moves fit the device, the first two
+        /// shadow Metal's tiles there (the texture's elements, a multisample texture's samples)
+        /// rather than its rows, and so do two textures that would otherwise need no shadow: one
+        /// whose image the driver keeps GPU-optimized where Metal's texture is not
+        /// ([`metal2vulkan::device::DriverFact::DepthStencilImagesStayGpuOptimized`]), and a
+        /// multisample texture whose image lies in memory of its own.
         ShadowedTexture = "shadowed-texture", Performance,
             "its texels are copied into an image before each use and back after each write \
              (over a buffer's bytes but a tracked private buffer's, kept before a write and merged \
