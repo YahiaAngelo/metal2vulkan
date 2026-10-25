@@ -1846,6 +1846,57 @@ pub(crate) fn unattached_colors_written(
         .collect()
 }
 
+/// Whether the pipeline names color attachment `color` of descriptor `c` for Metal's own blend
+/// alone, the entry `spec` writing it: an attachment the function blends in the storage form,
+/// where the profile asks for that blend (`lower::fragment::blends_half_in_shader`) and the
+/// function does not already read the attachment.
+///
+/// A 16-bit float attachment (`R16Float`, `RG16Float`, `RGBA16Float`) of a `half` output of one to
+/// four lanes of a module that states its math mode, under a blend Metal's model holds
+/// (`fetch::half_blend_attachment`, `fetch::half_output`).
+///
+/// And a 32-bit float attachment (`R32Float`, `RG32Float`, `RGBA32Float`) of a four-lane `half` or
+/// `float` output of a module **with** fast math, blended under a state whose forms are Metal's
+/// (`extended_range::Blend::float32`, whose [`fitted`](extended_range::Blend::fitted) is the one
+/// sweep that measured the family: the two measured pairs at two or four channels, and the forms
+/// that need no measurement), where the write stores some channel of the format and the factors
+/// are not one and zero, which the device stores as the source anyway. Metal's arithmetic for the
+/// format without fast math is measured in no state, and at an unfitted state the generic blend is
+/// the measured-closer near-equivalent, so neither is named here (`fetch`'s module docs).
+///
+/// What only the function's body or the device can answer is the lowering's: whether a lane of the
+/// output folds into Metal's blend (`fetch::folds_into_blend`), and whether the attachment's
+/// storage form is blocked. A named attachment either of those drops keeps the device's blend, so
+/// this holds of more attachments than take the form.
+fn blended_in_shader(spec: &air::Entry, c: &ColorAttachmentDescriptor, color: u32) -> bool {
+    use crate::lower::arith::extended_range;
+    use crate::metal::ColorWriteMask as Mask;
+    let eq = crate::pipeline::lower_inputs::BlendEquation::of(c);
+    let half = crate::lower::fragment::half_blend_attachment(
+        c.pixel_format,
+        c.blending_enabled,
+        c.write_mask,
+        eq,
+    ) && crate::lower::fragment::half_output(spec, color);
+    // The channels the write keeps from the texel, as `fetch::storage_form` reads them: none where
+    // the mask covers every channel of the format, all four where it covers none of them, in which
+    // case the write stores nothing and the storage form would buy nothing.
+    let kept = crate::lower::fragment::kept_channels(c.pixel_format, c.write_mask, true);
+    let float32 = crate::lower::fragment::fetch::float32_format(c.pixel_format)
+        && c.blending_enabled
+        && !crate::pipeline::color_writes::replaces(c)
+        && spec.compile.fast_math == Some(true)
+        && !c.write_mask.contains(Mask::UNSPECIALIZED)
+        && kept != Mask::ALL
+        && crate::lower::fragment::fetch::blended_output(spec, color)
+            .is_some_and(|(_, lanes)| lanes == 4)
+        && eq.is_some_and(|eq| {
+            let written = Mask::ALL.difference(kept);
+            extended_range::Blend::float32(&eq, c.pixel_format, written).is_ok_and(|b| b.fitted())
+        });
+    half || float32
+}
+
 /// The framebuffer-fetch state of pass `d` for the specialized fragment entry `spec` on `p`
 /// (`LoweringInputs::framebuffer_fetch`): on a device that orders fetch only through the pixel
 /// interlock, the state of every attachment the entry declares a `[[color(n)]]` input of a constant
@@ -1858,9 +1909,10 @@ pub(crate) fn unattached_colors_written(
 /// function computes over its input attachment, `lower::fragment`'s `input_blend`), and of every
 /// word attachment it writes under a mask of some of the word's channels (whose word the function
 /// merges into its input attachment's, `color_writes::merged_word`). Where the
-/// profile asks for Metal's 16-bit float blend of a `half4` output (`DevicePolicy::half_blend`) on
-/// a device that orders fetch through the interlock, also every such attachment the entry writes,
-/// those it names for that alone in `FramebufferFetchInputs::half_blends`.
+/// profile asks for Metal's own blend of a blended output (`DevicePolicy::half_blend`) on a
+/// device that orders fetch through the interlock, also every attachment [`blended_in_shader`]
+/// holds that the entry writes, those it names for that alone in
+/// `FramebufferFetchInputs::half_blends`.
 pub(crate) fn fetch_inputs(
     spec: &air::Entry,
     d: FragmentPass<'_>,
@@ -1872,23 +1924,18 @@ pub(crate) fn fetch_inputs(
     if !matches!(spec.ep.stage, AbiStage::Fragment { .. }) || !(interlock || inputs) {
         return None;
     }
-    // Each 16-bit float attachment a `half` output of a module without fast math blends into,
-    // where the profile asks for Metal's blend there, which the function computes in the storage
-    // form where it is exact.
+    // Each attachment the entry writes whose blend Metal computes in the function, where the
+    // profile asks for Metal's blend there: a 16-bit float one of a `half` output, and a 32-bit
+    // float one of a four-lane output under fast math ([`blended_in_shader`]). The function
+    // computes it in the storage form where that form is exact, and leaves it to the device
+    // elsewhere.
     let half_blends: BTreeSet<u32> = match crate::lower::fragment::blends_half_in_shader(p) {
         true => d
             .color_attachments
             .iter()
             .zip(0u32..)
             .filter_map(|(c, color)| c.as_ref().map(|c| (c, color)))
-            .filter(|&(c, color)| {
-                crate::lower::fragment::half_blend_attachment(
-                    c.pixel_format,
-                    c.blending_enabled,
-                    c.write_mask,
-                    crate::pipeline::lower_inputs::BlendEquation::of(c),
-                ) && crate::lower::fragment::half_output(spec, color)
-            })
+            .filter(|&(c, color)| blended_in_shader(spec, c, color))
             .map(|(_, color)| color)
             .collect(),
         false => BTreeSet::new(),

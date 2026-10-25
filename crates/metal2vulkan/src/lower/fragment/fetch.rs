@@ -270,7 +270,12 @@
 //! measured the closer at the one-channel state above. The blend is Metal's only where no lane of
 //! the output folds into it ([`folds_into_blend`]) and the module states its math, as a 16-bit
 //! float one's is; where a lane folds, the forms stay and the function notes
-//! `PrecisionNote::HalfOutputFastMathBlend`.
+//! `PrecisionNote::HalfOutputFastMathBlend`. An attachment the function does not read takes the
+//! form on the same terms a 16-bit float one does, and only where its blend is exact: one a draw
+//! moved into the storage form (`VariantKey::interlocked_colors`), or one the pipeline names for
+//! the blend alone (`FramebufferFetchInputs::half_blends`, `compile::fetch_inputs`'s
+//! `blended_in_shader`, which names the fitted states of a four-lane output under fast math);
+//! elsewhere it stays a color attachment and the device blends it.
 //!
 //! **Another format's blend** (a format held directly whose channels read as floats, but a 16-bit
 //! float, a 32-bit float, an sRGB, a word or an extended-range one: a 16-bit normalized, 8-bit

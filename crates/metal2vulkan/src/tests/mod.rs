@@ -50,6 +50,7 @@ mod engine_extended_range;
 mod engine_fetch_blend16;
 mod engine_fetch_blend16_narrow;
 mod engine_fetch_blend8;
+mod engine_fetch_float32_reach;
 mod engine_fetch_generic_blend;
 mod engine_fill_moduli;
 mod engine_float_call_notes;

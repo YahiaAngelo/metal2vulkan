@@ -1259,7 +1259,8 @@ pub struct FramebufferFetchInputs {
     /// multiview.
     pub amplified: bool,
     /// The attachments of [`attachments`](Self::attachments) the pipeline names only for Metal's
-    /// 16-bit float blend of a `half4` output (`DevicePolicy::half_blend`): the function takes
+    /// own blend of a blended output (`DevicePolicy::half_blend`): a 16-bit float one of a `half`
+    /// output, and a 32-bit float one of a four-lane output under fast math. The function takes
     /// the storage form there where it is exact for the pipeline, and otherwise leaves the write
     /// to the attachment and its blend to the device. Empty unless the profile asks for that
     /// blend.
