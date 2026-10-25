@@ -244,7 +244,7 @@ fn a_kind_at_every_occurrence_is_announced_in_the_program_s_call_or_a_host_step(
 /// set's pieces (the caller's own and a pool thread's), on a runtime thread, and on the program's
 /// thread.
 #[test]
-fn an_announcement_breaking_d625_item_11_ends_the_process_where_debug_assertions_are_on() {
+fn an_announcement_inside_a_pipeline_pool_piece_ends_the_process_where_debug_assertions_are_on() {
     use crate::degradation::{announcement_breach, check_announcement, Degradation, NoticePlace};
     use crate::exit_guard::spawn;
     use crate::pipeline::pool::{Joined, Pool};

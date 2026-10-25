@@ -1127,11 +1127,29 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   does in the buffer's memory, holding no byte past them; or the buffer is over the caller's
   `VkBuffer`, whose memory backs no image of the runtime's. Also a heap's texture over host pages
   imported as dma-bufs where the device makes no image over a dma-buf of the texture's own pages
-  (the notice names why; `WorkCounts::dma_buf_image_fallbacks` counts it). Cost: its texels are
-  copied into an image before each use and back after each write (over a buffer's bytes but a
-  tracked private buffer's, kept before a write and merged back after it). A render pass that loads
-  it as an attachment, takes it in no other way and draws under scissors copies in only the texels
-  inside them (`WorkCounts::shadow_texels_copied_in`). Over a buffer's bytes that another writer may
+  (the notice names why; `WorkCounts::dma_buf_image_fallbacks` counts it). A heap's texture is a
+  shadow of the heap's bytes in its range in three more shapes, each announced with its own reason.
+  A single-sample depth or stencil texture held with no depth twin, whose texels fit its image's
+  bytes, on a device whose driver lays such images apart from the memory they are bound to
+  (`DriverFact::DepthStencilImagesLieApart`): one no such shadow serves, a multisampled one or a
+  depth twin among them, is `heap-depth-stencil-apart` instead. A texture the device binds no image
+  of to the heap's memory where the heap places it: its optimal image takes no memory type of the
+  heap's and no linear image of the device serves (a `Shared` heap's depth texture on MoltenVK), or
+  the heap lies over host pages that no linear image over them serves. And a heap's
+  `RGB10A8_2P_XR10` texture, or its sRGB twin, of a 1D, 2D, 1D array, 2D array or 3D type, of one
+  sample, whose moves fit the device: its image holds each texel's colour word and alpha byte side
+  by side where Metal keeps two planes in the heap's bytes, so the image is a shadow of those planes
+  (a mipmapped one's levels past the first, and a 1D array's texels, lie in the image alone:
+  `heap-two-plane-layout`). Where Metal's layout of the texture in the heap's bytes is measured and
+  the moves fit the device, the first two shadow Metal's tiles there (the texture's elements, a
+  multisample texture's samples) rather than its rows, and so do two textures that would otherwise
+  need no shadow: one whose image the driver keeps GPU-optimized where Metal's texture is not
+  (`DriverFact::DepthStencilImagesStayGpuOptimized`), and a multisample texture whose image lies in
+  memory of its own. Cost: its texels are copied into an image before each use and back after each
+  write (over a buffer's bytes but a tracked private buffer's, kept before a write and merged back
+  after it). A render pass that loads it as an attachment, takes it in no other way and draws under
+  scissors copies in only the texels inside them (`WorkCounts::shadow_texels_copied_in`). Over a
+  buffer's bytes that another writer may
   write while a command buffer runs, the image is kept in a scratch buffer before the first command
   that writes through it, and each copy back is a dispatch that merges only the words the commands
   changed, so that writer's writes to the texels they left stay, as on Metal: the CPU's, over a
@@ -1398,9 +1416,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   attachment of the later draws' subpass alone; or a tile dispatch runs between two instances; or
   some of its draws render some of its layers, each run of them in an instance over those layers; or
   a memory barrier over buffers or textures orders its draws after it behind those before it, which
-  a barrier between instances does. Cost: each instance after the first loads the attachments and
-  each before the last stores them, with a barrier from everything before to everything after
-  between them: on a tiler, a tile flush per split.
+  a barrier between instances does. Not where the pixel interlock alone splits the pass on a device
+  whose driver ran such a pass no slower split than whole
+  (`DriverFact::InterlockedPassSplitNoSlower`): the split is then its faster form. Cost: each
+  instance after the first loads the attachments and each before the last stores them, with a
+  barrier from everything before to everything after between them: on a tiler, a tile flush per
+  split.
 - `metal2vulkan-degrade-amplification-draws` (performance). `AmplificationDraws`: A draw under
   vertex amplification that Vulkan multiview cannot express (view mappings that offset the viewport
   or name layers out of order, more amplifications than the device's views, or a pipeline that
@@ -1539,16 +1560,18 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   without Metal's closed rule at its count (the 16-bit float, `RG11B10Float` and `RGB9E5Float`
   formats past 4 samples, and a format no rule covers), or an attachment whose image the exact
   resolve can neither read nor copy: an image without input attachment usage of a format the
-  device does not copy. Measured against Metal's rules at 2 and 4 samples on RADV (Mesa 26.0.8, the
-  Radeon 780M and the RX 7900 XTX), ANV (Mesa 26.2.4, the Iris Xe), NVIDIA (615.71, the RTX 5080
-  Laptop GPU) and lavapipe (Mesa 26.2.4, at 4 samples): every unorm, snorm and packed 16-bit unorm
+  device does not copy. Never, whatever the format, on a device whose resolve is measured to round
+  as Metal does (`DriverFact::ColorResolveAverageIsMetals`: MoltenVK's resolve is Metal's own).
+  Measured against Metal's rules at 2 and 4 samples on RADV (Mesa 26.0.8, the Radeon 780M and the RX
+  7900 XTX), ANV (Mesa 26.2.4, the Iris Xe), NVIDIA (615.71, the RTX 5080 Laptop GPU) and lavapipe
+  (Mesa 26.2.4, at 4 samples): every unorm, snorm and packed 16-bit unorm
   channel within one code of Metal's, an sRGB channel within two (NVIDIA's at 4 samples; one
   elsewhere). Each rounds an 8-bit unorm tie down (RADV and ANV: 32512 of `R8Unorm`'s 65536 pairs
   of samples one code below at 2 samples); an sRGB or packed channel lands above Metal's code in
   some texels and below in others. A float channel's average differs in its last bits, counted and
-  not bounded. Cost: a
-  resolved channel can differ from Metal's by one code (an sRGB channel by two) where the average
-  lies near a rounding boundary, a float channel in its last bits, and wholly where a sample is a
+  not bounded (RADV: 8565 of `R32Float`'s 65536 channels at 2 samples). Cost: a resolved channel can
+  differ from Metal's by one code (an sRGB channel by two) where the average lies near a rounding
+  boundary, a float channel in its last bits, and wholly where a sample is a
   NaN or an infinity: Metal's resolve counts a half or small-float NaN as 0 and a half infinity as
   65536 of its sign, and makes any 32-bit float NaN 0x7fc00000, where the device's average may
   keep them.
@@ -1573,9 +1596,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   values finer than the codes the attachment holds.
 - `metal2vulkan-degrade-dont-care-store` (precision). `DontCareStore`: An attachment stored with
   `DontCare` (or the multisampled attachment of `MultisampleResolve`) is Vulkan's `DONT_CARE`, where
-  Apple's GPU keeps the earlier texels unless its tiler overflows. Not a texture over a buffer: Metal
-  leaves the buffer's bytes in it (on an M3 Max, every texel of 926 such passes alike, and of 36
-  with a memory barrier between two draws, 20 times each, but that the first pass in a process to
+  Apple's GPU keeps the earlier texels unless its tiler overflows. Only on a driver measured to keep
+  either the earlier texel or the stored one at each texel
+  (`DriverFact::DontCareStoreIsOneOfMetals`); every other device stores the attachment, Metal's
+  answer where its tiler overflows. Not a texture over a buffer: Metal leaves the buffer's bytes in
+  it (on an M3 Max, every texel of 926 such passes alike, and of 36 with a memory barrier between
+  two draws, 20 times each, but that the first pass in a process to
   overflow Apple's tiler leaves the rendered texels, which no call can predict or detect), and the
   runtime gives the buffer's bytes, exactly, through an image the pass copies nothing back from
   (`dont-care-stand-in` below, or the texture's shadow), or by handing the attachment to Metal's
@@ -1672,16 +1698,18 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   other inputs are not checked.
 - `metal2vulkan-degrade-heap-depth-stencil-apart` (precision). `HeapDepthStencilApart`: A depth or
   stencil texture made in a heap on a device whose driver lays depth and stencil images apart from
-  the memory they are bound to that no shadow of the heap's bytes serves: a multisampled texture,
-  which Vulkan copies to and from no buffer, one whose texels do not fit its bytes, or one with a
-  depth twin. Cost: the texture's texels lie apart from the heap's bytes: a write through a buffer
+  the memory they are bound to (`DriverFact::DepthStencilImagesLieApart`) that no shadow of the
+  heap's bytes serves: a multisampled texture, which Vulkan copies to and from no buffer, one whose
+  texels do not fit its bytes, or one with a depth twin. Cost: the texture's texels lie apart from
+  the heap's bytes: a write through a buffer
   or texture over its bytes changes none of them, and its writes change none of those resources'
   bytes, where Metal's texture aliases them.
 - `metal2vulkan-degrade-heap-texture-host-transfer` (performance). `HeapTextureHostTransfer`: A
   colour texture made in a heap on a device whose driver's compressed images hide writes through an
-  alias, whose image takes host-transfer usage, which the driver keeps uncompressed in the heap's
-  bytes (`metal2vulkan::device::DriverFact::HostTransferImagesKeepTheirBytes`). Cost: the texture's
-  image is kept uncompressed, so writes through the heap's buffers and textures over its bytes show
+  alias (`DriverFact::CompressedImagesHideAliasedWrites`), whose image takes host-transfer usage,
+  which the driver keeps uncompressed in the heap's bytes
+  (`metal2vulkan::device::DriverFact::HostTransferImagesKeepTheirBytes`). Cost: the texture's image
+  is kept uncompressed, so writes through the heap's buffers and textures over its bytes show
   in it as Metal's do: a clear of it loses the driver's fast clear (334.5 us where a compressed
   2048x2048 RGBA8Unorm image's took 4.1 us on an RPL-S), while its copies, sampling and blending
   measured no slower.
@@ -1763,10 +1791,11 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-optimized-depth-stencil-texture` (precision).
   `OptimizedDepthStencilTexture`: A depth or stencil texture with `allowGPUOptimizedContents` off
   sized or made in a heap (never a device's own texture, whose layout nothing shows), on a device
-  whose driver keeps depth and stencil images GPU-optimized whatever their create info, that no
-  shadow of Metal's tiles in the heap's bytes serves (a multisample texture, a depth twin, a format
-  whose layout is not measured): Metal lays the texture out without its compression metadata, and
-  the runtime's image keeps it. Cost: the texture's image keeps the GPU-optimized layout Metal
+  whose driver keeps depth and stencil images GPU-optimized whatever their create info
+  (`DriverFact::DepthStencilImagesStayGpuOptimized`), that no shadow of Metal's tiles in the heap's
+  bytes serves (a multisample texture, a depth twin, a format whose layout is not measured): Metal
+  lays the texture out without its compression metadata, and the runtime's image keeps it. Cost: the
+  texture's image keeps the GPU-optimized layout Metal
   drops with the property off, so its bytes in the heap are not Metal's layout of its texels (where
   they lie instead, and what moving them costs, heap-texture-untiled-layout and shadowed-texture
   name for the shapes they cover); heap_texture_size_and_align answers Metal's own size and
@@ -2004,7 +2033,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   also under `SamplingPolicy::Exact`). Under the default a device that samples natively answers
   the device's filter, `metal2vulkan-degrade-device-sampling`; on MoltenVK, Metal's own sampler
   filters the converted texels as an `RGBA16Float` or `RGBA32Float` texture's, within one step of
-  the grid (a `half` result within one `half` ulp), announced at a draw that binds such a texture.
+  the grid (a `half` result within one `half` ulp, measured in plain Metal on an Apple M3 Max under
+  macOS 27.0.1 for `YCBCR8_420_2P` and its sRGB twin against such a texture of the same texels),
+  announced at a draw that binds such a texture.
 - `metal2vulkan-degrade-rotated-load-tiles` (precision). `RotatedLoadTiles`: A render pass that
   draws loads and stores a rotated texture of rotation 4, whose load is the plane transposed and
   whose store is rotation 1's: every tile of the frame lands mirrored, where Metal loads and stores
@@ -2150,7 +2181,8 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   extended-range sRGB format (`BGR10_XR_sRGB`, `BGRA10_XR_sRGB`), whose filtered levels and levels
   read from kept values take it; or of a 16-bit float format (`R16Float`, `RG16Float`,
   `RGBA16Float`) with a level read from the level above's kept values (a 2D chain's even level below
-  a square of a power of two, a pass's second level). Cost: each level is Metal's but at a value
+  a square of a power of two, a pass's second level). `RGB10A2Unorm`, `BGR10A2Unorm`, `BGR10_XR`,
+  `BGRA10_XR`, `ABGR4Unorm` and `A1BGR5Unorm` are exact. Cost: each level is Metal's but at a value
   whose sum lies a hair from a rounding boundary, which may be one unit off: an 8-bit sRGB colour
   code of a filtered level (1 of 5,331,270 measured values), an extended-range sRGB code, a 16-bit
   float read from kept values one unit in the last place (8 of 538,088). Under macOS 27.0.1 an Apple
@@ -2171,7 +2203,8 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   heap texture sized or made (`heap_texture_size_and_align`, `Heap::new_texture`) whose size Metal's
   layout the runtime does not model: a format or a sample count whose layout in Metal's heaps is not
   measured at the device's Metal level (8 samples; a PVRTC format at macOS 26.7's level, whose
-  blocks' placement only macOS 27.0.1's measures). Cost: heap_texture_size_and_align answers the
+  blocks' placement only macOS 27.0.1's measures); a mipmapped texture Metal compresses and a
+  `Depth32Float_Stencil8` one are modelled. Cost: heap_texture_size_and_align answers the
   device's own image's size and alignment, which may be larger or smaller than Metal's, so a heap
   sized by Metal's answers may hold more or fewer such textures and they lie at other offsets.
 - `metal2vulkan-degrade-plain-state-unique-identifier` (precision). `PlainStateUniqueIdentifier`: A
@@ -2306,8 +2339,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   memory) through an image its texture keeps, so that the buffer
   keeps its bytes, as Metal's does: rendered in place, the pass would write them. A pass that stores
   the attachment renders it in place, at no cost; so does one that hands it to a driver that stores
-  `DONT_CARE` as Metal's own `DontCare` (MoltenVK on the M3 Max and the M4), as one render pass
-  instance the driver runs unbroken, where Metal keeps the bytes itself. Cost: an image of the
+  `DONT_CARE` as Metal's own `DontCare` (`DriverFact::DontCareStoreIsMetals`: MoltenVK on the M3
+  Max and the M4), as one render pass instance the driver runs unbroken, where Metal keeps the bytes
+  itself. Cost: an image of the
   attachment's size, which its texture keeps for the queue, renders the pass; a `Load` copies the
   buffer's texels over the render area into it before the pass, and nothing is copied back.
 - `metal2vulkan-degrade-host-deallocator-delayed` (precision). `HostDeallocatorDelayed`: A no-copy
@@ -2387,9 +2421,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   (`DriverFact::DepthTestComparesMagnitudes`). Announced for what that misses: a merge under a
   draw's exact +inf, a depth loaded through another image, a switch while another command buffer is
   uncommitted, a multisampled or `Depth32Float_Stencil8` target's test (at the write, or at the pass
-  that loads its new pattern), a strip the device does not make, and a NaN clear depth the device
-  does not write before the pass. Cost: a depth test against the stored value, or the value a pass
-  with depth writes stores, can differ from Metal's in the pass or target named: the device compares
+  that loads its new pattern, on a device that keeps such a value in a depth image:
+  `VK_EXT_depth_range_unrestricted` enabled, or `DriverFact::DepthImageKeepsValuesOutsideUnitRange`;
+  elsewhere `restricted-depth-upload` is announced), a strip the device does not make, and a NaN
+  clear depth the device does not write before the pass. Cost: a depth test against the stored
+  value, or the value a pass with depth writes stores, can differ from Metal's in the pass or target
+  named: the device compares
   a negative value below zero and a NaN by its own rule and keeps the value's sign, or a pass's
   merge keeps a stored NaN where a draw wrote +inf over it, where Metal compares the value's
   magnitude, orders a NaN above every value, stores the value without its sign and stores the
