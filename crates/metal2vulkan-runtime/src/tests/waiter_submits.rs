@@ -1,6 +1,6 @@
-//! `Scheduler::submit_before_waiting`: a thread about to block for a command buffer's completion
-//! submits for itself what still waits in the scheduler's inbox, instead of waiting for a wake
-//! and a whole pass (`WorkCounts::scheduler_passes_by_waiters`,
+//! `Scheduler::submit_before_waiting`: a thread about to block for a command buffer's completion,
+//! or for its scheduling, submits for itself what still waits in the scheduler's inbox, instead of
+//! waiting for a wake and a whole pass (`WorkCounts::scheduler_passes_by_waiters`,
 //! `WorkCounts::batches_submitted_by_waiters`); and it submits nothing of a command buffer with a
 //! submission or a scheduled handler, which runs the program's code on the thread that takes its
 //! last batch, or that is scheduled where its last batch goes: it passes and leaves every batch
@@ -156,6 +156,101 @@ fn a_thread_about_to_block_submits_what_it_committed_unless_a_handler_must_run()
         assert!(
             !held.handler_threads.contains(&waiting),
             "a {besides:?} ran on the thread waiting in wait_until_completed"
+        );
+    }
+    drop(queue);
+    drop(device);
+}
+
+/// What one round of [`scheduled_rounds`] counted, over the wait for the scheduling alone.
+struct Scheduled {
+    passes: u64,
+    batches: u64,
+    handler_threads: Vec<ThreadId>,
+}
+
+/// [`ROUNDS`] command buffers of `queue`, each a fill of 16 bytes with what `besides` says, each
+/// committed and then waited for, counting the passes and batches of the wait for the
+/// **scheduling** alone: the counts are read around `wait_until_scheduled`, before the wait for
+/// the completion, which would make a pass of its own.
+fn scheduled_rounds(device: &Device, queue: &CommandQueue, besides: Besides) -> Scheduled {
+    let target = device.new_buffer(16, ResourceOptions::shared()).unwrap();
+    let threads: &'static Mutex<Vec<ThreadId>> = Box::leak(Box::new(Mutex::new(Vec::new())));
+    let (mut passes, mut batches) = (0, 0);
+    for round in 0..ROUNDS {
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut blit = command_buffer.blit_command_encoder().unwrap();
+        blit.fill_buffer(&target, 0..16, round as u8).unwrap();
+        blit.end_encoding().unwrap();
+        let handler = Box::new(|_: &CommandBuffer| {
+            (threads.lock().unwrap()).push(std::thread::current().id());
+        });
+        match besides {
+            Besides::Nothing => {}
+            Besides::SubmissionHandler => command_buffer.add_submission_handler(handler).unwrap(),
+            Besides::ScheduledHandler => command_buffer.add_scheduled_handler(handler).unwrap(),
+        }
+        command_buffer.commit().unwrap();
+        let before = device.work_counts();
+        command_buffer.wait_until_scheduled().unwrap();
+        let after = device.work_counts();
+        passes += after.scheduler_passes_by_waiters - before.scheduler_passes_by_waiters;
+        batches += after.batches_submitted_by_waiters - before.batches_submitted_by_waiters;
+        command_buffer.wait_until_completed().unwrap();
+        assert_eq!(command_buffer.error(), None);
+    }
+    Scheduled {
+        passes,
+        batches,
+        handler_threads: threads.lock().unwrap().clone(),
+    }
+}
+
+/// A thread that commits and then waits for the **scheduling** submits its own batch too: at
+/// least one of [`ROUNDS`] does, counted over that wait alone rather than over the wait for the
+/// completion that follows it.
+///
+/// Its claim on the batches behind it is the weaker one -- the scheduling is established by the
+/// submission of the command buffer's last batch, which another thread's work may have to come
+/// first for -- and the predicate is what holds that line: a command buffer with a scheduled
+/// handler is scheduled on its queue's handler thread, and one with a submission handler has that
+/// handler run on the thread that takes its last batch, so neither is submitted here. Each
+/// handler ran, and on none of the waiting threads.
+#[test]
+fn a_thread_waiting_for_the_scheduling_submits_what_it_committed_unless_a_handler_must_run() {
+    let scratch = Scratch::new();
+    let device = device(&scratch.0);
+    let queue = device.new_command_queue().unwrap();
+    let waiting = std::thread::current().id();
+    let plain = scheduled_rounds(&device, &queue, Besides::Nothing);
+    println!(
+        "submitted by waiters for the scheduling: {} batches over {} passes of {ROUNDS} waits",
+        plain.batches, plain.passes
+    );
+    assert!(
+        plain.batches >= 1,
+        "no thread waiting for the scheduling submitted its own batch over {ROUNDS} waits"
+    );
+    assert!(plain.passes >= plain.batches);
+    for besides in [Besides::SubmissionHandler, Besides::ScheduledHandler] {
+        let held = scheduled_rounds(&device, &queue, besides);
+        println!(
+            "with {besides:?}: {} batches over {} passes of {ROUNDS} waits for the scheduling",
+            held.batches, held.passes
+        );
+        assert_eq!(
+            held.batches, 0,
+            "a thread waiting for the scheduling submitted a batch of a command buffer with \
+             {besides:?}"
+        );
+        assert_eq!(
+            held.handler_threads.len(),
+            ROUNDS as usize,
+            "{besides:?} did not run once a round"
+        );
+        assert!(
+            !held.handler_threads.contains(&waiting),
+            "a {besides:?} ran on the thread waiting in wait_until_scheduled"
         );
     }
     drop(queue);

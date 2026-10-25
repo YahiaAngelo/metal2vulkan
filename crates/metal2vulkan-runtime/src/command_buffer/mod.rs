@@ -2047,8 +2047,8 @@ impl CommandBuffer {
 
     /// Call `handler` once the runtime took the command buffer's last batch for its `VkQueue`,
     /// on the thread that took it, before the command buffer becomes `Scheduled`: a runtime
-    /// extension, no Metal call (docs/API.md, "A command buffer's submission handlers"). The
-    /// batch is taken where it is submitted, or held for one kernel submission with the batches
+    /// extension, no Metal call (the crate's README, "Runtime extensions"). The batch is taken
+    /// where it is submitted, or held for one kernel submission with the batches
     /// committed after it (`CompletionPolicy::Grouped`, on a driver that merges submissions): its
     /// commands and its place in its queue's order are fixed then, so nothing committed later on
     /// the queue runs before it. Metal submits on its own thread and tells a program of it only
@@ -3045,6 +3045,12 @@ impl CommandBuffer {
     /// once every scheduled handler returned, though [`status`](Self::status) reads `Scheduled`
     /// just before they start.
     ///
+    /// As [`wait_until_completed`](Self::wait_until_completed) does, it submits for itself what
+    /// still waits in the scheduler's inbox before it sleeps, where no handler of the program's
+    /// would run on this thread for it (`Scheduler::submit_before_waiting`). It sends no group
+    /// held: a batch held for one kernel submission makes its command buffer `Scheduled` as it is
+    /// held, so this wait is already answered by the hold.
+    ///
     /// From a handler or a release on the device's handler threads it answers as Metal's does
     /// where measured: once the command buffer's transition to `Scheduled` ran, it returns. Its own
     /// scheduled handlers' wait, and a wait for a later command buffer of the handler's queue, are
@@ -3063,6 +3069,7 @@ impl CommandBuffer {
             Answer::Block(from) => Some(contexts::block(from, self.0.context())?),
         };
         self.settle_commit();
+        self.0.waits_for_scheduling();
         let mut state = self.state();
         while !scheduled(&state) {
             if exit_guard::closed() {

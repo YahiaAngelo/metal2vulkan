@@ -149,6 +149,19 @@ impl CommandBufferShared {
         scheduler.submit_before_waiting(&self.device);
     }
 
+    /// A thread begins to wait for its scheduling (`CommandBuffer::wait_until_scheduled`): it
+    /// submits for itself what still waits in the scheduler's inbox before it sleeps
+    /// (`Scheduler::submit_before_waiting`), as a thread waiting for the completion does.
+    ///
+    /// It marks no wait on the group, where [`waits_for_completion`](Self::waits_for_completion)
+    /// does: a batch held in a group makes its command buffer `Scheduled` as it is held
+    /// ([`Group::schedule_held`]), so this wait is answered by the hold, and sending the group for
+    /// it would spend its kernel submission for nothing. Nor does the pass it makes submit a
+    /// batch of a queue whose batches group at all (`scheduler::plain_ready`).
+    pub(crate) fn waits_for_scheduling(&self) {
+        (self.device.shared().scheduler).submit_before_waiting(&self.device);
+    }
+
     /// Whether a thread waits for its completion.
     fn is_waited_for(&self) -> bool {
         self.group_hold.load(Ordering::SeqCst) & WAITED_FOR != 0

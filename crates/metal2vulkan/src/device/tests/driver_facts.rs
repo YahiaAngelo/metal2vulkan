@@ -577,6 +577,75 @@ const TILE_STORE: DriverFact = DriverFact::TileStoreIsMetals;
 const FOLLOWS: DriverFact = DriverFact::PointerImportsFollowTheirAddress;
 const INTERLOCK_ORDER: DriverFact = DriverFact::InterlockOrdersDraws;
 
+/// A **defect** fact holds on a measured identity at a release past the last the row measured,
+/// where an **answer** fact does not: the driver goes on doing otherwise than Metal until a
+/// measurement clears it, so a release re-measured for some facts and not for this one keeps the
+/// workaround (`DeviceDescription::driver_facts`, the module docs).
+///
+/// The case that found this is the live one. MoltenVK's queue failures are reported through the
+/// instance's messenger alone (`DriverFact::QueueFailuresReportedByMessenger`), which earns the
+/// relay that gives a GPU fault to the command buffer it struck instead of losing the whole
+/// device. Its row is measured at 1.4.1; `MEASURED_DEVICES` lists the M3 Max at 1.4.2, where 21
+/// sibling facts were re-measured and this one was not. Under a window that ends at the last
+/// release measured, that Mac -- a measured identity, so withheld nothing -- lost the relay with
+/// nothing anywhere saying so.
+#[test]
+fn a_defect_holds_past_the_last_release_measured_on_a_measured_identity() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../metal2vulkan-validation/profiles");
+    let text = std::fs::read_to_string(dir.join("moltenvk-m3.json")).expect("the M3 Max profile");
+    let mut description =
+        DeviceDescription::from_khronos_json(&text, None).expect("the profile parses");
+    // The profile is the identity measured at 1.4.1.
+    assert_eq!(description.driver_version, moltenvk(1, 4, 1));
+    assert!(description.measured_identity());
+    assert!(description.driver_facts().contains(&MESSENGER));
+    assert!(description.driver_facts().contains(&STAMPS));
+    // The same identity at 1.4.2, measured there for its other facts: the defect holds past its
+    // last measured release, and the answer fact of a 1.4.2 row of its own holds as measured.
+    description.driver_version = moltenvk(1, 4, 2);
+    assert!(
+        description.measured_identity(),
+        "the M3 Max at 1.4.2 is the identity MEASURED_DEVICES lists"
+    );
+    assert!(description.driver_facts_withheld().is_empty());
+    assert!(
+        description.driver_facts().contains(&MESSENGER),
+        "the relay's defect was dropped at a release its row does not reach"
+    );
+    assert!(description.driver_facts().contains(&STAMPS));
+    // An answer fact measured at 1.4.1 alone is not taken at 1.4.2: it is Metal's answer, a cost
+    // or a diagnostic, never a workaround, so the runtime takes the path that needs none.
+    let answers: Vec<DriverFact> = (MEASURED.iter())
+        .filter(|row| row.driver == DriverId::MOLTENVK)
+        .filter(|row| !row.fact.assumed_where_unmeasured())
+        .filter(|row| row.last < moltenvk(1, 4, 2))
+        .map(|row| row.fact)
+        .filter(|fact| {
+            !(MEASURED.iter()).any(|row| {
+                row.driver == DriverId::MOLTENVK
+                    && row.fact == *fact
+                    && (row.first..=row.last).contains(&moltenvk(1, 4, 2))
+            })
+        })
+        .collect();
+    assert!(
+        !answers.is_empty(),
+        "no MoltenVK answer fact stops at 1.4.1"
+    );
+    for fact in answers {
+        assert!(
+            !description.driver_facts().contains(&fact),
+            "{fact:?} is an answer fact and was taken past its last release measured"
+        );
+    }
+    // A release `MEASURED_DEVICES` does not list is an unmeasured identity, and there a defect of
+    // the driver holds at any release, as it did before this: the rule for those is unchanged.
+    description.driver_version = moltenvk(1, 3, 0);
+    assert!(!description.measured_identity());
+    assert!(description.driver_facts().contains(&MESSENGER));
+    assert!(!description.driver_facts().contains(&STAMPS));
+}
+
 /// Every committed profile's driver has exactly its measured facts (on a measured identity those
 /// its rows name, on any other its driver's defects alone). A profile of a measured identity: the
 /// 780M (RADV 26.2.4, Phoenix's and Hawk Point's alike), the gate's lavapipe 26.0.8 (both CPUs), the RPL-P and the RPL-S (ANV

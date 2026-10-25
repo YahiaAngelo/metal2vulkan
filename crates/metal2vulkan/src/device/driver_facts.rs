@@ -30,9 +30,14 @@
 //! (MoltenVK's on Apple's GPUs is the macOS release and the GPU family) is one device class for
 //! every release measured on each of its GPUs; a release measured on one of them alone names that
 //! GPU by its `deviceName` (`NAMED_RELEASES`), and is no measured identity of the others.
-//! - **On a measured identity** a fact is taken where a row of its driver names the identity's
-//!   release (from the first through the last) and, where it names them, its vendor and GPU: as
-//!   measured.
+//! - **On a measured identity** an answer fact is taken where a row of its driver names the
+//!   identity's release (from the first through the last) and, where it names them, its vendor and
+//!   GPU: as measured. A defect fact is taken from the first release measured on, past the last as
+//!   well, as the deviations' table keeps one ([`among`]): the driver goes on doing otherwise than
+//!   Metal until a measurement clears it, so a release re-measured for some facts and not for this
+//!   one keeps the workaround rather than losing it unannounced. An identity measured at that
+//!   release is withheld nothing ([`DeviceDescription::driver_facts_withheld`] speaks for
+//!   unmeasured ones alone), so a defect dropped by its window would be the one gap nothing says.
 //! - **On any other identity** (another release of a measured driver, newer or older, another
 //!   GPU of it, or another driver) no answer fact is taken: the runtime takes the exact path that
 //!   needs none. A defect fact ([`DriverFact::assumed_where_unmeasured`], the driver doing
@@ -3054,7 +3059,17 @@ impl DeviceDescription {
             .filter(|row| Some(row.driver) == self.driver_id)
             .filter(|row| match measured {
                 true => {
-                    (row.first..=row.last).contains(&self.driver_version)
+                    let release = match row.fact.assumed_where_unmeasured() {
+                        // A defect is kept at a release past the last measured, as the
+                        // deviations' table keeps one ([`among`], `Standing::Beyond`): the driver
+                        // goes on doing otherwise than Metal until a measurement clears it, and
+                        // the workaround is the exact path. Not below the first measured.
+                        true => self.driver_version >= row.first,
+                        // An answer (Metal's answer, a cost, a diagnostic) holds as measured
+                        // alone: the runtime takes the path that needs none elsewhere.
+                        false => (row.first..=row.last).contains(&self.driver_version),
+                    };
+                    release
                         && row.vendor.is_none_or(|v| v == self.vendor_id)
                         && row.device.is_none_or(|d| Some(d) == gpu)
                 }

@@ -179,6 +179,8 @@ mod reader_sizes;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod recycle;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod relay_facts;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod released_programs;
 mod render;
 mod replays;
