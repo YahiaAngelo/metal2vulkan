@@ -40,8 +40,9 @@
 //!   (`SpecKey::TileThreadgroupLength`, the pass's length rounded up to 16) and the tiles across
 //!   the render area (`SpecKey::TileGridWidth`), and binds the pass's tile memory
 //!   (`WriteSource::TileMemory`, every tile's bytes). An argument the encoder did not set is
-//!   `BindError::MissingThreadgroupMemory`; one past the tile's memory or not 16-byte aligned
-//!   `BindError::TileThreadgroupArgument`. The tile's bytes start the threadgroup total.
+//!   `BindError::MissingThreadgroupMemory`; one whose offset is past the tile's memory or not
+//!   16-byte aligned `BindError::TileThreadgroupArgument`. An argument's length bounds nothing, as
+//!   plain Metal's does not. The tile's bytes start the threadgroup total.
 //! - **Kept imageblock bytes** (`RuntimeFact::TileImageblock`). A tile function whose explicit
 //!   imageblock stands alone, in a pass that keeps fewer bytes of its cells than its data
 //!   (`BindShape::kept_imageblock_bytes`), asks for `VariantKey::kept_imageblock_bytes`: plain
@@ -176,9 +177,10 @@ impl TileMemoryPlan {
 /// The tile threadgroup memory of a pipeline of `dependencies` as `shape` places it on `device`;
 /// `None` for a pipeline that reads no threadgroup argument (`RuntimeFact::TileThreadgroupMemory`:
 /// a tile function's, or a fragment function's). An argument the encoder did not set is
-/// `BindError::MissingThreadgroupMemory`; one whose length or offset is not a multiple of 16, or
-/// that ends past the tile's memory, `BindError::TileThreadgroupArgument`, as Metal's validation
-/// refuses either. A shape without a render area or a tile is `InvalidRenderArea` or
+/// `BindError::MissingThreadgroupMemory`. An argument's length takes no part in the layout and
+/// bounds no access, as plain Metal's does not; one whose offset is not a multiple of 16, or past
+/// the tile's memory, is `BindError::TileThreadgroupArgument` (both doc comments name what plain
+/// Metal answers there). A shape without a render area or a tile is `InvalidRenderArea` or
 /// `InvalidImageblockSize`. A buffer of every tile's memory past the device's
 /// `maxStorageBufferRange`, which one descriptor binds at most, is `Unsupported`.
 pub(crate) fn tile_memory(
@@ -196,10 +198,11 @@ pub(crate) fn tile_memory(
             .arguments
             .get(&index)
             .ok_or(BindError::MissingThreadgroupMemory { index })?;
-        let aligned = |n: u32| u64::from(n).is_multiple_of(TG_ALIGN);
-        let end = u64::from(argument.offset) + u64::from(argument.length);
-        if !aligned(argument.length) || !aligned(argument.offset) || end > u64::from(memory.length)
-        {
+        // The length bounds nothing: an access past the tile's memory is contained against
+        // `SpecKey::TileThreadgroupLength` and reads zero, which is what plain Metal reads past
+        // the pass's `threadgroupMemoryLength` (`BindError::TileThreadgroupArgument`).
+        let aligned = u64::from(argument.offset).is_multiple_of(TG_ALIGN);
+        if !aligned || argument.offset > memory.length {
             return Err(BindError::TileThreadgroupArgument {
                 index,
                 offset: argument.offset,

@@ -132,10 +132,13 @@ impl RenderLowering {
         const CALL: &str = "set_threadgroup_memory_length";
         check_index(CALL, index, BUFFER_SLOTS)?;
         let tile_length = self.layout.tile.threadgroup_memory_length;
-        let fits = |n: u64| u32::try_from(n).ok().filter(|n| n.is_multiple_of(16));
-        let argument = match (fits(length), fits(offset)) {
-            // Each below 2^32: the sum does not overflow.
-            (Some(length32), Some(offset32)) if offset + length <= tile_length => {
+        // A length takes no part in the layout and bounds no access, as plain Metal's does not, so
+        // any length a `u32` holds is planned; an argument that ends past the tile's memory has
+        // its accesses contained there, reading zero as Metal's do.
+        let argument = match (u32::try_from(length).ok(), u32::try_from(offset).ok()) {
+            (Some(length32), Some(offset32))
+                if offset32.is_multiple_of(16) && u64::from(offset32) <= tile_length =>
+            {
                 TileThreadgroupArgument::new(length32, offset32)
             }
             _ => {
@@ -157,10 +160,12 @@ impl RenderLowering {
 impl RenderCommandEncoder {
     /// `setThreadgroupMemoryLength:offset:atIndex:`: a tile or fragment function's threadgroup
     /// argument `index` is `length` bytes at byte `offset` of its tile's threadgroup memory, for
-    /// the encoder's later tile dispatches and draws (the module docs). Refused (`Invalid`), as Metal's
-    /// validation refuses it: an index past the table (`IndexOutOfRange`), and a length or an
-    /// offset that is not a multiple of 16 bytes, or an argument that ends past the pass's
-    /// `threadgroupMemoryLength` (`TileThreadgroupArgument`).
+    /// the encoder's later tile dispatches and draws (the module docs). Every length is taken, and
+    /// an argument that ends past the pass's `threadgroupMemoryLength` reads zero from its end on,
+    /// as plain Metal does (`Problem::TileThreadgroupArgument` names the measurement). Refused
+    /// (`Invalid`): an index past the table (`IndexOutOfRange`), and an offset that is not a
+    /// multiple of 16 bytes, past the pass's `threadgroupMemoryLength`, or past a `u32`
+    /// (`TileThreadgroupArgument`).
     pub fn set_threadgroup_memory_length(
         &mut self,
         length: u64,

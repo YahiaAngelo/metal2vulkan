@@ -7,7 +7,7 @@ use crate::metal_level::{choose, parse_version, Chosen, Host};
 use crate::texture::heap::no_texture_alignment;
 use crate::texture_descriptor::{Creator, Refused, TextureDescriptor, TextureProblem};
 use crate::texture_descriptor::{TextureRules, APPLE_SAMPLE_COUNTS};
-use crate::{BufferTextureProblem, Error, Invalid, MetalLevel, Problem, Unproven};
+use crate::{BufferTextureProblem, Error, Invalid, MetalLevel, Problem, ResourceId, Unproven};
 use metal2vulkan::bind::MipmapRule;
 use metal2vulkan::metal::PixelFormat as P;
 use metal2vulkan::metal::{TextureType, TextureUsage};
@@ -160,6 +160,25 @@ fn a_level_takes_its_release_s_mipmaps_and_nil_alignments() {
 /// of another dispatch type (the consumer's measurement); 27.0.1 runs it (ours). The 18 shapes
 /// run on a device at each level in the validation crate's runtime lane
 /// (`a_runs_first_indirect_dispatch_of_another_type_ends_the_process_at_26_7`).
+/// A depth/stencil state's `gpuResourceID` below Apple10 is the level's plain Metal answer: 0 at
+/// macOS 27.0.1 (our probe on an M3 Max, build 26A434, plain Metal: 0 for a depth state and for a
+/// depth-and-stencil one, the call returning), and no answer at macOS 26.7, whose plain call
+/// raises (the consumer's measurement on an M3 Max). Metal's own API validation stops the call at
+/// both releases, which is not what plain Metal does, so no level takes its word for it.
+#[test]
+fn only_26_7_has_no_depth_stencil_resource_id_below_apple10() {
+    assert_eq!(MetalLevel::MacOS26_7.depth_stencil_resource_id(), None);
+    assert_eq!(
+        MetalLevel::MacOS27_0_1.depth_stencil_resource_id(),
+        Some(ResourceId(0))
+    );
+    assert_eq!(
+        MetalLevel::NEWEST.depth_stencil_resource_id(),
+        Some(ResourceId(0)),
+        "a device off macOS answers the newest level's"
+    );
+}
+
 #[test]
 fn only_26_7_ends_at_a_runs_first_indirect_dispatch_of_another_type() {
     assert!(MetalLevel::MacOS26_7.ends_at_a_runs_first_indirect_of_another_type());

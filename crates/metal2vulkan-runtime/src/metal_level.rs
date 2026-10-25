@@ -4,7 +4,9 @@
 //! descriptor's `setPixelFormat:` takes, and which formats `MTLPixelFormatGetInfoForDevice`
 //! describes, whose textures Metal's validation stops otherwise; and whether a compute encoder
 //! run's first indirect dispatch in an encoder of another dispatch type ends the process
-//! ([`MetalLevel::ends_at_a_runs_first_indirect_of_another_type`]). A [`MetalLevel`] is one measured
+//! ([`MetalLevel::ends_at_a_runs_first_indirect_of_another_type`]); and what a depth/stencil
+//! state's `gpuResourceID` answers below Apple10
+//! ([`MetalLevel::depth_stencil_resource_id`]). A [`MetalLevel`] is one measured
 //! release, and its row of the table ([`MetalLevel::knows`], [`MetalLevel::describes`]) is what
 //! that release answered on our own probes. Every check that differs by release reads the row of
 //! the device's level, never a release's name.
@@ -20,6 +22,7 @@
 //! no release of the host's names it.
 
 use crate::error::{Error, Problem, Unproven};
+use crate::resource_ids::ResourceId;
 use crate::texture::heap_tiled::{BlockFamily, BlockPlacement, GpuRows};
 use crate::Degradation;
 use metal2vulkan::bind::{CompressedBlit, MipmapRule};
@@ -84,6 +87,10 @@ struct Row {
     /// in an encoder of another dispatch type than the run's first encoder's
     /// ([`MetalLevel::ends_at_a_runs_first_indirect_of_another_type`]).
     indirect_of_another_type_ends: bool,
+    /// What its plain Metal answers for a depth/stencil state's `gpuResourceID` on a device that
+    /// does not claim Apple10, or `None` where the plain call raises
+    /// ([`MetalLevel::depth_stencil_resource_id`]).
+    depth_stencil_resource_id: Option<ResourceId>,
 }
 
 /// How a level's Metal places a block-compressed texture's blocks in its levels' tiles, per
@@ -126,6 +133,9 @@ const MACOS_26_7: Row = Row {
     // of the 18 shapes of its `a_units_first_indirect_dispatch_of_another_type_dies` (the
     // others run), and in `interplay_decodewalk_27` in each of its setups; not run here.
     indirect_of_another_type_ends: true,
+    // The consumer's measurement on its M3 Max: the plain call raises, as its API validation
+    // stops it; we cannot run 26.7 here.
+    depth_stencil_resource_id: None,
 };
 
 /// macOS 27.0.1 on an Apple M3 Max: its descriptor knows every value the runtime names (it
@@ -161,6 +171,10 @@ const MACOS_27_0_1: Row = Row {
     // Our probe on the M3 Max: 12 shapes of it, with and without a predication block open, run;
     // the consumer's `interplay_decodewalk_27` completes in each of its setups.
     indirect_of_another_type_ends: false,
+    // Our probe on the M3 Max (macOS 27.0.1, build 26A434, plain Metal): 0 for a depth state and
+    // for a depth-and-stencil one, the call returning; an earlier run of three states over two
+    // runs answered 0 alike.
+    depth_stencil_resource_id: Some(ResourceId(0)),
 };
 
 impl MetalLevel {
@@ -262,6 +276,17 @@ impl MetalLevel {
     /// on. Whether a fence update ends such a run at 26.7 is not measured: none does.
     pub(crate) fn ends_at_a_runs_first_indirect_of_another_type(self) -> bool {
         self.row().indirect_of_another_type_ends
+    }
+
+    /// What the release's plain Metal answers for a depth/stencil state's `gpuResourceID` on a
+    /// device that does not claim Apple10, or `None` where the plain call raises, which the
+    /// runtime answers alike (`Invalid`, `Problem::DepthStencilResourceId`). Metal's own API
+    /// validation stops the call at every release measured ("Obtaining the resourceID of a
+    /// DepthStencilState object requires support for MTLGPUFamilyApple10"), which is not what
+    /// plain Metal does: 27.0.1 answers 0 (our probe on an M3 Max, every state asked), where
+    /// 26.7's plain call raises (the consumer's measurement on an M3 Max).
+    pub(crate) fn depth_stencil_resource_id(self) -> Option<ResourceId> {
+        self.row().depth_stencil_resource_id
     }
 
     /// The newest level whose release is at or below macOS `version` (major, minor, patch), if

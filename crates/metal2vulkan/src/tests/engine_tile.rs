@@ -772,9 +772,13 @@ fn a_tiles_threadgroup_memory_persists_across_dispatches() {
 
 /// The binder places a tile function's threadgroup arguments where the encoder set them: it
 /// specializes each offset, the tile's bytes (the pass's length rounded up to 16) and the tiles
-/// across the render area, and binds the pass's tile memory of every tile's bytes; an argument the
-/// encoder did not set, or that Metal's validation refuses, is refused, and so is a tile memory
-/// past one storage-buffer descriptor's range.
+/// across the render area, and binds the pass's tile memory of every tile's bytes. An argument's
+/// length takes no part in the layout and bounds no access, as plain Metal's does not, so a length
+/// that is not a multiple of 16 and one that ends past the tile's memory are both planned at their
+/// offset (plain Metal on an M3 Max under macOS 27.0.1 takes every length, and reads zero from the
+/// tile's memory's end on, which the arena's containment gives). An argument the encoder did not
+/// set, or whose offset is not a multiple of 16 or past the tile's memory, is refused, and so is a
+/// tile memory past one storage-buffer descriptor's range.
 #[test]
 fn a_tile_pipeline_places_its_threadgroup_arguments() {
     use crate::bind::{TileThreadgroupArgument, TileThreadgroupMemory};
@@ -834,7 +838,25 @@ fn a_tile_pipeline_places_its_threadgroup_arguments() {
             Err(BindError::MissingThreadgroupMemory { index: 1 }),
             "{stem}"
         );
-        for (index, length, offset) in [(1, 64, 8), (1, 56, 16), (1, 64, 16)] {
+        // A length that is not a multiple of 16, and an argument that ends past the tile's
+        // memory, are planned at their offset: plain Metal takes either.
+        for (length, offset) in [(56, 16), (64, 16), (1, 64), (0, 0), (u32::MAX, 32)] {
+            let plan = pipe
+                .plan(&dev, &state(72, &[(0, 64, 0), (1, length, offset)]).shape())
+                .unwrap_or_else(|e| panic!("{stem}: {length} at {offset}: {e}"));
+            assert_eq!(
+                specialized(&pipe, &plan, SpecKey::TgOffset(1)),
+                Some(offset),
+                "{stem} {length} at {offset}"
+            );
+            assert_eq!(
+                specialized(&pipe, &plan, SpecKey::TileThreadgroupLength),
+                Some(80),
+                "{stem} {length} at {offset}"
+            );
+        }
+        // An offset that is not a multiple of 16, or past the tile's memory, is refused.
+        for (index, length, offset) in [(1, 64, 8), (1, 16, 4), (1, 16, 80), (1, 16, 1 << 20)] {
             assert_eq!(
                 refused(&[(0, 64, 0), (index, length, offset)]),
                 Err(BindError::TileThreadgroupArgument {

@@ -14,9 +14,14 @@
 //! - Each argument sits at the byte offset the encoder set: `shift` with argument 1 at byte 16
 //!   writes words 4 to 19, which argument 0 reads back, and `dump` with argument 0 at byte 64
 //!   reads words 16 on, past `shift`'s still zero.
-//! - The setter is refused where Metal's validation refuses it, and a dispatch of a function whose
-//!   argument the encoder never set is the binder's `MissingThreadgroupMemory`, where Metal's
-//!   validation stops the dispatch.
+//! - The setter takes every length, and an argument that ends past the tile's memory, as plain
+//!   Metal does (an M3 Max under macOS 27.0.1: every length and offset tried took, the pass
+//!   completing, reading zero from the tile's memory's end on); it is refused for an offset that is
+//!   not a multiple of 16 or past the tile's memory, which Metal floors to a multiple of 4 and
+//!   reads as zero respectively — measurements `Problem::TileThreadgroupArgument` names. A
+//!   dispatch of a function whose argument the encoder never set is the binder's
+//!   `MissingThreadgroupMemory`: plain Metal runs it with the argument at a driver-chosen offset
+//!   (byte 120 of 256 on an M3 Max, our probe), which no rule gives.
 
 use super::tile_states::on_device;
 use super::{buffer_with, read_buffer, WAIT};
@@ -225,7 +230,7 @@ fn each_pass_starts_its_tiles_threadgroup_memory_at_zero() {
 }
 
 #[test]
-fn tile_threadgroup_arguments_are_refused_as_metal_refuses_them() {
+fn tile_threadgroup_arguments_answer_as_plain_metal_does() {
     on_device(|device| {
         let states = States::new(device);
         let target = target(device);
@@ -254,17 +259,23 @@ fn tile_threadgroup_arguments_are_refused_as_metal_refuses_them() {
                         limit: 31
                     })
                 );
-                assert_eq!(
-                    encoder.set_threadgroup_memory_length(8, 0, 0),
-                    argument(8, 0)
-                );
+                // Every length is taken, a multiple of 16 or not, and so is an argument that
+                // ends past the tile's memory: plain Metal takes either.
+                for (length, offset) in [(8, 0), (0, 0), (1, 16), (64, 112), (u64::MAX, 32)] {
+                    assert_eq!(
+                        encoder.set_threadgroup_memory_length(length, offset, 0),
+                        Ok(()),
+                        "{length} at {offset}"
+                    );
+                }
+                // An offset that is not a multiple of 16, or past the tile's memory, is refused.
                 assert_eq!(
                     encoder.set_threadgroup_memory_length(64, 8, 0),
                     argument(64, 8)
                 );
                 assert_eq!(
-                    encoder.set_threadgroup_memory_length(64, 80, 0),
-                    argument(64, 80)
+                    encoder.set_threadgroup_memory_length(64, 144, 0),
+                    argument(64, 144)
                 );
                 encoder.set_render_pipeline_state(&states.add).unwrap();
                 assert_eq!(

@@ -1996,9 +1996,19 @@ pub enum BindError {
     /// (`BindState::tile_threadgroup`, `setThreadgroupMemoryLength:offset:atIndex:`): Metal's
     /// validation stops the dispatch ("missing Threadgroup Memory binding").
     MissingThreadgroupMemory { index: u32 },
-    /// A tile function's threadgroup argument `index` set at `offset` for `length` bytes, which
-    /// end past the render pass's tile threadgroup memory of `tile_length` bytes, or a length or
-    /// offset that is not a multiple of 16: Metal's validation refuses the setter.
+    /// A tile function's threadgroup argument `index` set at an `offset` past the render pass's
+    /// tile threadgroup memory of `tile_length` bytes, or at one that is not a multiple of 16
+    /// (`length` is the length set, which bounds nothing). Metal's own API validation refuses the
+    /// setter for either, and for a length that is not a multiple of 16, which is not what plain
+    /// Metal does: on an Apple M3 Max under macOS 27.0.1, plain Metal takes every length and
+    /// offset, the pass completes, and an argument begins at its offset floored to a multiple of
+    /// 4 bytes (17 reads byte 16), reading zero from the pass's memory's end on. So a length takes
+    /// no part in the layout here either, and an argument that ends past the tile's memory is
+    /// planned, its accesses contained to read zero as Metal's do. An offset between multiples of
+    /// 16 is refused all the same: matching Metal's floor needs a region base of 4-byte alignment,
+    /// whose effect on an access that claims wider alignment is unmeasured. An offset past the
+    /// tile's memory, which Metal reads as zero throughout, is refused because the shader's
+    /// 32-bit offset arithmetic could wrap into the memory.
     TileThreadgroupArgument {
         index: u32,
         offset: u32,

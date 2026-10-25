@@ -738,9 +738,15 @@ pub enum Problem {
     WrappedBuffer(WrappedBufferProblem),
     /// A tile function's threadgroup argument of `length` bytes at byte `offset` of its tile's
     /// threadgroup memory, which the pass makes `tile_length` bytes (its
-    /// `threadgroupMemoryLength`): a length or offset that is not a multiple of 16, or an
-    /// argument that ends past the tile's memory (`set_threadgroup_memory_length` of a render
-    /// encoder, as Metal's validation refuses it).
+    /// `threadgroupMemoryLength`): an `offset` that is not a multiple of 16, past the tile's
+    /// memory, or past a `u32` (`set_threadgroup_memory_length` of a render encoder). Metal's own
+    /// API validation refuses the setter for those and for a length that is not a multiple of 16
+    /// or an argument that ends past the tile's memory, which is not what plain Metal does: on an
+    /// Apple M3 Max under macOS 27.0.1 plain Metal takes every length and offset tried (4, 17, 0
+    /// and 2^32 among them), the pass completes, and the argument begins at its offset floored to
+    /// a multiple of 4 bytes, reading zero from the tile's memory's end on. So the runtime takes
+    /// every length and every argument that ends past the tile's memory too
+    /// (`metal2vulkan::error::BindError::TileThreadgroupArgument` carries the whole measurement).
     TileThreadgroupArgument {
         /// The argument's length, in bytes.
         length: u64,
@@ -749,10 +755,12 @@ pub enum Problem {
         /// The tile's threadgroup memory, in bytes.
         tile_length: u64,
     },
-    /// A depth/stencil state's `gpu_resource_id` on a device that does not claim Apple10:
-    /// Metal's API validation stops it ("Obtaining the resourceID of a DepthStencilState object
-    /// requires support for MTLGPUFamilyApple10"), and the primary reference's plain call (macOS
-    /// 26.7) raises; macOS 27.0.1's plain call answers 0.
+    /// A depth/stencil state's `gpu_resource_id` on a device that does not claim Apple10, at a
+    /// [`MetalLevel`](crate::MetalLevel) whose plain Metal raises there (macOS 26.7, the
+    /// consumer's measurement on an M3 Max). Metal's API validation stops the call at every
+    /// release measured ("Obtaining the resourceID of a DepthStencilState object requires support
+    /// for MTLGPUFamilyApple10"), which is not what plain Metal does: macOS 27.0.1's plain call
+    /// answers 0 (our probe on an M3 Max), and so does the runtime at that level.
     DepthStencilResourceId,
     /// A pipeline's `requiredThreadsPerThreadgroup` that Metal refuses at creation, or a dispatch
     /// whose threadgroup size is not it.

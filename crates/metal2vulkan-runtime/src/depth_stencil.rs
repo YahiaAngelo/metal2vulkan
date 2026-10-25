@@ -8,15 +8,16 @@
 //! (`render.rs`). Metal makes a state of any descriptor, masks wider than the 8-bit stencil
 //! included (measured on an M4), so creation refuses nothing.
 //!
-//! A state's `gpuResourceID` is Apple10's: below it Metal's API validation stops the call
-//! ("Obtaining the resourceID of a DepthStencilState object requires support for
-//! MTLGPUFamilyApple10", an M4 under macOS 27.0.1), and on the primary reference, an M3 under macOS
-//! 26.7, the plain call raises too (the consumer's measurement), so the runtime refuses it typed on
-//! a device that does not claim the family. macOS 27.0.1's plain call answers 0 for every state
-//! below Apple10 (two runs, three states): an OS version's difference,
-//! which [`DepthStencilState::gpu_resource_id`] would take in its one refusal if the primary
-//! reference moved to macOS 27. What the ID names on Apple10, a depth/stencil state an indirect
-//! render command sets, is not built.
+//! A state's `gpuResourceID` below Apple10 is a release's answer, not a refusal: Metal's API
+//! validation stops the call at every release measured ("Obtaining the resourceID of a
+//! DepthStencilState object requires support for MTLGPUFamilyApple10", an M4 under macOS 27.0.1),
+//! but plain Metal is what the runtime answers as, and the two differ. macOS 27.0.1's plain call
+//! answers 0 for every state asked below Apple10 (our probe on an M3 Max, and an earlier run of
+//! three states over two runs), where macOS 26.7's plain call raises (the consumer's measurement
+//! on an M3 Max). So the answer is the device's level's
+//! ([`MetalLevel::depth_stencil_resource_id`](crate::MetalLevel)), and the refusal is kept only for
+//! a level whose plain call raises. What the ID names on Apple10, a depth/stencil state an
+//! indirect render command sets, is not built.
 
 use super::error::{invalid, Error, Problem, RuntimeGap};
 use super::families::GpuFamily;
@@ -76,15 +77,19 @@ impl DepthStencilState {
         &self.0.descriptor
     }
 
-    /// `gpuResourceID` (the module docs): refused `Invalid(DepthStencilResourceId)` on a device
-    /// that does not claim Apple10 ([`Device::supports_family`]), as Metal's API validation stops
-    /// it, and `NotImplemented(IndirectRenderCommands)` on one that does: indirect render
-    /// commands that set a depth/stencil state are not built.
+    /// `gpuResourceID` (the module docs): on a device that does not claim Apple10
+    /// ([`Device::supports_family`]), what its level's plain Metal answers there (0 at macOS
+    /// 27.0.1), or `Invalid(DepthStencilResourceId)` at a level whose plain call raises (macOS
+    /// 26.7). Refused `NotImplemented(IndirectRenderCommands)` on a device that claims Apple10:
+    /// indirect render commands that set a depth/stencil state are not built.
     pub fn gpu_resource_id(&self) -> Result<ResourceId, Error> {
         if self.0.device.supports_family(GpuFamily::Apple10.raw()) {
             return Err(Error::NotImplemented(RuntimeGap::IndirectRenderCommands));
         }
-        Err(invalid("gpu_resource_id", Problem::DepthStencilResourceId))
+        let level = self.0.device.properties().metal_level;
+        level
+            .depth_stencil_resource_id()
+            .ok_or_else(|| invalid("gpu_resource_id", Problem::DepthStencilResourceId))
     }
 
     /// The Vulkan depth/stencil state the state stands for.
