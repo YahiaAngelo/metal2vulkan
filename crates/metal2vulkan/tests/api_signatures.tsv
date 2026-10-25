@@ -11656,7 +11656,6 @@ variant	metal2vulkan-runtime::Problem::LengthMismatch	LengthMismatch
 variant	metal2vulkan-runtime::Problem::LongTextureBufferFillPattern	LongTextureBufferFillPattern { length: u64 }
 variant	metal2vulkan-runtime::Problem::MaxCommandBufferCount	MaxCommandBufferCount
 variant	metal2vulkan-runtime::Problem::Mipmap	Mipmap(MipmapProblem)
-variant	metal2vulkan-runtime::Problem::NoBufferBound	NoBufferBound { index: u32 }
 variant	metal2vulkan-runtime::Problem::NoPipelineState	NoPipelineState
 variant	metal2vulkan-runtime::Problem::NotShareable	NotShareable
 variant	metal2vulkan-runtime::Problem::OffsetOutOfRange	OffsetOutOfRange { offset: u64, length: u64 }

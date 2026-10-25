@@ -10286,9 +10286,11 @@ impl RenderCommandEncoder {
     /// on an M4): for an attachment without a texture, or over an action the descriptor knew,
     /// nothing changes; a resolving action where nothing resolves resolves nothing
     /// (`MultisampleResolve` keeps no sample, `StoreAndMultisampleResolve` stores them); and one
-    /// that does not resolve where a resolve texture is named leaves that texture untouched.
-    /// Refused (`Invalid`, measured): an index past the attachments, `Unknown` itself, and `Store`
-    /// or `StoreAndMultisampleResolve` for a memoryless attachment.
+    /// that does not resolve where a resolve texture is named leaves that texture untouched. A
+    /// memoryless attachment holds no memory, so `Store` stores nowhere and
+    /// `StoreAndMultisampleResolve` is its resolve alone, the actions the descriptor's own take
+    /// (measured; Metal's End Encoding Validation alone objects to either).
+    /// Refused (`Invalid`, measured): an index past the attachments and `Unknown` itself.
     pub fn set_color_store_action(&mut self, action: StoreAction, index: u32) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_color_store_action(action, index)),
@@ -10300,10 +10302,11 @@ impl RenderCommandEncoder {
     /// `Unknown`; without a depth attachment nothing changes, as plain Metal does where its
     /// validation stops the call (measured on an M4); one that does not resolve where a resolve
     /// texture is named leaves that texture untouched and stores the depth by the action, as plain
-    /// Metal does where its validation stops it. Refused (`Invalid`, measured):
+    /// Metal does where its validation stops it; a memoryless attachment's `Store` stores nowhere,
+    /// as the descriptor's own does (measured). Refused (`Invalid`, measured):
     /// an action over one the descriptor knew, `Unknown` itself, a resolving action without a
-    /// resolve texture, `Store` for a memoryless attachment, and `Store` where the stencil
-    /// attachment is the same texture resolved by `MultisampleResolve`.
+    /// resolve texture, and `Store` where the stencil attachment is the same texture resolved by
+    /// `MultisampleResolve`.
     pub fn set_depth_store_action(&mut self, action: StoreAction) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_depth_store_action(action)),
@@ -11866,21 +11869,29 @@ fn late_store(
         }
         _ => action,
     };
-    // A memoryless attachment holds no memory, so the pass takes the descriptor's `Store` and
-    // `StoreAndMultisampleResolve` as plain Metal takes them
-    // (`render_pass::memoryless_actions`); a late one is still refused
-    // (`RenderPassProblem::MemorylessStore`), its own answer unmeasured.
-    if memoryless
-        && matches!(
-            action,
-            StoreAction::Store | StoreAction::StoreAndMultisampleResolve
-        )
-    {
-        return Err(store_problem(
-            call,
-            RenderPassProblem::MemorylessStore(which),
-        ));
-    }
+    // A memoryless attachment holds no memory, so `Store` stores nowhere and
+    // `StoreAndMultisampleResolve` is its resolve alone, set late by the encoder exactly as set in
+    // the descriptor: one mapping, `render_pass::memoryless_actions`, which the load action goes
+    // into as `DontCare` because this call has none and that mapping leaves `DontCare` alone.
+    // Plain Metal takes the late setter as it takes the descriptor's, for a color, depth and
+    // stencil attachment alike (`probes/memoryless_late_store_action.m` on an Apple M3 Max under
+    // macOS 27.0.1, one shape a process, graded at the commit and never at the call): the setter
+    // returns, `endEncoding` returns, the command buffer completes with no error, the stages'
+    // own counters report 3 vertices and every fragment, a guard buffer placed after the readable
+    // destination is untouched and three canary command buffers complete. A memoryless 4-sample
+    // attachment set late to `StoreAndMultisampleResolve` lands the same resolve texel as the
+    // same pass set to `MultisampleResolve`, and as a private attachment's
+    // `StoreAndMultisampleResolve` does, which is what says the resolve half still runs.
+    // Metal's validation layer alone objects, at the setter ("Deferred Store Action Validation:
+    // storeAction unsupported for Memoryless attachment.") and again at the end of the encoder
+    // ("endEncoding called with store action unsupported for Memoryless attachment."); those are
+    // layer messages, and `MTL_DEBUG_LAYER_ERROR_MODE=assert` ends the program at them.
+    // Nothing is claimed about what the attachment's texels are: Metal specifies no contents for
+    // tile memory, and a memoryless attachment has none to read.
+    let action = match memoryless {
+        true => render_pass::memoryless_actions(LoadAction::DontCare, action).1,
+        false => action,
+    };
     // One that does not resolve where the attachment resolves leaves the resolve texture
     // untouched and stores the attachment by the action, as plain Metal does where its
     // validation stops it (color, depth and stencil alike): the caller drops
@@ -11902,8 +11913,8 @@ mod tests {
     use crate::{Attachment, StoreAction};
 
     /// The encoder sets a store action only over the descriptor's `Unknown`, never to `Unknown`; a
-    /// resolving one exactly where the attachment resolves (measured on an M4), and no store of a
-    /// memoryless attachment.
+    /// resolving one exactly where the attachment resolves (measured on an M4); and a memoryless
+    /// attachment's store as the actions it can hold, storing nowhere.
     #[test]
     fn a_late_store_action_replaces_only_unknown() {
         let call = "set_color_store_action";
@@ -11980,15 +11991,15 @@ mod tests {
                 RenderPassProblem::StoreActionKnown(depth)
             ))
         );
+        // A memoryless attachment stores nowhere, so a late `Store` of one -- and a depth
+        // `CustomSampleDepthStore`, which stores as `Store` does -- is its `DontCare`, and a late
+        // `StoreAndMultisampleResolve` is its resolve alone, the same actions the descriptor's own
+        // take (`render_pass::memoryless_actions`). Plain Metal takes every one of these late
+        // (measured on an Apple M3 Max under macOS 27.0.1, graded at the commit).
         assert_eq!(
             late_store(call, depth, true, false, true, custom),
-            Err(store_problem(
-                call,
-                RenderPassProblem::MemorylessStore(depth)
-            ))
+            Ok(StoreAction::DontCare)
         );
-        // A memoryless attachment takes a late `DontCare` or `MultisampleResolve`, and no store
-        // (measured on an M4).
         assert_eq!(
             late_store(call, which, true, false, true, StoreAction::DontCare),
             Ok(StoreAction::DontCare)
@@ -12004,18 +12015,21 @@ mod tests {
             ),
             Ok(StoreAction::MultisampleResolve)
         );
-        for (resolves, action) in [
-            (false, StoreAction::Store),
-            (true, StoreAction::StoreAndMultisampleResolve),
-        ] {
-            assert_eq!(
-                late_store(call, which, true, resolves, true, action),
-                Err(store_problem(
-                    call,
-                    RenderPassProblem::MemorylessStore(which)
-                ))
-            );
-        }
+        assert_eq!(
+            late_store(call, which, true, false, true, StoreAction::Store),
+            Ok(StoreAction::DontCare)
+        );
+        assert_eq!(
+            late_store(
+                call,
+                which,
+                true,
+                true,
+                true,
+                StoreAction::StoreAndMultisampleResolve
+            ),
+            Ok(StoreAction::MultisampleResolve)
+        );
     }
 
     /// Indirect arguments are read from the offset rounded down to a multiple of 4, as plain

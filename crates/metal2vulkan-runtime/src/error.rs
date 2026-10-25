@@ -597,16 +597,6 @@ pub enum Problem {
         /// The buffer's length.
         length: u64,
     },
-    /// `set_buffer_offset` at an index with no buffer bound: a render stage's form (a compute
-    /// form at an index with nothing bound changes nothing, as plain Metal's; any form at an index
-    /// holding a visible-function table makes it read as the null table).
-    ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: setVertexBufferOffset:16 atIndex:0 with
-    /// no buffer bound returns, the encoder ends and the pass completes).
-    NoBufferBound {
-        /// The argument-table index.
-        index: u32,
-    },
     /// `set_bytes` (or a stage's form) of more bytes than Metal's limit for inline bytes.
     ///
     /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: setBytes:length:8192 returns and the
