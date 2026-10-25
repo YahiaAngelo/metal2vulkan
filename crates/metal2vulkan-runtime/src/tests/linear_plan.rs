@@ -4,16 +4,16 @@
 
 use super::super::image_plan::plan_image;
 use super::super::linear_plan::{
-    aliases, check_linear_limits, holding, linear_alignment, linear_lack, plan_buffer_texture,
-    BufferFacts, BufferLayout, BufferRefusal, BufferTexture, BufferTextureCall,
-    BufferTextureProblem, LinearImage, LinearLack, Placed, LINEAR_ALIGNMENT,
+    aliases, check_linear_limits, holding, is_linear, linear_alignment, linear_lack,
+    plan_buffer_texture, BufferFacts, BufferLayout, BufferRefusal, BufferTexture,
+    BufferTextureCall, BufferTextureProblem, LinearImage, LinearLack, Placed, LINEAR_ALIGNMENT,
 };
 use super::super::texture_descriptor::{effective_usage, no_texture_alone, TextureDescriptor};
 use super::super::values::StorageMode;
 use super::image_plan::{committed, facts};
 use super::texture_descriptor::APPLE;
 use crate::MetalLevel;
-use metal2vulkan::metal::format::direct_format;
+use metal2vulkan::metal::format::{byte_format, direct_format};
 use metal2vulkan::metal::PixelFormat as P;
 use metal2vulkan::metal::TextureType;
 use metal2vulkan::metal::TextureUsage;
@@ -1611,4 +1611,97 @@ fn a_render_target_s_linear_image_serves_it_by_the_linear_attachment_rule() {
         ruled >= 2,
         "the NVIDIA profiles render linear images by the rule"
     );
+}
+
+/// Every format a buffer can back has a texel size that divides 16, so Metal's GPU pitch for an
+/// IOSurface plane (its `bytesPerRow` rounded down to 16) is a whole number of texels.
+#[test]
+fn every_backed_format_s_texel_divides_the_linear_alignment() {
+    let mut backed = 0;
+    for &pf in P::ALL {
+        if !is_linear(pf) {
+            continue;
+        }
+        let Some(texel) = byte_format(pf)
+            .and_then(|format| format.block())
+            .map(|block| u64::from(block.size))
+        else {
+            continue;
+        };
+        backed += 1;
+        assert!(
+            texel != 0 && LINEAR_ALIGNMENT.is_multiple_of(texel),
+            "{pf:?}: a texel of {texel} bytes does not divide {LINEAR_ALIGNMENT}"
+        );
+    }
+    assert!(
+        backed > 50,
+        "the sweep took {backed} formats a buffer backs"
+    );
+}
+
+/// How far the rows of a refused IOSurface plane overlap, which bounds what holding them would
+/// take. A plane's `bytesPerRow` covers its own row (`BufferTextureProblem::RowPitch`), so
+/// rounding it down to 16 takes under 16 bytes off: the rows overlap by 1 to 15 bytes, a whole
+/// number of texels (above), and between consecutive rows alone, since twice the GPU pitch is
+/// always past one row. A plane whose rows overlap further is a two-plane YCbCr texture's rows of
+/// codes, which no row rule holds (`ycbcr.rs`).
+///
+/// No plane the runtime makes has rows that overlap at all.
+#[test]
+fn a_refused_plane_s_rows_overlap_by_under_sixteen_bytes() {
+    let formats = [
+        (P::R8Unorm, 1),
+        (P::RG8Unorm, 2),
+        (P::RGBA8Unorm, 4),
+        (P::RGBA16Uint, 8),
+        (P::RGBA32Uint, 16),
+    ];
+    let mut refused = 0;
+    let mut made = 0;
+    for (pf, texel) in formats {
+        for width in 1..=40 {
+            let row_bytes = width * texel;
+            for bytes_per_row in row_bytes..row_bytes + 48 {
+                for height in 2..=3 {
+                    let case = Case {
+                        call: BufferTextureCall::IoSurfacePlane { planar: true },
+                        pixel_format: pf,
+                        width,
+                        height,
+                        bytes_per_row,
+                        ..texture(width, height, 0, bytes_per_row, 1 << 20)
+                    };
+                    let pitch = bytes_per_row - bytes_per_row % LINEAR_ALIGNMENT;
+                    match placed(case) {
+                        Err(BufferRefusal::OverlappingRows) => {
+                            refused += 1;
+                            let overlap = row_bytes.saturating_sub(pitch);
+                            assert!(
+                                (1..LINEAR_ALIGNMENT).contains(&overlap)
+                                    && overlap.is_multiple_of(texel)
+                                    && pitch >= LINEAR_ALIGNMENT
+                                    && 2 * pitch > row_bytes,
+                                "{pf:?} {width}x{height} at {bytes_per_row} bytes a row: \
+                                 {overlap} bytes of overlap at a GPU pitch of {pitch}"
+                            );
+                        }
+                        Ok(placed) => {
+                            made += 1;
+                            assert!(
+                                placed.gpu.row_pitch >= placed.gpu.row_bytes
+                                    && placed.cpu.row_pitch >= placed.cpu.row_bytes,
+                                "{pf:?} {width}x{height} at {bytes_per_row} bytes a row: \
+                                 a made plane's rows overlap"
+                            );
+                        }
+                        Err(other) => {
+                            panic!("{pf:?} {width}x{height} at {bytes_per_row}: {other:?}")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!((refused, made), (1608, 17592));
 }

@@ -98,7 +98,10 @@
 //!   writes meet, one of them wins, by the order of the writes: the earlier row's in a blit, and
 //!   in a kernel the later row's on the M4 and others on the M3 Max. The runtime refuses such a
 //!   plane of more than one row (`NotImplemented`, `RuntimeGap::OverlappingSurfaceRows`;
-//!   [`BufferRefusal::OverlappingRows`]).
+//!   [`BufferRefusal::OverlappingRows`]). A plane's pitch covers its own row, so the overlap is
+//!   1 to 15 bytes, a whole number of texels, and between consecutive rows alone
+//!   (`tests::linear_plan`); a two-plane YCbCr texture's rows of codes, which no row rule holds,
+//!   overlap by any amount and across any number of rows (`ycbcr.rs`).
 //! - **Two-plane YCbCr codes** (an M3 Max under macOS 27.0.1; `ycbcr.rs`'s **Surfaces**). Metal
 //!   makes a two-plane YCbCr texture over any plane, its codes at the plane's rows however wide
 //!   they are: a 10-bit format over an 8-bit plane, whose rows of codes overlap where
@@ -357,7 +360,7 @@ impl Placed {
 /// CPU (the module's rules): from its offset rounded down to 16, rows its pitch rounded down to 16
 /// apart, or 16 apart where that is 0 (a plane under 16 bytes a row, [`Placed::narrow`]). A plane
 /// of one row lies there whatever its pitch; refused ([`BufferRefusal::OverlappingRows`]) where
-/// later rows would overlap earlier ones.
+/// later rows would overlap earlier ones, which no image holds.
 pub(super) fn iosurface_gpu_layout(cpu: &BufferLayout) -> Result<BufferLayout, BufferRefusal> {
     let down = |n: u64| n - n % LINEAR_ALIGNMENT;
     let pitch = down(cpu.row_pitch);
@@ -388,7 +391,9 @@ pub(super) enum BufferRefusal {
     /// the length and the runtime has no bytes for (`NotImplemented`).
     TexelsPastLength,
     /// An IOSurface plane whose rows overlap on Metal's GPU, where a write's bytes depend on the
-    /// order it writes rows in (`NotImplemented`; the module's rules).
+    /// order it writes rows in (`NotImplemented`; the module's rules). A plane whose pitch covers
+    /// its row overlaps by 1 to 15 bytes between consecutive rows; a two-plane YCbCr texture's
+    /// rows of codes, which no row rule holds, by any amount (`ycbcr.rs`).
     OverlappingRows,
     /// An IOSurface plane whose descriptor asks for `Memoryless` storage, which plain Metal makes
     /// and serves on the CPU while every GPU use fails the command buffer (`NotImplemented`; the

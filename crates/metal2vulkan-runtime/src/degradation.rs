@@ -238,7 +238,9 @@ macro_rules! degradations {
 degradations! {
     runtime {
         /// A 2D texture over a buffer is a shadow image: the buffer is over host pages (a no-copy
-        /// buffer's, imported by their pointer or as dma-bufs), where an image bound to them would
+        /// buffer's, imported by their pointer or as dma-bufs, or the fresh pages a host-visible
+        /// buffer of the runtime's own longer than 32 MiB lies in, `fresh_pages.rs`), where an
+        /// image bound to them would
         /// start `UNDEFINED` (`VUID-VkImageCreateInfo-pNext-01443`) and Vulkan lets its layout
         /// transitions (its first move among them) read and write any byte bound to it, where
         /// Metal keeps every CPU write; or its rows (or an array's slices) lie with the buffer's
@@ -1762,8 +1764,9 @@ degradations! {
         /// implementation's rules: its texels' bytes lie in an `R8G8_UNORM` carrier, and its twin
         /// holds Metal's texels as 8-bit codes, exact, decoded in whole rows.
         CarriedDecodedTwin = "carried-decoded-twin", Performance,
-            "a carrier image of its blocks, at most about 1 byte a texel, and a decoded twin of \
-             4 bytes a texel (R8G8B8A8, `DecodedTexelsPolicy::Compact`; an EAC 11-bit texture's \
+            "a carrier image of its blocks, at most about 1 byte a texel (a 4:2:2 texture's 2), \
+             and a decoded twin of 4 bytes a texel (R8G8B8A8, \
+             `DecodedTexelsPolicy::Compact`; an EAC 11-bit texture's \
              16-bit codes, 2 bytes a channel) or 16 (R32G32B32A32_SFLOAT, \
              `DecodedTexelsPolicy::Exact`; an EAC 11-bit texture's floats, 4 bytes a channel), \
              two for an ASTC texture viewed in both colour spaces, and a decode after each write \
@@ -1871,7 +1874,8 @@ degradations! {
         HostDeallocatorDelayed = "host-deallocator-delayed", Precision,
             "the deallocator runs once every command buffer that may still reach the pages \
              (through a texture over them, or a table of the live buffers it holds) lets go of \
-             them, where Metal's runs at the release; the pages stay mapped until then";
+             them, or the batches submitted before the import's memory went complete, where \
+             Metal's runs at the release; the pages stay mapped until then";
         /// A no-copy buffer, heap or rebind was made over host pages the process maps
         /// read-only, from the caller's dma-buf source (`HostMemory::with_dma_buf`): on Linux,
         /// where drivers pin a pointer's imported pages for writing, such pages are imported only

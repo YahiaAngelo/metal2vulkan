@@ -50,6 +50,7 @@ mod cpu_copy_layouts;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod deferred_calls;
 mod degradation;
+mod degradation_catalogue;
 mod depth_copy;
 mod depth_ranges;
 mod depth_stencil_resolve;
