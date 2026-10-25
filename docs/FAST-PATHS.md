@@ -857,17 +857,18 @@ announces `shared-in-system-memory` for every `Shared` buffer and no recording t
 declare it, which counts 699 of the 5080's cases divergent with 655 of them differing in nothing
 else.
 
-- **A texture over an IOSurface plane whose GPU rows overlap is refused.** Metal makes it: a plane
-  of more than one row of over 16 bytes whose `bytesPerRow` rounded down to 16 is below the row
-  reads and writes its rows that far apart, so consecutive rows share bytes
-  (`NotImplemented(OverlappingSurfaceRows)`, `linear_plan.rs`). No Vulkan image holds rows that
-  overlap, so such a texture would be a shadow whose copies reproduce the sharing. For a plane
-  whose pitch covers its own row the sharing is small and fixed: 1 to 15 bytes, a whole number of
-  texels, between consecutive rows alone (`tests::linear_plan`), which two copy regions a slice
-  express in each direction — a copy in that reads every row's shared head and the rest of each
-  row, and a copy back that writes each row from its head's texels on, with row 0's head alone
-  beside it, so every byte is written once and the shared bytes keep the earlier row's, the order
-  Metal's blit leaves. That still needs a note for a kernel's colliding writes, where Metal leaves
-  the later row's bytes on an M4 and others on an M3 Max, and a render pass's store into such rows
-  is unmeasured. A two-plane YCbCr texture's rows of codes, which no row rule holds, overlap by any
-  amount across any number of rows and need more than those two regions.
+- **A texture over an IOSurface plane whose GPU rows overlap is served only as a shadow.** A plain
+  plane of more than one row of over 16 bytes whose `bytesPerRow` rounded down to 16 is below the
+  row is made: its rows share 1 to 15 bytes, a whole number of texels, between consecutive rows
+  alone, and its shadow's copies hold the sharing with two regions a slice each way, which
+  announces `colliding-surface-row-writes` (`linear_plan.rs`,
+  `buffer_texture::plane_copy_regions`). Still refused
+  `NotImplemented(OverlappingSurfaceRows)`: a plane a render pass stores into, where what Metal
+  leaves of the shared bytes is unmeasured; a two-plane YCbCr texture's rows of codes, which no row
+  rule holds and which overlap by any amount across any number of rows, and the other formats whose
+  rows no row rule bounds (a two-plane extended-range one's, a 4:2:2 one's pairs, a depth or stencil
+  plane's elements), which two regions do not express; and a blit that addresses such a plane's rows
+  as bytes (`blit_texture.rs`), whose row copies leave the later row's bytes where two meet, as a
+  rotated texture's Metal blit writes them, not the earlier row's that Metal's blit through such a
+  plane leaves. A rotated plane never reaches any of this: its `bytesPerRow` must be a multiple of
+  16, so its GPU rows lie at the pitch itself.

@@ -68,6 +68,10 @@ impl Degradation {
                 D::ZeroedIndexFetch
                 | D::DontCareStore
                 | D::NarrowSurfaceRows
+                // Two rows of an IOSurface plane writing the bytes they share: Metal's blit
+                // leaves the earlier row's and its kernel the later row's on an M4, others on an
+                // M3 Max; the runtime leaves the earlier row's.
+                | D::CollidingSurfaceRowWrites
                 | D::RepeatedExecutionStart
                 | D::OverlappingTextureCopyAsMemmove
                 | D::PlainStateUniqueIdentifier

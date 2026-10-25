@@ -72,6 +72,13 @@
 //!   every copy through it writes the image or the texture's bytes, so the tracker orders it after
 //!   every other copy of the texture. A texture buffer's staging buffer is its shadow, with uses of
 //!   its own, as an image's.
+//! - **Rows that share bytes** (`linear_plan.rs`'s **Rows that overlap**). An IOSurface plane
+//!   whose GPU rows share 1 to 15 bytes is an image of its texels whose copies are two regions a
+//!   slice each way ([`plane_copy_regions`](super::buffer_texture::plane_copy_regions)): going
+//!   in each shared byte is read for both the rows that hold it, and going back it is
+//!   written once, from the earlier row, as Metal's blit leaves it. The rules above are the same;
+//!   no copy of such a shadow is cut to a rectangle, and none dispatches, both of which take one
+//!   region.
 //! - **Render passes** (`render/shadows.rs`). A render pass instance is one command: its draws
 //!   record apart, where no copy goes, so the copies go before the instance and the uses are its
 //!   draws' and its attachments'.
@@ -362,10 +369,17 @@ impl ShadowBuffer {
 /// A shadowed texture's shadow (see the module).
 pub(super) enum ShadowTarget {
     /// A 2D texture's image: `regions`, one per slice, copy its texels from the buffer, or from
-    /// `staging` where Vulkan cannot copy them in place.
+    /// `staging` where Vulkan cannot copy them in place, and `back` copies them out of the image
+    /// again.
     Image {
         image: vk::Image,
         regions: Vec<vk::BufferImageCopy>,
+        /// The regions a copy back, and a merge's keep, take out of the image
+        /// ([`ShadowCopies::record_out`]): `regions` for every shadow but one over an IOSurface
+        /// plane whose rows share bytes, where going in reads each shared byte for both its rows
+        /// and going back writes it once, from the earlier row
+        /// (`buffer_texture::plane_copy_regions`).
+        back: Vec<vk::BufferImageCopy>,
         staging: Option<ShadowStaging>,
         /// The bytes of one of its texels in the buffer, by which a copy back of a part of the
         /// texture ([`ShadowCopy::area`]) offsets its region; `None` where no copy of it is
@@ -407,6 +421,24 @@ pub(super) enum ShadowTarget {
         staging: ShadowStaging,
         tiles: Box<HeapTiledCopies>,
     },
+}
+
+impl ShadowTarget {
+    /// The regions a copy of a 2D texture's image over a buffer's bytes takes, going into the
+    /// image (`into_shadow`) or back out of it: `regions` in and `back` out, which differ only
+    /// for an IOSurface plane whose rows share bytes
+    /// ([`plane_copy_regions`](super::buffer_texture::plane_copy_regions): going in reads each
+    /// shared byte for both its rows, and going back writes it once, from the earlier row).
+    /// `None` for every other shadow.
+    pub(super) fn image_regions(&self, into_shadow: bool) -> Option<&[vk::BufferImageCopy]> {
+        let ShadowTarget::Image { regions, back, .. } = self else {
+            return None;
+        };
+        Some(match into_shadow {
+            true => regions,
+            false => back,
+        })
+    }
 }
 
 /// A shadowed texture's staging buffer (see the module): its bytes, from the first texel to the
@@ -812,9 +844,10 @@ impl ShadowCopies {
                     tiles.record_out(device, command_buffer, (*image, moves), staging, (to, at));
                 }
             }
-            ShadowTarget::Image { image, regions, .. } => {
-                let origin = regions.first().map_or(0, |region| region.buffer_offset);
-                let moved: Vec<vk::BufferImageCopy> = regions
+            ShadowTarget::Image { image, .. } => {
+                let back = target.image_regions(false).unwrap_or_default();
+                let origin = back.first().map_or(0, |region| region.buffer_offset);
+                let moved: Vec<vk::BufferImageCopy> = back
                     .iter()
                     .map(|region| vk::BufferImageCopy {
                         buffer_offset: region.buffer_offset - origin + at,
@@ -1442,12 +1475,13 @@ impl ShadowCopy {
         let (image, regions, staging) = match target {
             ShadowTarget::Image {
                 image,
-                regions,
                 staging,
                 texel,
                 ..
             } => {
-                let regions = match (self.area, staging, regions.as_slice(), *texel) {
+                // Going back takes the regions that write each byte once (the variant's `back`).
+                let regions = target.image_regions(into_shadow).unwrap_or_default();
+                let regions = match (self.area, staging, regions, *texel) {
                     (Some(area), None, [region], Some(texel)) => {
                         match part_of(region, area, texel) {
                             Some(part) => std::borrow::Cow::Owned(vec![part]),
@@ -1455,7 +1489,7 @@ impl ShadowCopy {
                             None => return,
                         }
                     }
-                    _ => std::borrow::Cow::Borrowed(regions.as_slice()),
+                    _ => std::borrow::Cow::Borrowed(regions),
                 };
                 (*image, regions, staging.as_ref())
             }

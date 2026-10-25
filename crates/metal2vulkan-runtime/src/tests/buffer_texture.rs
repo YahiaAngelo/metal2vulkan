@@ -12,7 +12,7 @@ use super::super::texture_descriptor::TextureLayout;
 use super::super::values::StorageMode;
 use ash::vk;
 use metal2vulkan::device::FormatUsage;
-use metal2vulkan::metal::{PixelFormat, TextureType};
+use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 
 /// Whether `result` is the typed gap of a view the runtime does not make.
 fn not_made(result: Result<ViewUsage, Error>) -> bool {
@@ -54,7 +54,9 @@ fn a_view_names_the_one_kind_its_format_serves_where_maintenance5_allows() {
 /// A staged shadow's texels go back into the buffer as one region where its rows lie one after
 /// another (a 1080p surface's packed rows: one region, not 1080), and a region a row where bytes
 /// lie between them; each slice of packed rows joins the next where the slices lie one after
-/// another too.
+/// another too. Rows that share bytes (an IOSurface plane's on Metal's GPU) join as well: a
+/// region of each would write the shared bytes twice in one `vkCmdCopyBuffer`
+/// (`VUID-vkCmdCopyBuffer-pRegions-12482`).
 #[test]
 fn packed_rows_go_back_as_one_region() {
     let layout = |row_pitch: u64, rows: u64, slices: u64| BufferLayout {
@@ -83,6 +85,43 @@ fn packed_rows_go_back_as_one_region() {
             (2 * 7744, 2 * 7744 + 5, 7680)
         ]
     );
+    // Rows 7664 apart, 7680 bytes of texels each: consecutive rows share 16 bytes, and the three
+    // go back as one region of their whole span.
+    assert_eq!(regions(layout(7664, 3, 1), 0, 5), [(0, 5, 2 * 7664 + 7680)]);
+}
+
+/// No rotated texture over an IOSurface plane has GPU rows that share bytes, which no shadow of
+/// a turned frame holds (`linear_plan.rs`'s **Rows that overlap**): `turned_plane` takes only a
+/// `bytesPerRow` that is a multiple of 16, so the plane's GPU pitch is its own pitch and covers
+/// its row. The shapes below are exactly the ones a plain plane holds as a shadow of two copy
+/// regions each way, and every rotation refuses them for their pitch alone.
+#[test]
+fn no_rotated_plane_s_gpu_rows_share_bytes() {
+    let refusal = |rotation: u8, width: u32, height: u32, bytes_per_row: u64| {
+        let texture = over_a_plane(width, height, bytes_per_row);
+        let length = bytes_per_row * u64::from(width.max(height)) + 1024;
+        match turned_plane("t", &texture, rotation, &BufferFacts { length }) {
+            // A plane whose pitch is a multiple of 16 lies at it, a row apart or further.
+            Ok((_, placed)) => {
+                assert_eq!(placed.gpu.shared_bytes(), 0, "rotation {rotation}");
+                None
+            }
+            Err(error) => Some(format!("{error:?}")),
+        }
+    };
+    let pitch = Some(format!(
+        "{:?}",
+        Error::NotImplemented(RuntimeGap::RotatedTexture)
+    ));
+    for rotation in 1..=4u8 {
+        // 20 bytes of texels a row at 20 and at 28: a plain plane's rows would lie 16 apart and
+        // share 4 bytes. Here the pitch itself is refused.
+        assert_eq!(refusal(rotation, 5, 4, 20), pitch, "rotation {rotation}");
+        assert_eq!(refusal(rotation, 5, 4, 28), pitch, "rotation {rotation}");
+        assert_eq!(refusal(rotation, 4, 5, 20), pitch, "rotation {rotation}");
+        // A pitch that is a multiple of 16 and covers both rows is taken, its rows a row apart.
+        assert_eq!(refusal(rotation, 5, 4, 32), None, "rotation {rotation}");
+    }
 }
 
 /// A `width x height` texture of 4-byte texels over an IOSurface plane whose rows are
@@ -102,6 +141,7 @@ fn over_a_plane(width: u32, height: u32, bytes_per_row: u64) -> BufferTexture {
         offset: 0,
         bytes_per_row,
         call: BufferTextureCall::IoSurfacePlane { planar: false },
+        usage: TextureUsage::SHADER_READ,
     }
 }
 

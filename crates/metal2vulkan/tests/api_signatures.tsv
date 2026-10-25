@@ -4898,6 +4898,7 @@ macro-member	metal2vulkan-runtime::Degradation::CappedAnisotropy	CappedAnisotrop
 macro-member	metal2vulkan-runtime::Degradation::CarriedDecodedTwin	CarriedDecodedTwin = "carried-decoded-twin", Performance,
 macro-member	metal2vulkan-runtime::Degradation::ClippedCoverageSplit	ClippedCoverageSplit = "clipped-coverage-split";
 macro-member	metal2vulkan-runtime::Degradation::ClippedDepthPieces	ClippedDepthPieces = "clipped-depth-pieces", Precision,
+macro-member	metal2vulkan-runtime::Degradation::CollidingSurfaceRowWrites	CollidingSurfaceRowWrites = "colliding-surface-row-writes", Precision,
 macro-member	metal2vulkan-runtime::Degradation::ColorAttachmentGroups	ColorAttachmentGroups = "color-attachment-groups";
 macro-member	metal2vulkan-runtime::Degradation::CombinedArchiveStages	CombinedArchiveStages = "combined-archive-stages", Precision,
 macro-member	metal2vulkan-runtime::Degradation::CompressedTexelDecode	CompressedTexelDecode = "compressed-texel-decode", Precision,

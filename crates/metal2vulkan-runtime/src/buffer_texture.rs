@@ -357,7 +357,14 @@ impl Buffer {
     /// - under 16 bytes a row, the GPU's rows are 16 bytes apart. There Metal's GPU reads every
     ///   row past the first as memory-dependent bytes; the runtime's reads them where its writes
     ///   put them, a near-equivalent announced once
-    ///   ([`Degradation::NarrowSurfaceRows`](super::Degradation::NarrowSurfaceRows)).
+    ///   ([`Degradation::NarrowSurfaceRows`](super::Degradation::NarrowSurfaceRows));
+    /// - where that pitch is below the row, the GPU's rows share bytes: 1 to 15 of them, a whole
+    ///   number of texels, between consecutive rows. A plain plane is made, its shadow's copies
+    ///   reproducing the sharing with two regions a slice each way, so that a read sees it as
+    ///   Metal's does and the shared bytes keep the earlier row's where two of its rows write
+    ///   them, as Metal's blit leaves them; announced once, as a kernel of Metal's leaves the
+    ///   later row's there on an M4 and others on an M3 Max, announced by
+    ///   [`Degradation::CollidingSurfaceRowWrites`](super::Degradation::CollidingSurfaceRowWrites).
     ///
     /// Refused: a surface made with `kIOSurfaceClientDirection`, SPI
     /// ([`AppleOnly::SurfaceClientDirection`](super::AppleOnly::SurfaceClientDirection)); what
@@ -367,10 +374,11 @@ impl Buffer {
     /// whose rows end past it, which plain Metal asserts on); `Memoryless` storage, which plain
     /// Metal makes and serves on the CPU while its GPU uses fail the command buffer
     /// (`NotImplemented(MemorylessSurfacePlane)`, which carries the measurement); rows that
-    /// overlap on Metal's GPU, of more than 16 bytes at a `bytes_per_row` whose multiple of 16
-    /// below it is shorter than the row, where Metal's writes depend on their order
-    /// (`NotImplemented(OverlappingSurfaceRows)`); a plane's own rows or its GPU texels past the
-    /// buffer, which Metal's surface holds in its pages
+    /// overlap on Metal's GPU where no shadow of the runtime's holds them
+    /// (`NotImplemented(OverlappingSurfaceRows)`: a plane a render pass stores into, a two-plane
+    /// YCbCr, two-plane extended-range, 4:2:2, depth or stencil one, and a blit that addresses
+    /// such a plane's rows as bytes; `linear_plan.rs`); a plane's own rows or its GPU texels past
+    /// the buffer, which Metal's surface holds in its pages
     /// (`NotImplemented(TexelsPastBufferLength)`); and as [`new_texture`](Self::new_texture)
     /// refuses a format or an image.
     ///
@@ -623,6 +631,7 @@ impl Buffer {
             offset,
             bytes_per_row,
             call: form,
+            usage: descriptor.usage,
         };
         // A rotated texture: its plane holds it turned, as Metal checks it, its CPU access and
         // blits address the plane as the texture's own extent at the plane's rows, and its
@@ -708,6 +717,9 @@ impl Buffer {
             if placed.narrow {
                 self.degrade_narrow_rows(&layout, &placed);
             }
+            if placed.gpu.shared_bytes() != 0 {
+                self.degrade_colliding_rows(&layout, &placed);
+            }
             Ok(texture)
         }
     }
@@ -721,6 +733,10 @@ impl Buffer {
 /// (`NotImplemented(RotatedTexture)`) for a plane whose offset or `bytesPerRow` is off 16 bytes,
 /// or a format of a texel size other than 1, 2, 4, 8 or 16 bytes (a 4:2:2 one among them), whose
 /// rotation is not measured.
+///
+/// A rotated plane's `bytesPerRow` must be a multiple of 16 here, so its GPU rows lie at the
+/// pitch itself and never share bytes, which no shadow of a turned frame holds
+/// (`linear_plan.rs`'s **Rows that overlap**).
 ///
 /// It reads nothing of the buffer but its length, so a test reaches every refusal from the
 /// input's own shape with no device — which the pitch rule needs, the texture it refuses being
@@ -810,6 +826,30 @@ impl Buffer {
             );
             (object, reason)
         });
+    }
+
+    /// Announce `CollidingSurfaceRowWrites` for an IOSurface plane of `layout` placed as `placed`,
+    /// whose GPU rows share bytes, once it is made (`linear_plan.rs`'s **Rows that overlap**).
+    fn degrade_colliding_rows(&self, layout: &TextureLayout, placed: &Placed) {
+        self.device()
+            .degrade(Degradation::CollidingSurfaceRowWrites, || {
+                let [width, height, _] = layout.extent;
+                let object = format!(
+                    "{width}x{height} {:?} texture of an IOSurface plane at offset {}, {} bytes a \
+                     row",
+                    layout.pixel_format, placed.cpu.offset, placed.cpu.row_pitch
+                );
+                let reason = format!(
+                    "Metal's GPU reads and writes its rows {} bytes apart from byte {}, {} bytes \
+                     of texels each, so consecutive rows share {} bytes, and which row's writes \
+                     stand there depends on the order Metal writes them in",
+                    placed.gpu.row_pitch,
+                    placed.gpu.offset,
+                    placed.gpu.row_bytes,
+                    placed.gpu.shared_bytes(),
+                );
+                (object, reason)
+            });
     }
 }
 
@@ -1140,10 +1180,21 @@ impl Texels {
         self.span().end <= self.buffer.length()
     }
 
-    /// Whether the texels' rows overlap: a rotated texture's whose rows are longer than its
-    /// plane's (`rotated_rows`).
+    /// Whether the texels' rows overlap: an IOSurface plane's on Metal's GPU
+    /// ([`plane_rows_overlap`](Self::plane_rows_overlap)), or a rotated texture's whose rows are
+    /// longer than its plane's (`rotated_rows`).
     pub(super) fn rows_overlap(&self) -> bool {
         self.layout.rows > 1 && self.layout.row_pitch < self.layout.row_bytes
+    }
+
+    /// Whether the texels' rows overlap because Metal's GPU reads and writes an IOSurface plane
+    /// at its pitch rounded down to 16 (`linear_plan::iosurface_gpu_layout`), the plane's own
+    /// rows lying a row apart, rather than because a quarter turn's rows are longer than the
+    /// plane's (`rotated_rows`, whose CPU rows overlap as its GPU rows do). The shadow's copies
+    /// hold the sharing ([`plane_copy_regions`]); a blit that addresses the rows as bytes does
+    /// not (`blit_texture.rs`).
+    pub(super) fn plane_rows_overlap(&self) -> bool {
+        self.rows_overlap() && self.cpu.row_pitch >= self.cpu.row_bytes
     }
 
     /// The texels of a texture of `descriptor` at `placed` in `buffer`, `texel_bytes` each.
@@ -1324,30 +1375,11 @@ impl Texels {
         let start = staging
             .as_ref()
             .map_or(at, |staging| staging.into.dst_offset);
-        let width = layout.row_bytes / self.texel_bytes;
         // The descriptor's checks bound a texture's extent and slices to `u32`s.
         let slices = layout.slices as u32;
-        let regions = (0..slices)
-            .map(|slice| vk::BufferImageCopy {
-                // Metal's slices are multiples of 128 bytes apart.
-                buffer_offset: start + layout.slice_pitch * u64::from(slice),
-                // Metal's rows are multiples of 16 bytes, so of every texel size.
-                buffer_row_length: (layout.row_pitch / self.texel_bytes) as u32,
-                buffer_image_height: 0,
-                image_subresource: vk::ImageSubresourceLayers {
-                    aspect_mask: aspects,
-                    mip_level: 0,
-                    base_array_layer: slice,
-                    layer_count: 1,
-                },
-                image_offset: vk::Offset3D::default(),
-                image_extent: vk::Extent3D {
-                    width: width as u32,
-                    height: layout.rows as u32,
-                    depth: 1,
-                },
-            })
-            .collect();
+        let (regions, back) = plane_copy_regions(layout, self.texel_bytes, start, aspects);
+        // A copy back dispatches, and a merge fetches, over one region copied in place alone.
+        let one_region = regions.len() == 1 && slices == 1 && staging.is_none();
         let (bytes, tracked) = self.buffer.tracked(layout.offset..layout.end());
         Ok(ShadowCopies {
             source: ShadowSource::Bytes {
@@ -1355,12 +1387,11 @@ impl Texels {
                 key: bytes.key,
                 bytes: tracked,
                 target: ShadowTarget::Image {
-                    // A copy back dispatches, and a merge fetches, over one region copied in
-                    // place alone.
-                    words: words.filter(|_| slices == 1 && staging.is_none()),
-                    unorm: unorm.filter(|_| slices == 1 && staging.is_none()),
+                    words: words.filter(|_| one_region),
+                    unorm: unorm.filter(|_| one_region),
                     image,
                     regions,
+                    back,
                     staging,
                     texel: Some(self.texel_bytes),
                 },
@@ -1645,16 +1676,25 @@ pub(super) fn view_usage(
 
 /// The regions that copy the texels laid out as `layout` from a staging buffer, where they start at
 /// `start`, back into the texture's `VkBuffer`, where they start at `at` (`ShadowStaging::back`):
-/// one a row, but one for rows that lie one after another.
+/// one a row, but one for rows that lie one after another or share bytes.
+///
+/// A row that shares bytes with the one above (an IOSurface plane's on Metal's GPU,
+/// `linear_plan::iosurface_gpu_layout`) extends that row's region rather than opening one of its
+/// own: a region of each would write the shared bytes twice in one `vkCmdCopyBuffer`, which no
+/// two destination regions of one may do (`VUID-vkCmdCopyBuffer-pRegions-12482`; older releases
+/// read it off `-00117`'s union of the destination regions). The staging buffer holds the plane's
+/// bytes as they lie, the shadow's copy back having written each of them once
+/// ([`plane_copy_regions`]), so one region of the rows' whole span moves them as they are.
 pub(super) fn staged_rows_back(layout: &BufferLayout, start: u64, at: u64) -> Vec<vk::BufferCopy> {
     let rows = (0..layout.slices).flat_map(|slice| {
         (0..layout.rows).map(move |row| slice * layout.slice_pitch + row * layout.row_pitch)
     });
     let mut back: Vec<vk::BufferCopy> = Vec::new();
     for row in rows {
+        let end = start + row + layout.row_bytes;
         match back.last_mut() {
-            Some(last) if last.src_offset + last.size == start + row => {
-                last.size += layout.row_bytes;
+            Some(last) if last.src_offset + last.size >= start + row => {
+                last.size = end - last.src_offset;
             }
             _ => back.push(vk::BufferCopy {
                 src_offset: start + row,
@@ -1664,4 +1704,80 @@ pub(super) fn staged_rows_back(layout: &BufferLayout, start: u64, at: u64) -> Ve
         }
     }
     back
+}
+
+/// The regions that copy the texels laid out as `layout`, `texel_bytes` each, starting at `start`
+/// of the `VkBuffer` the copies address, into a 2D texture's shadow image of `aspects`, and the
+/// regions that copy them back out of it (`shadow.rs`, [`Texels::shadow_copies`]): one region a
+/// slice each way, the slice's rows of texels, where each row lies a row apart from the one above
+/// or further. Metal's slices lie multiples of 128 bytes apart and its rows multiples of 16, so
+/// of every texel size.
+///
+/// Where consecutive rows share bytes (an IOSurface plane's on Metal's GPU,
+/// `linear_plan::iosurface_gpu_layout`: 1 to 15 bytes, a whole number of texels, between
+/// consecutive rows alone), no one region states a slice: a region addresses its rows one
+/// `bufferRowLength` apart, which is at least its width
+/// (`VUID-vkCmdCopyBufferToImage-bufferRowLength-00195`), and the shared bytes hold a texel of
+/// each of two rows. Each slice takes two regions instead, split at the texels the sharing
+/// covers:
+///
+/// - going in, every row's shared head and the rest of every row. Their sources share the bytes,
+///   which a copy into an image allows: a memory location may not be read by a source region and
+///   written by a destination region of one copy
+///   (`VUID-vkCmdCopyBufferToImage-pRegions-00173`), nor written by two destination regions
+///   (`-12483`), and the two regions' image texels are disjoint and together every texel;
+/// - going back, the rest of every row, and the head of row 0 alone. Those tile the slice's bytes
+///   exactly once, so no byte is written by two destination regions
+///   (`VUID-vkCmdCopyImageToBuffer-pRegions-12485`), and every shared byte takes the earlier
+///   row's tail, the order Metal's blit writes two rows in (`linear_plan.rs`'s **Rows that
+///   overlap**). A kernel's two writes there leave the earlier row's too, where Metal's leave the
+///   later row's on an M4 and others on an M3 Max
+///   ([`Degradation::CollidingSurfaceRowWrites`](super::Degradation::CollidingSurfaceRowWrites)).
+pub(super) fn plane_copy_regions(
+    layout: &BufferLayout,
+    texel_bytes: u64,
+    start: u64,
+    aspects: vk::ImageAspectFlags,
+) -> (Vec<vk::BufferImageCopy>, Vec<vk::BufferImageCopy>) {
+    let shared = layout.shared_bytes();
+    let width = (layout.row_bytes / texel_bytes) as u32;
+    let pitch = (layout.row_pitch / texel_bytes) as u32;
+    // The descriptor's checks bound a texture's extent and slices to `u32`s.
+    let (slices, rows) = (layout.slices as u32, layout.rows as u32);
+    let region = |slice: u32, at: u64, x: u32, texels: u32, height: u32| vk::BufferImageCopy {
+        buffer_offset: at + layout.slice_pitch * u64::from(slice),
+        buffer_row_length: pitch,
+        buffer_image_height: 0,
+        image_subresource: vk::ImageSubresourceLayers {
+            aspect_mask: aspects,
+            mip_level: 0,
+            base_array_layer: slice,
+            layer_count: 1,
+        },
+        image_offset: vk::Offset3D {
+            x: x as i32,
+            y: 0,
+            z: 0,
+        },
+        image_extent: vk::Extent3D {
+            width: texels,
+            height,
+            depth: 1,
+        },
+    };
+    if shared == 0 {
+        let regions: Vec<vk::BufferImageCopy> = (0..slices)
+            .map(|slice| region(slice, start, 0, width, rows))
+            .collect();
+        return (regions.clone(), regions);
+    }
+    let head = (shared / texel_bytes) as u32;
+    let (mut into, mut back) = (Vec::new(), Vec::new());
+    for slice in 0..slices {
+        into.push(region(slice, start, 0, head, rows));
+        into.push(region(slice, start + shared, head, width - head, rows));
+        back.push(region(slice, start, 0, head, 1));
+        back.push(region(slice, start + shared, head, width - head, rows));
+    }
+    (into, back)
 }

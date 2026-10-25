@@ -77,6 +77,7 @@ fn shadow_in(
             target: ShadowTarget::Image {
                 image: vk::Image::null(),
                 regions: Vec::new(),
+                back: Vec::new(),
                 staging: None,
                 texel: Some(4),
                 words: None,
@@ -1790,4 +1791,64 @@ fn kept_steps(copies: &[ShadowCopy<Boxed>]) -> Vec<String> {
             Step::Merge(Boxed(n, area)) => format!("merge {n} {area:?}"),
         })
         .collect()
+}
+
+/// A copy of a 2D texture's image takes the regions of its own direction
+/// ([`ShadowTarget::image_regions`]): the copy-in set going in, the copy-back set going out. They
+/// are one set for every shadow but one over an IOSurface plane whose rows share bytes, where
+/// going in reads each shared byte for both its rows and going back writes it once, from the
+/// earlier row — so a copy back that took the copy-in set would write the shared bytes twice in
+/// one `vkCmdCopyImageToBuffer` (`VUID-vkCmdCopyImageToBuffer-pRegions-12485`).
+#[test]
+fn a_copy_of_an_image_takes_the_regions_of_its_direction() {
+    // The two sets a 5x4 RGBA8Unorm plane 16 bytes a row takes
+    // (`buffer_texture::plane_copy_regions`): the head of every row and the rest of every row
+    // going in, and going back the rest of every row and the head of row 0 alone.
+    let region = |at: u64, x: i32, width: u32, height: u32| vk::BufferImageCopy {
+        buffer_offset: at,
+        buffer_row_length: 4,
+        buffer_image_height: 0,
+        image_subresource: vk::ImageSubresourceLayers {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+        image_offset: vk::Offset3D { x, y: 0, z: 0 },
+        image_extent: vk::Extent3D {
+            width,
+            height,
+            depth: 1,
+        },
+    };
+    let into = vec![region(0, 0, 1, 4), region(4, 1, 4, 4)];
+    let back = vec![region(0, 0, 1, 1), region(4, 1, 4, 4)];
+    let shape = |regions: &[vk::BufferImageCopy]| {
+        (regions.iter())
+            .map(|r| {
+                let e = r.image_extent;
+                (r.buffer_offset, r.image_offset.x, e.width, e.height)
+            })
+            .collect::<Vec<_>>()
+    };
+    let target = ShadowTarget::Image {
+        image: vk::Image::null(),
+        regions: into.clone(),
+        back: back.clone(),
+        staging: None,
+        texel: Some(4),
+        words: None,
+        unorm: None,
+    };
+    assert_eq!(
+        shape(target.image_regions(true).expect("an image's regions")),
+        shape(&into)
+    );
+    assert_eq!(
+        shape(target.image_regions(false).expect("an image's regions")),
+        shape(&back)
+    );
+    // The two sets differ, so taking the wrong one is visible: the copy-in set reads the shared
+    // head of all four rows, the copy-back set writes row 0's alone.
+    assert_ne!(shape(&into), shape(&back));
 }

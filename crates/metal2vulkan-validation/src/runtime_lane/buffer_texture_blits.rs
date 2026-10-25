@@ -958,6 +958,15 @@ fn iosurface_planes_lie_where_metal_puts_them() {
                     .new_texture_with_iosurface_plane(&d, plane)
                     .err()
             };
+            // As `refused`, with render target usage beside the descriptor's own.
+            let refused_target = |pf, [w, h]: [u64; 2], plane| {
+                let mut d = TextureDescriptor::texture_2d(pf, w, h, false);
+                d.resource_options = held.buffer.resource_options();
+                d.usage |= TextureUsage::RENDER_TARGET;
+                held.buffer
+                    .new_texture_with_iosurface_plane(&d, plane)
+                    .err()
+            };
             let flat = IoSurfacePlane::new(0, 4, false);
             assert_eq!(
                 refused(PixelFormat::R8Unorm, [4, 4], flat),
@@ -969,9 +978,12 @@ fn iosurface_planes_lie_where_metal_puts_them() {
                     }),
                 )))
             );
+            // A plane whose GPU rows share bytes (20 bytes of texels 16 apart): made for a
+            // plain descriptor, its shadow's copies reproducing the sharing, and refused where a
+            // render pass would store into it, what Metal leaves there being unmeasured.
             let overlapping = IoSurfacePlane::new(0, 20, true);
             assert_eq!(
-                refused(PixelFormat::RGBA8Unorm, [5, 4], overlapping),
+                refused_target(PixelFormat::RGBA8Unorm, [5, 4], overlapping),
                 Some(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows))
             );
             // A surface made with `kIOSurfaceClientDirection`, SPI, is refused whatever the

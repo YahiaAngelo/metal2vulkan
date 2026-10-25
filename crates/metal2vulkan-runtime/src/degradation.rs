@@ -1076,6 +1076,17 @@ degradations! {
             "a GPU read of a row past the first reads the bytes the GPU's writes put there, 16 \
              bytes a row apart, where Metal's GPU reads memory-dependent bytes; CPU access and \
              the GPU's writes and first row are Metal's";
+        /// A texture of an IOSurface plane whose rows share bytes on Metal's GPU
+        /// (`Buffer::new_texture_with_iosurface_plane`, `linear_plan.rs`): more than one row of
+        /// over 16 bytes whose `bytesPerRow` rounded down to 16 is below the row, so consecutive
+        /// rows share 1 to 15 bytes, a whole number of texels. Metal's reads see the sharing and
+        /// so do the runtime's, through a shadow whose two copy regions each way hold it; but
+        /// where two rows' writes meet Metal's answer is not one value: its blit leaves the
+        /// earlier row's bytes, and its kernel the later row's on an M4 and others on an M3 Max.
+        CollidingSurfaceRowWrites = "colliding-surface-row-writes", Precision,
+            "where two of the plane's rows write the bytes they share the earlier row's stand, \
+             as Metal's blit leaves them, where a kernel of Metal's leaves the later row's on an \
+             M4 and others on an M3 Max; reads, CPU access and every other byte are Metal's";
         /// A pipeline state's function may read an argument its function constants removed (a
         /// texture's read, sample, gather, query or atomic, or a sample through a removed
         /// sampler; `RuntimeFact::AbsentArgumentRead`), which Metal gives no value: its compiler

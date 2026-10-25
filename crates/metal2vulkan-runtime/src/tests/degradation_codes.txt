@@ -12,6 +12,7 @@ metal2vulkan-degrade-capped-anisotropy
 metal2vulkan-degrade-carried-decoded-twin
 metal2vulkan-degrade-clipped-coverage-split
 metal2vulkan-degrade-clipped-depth-pieces
+metal2vulkan-degrade-colliding-surface-row-writes
 metal2vulkan-degrade-color-attachment-groups
 metal2vulkan-degrade-combined-archive-stages
 metal2vulkan-degrade-compressed-texel-decode

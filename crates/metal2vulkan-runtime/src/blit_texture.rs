@@ -561,6 +561,14 @@ impl BlitCommandEncoder {
                     destination_slice,
                 )?;
                 if let Some(texels) = texture.buffer_texels() {
+                    // Rows that share bytes (an IOSurface plane's on Metal's GPU): the row
+                    // copies leave the later row's bytes where two meet, as a rotated texture's
+                    // plain Metal blit writes them (`blit_plan::RowsCopy`), and Metal's blit
+                    // through such a plane leaves the earlier row's
+                    // (`linear_plan.rs`'s **Rows that overlap**).
+                    if texels.plane_rows_overlap() {
+                        return Err(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows));
+                    }
                     let (from, to) = plan_rows_copy(
                         texture.record(),
                         &region,
@@ -709,6 +717,14 @@ impl BlitCommandEncoder {
                 let unit = unit(CALL, source_texture, options)?;
                 let region = region(CALL, source_origin, size, source_level, source_slice)?;
                 if let Some(texels) = source_texture.buffer_texels() {
+                    // Rows that share bytes (an IOSurface plane's on Metal's GPU): the row
+                    // copies leave the later row's bytes where two meet, as a rotated texture's
+                    // plain Metal blit writes them (`blit_plan::RowsCopy`), and Metal's blit
+                    // through such a plane leaves the earlier row's
+                    // (`linear_plan.rs`'s **Rows that overlap**).
+                    if texels.plane_rows_overlap() {
+                        return Err(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows));
+                    }
                     let (to, from) = plan_rows_copy(
                         source_texture.record(),
                         &region,
@@ -1677,8 +1693,12 @@ impl BlitCommandEncoder {
                 self.rows_copy(&from.buffer, &to.buffer, &RowsCopy::new(&src, &dst))
             }
             (Some(texels), None) | (None, Some(texels)) => {
-                // Rows that overlap (a rotated texture's) are no layout a buffer-image copy
-                // states.
+                // Rows that overlap are no layout a buffer-image copy states: an IOSurface
+                // plane's on Metal's GPU, which only its shadow's two regions each way hold
+                // (`linear_plan.rs`'s **Rows that overlap**), or a rotated texture's.
+                if texels.plane_rows_overlap() {
+                    return Err(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows));
+                }
                 if texels.rows_overlap() {
                     return Err(Error::NotImplemented(RuntimeGap::RotatedTexture));
                 }

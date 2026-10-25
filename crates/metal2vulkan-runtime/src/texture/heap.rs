@@ -3488,6 +3488,9 @@ impl Device {
                     bytes: tracked,
                     target: ShadowTarget::Image {
                         image,
+                        // A heap's depth or stencil texture holds no byte twice: its copies back
+                        // are its copies in.
+                        back: regions.clone(),
                         regions,
                         staging: None,
                         texel: None,
