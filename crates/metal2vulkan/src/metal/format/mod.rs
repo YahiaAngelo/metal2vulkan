@@ -2376,7 +2376,16 @@ pub(crate) enum WriteConversion {
 /// unorm formats' channels round the value to a half first and then as a unorm channel
 /// (`ChannelWrite::HalfUnorm`; every half in `[0, 1]`, the midpoints between them and every code's
 /// value and tie of 1, 4, 5 and 6 bits with `f32` steps either side, plain and blended with factors
-/// one and zero, every channel of the four formats). `RGB9E5Float` was measured only with equal
+/// one and zero, every channel of the four formats; and `BGRA4Unorm`'s four, measured the same way
+/// on an Apple M3 Max under macOS 27.0.1 over 31,864 values a channel -- every `half` in `[0, 1]`,
+/// every midpoint between two of them, every code's value and tie of 1, 4, 5 and 6 bits with two
+/// `f32` steps either side, the values outside `[0, 1]` and the non-finite ones -- from a `float`
+/// and a `half` output, plain and blended with factors one and zero, beside `ABGR4Unorm`'s and
+/// `B5G6R5Unorm`'s recorded rules in the same process. Rounding the exact product without the
+/// `half` first explains none of those legs: an `ABGR4Unorm` or `BGRA4Unorm` red of 0.0333404541
+/// stores 0, not 1. The only ties these five formats reach round the same to nearest even and away
+/// from zero, so this measurement does not separate the two; `A1BGR5Unorm`'s 1-bit alpha of 0.5,
+/// which stores 0, is what does. `RGB9E5Float` was measured only with equal
 /// channels: its conversion stays unmeasured. `ARGB8Unorm` converts as `RGBA8Unorm` and stores the
 /// codes rotated. `None` for a format that is no color attachment.
 pub(crate) fn write_conversion(pf: PixelFormat) -> Option<WriteConversion> {
@@ -2429,7 +2438,7 @@ pub(crate) fn write_conversion(pf: PixelFormat) -> Option<WriteConversion> {
         P::A8Unorm => [None, None, None, u(8)],
         P::B5G6R5Unorm => [hu(5), hu(6), hu(5), None],
         P::A1BGR5Unorm | P::BGR5A1Unorm => [hu(5), hu(5), hu(5), hu(1)],
-        P::ABGR4Unorm => [hu(4); 4],
+        P::ABGR4Unorm | P::BGRA4Unorm => [hu(4); 4],
         _ => {
             return color_output_components(pf).map(|_| match sampled_type(pf) {
                 Some(SampledType::Float)

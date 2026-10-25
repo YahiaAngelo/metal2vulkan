@@ -3260,3 +3260,52 @@ fn the_srgb_straggler_has_no_vulkan_image_and_keeps_its_footprint() {
     );
     assert!(!crate::metal::texel_format::srgb_raw(pf));
 }
+
+/// `BGRA4Unorm`'s colour-attachment conversion, measured on an Apple M3 Max under macOS 27.0.1
+/// (`metal2vulkan-conformance/probes/bgra4_write_and_mipmap.m`), is the packed 16-bit rule its four
+/// siblings already hold: each channel's value rounded to `half` to nearest even, clamped, times
+/// 15, rounded to nearest even. The probe swept 31,864 values a channel from a `float` and a
+/// `half` output, plain and blended with factors one and zero, and ran `ABGR4Unorm` and
+/// `B5G6R5Unorm` beside it in the same process, reproducing their recorded rules and their recorded
+/// field positions.
+///
+/// Rounding the exact product *without* the `half` -- which is what every unpacked unorm format
+/// does -- explains none of the `float` legs, and the first value where it parts company is the
+/// one asserted here. That is the measurement, not a restatement of the rule: a red of
+/// `0.0333404541` is half 0.033325195, whose product with 15 is 0.49988, which stores 0, while the
+/// exact product 0.50011 would store 1.
+#[test]
+fn the_packed_four_bit_straggler_converts_writes_through_a_half() {
+    use super::word::half_unorm_code;
+
+    let rule = Some(ChannelWrite::HalfUnorm { bits: 4 });
+    assert_eq!(
+        write_conversion(PixelFormat::BGRA4Unorm),
+        Some(WriteConversion::Rules([rule; 4])),
+    );
+    // Its sibling's rule, which the same run reproduced.
+    assert_eq!(
+        write_conversion(PixelFormat::ABGR4Unorm),
+        Some(WriteConversion::Rules([rule; 4])),
+    );
+
+    // The value Metal's own answer used to reject the product rule, and the rounding either side.
+    let parts = f32::from_bits(0x3d08_9000);
+    assert_eq!(half_unorm_code(parts, 4), 0);
+    assert_eq!((f64::from(parts) * 15.0).round_ties_even(), 1.0);
+
+    // The probe's `graded` texel: (1, 2, 4, 8) / 15 stored 0x8124, alpha in bits 12 to 15, then
+    // red, green and blue, which is this format's word read from its least significant bit.
+    let graded = [1.0 / 15.0, 2.0 / 15.0, 4.0 / 15.0, 8.0 / 15.0];
+    let codes = graded.map(|x| half_unorm_code(x, 4));
+    assert_eq!(codes, [1, 2, 4, 8]);
+    let word = (codes[3] << 12) | (codes[0] << 8) | (codes[1] << 4) | codes[2];
+    assert_eq!(word, 0x8124);
+    // And its single-channel texels: a channel of one fills its own nibble and no other.
+    assert_eq!(half_unorm_code(1.0, 4), 15);
+    // Outside `[0, 1]` and the non-finite values, over the whole sweep.
+    assert_eq!(half_unorm_code(f32::NAN, 4), 0);
+    assert_eq!(half_unorm_code(-1.0, 4), 0);
+    assert_eq!(half_unorm_code(f32::INFINITY, 4), 15);
+    assert_eq!(half_unorm_code(f32::NEG_INFINITY, 4), 0);
+}

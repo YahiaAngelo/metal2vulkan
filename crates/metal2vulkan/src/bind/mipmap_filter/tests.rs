@@ -108,8 +108,8 @@ fn every_filter_kernel_is_valid_on_every_committed_profile_with_int64() {
     let fetching = kernels.iter().filter(|k| k.fetches()).count();
     assert_eq!(
         kernels.len() - fetching,
-        304,
-        "the kernels of the 35 formats"
+        316,
+        "the kernels of the 36 formats"
     );
     assert_eq!(
         fetching,
@@ -1170,7 +1170,7 @@ fn the_kernel_is_the_chain_on_the_cpu() {
             }
         }
     }
-    assert_eq!(formats, 35, "the formats the filter computes");
+    assert_eq!(formats, 36, "the formats the filter computes");
 }
 
 /// Taps the M4 measured (R32Float ramps) where the exact centre's weight,

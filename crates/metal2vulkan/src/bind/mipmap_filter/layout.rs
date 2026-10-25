@@ -159,8 +159,10 @@ pub(super) fn layout(pf: PixelFormat) -> Option<Layout> {
                 at(11, 5, widened(5, 10)),
             ],
         ),
-        // Each 4-bit field filtered as an 8-bit code.
-        P::ABGR4Unorm => (2, uniform(4, 4, widened(4, 8))),
+        // Each 4-bit field filtered as an 8-bit code. `BGRA4Unorm` is the same four 4-bit
+        // fields from bit 0, in a channel order this rule never reads, and Metal's three
+        // measured chains of it are `ABGR4Unorm`'s byte for byte (`mipmap_answers.txt`).
+        P::ABGR4Unorm | P::BGRA4Unorm => (2, uniform(4, 4, widened(4, 8))),
         P::R16Unorm => (2, uniform(1, 16, Rule::Fixed16 { signed: false })),
         P::RG16Unorm => (4, uniform(2, 16, Rule::Fixed16 { signed: false })),
         P::RGBA16Unorm => (8, uniform(4, 16, Rule::Fixed16 { signed: false })),
@@ -220,6 +222,7 @@ pub(super) fn layout(pf: PixelFormat) -> Option<Layout> {
     let half = matches!(
         pf,
         P::ABGR4Unorm
+            | P::BGRA4Unorm
             | P::A1BGR5Unorm
             | P::BGR10XR
             | P::BGR10XRSRGB

@@ -98,10 +98,13 @@
 //! - `BGR10_XR` and `BGRA10_XR` the same way, a colour's terms floored to `2^-13` code and alpha's
 //!   to `2^-15` (2 of 9,216 texels of `BGR10_XR`'s 193x193 level missed the exact sum);
 //! - `ABGR4Unorm` and `A1BGR5Unorm`, each code filtered as a wider code (below; 4 of 9,216 texels
-//!   of each one's 193x193 level missed each code on its own grid).
+//!   of each one's 193x193 level missed each code on its own grid). `BGRA4Unorm`'s four 4-bit
+//!   fields from bit 0 are `ABGR4Unorm`'s, in a channel order this rule never reads, so it takes
+//!   the same one; its own three chains, measured on an M3 Max under macOS 27.0.1
+//!   (`mipmap_answers.txt`), hold it.
 //!
-//! **The M3 Max's half.** At its filter's levels the M3 Max carries `ABGR4Unorm`,
-//! `A1BGR5Unorm` and the extended-range formats through a half float: a normalized field's grid
+//! **The M3 Max's half.** At its filter's levels the M3 Max carries `ABGR4Unorm` (and so
+//! `BGRA4Unorm`, its fields), `A1BGR5Unorm` and the extended-range formats through a half float: a normalized field's grid
 //! sum `Q` (below; a widened field's of its wide code, `m` times its own) is `v = Q / (den m
 //! 2^k)` rounded to a half (nearest even) and stored as `v den` rounded to nearest even; an
 //! extended-range colour's `v = (Q / 16 - 384) / 510`, alpha's `(Q / 8 - 384) / 510` (on its 1/8
@@ -333,7 +336,8 @@ pub struct MipmapFilterChain {
     /// are not known (an Apple M4's filter stands in there: a first level wider or taller than
     /// 65 texels of a compressed texture with a pass from a level more than 128 times wider than
     /// tall or taller than wide), in `A1BGR5Unorm`'s 2D chains and below the first level of
-    /// `ABGR4Unorm`'s (a few measured values unexplained), and in a 3D chain of a format summed as
+    /// `ABGR4Unorm`'s (a few measured values unexplained) and of `BGRA4Unorm`'s (whose macOS 26.7
+    /// chains no Mac here can measure), and in a 3D chain of a format summed as
     /// half floats (two); never under [`MipmapRule::Filter`] (the module docs' "By release").
     pub unlike_an_m3: bool,
     /// Whether a level may be one unit from Metal's where its sum lies a hair from a rounding
@@ -343,7 +347,7 @@ pub struct MipmapFilterChain {
     /// sRGB format, one code; or a tail level of a 16-bit float format or an extended-range
     /// sRGB one read from the level above's kept values (one unit in the last place, or one code).
     /// Not a 10-bit field's (`RGB10A2Unorm`, `BGR10A2Unorm`; exact), nor `BGR10_XR`'s and
-    /// `BGRA10_XR`'s, nor `ABGR4Unorm`'s and `A1BGR5Unorm`'s.
+    /// `BGRA10_XR`'s, nor `ABGR4Unorm`'s, `BGRA4Unorm`'s and `A1BGR5Unorm`'s.
     pub near_ties: bool,
     /// Whether the consumer fills each later level with zeros before its dispatch: where the
     /// format's texels are narrower than a word, which a dispatch ORs into their words. A wider
@@ -827,7 +831,11 @@ impl MipmapFilterChain {
             MipmapRule::AppleM3MaxPasses if volume => half_sums,
             MipmapRule::AppleM3MaxPasses => {
                 pixel_format == PixelFormat::A1BGR5Unorm
-                    || (below_first && (pixel_format == PixelFormat::ABGR4Unorm || !known))
+                    || (below_first
+                        && (matches!(
+                            pixel_format,
+                            PixelFormat::ABGR4Unorm | PixelFormat::BGRA4Unorm
+                        ) || !known))
             }
         };
         Some(MipmapFilterChain {

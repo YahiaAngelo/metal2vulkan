@@ -478,21 +478,29 @@ driver's. Each is open work.
   linear, and Metal's alpha is the low byte here, which a view's component mapping cannot move
   because format conversion runs before the swizzle. Holding it needs the raw-code sRGB decode in
   the shader (`metal::texel_format::srgb_raw`) as the only read of it.
-- **`BGRA4Unorm` on a device without the 4-bit words of Metal's channel order.** Its texel is
+- **`BGRA4Unorm` as a render target on a device that does not render its word.** Its texel is
   `A4R4G4B4_UNORM_PACK16`'s word bit for bit (core 1.3, or `VK_EXT_4444_formats`), and a device
   exposing neither is refused the version or the extension at the format's first use. The two
   core-1.0 4-bit words hold the same bits with the channels one place over, but only a rotating
   view reads them back and what Metal's opaque-black border reads through this format's rotation
   is unmeasured (`ARGB8Unorm`'s was measured, and is not alpha), so no fallback candidate is
-  taken. A color attachment and a storage image of it are the device's to allow: its write
-  conversion is `WriteConversion::Unmeasured` and it has no word-view render fallback
-  (`metal::format::word`), both of which wait on a Metal measurement of its channels.
-  `generateMipmapsForTexture:` of one is refused `NotImplemented(MipmapGeneration)`
-  (`mipmap_plan::not_implemented`): `mipmap_answers.txt` holds the probe's measured filter for
-  every other format the runtime filters and the probe never asked Metal for this one, so a blit
-  chain would average its texels by the device's rule with nothing to hold it to. Its clear and
-  fill take the packed 4-bit unorm rule the probe measured by channel width over the other four
-  packed formats.
+  taken. Its write conversion, its filter and its channel order are measured (an Apple M3 Max
+  under macOS 27.0.1, `probes/bgra4_write_and_mipmap.m`): blue in bits 0 to 3, then green, red and
+  alpha, read out of Metal's own stored words; each channel `ChannelWrite::HalfUnorm`'s rule, as
+  its four siblings; `generateMipmapsForTexture:` computed by `bind::mipmap_filter` on every
+  device, with the blit chain's per-device check against its `mipmap_answers.txt` block where the
+  kernel cannot run. Below the first level of a 2D chain under macOS 26.7's rule its answer is
+  announced as an M4's (`mipmaps-as-apple-m4`): only 27.0.1 could be measured here.
+  What is still open is the **render target** on a device whose `A4R4G4B4_UNORM_PACK16` carries no
+  `COLOR_ATTACHMENT` -- both MoltenVK profiles and the RTX 5080 -- where the format is refused
+  rather than rendered through the view of its word. Metal takes both a `[[color(0)]]` fragment
+  function and a source-over blend on an attachment of it, so the word view's refusal of a
+  fetch and of any blend but one and zero would be our gap and not Metal's; and because
+  `framebuffer_fetch::renders_through_words` is an `any` over every format, taking the fallback
+  would turn MoltenVK's `ProgrammableBlending` family row into a gap and block every Apple family
+  there. The fallback therefore waits on a packed-16 word fetch in `lower::fragment::fetch`
+  (`metal::format::word` has no entry for the format meanwhile). Six committed profiles render it
+  directly (RADV, lavapipe and ANV), where the measured write conversion applies.
 - **PVRTC textures on a device without PVRTC.** One without a decoded twin (a sparse heap's, or a
   heap's over the caller's host pages or laid out apart from its bytes) holds its blocks for copies
   alone: a command that reads it is refused.
