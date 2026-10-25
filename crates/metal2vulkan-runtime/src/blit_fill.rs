@@ -115,8 +115,10 @@
 //! samples take a part each (`Depth32Float` at 2 and 4). Every value lands as given, a depth's
 //! NaN, 2.0, -1.0 and denormal too.
 //!
-//! An empty pattern Metal's validation stops; plain Metal reads a unit's bytes from the pattern's
-//! address all the same, which the call does not give (`Problem::EmptyFillPattern`).
+//! An empty pattern Metal's API validation layer stops; plain Metal takes the fill, the layer off,
+//! and reads a unit's bytes from the pattern's address all the same, which the call does not give,
+//! so the runtime holds nothing to write and refuses it its own gap
+//! (`NotImplemented(RuntimeGap::EmptyFillPattern)`, [`check_pattern`]).
 //!
 //! **`fillBuffer:range:pattern4:`** ([`BlitCommandEncoder::fill_buffer_pattern4`]; 10 ranges of a
 //! 256-byte buffer) writes the 4-byte pattern from the range's start, restarting it at each
@@ -149,7 +151,7 @@ use super::clear_value::has_channels;
 use super::copy_plan::{
     block_bytes, block_extent, level_extent, BlitOption, CopyUnit, ImageRegion,
 };
-use super::error::{internal, invalid, Error, Problem};
+use super::error::{internal, invalid, Error, Problem, RuntimeGap};
 use super::fill_value::fill_texel;
 use super::heap::Heap;
 use super::render_values::ClearColor;
@@ -278,6 +280,33 @@ pub(super) fn words(unit: &[u8]) -> [u32; 4] {
 /// The longest pattern a texture buffer's fill takes: Metal's process ends in the fill of a longer
 /// one (the module docs).
 pub(super) const TEXTURE_BUFFER_PATTERN_BYTES: usize = 32752;
+
+/// A fill's refusal for the length of its `pattern` over a texture of type `ty`, in Metal's own
+/// order (the module docs). The two lengths fall on either side of what misuse is:
+///
+/// - **no bytes at all** is input plain Metal takes, so it is the runtime's own gap
+///   ([`RuntimeGap::EmptyFillPattern`]): Metal's API validation layer stops it, and plain Metal
+///   reads a unit's bytes from the pattern's address, which the runtime holds none of;
+/// - **more than [`TEXTURE_BUFFER_PATTERN_BYTES`] into a texture buffer** is misuse
+///   ([`Problem::LongTextureBufferFillPattern`]): Metal's own process ends in the call, whatever
+///   the region. A fill of any other texture takes a pattern of any length.
+pub(super) fn check_pattern(
+    call: &'static str,
+    ty: TextureType,
+    pattern: &[u8],
+) -> Result<(), Error> {
+    if pattern.is_empty() {
+        return Err(Error::NotImplemented(RuntimeGap::EmptyFillPattern));
+    }
+    if ty == TextureType::TextureBuffer && pattern.len() > TEXTURE_BUFFER_PATTERN_BYTES {
+        let length = pattern.len() as u64;
+        return Err(invalid(
+            call,
+            Problem::LongTextureBufferFillPattern { length },
+        ));
+    }
+    Ok(())
+}
 
 /// The bytes Metal's fill of a texture buffer writes into its buffer's bytes `start..end` (the
 /// region's texels from the texture's offset), from `pattern` of `n` bytes (the module docs):
@@ -504,15 +533,16 @@ impl BlitCommandEncoder {
     /// pattern where a texel's samples hold 16 bytes or fewer, else the pattern cut at the texel
     /// (the module docs).
     ///
-    /// Refused: a texture of another device (`Invalid`), an empty pattern
-    /// (`Invalid(EmptyFillPattern)`), which Metal's validation stops and whose bytes plain Metal
-    /// reads from past the call's, and a texture buffer's fill of a pattern of more than 32752
-    /// bytes (`Invalid(LongTextureBufferFillPattern)`), in which Metal's process ends, whatever
-    /// the region; another texture's fill takes a pattern of any length and reads 16 bytes of it
-    /// at most. A multisample texture's fill is refused, `Unsupported`, where
-    /// the device cannot run the sample planes' merge (sample-rate shading, the sample count among
-    /// its integer color attachments') or the copy into the texture (`copy_from_texture`'s
-    /// refusals of copies between multisampled textures).
+    /// Refused: a texture of another device (`Invalid`), and a texture buffer's fill of a pattern
+    /// of more than 32752 bytes (`Invalid(LongTextureBufferFillPattern)`), in which Metal's process
+    /// ends, whatever the region; another texture's fill takes a pattern of any length and reads 16
+    /// bytes of it at most. An empty pattern is the runtime's own gap
+    /// (`NotImplemented(RuntimeGap::EmptyFillPattern)`): Metal's API validation layer stops it, and
+    /// plain Metal takes the fill and reads a unit's bytes from past the call's. A multisample
+    /// texture's fill is refused, `Unsupported`, where the device cannot run the sample planes'
+    /// merge (sample-rate shading, the sample count among its integer color attachments') or the
+    /// copy into the texture (`copy_from_texture`'s refusals of copies between multisampled
+    /// textures).
     pub fn fill_texture(
         &mut self,
         texture: &Texture,
@@ -681,14 +711,12 @@ impl BlitCommandEncoder {
     ) -> Result<(), Error> {
         self.core().check_device(call, texture.device())?;
         self.see(texture);
-        if pattern.is_empty() {
-            return Err(invalid(call, Problem::EmptyFillPattern));
-        }
+        check_pattern(call, texture.texture_type(), pattern)?;
         let unit = fill_unit(texture.pixel_format())
             .ok_or_else(|| internal("a fill of a format the runtime makes no texture of"))?;
         // A texture buffer's fill writes one row whatever the region's height and depth.
         if texture.texture_type() == TextureType::TextureBuffer {
-            return self.texture_buffer_fill(call, texture, unit, region, pattern);
+            return self.texture_buffer_fill(texture, unit, region, pattern);
         }
         let Size {
             width,
@@ -948,23 +976,15 @@ impl BlitCommandEncoder {
     /// Write `pattern` into the bytes of the texture buffer `texture`'s buffer that the texels `x`
     /// to `x + width` of `region` cover from its offset, past its width too (cut at the buffer's
     /// end), whatever the level, slice, row, height and depth, as Metal writes them
-    /// ([`StreamFill`]; the module docs): a width of 0 writes nothing. A pattern of more than
-    /// [`TEXTURE_BUFFER_PATTERN_BYTES`] is refused, as Metal's process ends there.
+    /// ([`StreamFill`]; the module docs): a width of 0 writes nothing. Its pattern's length is
+    /// already checked ([`check_pattern`]).
     fn texture_buffer_fill(
         &mut self,
-        call: &'static str,
         texture: &Texture,
         unit: FillUnit,
         region: Region,
         pattern: &[u8],
     ) -> Result<(), Error> {
-        if pattern.len() > TEXTURE_BUFFER_PATTERN_BYTES {
-            let length = pattern.len() as u64;
-            return Err(invalid(
-                call,
-                Problem::LongTextureBufferFillPattern { length },
-            ));
-        }
         let FillUnit::Texels { bytes, .. } = unit else {
             return Err(internal("a texture buffer of no texel format"));
         };

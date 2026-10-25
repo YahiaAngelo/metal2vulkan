@@ -45,7 +45,7 @@ use metal2vulkan_runtime::{
     ExecutedPipeline, Execution, Heap, HeapDescriptor, HeapType, HostMemory, IndirectCommand,
     IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectCommandBufferProblem, Invalid,
     PipelineCreationCause, PipelineOptions, Problem, Region, RenderPassDescriptor, ResourceOptions,
-    Size, VisibleFunctionTableDescriptor, VkResultCode,
+    RuntimeGap, Size, VisibleFunctionTableDescriptor, VkResultCode,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -1182,8 +1182,9 @@ fn inheriting_commands_run_the_encoder_s_state() {
 }
 
 /// A command's kernel buffer set without a stride, where the pipeline's stage-in layout of
-/// `MTLBufferLayoutStrideDynamic` reads it, refuses the commit (`UnstridedBuffer`): Metal reads it
-/// at stride 2^32 - 1, past element 0 whatever memory lies 4 GiB on.
+/// `MTLBufferLayoutStrideDynamic` reads it, refuses the commit the runtime's own gap
+/// (`IndirectCommandUnstridedBuffer`): plain Metal takes such a command and reads the buffer at
+/// stride 2^32 - 1, past element 0 whatever memory lies 4 GiB on.
 #[test]
 fn a_command_s_unstrided_stage_in_buffer_is_refused() {
     on_device(|device, _| {
@@ -1211,12 +1212,9 @@ fn a_command_s_unstrided_stage_in_buffer_is_refused() {
         encoder.end_encoding().unwrap();
         assert_eq!(
             command_buffer.commit().err(),
-            Some(Error::Invalid(Invalid::new(
-                "execute_commands_in_buffer",
-                Problem::IndirectCommandBuffer(IndirectCommandBufferProblem::UnstridedBuffer {
-                    index
-                })
-            )))
+            Some(Error::NotImplemented(
+                RuntimeGap::IndirectCommandUnstridedBuffer { index }
+            ))
         );
     });
 }

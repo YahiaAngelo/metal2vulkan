@@ -449,16 +449,6 @@ pub enum IndirectCommandBufferProblem {
     /// not refused there: Metal gives the command, as the runtime does
     /// (`IndirectRenderCommand`'s `of_compute`).
     CommandKind,
-    /// An executed command's kernel or vertex buffer at `index` set without an attribute stride
-    /// (the plain setter, the stride form at `MTLAttributeStrideStatic`, or a kernel's plain
-    /// `set_kernel_buffer`), where its pipeline state's layout of `MTLBufferLayoutStrideDynamic`
-    /// reads the stride. Metal reads such a buffer at stride 2^32 - 1, with no bounds check, so
-    /// past element 0 the fetch reads whatever memory lies 4 GiB on (measured on an M3 Max and an
-    /// M4, with and without the debug layer, which stops neither).
-    UnstridedBuffer {
-        /// The buffer's index.
-        index: u32,
-    },
     /// A render state set on a render command (`set_depth_stencil_state`, `set_depth_bias`,
     /// `set_depth_clip_mode`, `set_cull_mode`, `set_front_facing_winding`,
     /// `set_triangle_fill_mode`) on a device that does not claim Apple10. Plain Metal raises

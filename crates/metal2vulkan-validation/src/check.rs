@@ -828,7 +828,7 @@ fn check_render_replay_templates(
 /// pipeline's layout of `MTLBufferLayoutStrideDynamic` reads (the template's dynamic stage or
 /// vertex inputs, at their slots) with the stride form: Metal reads one bound without a stride
 /// there at stride 2^32 - 1, past element 0 whatever memory lies 4 GiB on, and the runtime
-/// refuses such a command at the commit (`IndirectCommandBufferProblem::UnstridedBuffer`). A
+/// refuses such a command at the commit (`RuntimeGap::IndirectCommandUnstridedBuffer`). A
 /// command that inherits its buffers, or runs nothing, binds none of its own.
 fn check_replayed_strides(
     case: &AuthoredCase,

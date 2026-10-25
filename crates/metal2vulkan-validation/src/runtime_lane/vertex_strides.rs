@@ -12,8 +12,9 @@
 //!   Metal does (an M4; an M3 Max and an M4), where Metal's debug layer stops the draw; a stride
 //!   past 32 bits is refused at the setter.
 //! - An executed indirect render command's vertex buffer set without a stride under a dynamic
-//!   layout refuses the commit (`UnstridedBuffer`): Metal reads it at stride 2^32 - 1, past
-//!   vertex 0 whatever memory lies 4 GiB on.
+//!   layout refuses the commit the runtime's own gap (`IndirectCommandUnstridedBuffer`): plain
+//!   Metal takes such a command and reads the buffer at stride 2^32 - 1, past vertex 0 whatever
+//!   memory lies 4 GiB on.
 
 use super::{
     buffer_with, layer_reported_nothing_at_all, read_buffer, validated_device, Messages,
@@ -31,8 +32,8 @@ use metal2vulkan::pipeline::{
 use metal2vulkan_devtools::llvm_assemble;
 use metal2vulkan_runtime::{
     Buffer, CommandBufferStatus, CommandQueue, Device, Error, IndirectCommandBufferDescriptor,
-    IndirectCommandBufferProblem, IndirectRenderCommand, Invalid, PipelineOptions, Problem,
-    RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
+    IndirectRenderCommand, PipelineOptions, RenderCommandEncoder, RenderPassDescriptor,
+    RenderPipelineState, ResourceOptions, RuntimeGap,
 };
 use std::path::Path;
 
@@ -249,8 +250,9 @@ fn executed(
 }
 
 /// An executed indirect render command's vertex buffer set without a stride under a dynamic
-/// layout refuses the commit (`UnstridedBuffer`), where Metal reads it at stride 2^32 - 1; the
-/// same command with the stride form draws as the encoder's draw at that stride.
+/// layout refuses the commit the runtime's own gap (`IndirectCommandUnstridedBuffer`), where plain
+/// Metal takes it and reads the buffer at stride 2^32 - 1; the same command with the stride form
+/// draws as the encoder's draw at that stride.
 #[test]
 fn an_executed_command_s_unstrided_vertex_buffer_is_refused() {
     let cache = ScratchCache::new().unwrap();
@@ -267,12 +269,9 @@ fn an_executed_command_s_unstrided_vertex_buffer_is_refused() {
                 0,
                 0
             )),
-            Err(Error::Invalid(Invalid::new(
-                "execute_commands_in_buffer",
-                Problem::IndirectCommandBuffer(IndirectCommandBufferProblem::UnstridedBuffer {
-                    index: 0
-                })
-            ))),
+            Err(Error::NotImplemented(
+                RuntimeGap::IndirectCommandUnstridedBuffer { index: 0 }
+            )),
             "the plain form"
         );
         assert_eq!(
@@ -352,7 +351,6 @@ impl Large {
 #[test]
 fn vertex_fetches_past_4_gib_of_a_buffer_are_refused() {
     use metal2vulkan::metal::IndexType;
-    use metal2vulkan_runtime::RuntimeGap;
     const LENGTH: u64 = (1 << 32) + 4096;
     const FAR: u32 = 715_827_883;
     let cache = ScratchCache::new().unwrap();

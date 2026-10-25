@@ -40,10 +40,11 @@
 //!   1, as the encoder's until set); and the command buffer's resident resources, every
 //!   encoder's, as the commit leaves them (`residency.rs`). A kernel buffer's attribute stride past
 //!   32 bits, at an index a stage-in layout of `MTLBufferLayoutStrideDynamic` reads, is refused
-//!   (`Unsupported{KernelStageIn, NotImplemented}`): Metal's answer is not measured. So is a kernel
-//!   buffer set without a stride there (`Invalid`,
-//!   `IndirectCommandBufferProblem::UnstridedBuffer`): Metal reads it at stride 2^32 - 1 with no
-//!   bounds check, so past element 0 its answer is whatever memory lies 4 GiB on, where an
+//!   (`Unsupported{KernelStageIn, NotImplemented}`): Metal's answer is not measured. A kernel
+//!   buffer set without a stride there is refused the runtime's own gap
+//!   (`NotImplemented(RuntimeGap::IndirectCommandUnstridedBuffer)`, `unstrided_buffer`): plain
+//!   Metal takes it and reads the buffer at stride 2^32 - 1 with no bounds check, so past element 0
+//!   its answer is whatever memory lies 4 GiB on, which the runtime holds none of, where an
 //!   inheriting buffer's command reads the encoder's buffer set without one at stride 0, as the
 //!   encoder's own dispatch does. A command with no dispatch, no pipeline state, or a threadgroup
 //!   that is empty or holds more threads than the state's `max_total_threads_per_threadgroup` runs
@@ -87,11 +88,10 @@ use super::compute::{
 use super::degradation::Degradation;
 use super::device::lock;
 use super::encoder::{EncoderCore, RecordedSegment};
-use super::error::{internal, invalid, Error, Problem, RuntimeGap};
+use super::error::{internal, invalid, Error, RuntimeGap};
 use super::executed_commands::{ExecutedCommand, RecordsRead};
 use super::indirect_command_buffer::{
-    IndirectCommandBuffer, IndirectCommandBufferProblem, IndirectCommandCheck,
-    IndirectCommandCheckNeeds, Reader,
+    IndirectCommandBuffer, IndirectCommandCheck, IndirectCommandCheckNeeds, Reader,
 };
 use super::pipeline::{BufferForms, ComputePipelineState, IndirectStates, Variant};
 use super::predication::HostGate;
@@ -376,18 +376,12 @@ impl Execute {
                 )));
             }
             // A buffer set without a stride that such a layout reads: Metal reads it at stride
-            // 2^32 - 1, past element 0 whatever memory lies 4 GiB on.
-            if let Some(&index) = bindings
-                .unstrided
-                .iter()
-                .find(|&&index| pipeline.reads_stage_in_stride(index))
-            {
-                return Err(invalid(
-                    CALL,
-                    Problem::IndirectCommandBuffer(IndirectCommandBufferProblem::UnstridedBuffer {
-                        index,
-                    }),
-                ));
+            // 2^32 - 1, past element 0 whatever memory lies 4 GiB on, where the runtime holds
+            // nothing (`unstrided_buffer`).
+            if let Some(refusal) = unstrided_buffer(bindings.unstrided.iter().copied(), |index| {
+                pipeline.reads_stage_in_stride(index)
+            }) {
+                return Err(refusal);
             }
             let tables = bindings.tables(self, pipeline, record, &residency, forms)?;
             record_dispatch(&mut core, &tables, CALL, dispatch)?;
@@ -617,6 +611,24 @@ impl Execute {
             unstrided,
         }
     }
+}
+
+/// The refusal of an executed indirect command's buffers, where `unstrided` names the indices it
+/// bound without an attribute stride and `reads_stride` the indices its pipeline state's layout of
+/// `MTLBufferLayoutStrideDynamic` reads: the lowest index that is both, as
+/// [`RuntimeGap::IndirectCommandUnstridedBuffer`], and `None` where no layout reads one. Plain
+/// Metal takes such a command, so this is the runtime's own gap and not misuse (the gap's doc).
+/// Both encoders' executions decide it so: a kernel buffer's stage-in layout here, a vertex
+/// buffer's vertex-descriptor layout in `render/executions.rs`.
+pub(crate) fn unstrided_buffer(
+    unstrided: impl IntoIterator<Item = u32>,
+    reads_stride: impl Fn(u32) -> bool,
+) -> Option<Error> {
+    unstrided
+        .into_iter()
+        .filter(|&index| reads_stride(index))
+        .min()
+        .map(|index| Error::NotImplemented(RuntimeGap::IndirectCommandUnstridedBuffer { index }))
 }
 
 /// Announce `Degradation::IndirectNilBufferOffset` for a command's `binding` at `index`, a nil

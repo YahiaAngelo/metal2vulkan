@@ -292,3 +292,58 @@ fn a_fill_s_log_keeps_the_bytes_its_fill_reads() {
         }
     }
 }
+
+/// A fill's pattern length falls on either side of what misuse is ([`check_pattern`]). No bytes at
+/// all is input plain Metal takes, whatever the texture's type, so it is the runtime's own gap: its
+/// API validation layer stops the call, and plain Metal, the layer off, reads a unit's bytes from
+/// the pattern's address -- bytes the call never gave (an Apple M3 Max under macOS 27.0.1, the
+/// fills' probe round). A texture buffer's pattern of
+/// more than [`TEXTURE_BUFFER_PATTERN_BYTES`] is misuse, in which Metal's own process ends, and no
+/// other texture's fill has an upper bound (our probes `tblf.m` and `tbz.m`, the same M3 Max).
+#[test]
+fn a_fill_s_pattern_length_separates_the_runtime_s_gap_from_misuse() {
+    use crate::blit_fill::check_pattern;
+    use crate::error::{invalid, Error, Problem, RuntimeGap};
+    const CALL: &str = "fill_texture";
+    const TYPES: [TextureType; 4] = [
+        TextureType::Type2D,
+        TextureType::TextureBuffer,
+        TextureType::Type2DMultisample,
+        TextureType::Cube,
+    ];
+    let longest = vec![0u8; TEXTURE_BUFFER_PATTERN_BYTES];
+    for ty in TYPES {
+        assert_eq!(
+            check_pattern(CALL, ty, &[]),
+            Err(Error::NotImplemented(RuntimeGap::EmptyFillPattern)),
+            "{ty:?} of no bytes"
+        );
+        assert_eq!(check_pattern(CALL, ty, &[0]), Ok(()), "{ty:?} of one byte");
+        assert_eq!(
+            check_pattern(CALL, ty, &longest),
+            Ok(()),
+            "{ty:?} of Metal's longest"
+        );
+    }
+    // One byte past it, a texture buffer's fill is misuse; no other texture's fill is bounded.
+    let long = vec![0u8; TEXTURE_BUFFER_PATTERN_BYTES + 1];
+    assert_eq!(
+        check_pattern(CALL, TextureType::TextureBuffer, &long),
+        Err(invalid(
+            CALL,
+            Problem::LongTextureBufferFillPattern {
+                length: TEXTURE_BUFFER_PATTERN_BYTES as u64 + 1,
+            }
+        ))
+    );
+    for ty in TYPES
+        .into_iter()
+        .filter(|&ty| ty != TextureType::TextureBuffer)
+    {
+        assert_eq!(
+            check_pattern(CALL, ty, &long),
+            Ok(()),
+            "{ty:?} of a long one"
+        );
+    }
+}

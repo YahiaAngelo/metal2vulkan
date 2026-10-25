@@ -259,12 +259,12 @@
 //!   or fails the command buffer where the step records it, `CommandBufferError::Refused` with
 //!   the same refusal typed (`CommandBuffer::refusal`). The call checks no record but for type 9
 //!   (above): Metal lets a program write the records until it commits. A command's vertex buffer
-//!   set without an
-//!   attribute stride, where its pipeline state's layout of `MTLBufferLayoutStrideDynamic` reads
-//!   the stride, is refused so too (`Invalid`, `IndirectCommandBufferProblem::UnstridedBuffer`):
-//!   Metal reads it at stride 2^32 - 1 with no bounds check, so past vertex 0 its answer is
-//!   whatever memory lies 4 GiB on, where the encoder's own draw reads such a buffer at stride 0
-//!   (`render/vertex_strides.rs`).
+//!   set without an attribute stride, where its pipeline state's layout of
+//!   `MTLBufferLayoutStrideDynamic` reads the stride, is the runtime's own gap, as a compute
+//!   encoder's kernel buffer is (`NotImplemented(RuntimeGap::IndirectCommandUnstridedBuffer)`):
+//!   plain Metal takes it and reads the buffer at stride 2^32 - 1 with no bounds check, so past
+//!   vertex 0 its answer is whatever memory lies 4 GiB on, which the runtime holds none of, where
+//!   the encoder's own draw reads such a buffer at stride 0 (`render/vertex_strides.rs`).
 
 use super::bound::Bound;
 use super::mesh::MeshGrid;
@@ -296,11 +296,10 @@ use crate::error::{internal, invalid, vulkan, CommandBufferError, Error, Problem
 use crate::executed_commands::{ExecutedCommand, RecordsRead};
 use crate::fragment_imageblock::PassImageblock;
 use crate::indirect_command_buffer::{
-    IndirectCommandBuffer, IndirectCommandBufferProblem, IndirectCommandCheck,
-    IndirectCommandCheckNeeds, NineDraw, Reader,
+    IndirectCommandBuffer, IndirectCommandCheck, IndirectCommandCheckNeeds, NineDraw, Reader,
 };
 use crate::indirect_dispatch;
-use crate::indirect_execute::{self, ExecutionRange};
+use crate::indirect_execute::{self, unstrided_buffer, ExecutionRange};
 use crate::pipeline::budget::Urgency;
 use crate::pipeline::RenderPipelineState;
 use crate::pipeline::Settled;
@@ -2117,21 +2116,20 @@ impl RenderExecution {
                 encoder.object =
                     table(BufferStage::Object, descriptor.max_object_buffer_bind_count);
                 encoder.mesh = table(BufferStage::Mesh, descriptor.max_mesh_buffer_bind_count);
-                // A vertex buffer set without a stride that a dynamic layout reads.
+                // A vertex buffer set without a stride that a dynamic layout reads: Metal reads
+                // it at stride 2^32 - 1, past vertex 0 whatever memory lies 4 GiB on, where the
+                // runtime holds nothing (`unstrided_buffer`).
                 let table = &encoder.vertex;
                 let unstrided = encoder.pipeline.as_ref().and_then(|pipeline| {
-                    table.buffers.keys().copied().find(|index| {
-                        !table.attribute_strides.contains_key(index)
-                            && reads_vertex_stride(pipeline, *index)
-                    })
+                    let bound = table
+                        .buffers
+                        .keys()
+                        .copied()
+                        .filter(|index| !table.attribute_strides.contains_key(index));
+                    unstrided_buffer(bound, |index| reads_vertex_stride(pipeline, index))
                 });
-                if let Some(index) = unstrided {
-                    return Err(invalid(
-                        CALL,
-                        Problem::IndirectCommandBuffer(
-                            IndirectCommandBufferProblem::UnstridedBuffer { index },
-                        ),
-                    ));
+                if let Some(refusal) = unstrided {
+                    return Err(refusal);
                 }
             }
             match draw {

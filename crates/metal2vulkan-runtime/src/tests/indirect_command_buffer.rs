@@ -177,3 +177,39 @@ fn an_execution_range_metal_takes_is_the_runtime_s_gap() {
         })
     );
 }
+
+/// An executed indirect command's buffer bound without the attribute stride its pipeline state's
+/// layout of `MTLBufferLayoutStrideDynamic` reads is input plain Metal takes (an M3 Max and an M4,
+/// with and without Metal's API validation layer, which stops it no more), so it
+/// is the runtime's own gap and never misuse ([`unstrided_buffer`], the decision both encoders'
+/// executions make): the lowest index that is both bound without a stride and read by such a layout
+/// is refused, and a command whose layouts read none of them is taken.
+#[test]
+fn an_unstrided_executed_buffer_is_the_runtime_s_gap_not_misuse() {
+    use crate::error::{Error, RuntimeGap};
+    use crate::indirect_execute::unstrided_buffer;
+    let gap = |index| {
+        Some(Error::NotImplemented(
+            RuntimeGap::IndirectCommandUnstridedBuffer { index },
+        ))
+    };
+    // Nothing bound without a stride: nothing refused, whatever the layouts read.
+    assert_eq!(unstrided_buffer([], |_| true), None);
+    // Bound without a stride only at indices no dynamic layout reads: taken, as Metal takes it.
+    assert_eq!(unstrided_buffer([1, 3], |index| index == 2), None);
+    assert_eq!(unstrided_buffer([1, 3], |_| false), None);
+    // The lowest index that is both, whatever the order the indices come in.
+    assert_eq!(unstrided_buffer([3, 1, 7], |index| index != 7), gap(1));
+    assert_eq!(unstrided_buffer([3, 1, 7], |index| index == 7), gap(7));
+    assert_eq!(unstrided_buffer([0], |_| true), gap(0));
+    // The refusal is the runtime's own gap, never `Error::Invalid`.
+    for refusal in [
+        unstrided_buffer([0], |_| true),
+        unstrided_buffer([30], |_| true),
+    ] {
+        assert!(
+            matches!(refusal, Some(Error::NotImplemented(_))),
+            "{refusal:?}"
+        );
+    }
+}

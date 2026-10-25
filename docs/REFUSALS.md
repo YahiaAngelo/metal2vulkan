@@ -19,7 +19,7 @@ Columns:
 | Kind | Variants | With a site | Reach system | Reach app | Reach rare | Reach none | Unassessed |
 |---|---|---|---|---|---|---|---|
 | Translator and front-end refusals | 126 | 126 | 6 | 33 | 70 | 17 | 0 |
-| Runtime gaps | 68 | 68 | 1 | 8 | 44 | 15 | 0 |
+| Runtime gaps | 70 | 70 | 1 | 8 | 45 | 16 | 0 |
 | Apple-only calls | 5 | 5 | 0 | 0 | 0 | 5 | 0 |
 | Binder refusals at a device limit | 9 | 9 | 0 | 1 | 7 | 1 | 0 |
 | Translation caps | 14 | 14 | 0 | 0 | 7 | 7 | 0 |
@@ -184,6 +184,7 @@ Columns:
 | `IndirectCommandPastSize` | A command of an indirect command buffer at or past its size (`indirectComputeCommandAtIndex:`, `indirectRenderCommandAtIndex:`) | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/indirect_command_buffer.rs (command_at)` | `none`: an indirect command at or past the buffer's size |
 | `ExecutionRangePastBuffer` | An `MTLIndirectCommandBufferExecutionRange` whose 8 bytes run past the buffer it is read from (`execute_commands_in_buffer_indirect`, a compute... | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/indirect_execute.rs (check_range_buffer)` | `rare`: an execution range whose 8 bytes run past its buffer |
 | `ExecutionRangeOffFour` | An `MTLIndirectCommandBufferExecutionRange` read at an offset that is not a multiple of 4 bytes (`execute_commands_in_buffer_indirect`, a compute... | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/indirect_execute.rs (check_range_buffer)` | `rare`: an execution range at an offset off 4 bytes |
+| `IndirectCommandUnstridedBuffer` | An executed indirect command's kernel or vertex buffer at `index` set without an attribute stride (the plain setter, the stride form at... | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/indirect_execute.rs (unstrided_buffer)` | `rare`: an executed indirect command's buffer bound without the attribute stride its pipeline's dynamic layout reads |
 | `SamplePositionsAtBegin` | A render pass whose custom sample positions Vulkan takes only through what the runtime does not build | every device (runtime piece not built) | 3: `crates/metal2vulkan-runtime/src/depth_stencil_scratch.rs (stencil_scratch)`, `crates/metal2vulkan-runtime/src/render_pass.rs (positioned_stand_in)` (+1) | `rare`: custom sample positions Vulkan takes only at begin |
 | `SharedEventAcrossDevices` | A shared event handle opened on a device other than its event's | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/event.rs (new_shared_event_with_handle)` | `rare`: a shared event opened on another device |
 | `ViewportDepthRange` | A viewport depth range past `[0, 1]`, which Metal takes, on a device without the features to take it natively or by the vertex stage's... | every device (runtime piece not built) | 7: `crates/metal2vulkan-runtime/src/render/draw_shape.rs (settings)`, `crates/metal2vulkan-runtime/src/render_state.rs` (+5) | `rare`: viewport depth outside [0, 1] without the device features |
@@ -209,6 +210,7 @@ Columns:
 | `RateMapRegions` | A draw in a rate-mapped pass that the region path does not draw, for the compile layer's reason (`rate_mapped_pass.rs`) | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/rate_mapped_pass.rs (refusal)` | `rare`: draws in rate-mapped passes the region path does not draw |
 | `LayeredPass` | A layered render pass (`renderTargetArrayLength` 2 or more) that needs a step of one layer | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/color_resolve.rs (plan)` | `rare`: layered passes needing a per-layer color resolve |
 | `OverlappingTextureCopies` | A blit copy between overlapping regions of one texture's texels (`copyFromTexture:...` with the source's region meeting the destination's, through... (not scheduled) | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/blit_texture.rs (texture_copies_of_bytes)` | `rare`: overlapping texture copies (Metal races) |
+| `EmptyFillPattern` | A texture fill given no pattern bytes (`fillTexture:level:slice:region:bytes:length:` of length 0,... | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/blit_fill.rs (check_pattern)` | `none`: a fill of no pattern bytes through the Apple-private fillTexture:...:bytes:length: |
 | `RebindTextures` | `Buffer::rebind_bytes_no_copy` of a no-copy buffer with a live texture over its bytes, given memory at another offset in its page than the old | every device (runtime piece not built) | 5: `crates/metal2vulkan-runtime/src/buffer_descriptor.rs (rebind_host_pages)`, `crates/metal2vulkan-runtime/src/texture/heap.rs (dma_buf_heap_images_again)` (+1) | `none`: a runtime extension's rebind with a live texture |
 | `PvrtcBlockOrder` | A PVRTC texture's blocks in a Metal block order the runtime does not lay out | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/texture.rs (host_copy)` | `rare`: PVRTC regions off whole levels |
 | `DecodedHeapTexture` | A heap's or a sparse heap's texture of an ASTC format on a device without that ASTC format (`astc.rs`), or a sparse heap's texture of an ETC2 or... | every device (runtime piece not built) | 4: `crates/metal2vulkan-runtime/src/texture.rs (plan_sparse_texture)`, `crates/metal2vulkan-runtime/src/texture/heap.rs (heap_plan)` (+1) | `app`: an ASTC texture in a heap on a device without ASTC |
@@ -442,6 +444,7 @@ Each refusal's sites, with the function that builds it.
 - `gap::IndirectCommandPastSize`: `crates/metal2vulkan-runtime/src/indirect_command_buffer.rs (command_at)`
 - `gap::ExecutionRangePastBuffer`: `crates/metal2vulkan-runtime/src/indirect_execute.rs (check_range_buffer)`
 - `gap::ExecutionRangeOffFour`: `crates/metal2vulkan-runtime/src/indirect_execute.rs (check_range_buffer)`
+- `gap::IndirectCommandUnstridedBuffer`: `crates/metal2vulkan-runtime/src/indirect_execute.rs (unstrided_buffer)`
 - `gap::SamplePositionsAtBegin`: `crates/metal2vulkan-runtime/src/depth_stencil_scratch.rs (stencil_scratch)`; `crates/metal2vulkan-runtime/src/render_pass.rs (positioned_stand_in)`; `crates/metal2vulkan-runtime/src/sample_positions.rs (refusal_error)`
 - `gap::SharedEventAcrossDevices`: `crates/metal2vulkan-runtime/src/event.rs (new_shared_event_with_handle)`
 - `gap::ViewportDepthRange`: `crates/metal2vulkan-runtime/src/render/draw_shape.rs (settings)`; `crates/metal2vulkan-runtime/src/render_state.rs`; `crates/metal2vulkan-runtime/src/render_state.rs (bias_holds)`; `crates/metal2vulkan-runtime/src/render_state.rs (collapses)`; `crates/metal2vulkan-runtime/src/render_state.rs (compensation)`; `crates/metal2vulkan-runtime/src/render_state.rs (depth_range)`; `crates/metal2vulkan-runtime/src/render_state.rs (depth_ranges_refused)`
@@ -467,6 +470,7 @@ Each refusal's sites, with the function that builds it.
 - `gap::RateMapRegions`: `crates/metal2vulkan-runtime/src/rate_mapped_pass.rs (refusal)`
 - `gap::LayeredPass`: `crates/metal2vulkan-runtime/src/color_resolve.rs (plan)`
 - `gap::OverlappingTextureCopies`: `crates/metal2vulkan-runtime/src/blit_texture.rs (texture_copies_of_bytes)`
+- `gap::EmptyFillPattern`: `crates/metal2vulkan-runtime/src/blit_fill.rs (check_pattern)`
 - `gap::RebindTextures`: `crates/metal2vulkan-runtime/src/buffer_descriptor.rs (rebind_host_pages)`; `crates/metal2vulkan-runtime/src/texture/heap.rs (dma_buf_heap_images_again)`; `crates/metal2vulkan-runtime/src/texture/heap.rs (rebound_heap_images, 3 sites)`
 - `gap::PvrtcBlockOrder`: `crates/metal2vulkan-runtime/src/texture.rs (host_copy)`
 - `gap::DecodedHeapTexture`: `crates/metal2vulkan-runtime/src/texture.rs (plan_sparse_texture)`; `crates/metal2vulkan-runtime/src/texture/heap.rs (heap_plan)`; `crates/metal2vulkan-runtime/src/texture/heap.rs (heap_texture_size_and_align, 2 sites)`

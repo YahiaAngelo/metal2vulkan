@@ -616,11 +616,6 @@ pub enum Problem {
     HandlerAfterCommit,
     /// The given slices' lengths differ.
     LengthMismatch,
-    /// A texture fill given no pattern bytes (`fillTexture:...:bytes:length:` of length 0).
-    /// Metal's validation stops it ("buffer length for format ... must be at least" a unit's
-    /// bytes); plain Metal reads a unit's bytes from the pattern's address all the same, bytes the
-    /// call does not give (an Apple M3 Max under macOS 27.0.1).
-    EmptyFillPattern,
     /// A texture buffer's fill given a pattern of more than 32752 bytes
     /// (`fillTexture:...:bytes:length:`): Metal's process ends in the call, in the blit's
     /// dispatch, whatever the region, of no texels or past the buffer too (an Apple M3 Max under
@@ -1314,6 +1309,22 @@ pub enum RuntimeGap {
         /// The range's offset in the buffer.
         offset: u64,
     },
+    /// An executed indirect command's kernel or vertex buffer at `index` set without an attribute
+    /// stride (the plain setter, the stride form at `MTLAttributeStrideStatic`, or a kernel's plain
+    /// `set_kernel_buffer`), where its pipeline state's `[[stage_in]]` or vertex-descriptor layout
+    /// of `MTLBufferLayoutStrideDynamic` reads the stride. Plain Metal takes it, and its API
+    /// validation layer stops it no more than plain Metal does: it reads such a buffer at stride
+    /// 2^32 - 1, with no bounds check, so past element 0 the fetch reads whatever memory lies 4 GiB
+    /// on (measured on an M3 Max and an M4, with and without the layer) -- where the encoder's own
+    /// dispatch or draw reads a buffer bound without a stride at stride 0, as plain Metal reads it
+    /// (`render/vertex_strides.rs`). The runtime's fetch places its displacement in 32 bits, as
+    /// [`StageInFetchPast4GiB`](Self::StageInFetchPast4GiB) and
+    /// [`VertexFetchPast4GiB`](Self::VertexFetchPast4GiB) say, and it holds no bytes 4 GiB on, so
+    /// the command is refused.
+    IndirectCommandUnstridedBuffer {
+        /// The buffer's index.
+        index: u32,
+    },
     /// A render pass whose custom sample positions Vulkan takes only through what the runtime
     /// does not build: a depth/stencil attachment of a caller's image not made with
     /// `VK_IMAGE_CREATE_SAMPLE_LOCATIONS_COMPATIBLE_DEPTH_BIT_EXT`, of a format the device does
@@ -1448,6 +1459,15 @@ pub enum RuntimeGap {
     /// texels another part of the copy has already written, differently from run to run, on an
     /// M3 Max and an M4, with and without API validation (probes).
     OverlappingTextureCopies,
+    /// A texture fill given no pattern bytes (`fillTexture:level:slice:region:bytes:length:` of
+    /// length 0, [`BlitCommandEncoder::fill_texture`](crate::BlitCommandEncoder::fill_texture)).
+    /// Metal's API validation layer stops it ("buffer length for format ... must be at least" a
+    /// unit's bytes); plain Metal takes the fill, the layer off, and reads a unit's bytes from the
+    /// pattern's address all the same -- bytes the call never gave (an Apple M3 Max under macOS
+    /// 27.0.1). The runtime holds no bytes there: a caller's slice of no bytes is all it is given,
+    /// and reading past it is unsound, so there is nothing exact to write and the call is
+    /// refused.
+    EmptyFillPattern,
     /// `Buffer::rebind_bytes_no_copy` of a no-copy buffer with a live texture over its bytes,
     /// given memory at another offset in its page than the old: the texture's copies and texel
     /// views are planned at the bytes' offset in their `VkBuffer` (`rebind.rs`). Also a rebind

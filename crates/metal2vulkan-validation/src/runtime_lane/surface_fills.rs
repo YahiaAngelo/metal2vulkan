@@ -19,16 +19,17 @@
 //!   `RGBA8Unorm` after one packed in `RGBA32Uint`, in one encoder with fills alone between, as
 //!   Metal's warm runs write them (its 16-byte texel, cut and overwritten as the runtime's slot
 //!   is).
-//! - **An empty pattern** is refused `Invalid(EmptyFillPattern)`; Metal's validation stops it.
+//! - **An empty pattern** is the runtime's own gap
+//!   (`NotImplemented(RuntimeGap::EmptyFillPattern)`): Metal's API validation layer stops it, and
+//!   plain Metal takes the fill and reads a unit's bytes from the pattern's address.
 //!
 //! A difference prints a `SURFACE-FILLS-DIFFERS` line.
 
 use super::{buffer_with, read_buffer, WAIT};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
-    BlitOption, ClearColor, CommandQueue, Device, Error, HeapDescriptor, HeapType, Invalid,
-    IoSurfacePlane, IoSurfaceYCbCr, Origin, Problem, Region, ResourceOptions, Size, Texture,
-    TextureDescriptor,
+    BlitOption, ClearColor, CommandQueue, Device, Error, HeapDescriptor, HeapType, IoSurfacePlane,
+    IoSurfaceYCbCr, Origin, Region, ResourceOptions, RuntimeGap, Size, Texture, TextureDescriptor,
 };
 
 use super::degrade_notices::on_device;
@@ -646,7 +647,9 @@ fn unpacked_color_fills_repeat_the_last_packed_texel() {
     });
 }
 
-/// A fill of no pattern bytes is refused as Metal's validation stops it, and writes nothing.
+/// A fill of no pattern bytes is refused the runtime's own gap -- plain Metal takes the fill and
+/// reads a unit's bytes from the pattern's address, which the runtime holds none of -- and writes
+/// nothing.
 #[test]
 fn an_empty_pattern_is_refused() {
     on_device(|device, _messages| {
@@ -657,10 +660,7 @@ fn an_empty_pattern_is_refused() {
         let refused = blit.fill_texture(&t, 0, 0, Region::new_2d(0, 0, 4, 1), &[]);
         assert_eq!(
             refused,
-            Err(Error::Invalid(Invalid::new(
-                "fill_texture",
-                Problem::EmptyFillPattern
-            )))
+            Err(Error::NotImplemented(RuntimeGap::EmptyFillPattern))
         );
         blit.end_encoding().unwrap();
         command_buffer.commit().unwrap();
