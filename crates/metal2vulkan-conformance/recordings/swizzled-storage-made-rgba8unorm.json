@@ -1036,18 +1036,25 @@
         "commits_handed_off": 8,
         "completed_waits": 11,
         "completed_where_seen": 8,
+        "completion_arms": 8,
+        "completion_arms_after_a_wake": 8,
         "creation_pipelines_made": 4,
         "device_memory_allocated": 268435712,
         "dispatch_pipelines_pooled": 7,
         "encoder_command_buffers_begun": 22,
+        "fence_waits": 8,
         "finales_folded": 8,
+        "gate_waits": 8,
+        "gate_waits_slept": 8,
         "host_texel_copies": 14,
         "images_started_on_the_host": 2,
         "new_buffer_bytes_cleared": 128,
+        "object_churn.buffers_evicted": 1,
         "object_churn.buffers_parked": 8,
         "object_churn.buffers_recycled": 8,
         "object_churn.images_own_memory": 2,
         "object_churn.textures_image": 2,
+        "object_churn.vk_buffers_destroyed": 1,
         "object_churn.vk_image_bindings": 2,
         "object_churn.vk_image_views_made": 4,
         "object_churn.vk_images_destroyed": 4,
@@ -1064,13 +1071,14 @@
         "slot_returns": 8,
         "spare_command_pools_taken": 16,
         "submit_infos": 15,
+        "trail_waits": 8,
         "variant_pipelines_made": 11,
         "variants_taken_back": 7,
         "wakes_completion_waiters": 8,
-        "wakes_spared": 48
+        "wakes_spared": 56
       },
       "moving": {
-        "batches_submitted_by_waiters": 7
+        "batches_submitted_by_waiters": 5
       },
       "composed": {
         "command_buffers_begun": 30,

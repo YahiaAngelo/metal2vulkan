@@ -150,9 +150,14 @@
         "commits_handed_off": 13,
         "completed_waits": 16,
         "completed_where_seen": 13,
+        "completion_arms": 13,
+        "completion_arms_after_a_wake": 13,
         "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 13,
+        "fence_waits": 13,
         "finales_folded": 13,
+        "gate_waits": 13,
+        "gate_waits_slept": 13,
         "new_buffer_bytes_cleared": 3936,
         "object_churn.buffers_evicted": 11,
         "object_churn.buffers_parked": 80,
@@ -179,8 +184,9 @@
         "slot_returns": 13,
         "spare_command_pools_taken": 26,
         "submit_infos": 13,
+        "trail_waits": 13,
         "wakes_completion_waiters": 13,
-        "wakes_spared": 78
+        "wakes_spared": 91
       },
       "moving": {
         "batches_submitted_by_waiters": 12

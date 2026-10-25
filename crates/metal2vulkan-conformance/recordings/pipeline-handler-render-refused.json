@@ -271,6 +271,8 @@
       "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
       "bounds": {
         "linked_use_questions_asked": 3,
+        "scheduler_sleep_slices": 1,
+        "scheduler_sleeps": 1,
         "stage_entries_shared": 1,
         "stage_entries_specialized": 2
       },

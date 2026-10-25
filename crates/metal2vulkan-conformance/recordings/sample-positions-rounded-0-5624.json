@@ -349,6 +349,8 @@
         "commits_handed_off": 1,
         "completed_waits": 4,
         "completed_where_seen": 1,
+        "completion_arms": 1,
+        "completion_arms_after_a_wake": 1,
         "creation_pipelines_made": 1,
         "device_memory_allocated": 201326592,
         "draw_shapes_made": 1,
@@ -356,7 +358,10 @@
         "draws_settled": 1,
         "driver_diagnostics_withheld": 2,
         "encoder_command_buffers_begun": 3,
+        "fence_waits": 1,
         "finales_folded": 1,
+        "gate_waits": 1,
+        "gate_waits_slept": 1,
         "graphics_pipelines_looked_up": 1,
         "new_buffer_bytes_cleared": 48,
         "object_churn.buffers_parked": 2,
@@ -385,10 +390,11 @@
         "spare_command_pools_taken": 2,
         "stage_tables_read": 4,
         "submit_infos": 1,
+        "trail_waits": 1,
         "variant_pipelines_made": 2,
         "variants_taken_back": 1,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 6
+        "wakes_spared": 7
       },
       "composed": {
         "argument_samplers_taken": 1,

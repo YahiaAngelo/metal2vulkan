@@ -19147,9 +19147,9 @@
     {
       "venue": "Apple M3 Max",
       "runs": 0,
-      "measured": "no measurement: the run stopped before the case finished (a call did not answer, at MTLPixelFormatYCBCR8_422_1P/Type2D/64x64x1/levels-1/samples-1/slices-1/usage-0x1/shared/size-and-align)",
+      "measured": "no measurement: the run stopped before the case finished (a call did not answer, at MTLPixelFormatYCBCR8_422_1P/Type2D/64x64x1/levels-1/samples-1/slices-1/usage-0x1/shared/makes-texture)",
       "bounds": {},
-      "unmeasurable": "a call did not answer, at MTLPixelFormatYCBCR8_422_1P/Type2D/64x64x1/levels-1/samples-1/slices-1/usage-0x1/shared/size-and-align"
+      "unmeasurable": "a call did not answer, at MTLPixelFormatYCBCR8_422_1P/Type2D/64x64x1/levels-1/samples-1/slices-1/usage-0x1/shared/makes-texture"
     }
   ],
   "times": [

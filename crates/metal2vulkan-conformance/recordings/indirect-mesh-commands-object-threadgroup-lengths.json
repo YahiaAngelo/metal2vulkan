@@ -548,6 +548,8 @@
         "commits_handed_off": 1,
         "completed_waits": 4,
         "completed_where_seen": 1,
+        "completion_arms": 1,
+        "completion_arms_after_a_wake": 1,
         "device_memory_allocated": 1342177280,
         "draw_shapes_made": 2,
         "draw_states_recorded": 19,
@@ -555,7 +557,10 @@
         "driver_diagnostics_withheld": 2,
         "empty_memory_blocks_live": 1,
         "encoder_command_buffers_begun": 7,
+        "fence_waits": 1,
         "finales_apart": 1,
+        "gate_waits": 1,
+        "gate_waits_slept": 1,
         "gpu_pool_blocks_made": 1,
         "gpu_pool_blocks_released": 1,
         "graphics_pipelines_looked_up": 2,
@@ -592,7 +597,7 @@
         "scheduler_passes": 2,
         "scheduler_passes_by_waiters": 1,
         "scheduler_sleep_slices": 1,
-        "scheduler_sleeps": 3,
+        "scheduler_sleeps": 2,
         "scheduler_wakes_commit": 1,
         "scheduler_wakes_host": 1,
         "set_zero_sets_reused": 1,
@@ -603,9 +608,10 @@
         "stage_entries_specialized": 2,
         "stage_tables_read": 8,
         "submit_infos": 2,
+        "trail_waits": 1,
         "variant_pipelines_made": 6,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 6
+        "wakes_spared": 7
       },
       "composed": {
         "device_memory_allocated": 1342177280

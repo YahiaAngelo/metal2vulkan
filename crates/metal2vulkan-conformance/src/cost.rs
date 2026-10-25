@@ -726,7 +726,7 @@ const TRANSLATION: [&str; 18] = [
 
 /// The name prefixes that put a count in [`Region::Submission`]: the commit path, our own other
 /// threads and the GPU.
-const SUBMISSION: [&str; 41] = [
+const SUBMISSION: [&str; 47] = [
     "commands_replayed.",
     "command_buffers_",
     "command_pools_made",
@@ -750,6 +750,20 @@ const SUBMISSION: [&str; 41] = [
     "completed_waits",
     "event_waits_met",
     "timeline_waits",
+    // The sites one wait for a completion is made of, which the runtime counts one counter a
+    // site. Each is a wait, so each belongs here beside `completed_waits` and `timeline_waits`
+    // rather than in the device API's residual: `fence_waits` is the explicit alternative to
+    // `timeline_waits` (which object the queue's waiter waited for), `completion_arms_` is a
+    // queue waiter arming for its queue's front batch, `completion_reads_ran_ahead` is the
+    // second wait a read past the wait's value costs, and the gate and trail rows are the two
+    // halves of `waitUntilCompleted`'s own wait. Named one by one and not by a `_waits` suffix,
+    // because the suffix would also catch a count of what a call asked for.
+    "fence_waits",
+    "completion_arms",
+    "completion_reads_ran_ahead",
+    "gate_waits",
+    "gate_wakes_found_shut",
+    "trail_waits",
     "missed_completion_wakes",
     "completed_where_seen",
     "scheduled_where_submitted",
@@ -2029,6 +2043,108 @@ mod the_contrast {
              made nothing. Take the contrast with `cost --alone --runs 8 --write <the cases>`:\n  {}",
             without.len(),
             without.join("\n  ")
+        );
+    }
+}
+
+/// The submission counters' own arithmetic, held over the **committed recordings**.
+///
+/// `queue_submissions` counts the `vkQueueSubmit` and `vkQueueBindSparse` calls the runtime made,
+/// and its documentation puts **internal and staging submissions among them**: each is a
+/// submission of its own to the driver. `submit_infos` counts the `VkSubmitInfo`s those calls
+/// held. So on a record that makes an internal or staging submission at all, the calls must
+/// exceed the infos by exactly those submissions, and that is arithmetic rather than a
+/// measurement.
+///
+/// **This exists because a bless got it wrong and nothing could see it.** One whole-set `--write`
+/// pass recorded `queue_submissions` equal to `submit_infos` on all 20 records that make such a
+/// submission -- 30/30 with 5 internal on the fourteen `compressed-moves-*`, 36/36 with 12 on the
+/// six `pvrtc-cpu-order-*` -- which is the bound understating the calls by exactly the internal
+/// submissions. An understated bound makes the gate *tighter* than the tree, so those 20 cases
+/// read `Over` on every run from that bless until the next one, and the only thing that found it
+/// was a person reading a diff. The measurement before that bless and the measurement after it
+/// both hold this identity (137 = 81 + 56 at the host-shadow landing, 35 = 30 + 5 and 48 = 36 + 12
+/// now), and no commit between them changed a line of the counting.
+///
+/// It is deliberately **not** stated as `queue_submissions >= submit_infos` over every record: a
+/// batch's new resources ride as a second `VkSubmitInfo` inside the batch's own call
+/// (`texture/first_move.rs`), so 391 committed records hold one more info than calls and are right
+/// to. The identity is claimed only where an internal or staging submission exists, which is where
+/// the counters' own definitions decide it.
+#[cfg(test)]
+mod the_submissions {
+    /// The fewest records that must exercise the identity, so the census cannot rot into passing
+    /// by matching nothing -- the same floor [`super::the_ratio`]'s own census carries.
+    ///
+    /// Twenty, measured: the fourteen `compressed-moves-*` and the six `pvrtc-cpu-order-*`, the
+    /// families whose block textures are decoded on the host and whose shadows each cost an
+    /// internal submission.
+    const EXERCISE_IT: usize = 20;
+
+    /// **The calls exceed the infos by exactly the internal and staging submissions.**
+    #[test]
+    fn a_submission_of_its_own_is_counted_among_the_queue_submissions() {
+        let mut exercised = 0;
+        let mut broken: Vec<String> = Vec::new();
+        for case in crate::cases::all() {
+            let Ok(recording) = crate::recording::read(case.name()) else {
+                continue;
+            };
+            for record in &recording.costs {
+                if record.unmeasurable.is_some() || record.bounds.is_empty() {
+                    continue;
+                }
+                let held = |count: &str| record.bounds.get(count).copied().unwrap_or(0);
+                let (internal, staging) =
+                    (held("internal_submissions"), held("staging_submissions"));
+                if internal + staging == 0 {
+                    continue;
+                }
+                // A count the runs disagreed on is reported rather than gated, and its bound is
+                // then one end of a range: the arithmetic says nothing about it.
+                let moved = [
+                    "queue_submissions",
+                    "submit_infos",
+                    "internal_submissions",
+                    "staging_submissions",
+                ]
+                .iter()
+                .any(|count| record.moving.contains_key(*count));
+                if moved {
+                    continue;
+                }
+                exercised += 1;
+                let (calls, infos) = (held("queue_submissions"), held("submit_infos"));
+                if calls != infos + internal + staging {
+                    broken.push(format!(
+                        "{} on {}: queue_submissions {calls}, submit_infos {infos}, \
+                         internal_submissions {internal}, staging_submissions {staging} \
+                         (the calls exceed the infos by {}, where {} submission(s) of their own \
+                         were made)",
+                        case.name(),
+                        record.venue,
+                        calls as i64 - infos as i64,
+                        internal + staging,
+                    ));
+                }
+            }
+        }
+        println!("{exercised} cost record(s) make a submission of their own and hold the identity");
+        assert!(
+            exercised >= EXERCISE_IT,
+            "only {exercised} record(s) exercise the identity, where {EXERCISE_IT} did, so this \
+             census is reading the wrong thing or a `--write` pass dropped the counts"
+        );
+        assert!(
+            broken.is_empty(),
+            "{} cost record(s) break the submission counters' own arithmetic. An internal or \
+             staging submission is a `vkQueueSubmit` call of its own, so it is counted in \
+             `queue_submissions` as well as in its own counter. A record where it is not has an \
+             understated bound, which makes the gate TIGHTER than the tree: every run then reads \
+             `Over` on a count nothing regressed. Re-measure the gate's own shape with \
+             `conformance cost --runs 8 --write`:\n  {}",
+            broken.len(),
+            broken.join("\n  ")
         );
     }
 }

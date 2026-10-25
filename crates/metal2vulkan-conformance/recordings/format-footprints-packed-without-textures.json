@@ -4129,10 +4129,9 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 0,
-      "measured": "no measurement: the run stopped before the case finished (a call did not answer, at MTLPixelFormatR10Unorm_PACKED/Type2D/64x64x1/levels-1/samples-1/slices-1/usage-0x1/shared/size-and-align)",
-      "bounds": {},
-      "unmeasurable": "a call did not answer, at MTLPixelFormatR10Unorm_PACKED/Type2D/64x64x1/levels-1/samples-1/slices-1/usage-0x1/shared/size-and-align"
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "bounds": {}
     }
   ],
   "times": [

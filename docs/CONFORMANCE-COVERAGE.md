@@ -43,7 +43,7 @@ Its limits, measured rather than asserted:
 | committed recordings | 1103 |
 | distinct SDK items the Metal leg reaches, of any status | 797 |
 | of those, reached only where this cannot name the family | 2 |
-| ledger rows (a case whose gap is recorded) | 288 |
+| ledger rows (a case whose gap is recorded) | 287 |
 | declared crossings of the option space (pairs put to Metal at once) | 24 |
 | declared crossings that are no pair of it (a boolean or numeric field, or one type in two slots) | 30 |
 
@@ -2235,12 +2235,11 @@ A case whose difference from Metal is recorded rather than compared away. The le
 | `half-output-blends-rgba32f` | Metal's stored blend result rounds the SOURCE product to the attachment's precision and carries the DESTINATION product into the sum unrounded -- `round(round(S… |
 | `half-output-blends-rgba32f` | A blend whose factor reads the blend colour, at the same product rounding as this family's other divergent sites and not yet fitted to a rule there. What is mea… |
 | `half-output-blends-rgba32f` | A blend whose factor reads the blend colour, at the same product rounding as this family's other divergent sites and not yet fitted to a rule there. What is mea… |
-| `format-footprints-astc-4x2-and-8x4` | The runtime holds no image of ASTC's 4x2 and 8x4 footprints, so `heapTextureSizeAndAlignWithDescriptor:` -- CPU arithmetic over a descriptor, which Metal answer… |
-| `format-footprints-plain-stragglers` | The runtime holds no image of BGRA4Unorm and ARGB8Unorm_sRGB, so `heapTextureSizeAndAlignWithDescriptor:` -- CPU arithmetic over a descriptor, which Metal answe… |
-| `format-footprints-one-plane-ycbcr` | The runtime holds no image of Apple's nine one-plane YCbCr formats, so `heapTextureSizeAndAlignWithDescriptor:` -- CPU arithmetic over a descriptor, which Metal… |
-| `format-footprints-padded-wide-channels` | The runtime holds no image of the ten padded 10- and 12-bit display formats, so `heapTextureSizeAndAlignWithDescriptor:` -- CPU arithmetic over a descriptor, wh… |
-| `format-footprints-two-plane-ten-bit` | The runtime holds no image of the four two-plane RGB10A8_2P formats, so `heapTextureSizeAndAlignWithDescriptor:` -- CPU arithmetic over a descriptor, which Meta… |
-| `format-footprints-packed-without-textures` | The runtime holds no image of R10Unorm_PACKED and RG10Unorm_PACKED, whose texture Metal itself refuses, so `heapTextureSizeAndAlignWithDescriptor:` -- CPU arith… |
+| `format-footprints-astc-4x2-and-8x4` | The runtime answers Metal's heap footprint for ASTC's 4x2 and 8x4 footprints, which is arithmetic over a descriptor, but holds no image of any of them, so `newT… |
+| `format-footprints-plain-stragglers` | The runtime answers Metal's heap footprint for BGRA4Unorm and ARGB8Unorm_sRGB, which is arithmetic over a descriptor, but holds no image of any of them, so `new… |
+| `format-footprints-one-plane-ycbcr` | The runtime answers Metal's heap footprint for Apple's nine one-plane YCbCr formats, which is arithmetic over a descriptor, but holds no image of any of them, s… |
+| `format-footprints-padded-wide-channels` | The runtime answers Metal's heap footprint for the ten padded 10- and 12-bit display formats, which is arithmetic over a descriptor, but holds no image of any o… |
+| `format-footprints-two-plane-ten-bit` | The runtime answers Metal's heap footprint for the four two-plane RGB10A8_2P formats, which is arithmetic over a descriptor, but holds no image of any of them, … |
 | `half-texel-nans-r16f` | Metal's `texture2d<half>` never widens, so a 16-bit float texel's NaN comes back as its own bits (verified: this case's own recording of plain Metal on an M3 Ma… |
 | `half-texel-nans-rg16f` | Metal's `texture2d<half>` never widens, so a 16-bit float texel's NaN comes back as its own bits (verified: this case's own recording of plain Metal on an M3 Ma… |
 | `half-texel-nans-rgba16f` | Metal's `texture2d<half>` never widens, so a 16-bit float texel's NaN comes back as its own bits (verified: this case's own recording of plain Metal on an M3 Ma… |

@@ -4131,6 +4131,19 @@ fn the_work_is_attributed_to_the_three_regions() {
         "scheduler_passes",
         "wakes_handler_threads",
         "completed_waits",
+        // The sites one wait for a completion is made of. A wait is submission work by the
+        // region's own definition, and each of these landed in the device API's residual when
+        // the counters arrived without a row here -- which reads as the calling thread paying
+        // for the wait, the opposite of what the regions are kept apart to show.
+        "fence_waits",
+        "completion_arms",
+        "completion_arms_after_a_wake",
+        "completion_reads_ran_ahead",
+        "gate_waits",
+        "gate_waits_slept",
+        "gate_wakes_found_shut",
+        "trail_waits",
+        "trail_waits_blocked",
     ] {
         assert_eq!(region_of(name), Region::Submission, "{name}");
     }
