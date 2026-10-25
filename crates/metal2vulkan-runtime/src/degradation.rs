@@ -2815,6 +2815,7 @@ pub(crate) fn dropped_exact_forms(
             nan_and_min_max,
             rounding_order,
             half_blend,
+            half_texel_bits,
         } => Some(
             [
                 (sampling, "exact sampling"),
@@ -2824,6 +2825,10 @@ pub(crate) fn dropped_exact_forms(
                 (nan_and_min_max, "exact NaN and minimum and maximum"),
                 (rounding_order, "exact rounding order"),
                 (half_blend, "exact half blend"),
+                (
+                    half_texel_bits,
+                    "exact 16-bit float texel bits through a read",
+                ),
             ]
             .into_iter()
             .filter_map(|(dropped, name)| dropped.then_some(name))

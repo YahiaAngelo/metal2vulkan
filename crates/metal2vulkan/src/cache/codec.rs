@@ -1238,7 +1238,8 @@ codec_enum! {
             half_rounding,
             nan_and_min_max,
             rounding_order,
-            half_blend
+            half_blend,
+            half_texel_bits
         },
         MergedDraws,
         QuadPrimitiveIds,

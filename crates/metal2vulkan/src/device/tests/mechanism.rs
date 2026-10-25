@@ -279,6 +279,7 @@ fn every_fact() -> Vec<RuntimeFact> {
             nan_and_min_max: true,
             rounding_order: false,
             half_blend: false,
+            half_texel_bits: true,
         },
     ]
 }

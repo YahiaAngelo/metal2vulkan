@@ -799,7 +799,10 @@ pub enum RuntimeFact {
     /// ANV's register allocator). Each `true` field is an exact form the pipeline would carry under
     /// the consumer's policy that the fitting translation gave up to fit the bound (`sampling`
     /// also for Metal's filter of a two-plane YCbCr texture, `YCbCrFilterPolicy::Exact`, which is
-    /// dropped with it); the stages carry
+    /// dropped with it; `half_texel_bits` for a 16-bit float texel's own bits, read through the
+    /// unsigned integer alias of a slot the function declares `access::read`
+    /// ([`HalfTexelBitsPolicy::Exact`](crate::device::HalfTexelBitsPolicy::Exact)), whose widening
+    /// at each such read grows the module); the stages carry
     /// the reduced policy's own precision notes besides. The consumer announces it once per device
     /// (the runtime's `Degradation::ExactFormsOverCompilerLimit`), naming the pipeline and the forms
     /// dropped. Nothing binds it.
@@ -811,6 +814,7 @@ pub enum RuntimeFact {
         nan_and_min_max: bool,
         rounding_order: bool,
         half_blend: bool,
+        half_texel_bits: bool,
     },
     /// The render pipeline was compiled under `VariantKey::quad_primitive_ids`, and its fragment
     /// function reads `[[primitive_id]]` from Vulkan's `PrimitiveId` shifted right by one
