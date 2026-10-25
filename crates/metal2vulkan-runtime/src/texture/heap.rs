@@ -90,10 +90,17 @@
 //!   sizes that image as Metal's `PixelFormatView` texture, so its answer is Metal's. Metal also
 //!   drops a depth or stencil texture's metadata with it off, which no Vulkan request reaches on
 //!   MoltenVK ([`DriverFact::DepthStencilImagesStayGpuOptimized`]): there the texture is a shadow
-//!   of Metal's tiles in the heap's bytes (below) and answers Metal's size; where no such shadow
-//!   serves it (a multisample texture whose samples the device does not move, a depth twin, a
-//!   layout not measured), the answer stays the optimized texture's, larger than Metal's, and the
-//!   device announces `optimized-depth-stencil-texture` once.
+//!   of Metal's tiles in the heap's bytes (below), which answers Metal's size and lays its texels
+//!   out as Metal does. Where no such shadow serves it — a multisample texture whose samples the
+//!   device does not move, a texture whose levels of all its parts pass the moves one shadow holds
+//!   (`HeapTiledCopies::fit`: 16, so a two-aspect texture of 9 levels asks 18) or whose moves pass
+//!   the device's limits, a depth twin, a layout not measured — its image keeps that layout, so
+//!   the heap's bytes are not Metal's layout of its texels, and the device announces
+//!   `optimized-depth-stencil-texture` once. The **answer** there is Metal's own still wherever
+//!   the runtime models it and the texture is held to it ([`held_to_metal`]: a shadow of the
+//!   heap's bytes in rows, or an image apart from them that takes none of its bytes, such as a
+//!   multisample texture's); it is the larger of the images' and Metal's only for a texture no
+//!   shadow holds to Metal's answer, a depth twin among them, which is the cost that notice names.
 //! - **The heap's memory.** A heap's buffer lies at a multiple of [`HEAP_BASE_ALIGNMENT`] of its
 //!   memory (256 KiB, the largest image alignment measured), of a type optimal images take where
 //!   its storage class has one, else of one linear images take ([`HeapTypes::heap_memory`],
@@ -101,10 +108,12 @@
 //!   to half a pooled block it takes whole units of the base of a pooled block; past that, a block
 //!   of its own of its own size (`buffer.rs`'s `placed`), so the largest heap stays one allocation
 //!   of the device. A heap over host pages starts at offset 0 of its own import
-//!   (`HeapProblem::HostMemoryAlignment`), which meets any alignment. A texture whose alignment
-//!   exceeds that base, or whose image the heap's memory type does not take, is refused typed
-//!   (`RuntimeGap::HeapTextureAlignment`, `HeapTextureMemory`), by the query and the call alike
-//!   where the cause is the descriptor.
+//!   (`HeapProblem::HostMemoryAlignment`), which meets any alignment. A texture an image of binds
+//!   into that memory ([`holds_heap_base`]) whose alignment exceeds the base, or whose image the
+//!   heap's memory type does not take, is refused typed (`RuntimeGap::HeapTextureAlignment`,
+//!   `HeapTextureMemory`), by the query and the call alike where the cause is the descriptor. A
+//!   texture whose every image lies in memory of its own binds nothing there and is held to no
+//!   base, as its placement offset is held to Metal's alignment alone ([`placement_align`]).
 //! - **Linear images**. A texture whose optimal image does not take the heap's memory (any texture
 //!   of a `Shared` heap on the RTX 3090, whose optimal images take no host-visible memory; a depth
 //!   texture of one on MoltenVK) is a linear image there, used only where it can do all the optimal
@@ -245,8 +254,9 @@ use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// The alignment of a heap's memory: a heap texture whose answered alignment exceeds it is
-/// refused (`RuntimeGap::HeapTextureAlignment`, [`check_heap_base`]). It is the largest image
+/// The alignment of a heap's memory: a heap texture an image of binds into that memory
+/// ([`holds_heap_base`]) whose answered alignment exceeds it is refused
+/// (`RuntimeGap::HeapTextureAlignment`, [`check_heap_base`]). It is the largest image
 /// alignment measured: RADV on an RX 7900 XTX (Mesa 26.0.8) asks 128 KiB of a `D16`, `D32F` or
 /// `D32FS8` image of 8 x 8 texels or more and 256 KiB of a multisample depth, stencil or color
 /// image from about 128 x 128 texels, where the Radeon 780M under the same driver asks at most
@@ -1295,10 +1305,34 @@ pub(crate) fn held_to_metal(
     }
 }
 
-/// Whether a heap texture of alignment `align` lies at a multiple of it wherever a heap's memory
-/// starts: refused past [`HEAP_BASE_ALIGNMENT`] (`RuntimeGap::HeapTextureAlignment`).
-pub(crate) fn check_heap_base(align: u64) -> Result<(), Error> {
-    if align > HEAP_BASE_ALIGNMENT {
+/// Whether a heap texture whose own image takes `route`, held with a depth twin of `twin`, is
+/// held to the heap's base at all ([`check_heap_base`]): an image of it binds into the heap's own
+/// memory, which starts at a multiple of [`HEAP_BASE_ALIGNMENT`] alone, so an image whose
+/// alignment passes that base has no offset there to bind at.
+///
+/// A texture whose every image lies in memory of its own ([`AliasRoute::in_own_memory`]) binds
+/// nothing to the heap's memory: the heap's bytes hold the texture's own layout there and the
+/// encoders move its elements to and from the image, or nothing of them
+/// ([`AliasRoute::Unaliased`]). Wherever the heap's memory starts, such a texture is made, so the
+/// alignment it answers is no bound on the base and refusing it would refuse a texture Metal
+/// makes — the rule [`placement_align`] follows for the offset inside the heap. A depth twin's
+/// image always binds to the heap's memory (`heap_image` of `Mine::Twin` reaches neither shadow
+/// route), and a texture held with one is never a shadow of its bytes (`shadows: twin.is_none()`),
+/// so one image of a twinned texture binds either way.
+fn holds_heap_base(route: AliasRoute, twin: Option<AliasRoute>) -> bool {
+    !route.in_own_memory() || twin.is_some_and(|twin| !twin.in_own_memory())
+}
+
+/// Whether a heap texture whose own image takes `route`, held with a depth twin of `twin`, and
+/// whose answer is of alignment `align`, lies at a multiple of that alignment wherever a heap's
+/// memory starts: refused past [`HEAP_BASE_ALIGNMENT`] (`RuntimeGap::HeapTextureAlignment`) where
+/// an image of it binds into the heap's memory and nowhere else ([`holds_heap_base`]).
+pub(crate) fn check_heap_base(
+    route: AliasRoute,
+    twin: Option<AliasRoute>,
+    align: u64,
+) -> Result<(), Error> {
+    if holds_heap_base(route, twin) && align > HEAP_BASE_ALIGNMENT {
         return Err(Error::NotImplemented(RuntimeGap::HeapTextureAlignment {
             alignment: align,
         }));
@@ -1888,7 +1922,13 @@ impl Device {
                 metal_layout = tiles;
             }
         }
-        check_heap_base(size_and_align.align)?;
+        // Only a texture an image of binds into the heap's own memory is held to the heap's base,
+        // and the routes decide that (`holds_heap_base`).
+        check_heap_base(
+            image.route,
+            twin.as_ref().map(|twin| twin.route),
+            size_and_align.align,
+        )?;
         // The size answered is the optimized texture's where the driver keeps the layout, but for
         // a shadow of Metal's tiles.
         if image.route != AliasRoute::Tiled {

@@ -657,15 +657,18 @@ fn a_heap_texture_is_held_to_metal_s_answer_by_its_image_or_by_a_shadow() {
 /// such an image is placed, not refused: RADV's on an RX 7900 XTX (Mesa 26.0.8), 128 KiB for a
 /// `D16`, `D32F` or `D32FS8` image of 8 x 8 texels or more and 256 KiB for a multisample image from
 /// about 128 x 128 texels, and the Radeon 780M's 64 KiB under the same driver (the alignments alone
-/// were measured; the sizes here stand in). An alignment past the base is refused typed.
+/// were measured; the sizes here stand in). An alignment past the base is refused typed, for a
+/// texture an image of binds into the heap's memory (`AliasRoute::Direct` here; the sibling test
+/// covers the routes that bind nothing there).
 #[test]
 fn every_image_alignment_measured_fits_a_heap_s_base() {
     use crate::error::{Error, RuntimeGap};
     use crate::memory::BLOCK_BYTES;
-    use crate::texture::heap::{check_heap_base, heap_extent, HEAP_BASE_ALIGNMENT};
+    use crate::texture::heap::{check_heap_base, heap_extent, AliasRoute, HEAP_BASE_ALIGNMENT};
     use crate::texture::ImagePlacement;
     use ash::vk::MemoryRequirements;
     use std::collections::BTreeSet;
+    let bound = AliasRoute::Direct;
     let pages = ImagePlacement::new(1, &BTreeSet::new());
     for alignment in [64 << 10, 128 << 10, 256 << 10] {
         let image = MemoryRequirements {
@@ -675,11 +678,15 @@ fn every_image_alignment_measured_fits_a_heap_s_base() {
         };
         let (answer, _) = heap_extent(&image, None, pages);
         assert_eq!(answer.align, alignment);
-        assert_eq!(check_heap_base(answer.align), Ok(()), "{alignment:#x}");
+        assert_eq!(
+            check_heap_base(bound, None, answer.align),
+            Ok(()),
+            "{alignment:#x}"
+        );
     }
     let past = 2 * HEAP_BASE_ALIGNMENT;
     assert_eq!(
-        check_heap_base(past),
+        check_heap_base(bound, None, past),
         Err(Error::NotImplemented(RuntimeGap::HeapTextureAlignment {
             alignment: past
         }))
@@ -687,6 +694,97 @@ fn every_image_alignment_measured_fits_a_heap_s_base() {
     // A heap's buffer takes whole units of the base (`buffer.rs`'s `placed`), so rounding never
     // carries one past the size that takes a block of its own (half a pooled block).
     assert!((BLOCK_BYTES / 2).is_multiple_of(HEAP_BASE_ALIGNMENT));
+}
+
+/// The heap's base holds only a texture an image of binds into the heap's own memory
+/// (`texture/heap.rs`'s `holds_heap_base`): a heap's memory starts at a multiple of
+/// `HEAP_BASE_ALIGNMENT` alone, so an image whose alignment passes it has no offset there to bind
+/// at, while a texture whose every image lies in memory of its own binds nothing there — the
+/// heap's bytes hold its own layout and the encoders move its elements, or nothing of them
+/// (`AliasRoute::Unaliased`) — and is made wherever the heap's memory starts, as `placement_align`
+/// already holds its offset to Metal's alignment alone. Refusing it would refuse a texture Metal
+/// makes: the answer that trips the base is the image's own, which the query hands back widened
+/// past Metal's (`heap-texture-larger-than-metal`) for a texture no shadow holds, and a
+/// multisample depth image already asks 256 KiB on RADV.
+///
+/// A depth twin's image always binds to the heap's memory (`heap_image` of `Mine::Twin` reaches
+/// neither shadow route), so a texture held with one is held to the base whatever its own route
+/// says.
+///
+/// `AliasRoute::Shadow` counts among the routes the base holds, as `in_own_memory` has it, though
+/// `heap_texture_at` makes its image in memory of its own too: the route is reached only on a
+/// driver that lays depth and stencil images apart from their memory (MoltenVK, measured), whose
+/// image alignments are Metal's and well inside the base, so no texture is refused for it. The
+/// rule that would loosen it is `placement_align`'s, not this one's.
+#[test]
+fn the_heap_s_base_holds_only_a_texture_whose_image_binds_to_its_memory() {
+    use crate::error::{Error, RuntimeGap};
+    use crate::texture::heap::{check_heap_base, AliasRoute, HEAP_BASE_ALIGNMENT};
+    // The alignment a RADV multisample depth image asks past the base, which the query hands
+    // back for a texture no shadow holds to Metal's answer.
+    let past = 2 * HEAP_BASE_ALIGNMENT;
+    let refused = Err(Error::NotImplemented(RuntimeGap::HeapTextureAlignment {
+        alignment: past,
+    }));
+    let holds_base = |route, twin| check_heap_base(route, twin, past) == refused;
+    let own = [
+        AliasRoute::Tiled,
+        AliasRoute::Lossless,
+        AliasRoute::MemoryShadow,
+        AliasRoute::Planes,
+        AliasRoute::Unaliased,
+    ];
+    let bound = [
+        AliasRoute::Direct,
+        AliasRoute::HostTransfer,
+        AliasRoute::Linear,
+        AliasRoute::Hidden,
+        AliasRoute::Compressed,
+        AliasRoute::Shadow,
+        AliasRoute::Apart,
+    ];
+    for route in own {
+        assert!(route.in_own_memory(), "{route:?}");
+        assert_eq!(check_heap_base(route, None, past), Ok(()), "{route:?}");
+        // A depth twin of such a texture binds to the heap's memory, so the base holds it.
+        assert!(holds_base(route, Some(AliasRoute::Direct)), "{route:?}");
+        assert!(holds_base(route, Some(AliasRoute::Apart)), "{route:?}");
+        // An alignment the base meets is no refusal either way.
+        assert_eq!(
+            check_heap_base(route, None, HEAP_BASE_ALIGNMENT),
+            Ok(()),
+            "{route:?}"
+        );
+    }
+    for route in bound {
+        assert!(!route.in_own_memory(), "{route:?}");
+        assert!(holds_base(route, None), "{route:?}");
+        assert!(holds_base(route, Some(AliasRoute::Direct)), "{route:?}");
+        assert_eq!(
+            check_heap_base(route, None, HEAP_BASE_ALIGNMENT),
+            Ok(()),
+            "{route:?}"
+        );
+    }
+    // Every route joins one list or the other, and a new one breaks this match rather than
+    // falling silently into the refusing side.
+    let listed = |route: AliasRoute| match route {
+        AliasRoute::Direct
+        | AliasRoute::HostTransfer
+        | AliasRoute::Linear
+        | AliasRoute::Hidden
+        | AliasRoute::Compressed
+        | AliasRoute::Shadow
+        | AliasRoute::Apart => bound.contains(&route),
+        AliasRoute::MemoryShadow
+        | AliasRoute::Unaliased
+        | AliasRoute::Planes
+        | AliasRoute::Tiled
+        | AliasRoute::Lossless => own.contains(&route),
+    };
+    for &route in own.iter().chain(&bound) {
+        assert!(listed(route), "{route:?} is in neither list");
+    }
 }
 
 /// A placement offset is held to Metal's own alignment, not this device's answer, for a texture

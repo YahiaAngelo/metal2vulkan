@@ -10,8 +10,11 @@
 //!   format, at least that answer: every answer holds Metal's where it is measured, and Metal keeps
 //!   such a texture of `PixelFormatView` usage compressed), which MoltenVK makes a
 //!   `PixelFormatView` Metal texture where it is a color one: Metal's answer for the texture with
-//!   the property off. A depth or stencil texture's metadata no Vulkan request drops there, so its
-//!   answer is Metal's for the texture with the property on.
+//!   the property off. A depth or stencil texture's metadata no Vulkan request drops there, so the
+//!   device's image of it is the property-on texture's; the answer is still Metal's own for the
+//!   descriptor as given, the property-off number, where a shadow of the heap's bytes holds the
+//!   texture to it (16384 for the single-sample 64x64 `Depth32Float` one, where Metal answers
+//!   16512 with the property on).
 //! - **Placement.** A texture fits at every multiple of the answered alignment of a placement
 //!   heap, its `heap_offset` that offset; an offset off the alignment, bytes past the heap's end,
 //!   another storage or CPU cache mode and the other heap type's call are refused `Invalid`, as
