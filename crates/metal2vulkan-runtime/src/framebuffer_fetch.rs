@@ -122,12 +122,23 @@ pub(crate) fn through_storage(profile: &DeviceProfile) -> bool {
 }
 
 /// Whether `profile`'s device renders some color format only through the view of its word
-/// (`WordAttachment::of`: the one- and two-channel 8-bit sRGB formats on NVIDIA and ANV), whose
-/// fetch the compile layer does not build (`NotImplemented(Format)`).
+/// (`WordAttachment::of`) and the compile layer does not build that word's fetch
+/// (`NotImplemented(Format)`): an 8-bit sRGB word (the one- and two-channel 8-bit sRGB formats on
+/// NVIDIA and ANV) or an `RGB9E5Float` one, whose decodes a read does not take.
+///
+/// A packed 16-bit word's fetch is built: the read decodes the word into the value Metal's
+/// programmable blending hands the function (`lower::fragment::fetch`,
+/// `stage_io::word_color::decode`), so a format the device renders only through such a word
+/// (`BGRA4Unorm` on MoltenVK) leaves the device's framebuffer fetch whole. The question the
+/// `ProgrammableBlending` family row asks is this one, not whether any format renders through a
+/// word at all.
 pub(crate) fn renders_through_words(profile: &DeviceProfile) -> bool {
-    metal2vulkan::metal::PixelFormat::ALL
-        .iter()
-        .any(|&pf| WordAttachment::of(pf, profile).is_some())
+    metal2vulkan::metal::PixelFormat::ALL.iter().any(|&pf| {
+        matches!(
+            WordAttachment::of(pf, profile),
+            Some(WordAttachment::Srgb8 { .. } | WordAttachment::Rgb9e5)
+        )
+    })
 }
 
 /// Whether the compile layer reads `profile`'s fetched color attachments of a pass of `samples`

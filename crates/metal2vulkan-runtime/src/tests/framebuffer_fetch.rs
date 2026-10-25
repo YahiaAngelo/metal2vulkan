@@ -4,14 +4,15 @@
 use super::image_plan::{committed, facts};
 use super::texture_descriptor::APPLE;
 use crate::framebuffer_fetch::{
-    fetch_candidate, planes_candidate, planes_copies, planes_copies_gap, storage_candidate,
-    stores_samples, through_inputs, through_multisampled_storage, through_planes, through_storage,
-    UsageAnswers, ANSWERS,
+    fetch_candidate, planes_candidate, planes_copies, planes_copies_gap, renders_through_words,
+    storage_candidate, stores_samples, through_inputs, through_multisampled_storage,
+    through_planes, through_storage, UsageAnswers, ANSWERS,
 };
 use crate::image_plan::{plan_image, ImagePlan};
 use crate::texture_descriptor::{TextureDescriptor, TextureLayout};
 use metal2vulkan::bind::PlanesCopy;
 use metal2vulkan::device::FormatUsage;
+use metal2vulkan::metal::format::WordAttachment;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::{Format, ImageCreateFlags, ImageUsageFlags};
 
@@ -455,4 +456,50 @@ fn single_sample_depth_targets_are_offered_sampled_where_the_driver_keeps_hiz_so
         "intel-irisxe-rplp-anv".to_owned(),
         PixelFormat::Depth32Float
     )));
+}
+
+/// The word gap the `ProgrammableBlending` family row reads ([`renders_through_words`]) is
+/// exactly the word kinds whose fetch the compile layer does not build: an 8-bit sRGB word and an
+/// `RGB9E5Float` one. A packed 16-bit word's fetch decodes the word into Metal's value
+/// (`lower::fragment::fetch`), so a format the device renders only through such a word leaves the
+/// device's framebuffer fetch whole.
+///
+/// On every committed profile the predicate follows that rule. MoltenVK renders `BGRA4Unorm`
+/// through a packed 16-bit word and no format through either other kind, so its row is no gap;
+/// the RTX 5080 and the ANV profiles sample `R8_SRGB` without rendering it, so theirs is.
+#[test]
+fn the_word_gap_is_the_word_kinds_whose_fetch_is_not_built() {
+    let mut gapped: Vec<String> = Vec::new();
+    let mut packed_only: Vec<(String, Vec<PixelFormat>)> = Vec::new();
+    for (name, _desc, device) in committed() {
+        let profile = device.profile();
+        let words: Vec<(PixelFormat, WordAttachment)> = PixelFormat::ALL
+            .iter()
+            .filter_map(|&pf| WordAttachment::of(pf, profile).map(|w| (pf, w)))
+            .collect();
+        let unbuilt = words
+            .iter()
+            .any(|(_, w)| !matches!(w, WordAttachment::Packed16 { .. }));
+        assert_eq!(renders_through_words(profile), unbuilt, "{name}: {words:?}");
+        if unbuilt {
+            gapped.push(name.clone());
+        } else if !words.is_empty() {
+            packed_only.push((name.clone(), words.iter().map(|&(pf, _)| pf).collect()));
+        }
+    }
+    for name in ["moltenvk-m3", "moltenvk-m4"] {
+        let formats = (packed_only.iter())
+            .find(|(n, _)| n == name)
+            .map(|(_, f)| f.clone());
+        assert_eq!(
+            formats,
+            Some(vec![PixelFormat::BGRA4Unorm]),
+            "{name}: {packed_only:?} {gapped:?}"
+        );
+    }
+    assert!(
+        gapped.contains(&"nvidia-rtx5080-laptop".to_owned()),
+        "{gapped:?}"
+    );
+    assert!(gapped.iter().any(|n| n.contains("anv")), "{gapped:?}");
 }

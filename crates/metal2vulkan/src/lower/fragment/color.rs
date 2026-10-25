@@ -155,8 +155,11 @@ pub(super) fn select_param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<Co
     };
     let form = param_form(cx, b)?;
     let extended = cx.inputs.extended_range_colors.get(&color).copied();
-    // A word attachment's input reads the word, whose decode is not built.
-    if cx.inputs.word_colors.contains_key(&color) {
+    // A word attachment's input reads the word. Where the interlocked storage form took the
+    // attachment, its read decodes a packed 16-bit word, Metal's value, and refuses the other two
+    // kinds (`fetch::select_read`); the input attachment form, whose attachment is the word
+    // itself, decodes none.
+    if cx.inputs.word_colors.contains_key(&color) && !super::fetch::is_storage(cx, color) {
         let refused = Unsupported::not_implemented(Feature::Format);
         return Err(refused.at_attachment(Attachment::Color(color)).into());
     }

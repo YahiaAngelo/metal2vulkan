@@ -102,7 +102,12 @@
 //!   and over a clear's or an earlier blend's result in the same pass, which Metal's tile holds as
 //!   a `half` finer than the codes the attachment holds (`PrecisionNote::DeviceColorConversion`,
 //!   noted for every such blend). An output of fewer lanes and a factor of the second source are
-//!   not built. A read of one is not built (`NotImplemented(Format)`).
+//!   not built. A read of one decodes the word's channels as Metal's programmable blending hands
+//!   them to the function, each code over its maximum code rounded to `half`, nearest even
+//!   ([`value`], the same decode; measured for a `float4` and a `half4` color input,
+//!   `metal::format::word`), which Metal's tile holds finer after a clear or an earlier draw of the
+//!   same pass, as it holds a blend's destination. A read of an 8-bit sRGB word and of an
+//!   `RGB9E5Float` one is not built (`NotImplemented(Format)`).
 //!
 //! **Per sample**. Metal runs a function that reads a color attachment of a multisampled pass once
 //! per covered sample, reading its own sample, in draw order per sample, with `[[position]]`'s x
@@ -2050,8 +2055,13 @@ pub(super) fn select_read(cx: &mut SelectCx<'_>, c: ColorInput) -> Result<(), Er
     let Some(sc) = cx.families.fragment.fetch.get(&c.color).copied() else {
         return Err(cx.invariant("a storage-form read of an attachment of another form"));
     };
-    // A word attachment's read decodes the word, which is not built.
-    if sc.view.word.is_some() {
+    // A packed 16-bit word attachment's read decodes the word, Metal's value
+    // (`stage_io::word_color::decode`, [`value`]). An 8-bit sRGB word's decode of its bytes, and
+    // an `RGB9E5Float` word's of its shared exponent, are not built.
+    if matches!(
+        sc.view.word,
+        Some(WordAttachment::Srgb8 { .. } | WordAttachment::Rgb9e5)
+    ) {
         let refused = Unsupported::not_implemented(Feature::Format);
         return Err(refused.at_attachment(Attachment::Color(c.color)).into());
     }
@@ -2354,6 +2364,13 @@ pub(super) fn words(cx: &SelectCx<'_>, uses: u64, rets: u64) -> u64 {
         (false, true) => READ.saturating_add(u64::from(3 * srgb::STEP_WORDS) + 400),
         (false, false) => READ,
     }
+    // A packed 16-bit word attachment's read decodes the word's four fields. Added, not chosen:
+    // a function may read such an attachment beside one of another kind, and every use takes the
+    // larger shape.
+    .saturating_add(match fetch.values().any(|sc| sc.view.word.is_some()) {
+        true => stage_io::word_color::DECODE_WORDS,
+        false => 0,
+    })
     .saturating_add(EXCHANGE.saturating_mul(exchanged))
     .saturating_add(super::color::ALPHA_IN_RED_WORDS.saturating_mul(moved));
     // An sRGB attachment's write encodes four channels (three through Metal's thresholds),
@@ -2656,6 +2673,17 @@ pub(super) fn value(
             };
             let word = fb.composite_extract(texel, &[0])?;
             srgb_decode(fb, sc.view.format, word, table)?
+        }
+        // A packed 16-bit word attachment's texel is the word, whose channels the read decodes as
+        // Metal's programmable blending hands them to the function, and as its blend reads them
+        // (`stage_io::word_color::decode`; the measurement is `metal::format::word`'s). The other
+        // word kinds' reads are refused in the plan ([`select_read`]).
+        (None, None) if sc.view.word.is_some() => {
+            let Some(word) = sc.view.word else {
+                return Err(cx.fail("a word read of an attachment without a word"));
+            };
+            let w = fb.composite_extract(texel, &[0])?;
+            stage_io::word_color::decode(fb, word, w)?
         }
         (None, None) => as_held(fb, texel, sc.view.numeric)?,
     };

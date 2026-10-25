@@ -277,15 +277,21 @@ fn states_follow_their_sources() {
         let apple9 = &all[&GpuFamily::Apple9];
         let blending = state(apple9, feature(F::ProgrammableBlending)).unwrap();
         // Through input attachments in rasterization order exact; through the pixel interlock's
-        // storage form exact but where the device renders a color format only through its word
-        // (the one- and two-channel sRGB formats on NVIDIA and ANV), whose fetch is the runtime's
-        // gap; with neither, refused.
+        // storage form exact but where the device renders a color format only through a word
+        // whose fetch is not built, an 8-bit sRGB word (the one- and two-channel sRGB formats on
+        // NVIDIA and ANV) or an `RGB9E5Float` one; with neither form, refused. A packed 16-bit
+        // word's fetch decodes the word (`lower::fragment::fetch`), so `BGRA4Unorm`, which
+        // MoltenVK renders only that way, is no gap.
         if enabled.has(VkFeature::RasterizationOrderColorAttachmentAccess) {
             assert_eq!(blending, RowState::Exact, "{stem}");
         } else if enabled.has(VkFeature::FragmentShaderPixelInterlock) {
             let compile = Device::new(enabled.clone(), DevicePolicy::UNTRUSTED).unwrap();
-            let words = (PixelFormat::ALL.iter())
-                .any(|&pf| WordAttachment::of(pf, compile.profile()).is_some());
+            let words = (PixelFormat::ALL.iter()).any(|&pf| {
+                matches!(
+                    WordAttachment::of(pf, compile.profile()),
+                    Some(WordAttachment::Srgb8 { .. } | WordAttachment::Rgb9e5)
+                )
+            });
             let want = match words {
                 true => not_implemented(Feature::FramebufferFetch),
                 false => RowState::Exact,

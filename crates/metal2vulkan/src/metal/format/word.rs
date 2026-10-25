@@ -15,7 +15,9 @@
 //! `B5G6R5Unorm`, `A1BGR5Unorm`, `ABGR4Unorm` and `BGR5A1Unorm`): each channel's value rounded to
 //! `half` to nearest even (a NaN 0), clamped to `[0, 1]`, times the channel's maximum code, rounded
 //! to nearest even; the only ties are at one half, which store the even code (an `A1BGR5Unorm`
-//! alpha of 0.5 is 0). That is `ChannelWrite::HalfUnorm`'s rule.
+//! alpha of 0.5 is 0). That is `ChannelWrite::HalfUnorm`'s rule. `BGRA4Unorm`'s four fields take
+//! it too, measured the same way on the same device, its red at bit 8, green 4, blue 0 and alpha
+//! 12, read back off Metal's own words.
 //!
 //! Metal's store into an 8-bit sRGB format (`R8Unorm_sRGB`, `RG8Unorm_sRGB`; the lane's rule,
 //! `runtime_lane::color_writes`, and its in-guest probe's clears and draws on the M3 Max): each
@@ -40,8 +42,20 @@
 //! which hold their codes as Metal's tile holds them. The device blends no such view otherwise,
 //! resolves none, and reads none as the format's input attachment: a pipeline that blends a word
 //! attachment, covers by its alpha, or writes some of its channels on a device without that
-//! interlock is refused as the device lacking the format's attachment, as without the view; a
-//! color input of one, and a pass's resolve of one, are `NotImplemented(Format)`.
+//! interlock is refused as the device lacking the format's attachment, as without the view.
+//!
+//! A fragment function's color input of a packed 16-bit word attachment reads the word and
+//! decodes it, in the interlocked storage form (`lower::fragment::fetch`): each channel's code
+//! over its maximum code rounded to `half`, nearest even, which is the value Metal's programmable
+//! blending hands the function (measured on an Apple M3 Max under macOS 27.0.1: a `float4` and a
+//! `half4` color input of `BGRA4Unorm`, `ABGR4Unorm` and `B5G6R5Unorm`, every code of each 4-bit
+//! channel and a sweep of the 5- and 6-bit ones, stored raw into an `RGBA32Float` attachment; an
+//! `RGBA8Unorm` control reads the `f32` quotient through a `float4` input, so the two rules are
+//! told apart). Metal's tile holds a pass's clear and an earlier draw's write finer than the
+//! codes, as it holds them for a blend (`PrecisionNote::DeviceColorConversion`), so a read after
+//! one in the same pass reads the code the attachment holds. A color input of an 8-bit sRGB word
+//! and of an `RGB9E5Float` one, and a pass's resolve of any word attachment, are
+//! `NotImplemented(Format)`.
 
 use crate::device::requirements::FormatUsage;
 use crate::device::DeviceProfile;
@@ -55,9 +69,9 @@ use crate::vk;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum WordAttachment {
     /// A packed 16-bit unsigned normalized format (`B5G6R5Unorm`, `A1BGR5Unorm`, `ABGR4Unorm`,
-    /// `BGR5A1Unorm`), held as `R16_UINT`: each channel's field in the little-endian word, red,
-    /// green, blue and alpha, as its lowest bit and its width; `None` for a channel the format
-    /// lacks.
+    /// `BGR5A1Unorm`, `BGRA4Unorm`), held as `R16_UINT`: each channel's field in the
+    /// little-endian word, red, green, blue and alpha, as its lowest bit and its width; `None`
+    /// for a channel the format lacks.
     Packed16 {
         /// The fields of red, green, blue and alpha.
         fields: [Option<WordField>; 4],
@@ -95,6 +109,7 @@ impl WordAttachment {
             PixelFormat::B5G6R5Unorm => [f(11, 5), f(5, 6), f(0, 5), None],
             PixelFormat::A1BGR5Unorm => [f(11, 5), f(6, 5), f(1, 5), f(0, 1)],
             PixelFormat::ABGR4Unorm => [f(12, 4), f(8, 4), f(4, 4), f(0, 4)],
+            PixelFormat::BGRA4Unorm => [f(8, 4), f(4, 4), f(0, 4), f(12, 4)],
             PixelFormat::BGR5A1Unorm => [f(10, 5), f(5, 5), f(0, 5), f(15, 1)],
             PixelFormat::R8UnormSRGB => {
                 let fields = [f(0, 8), None, None, None];
@@ -301,12 +316,86 @@ mod tests {
         assert_eq!(rgb9e5_word([2f32.powi(-24), 0.0, 0.0]), 1);
     }
 
+    /// `BGRA4Unorm`'s fields, Metal's own words (the probe `packed16_word_fetch`'s controls read
+    /// each format's fields out of single-channel texels): blue in bits 0 to 3, then green, red
+    /// and alpha. Its word of a codes vector is `ABGR4Unorm`'s rotated, and never its own.
+    #[test]
+    fn bgra4_is_blue_then_green_then_red_then_alpha() {
+        let w = WordAttachment::layout(PixelFormat::BGRA4Unorm).unwrap();
+        assert_eq!(w.word_format(), vk::Format::R16_UINT);
+        assert_eq!(w.pack([15, 0, 0, 0]), 0x0f00);
+        assert_eq!(w.pack([0, 15, 0, 0]), 0x00f0);
+        assert_eq!(w.pack([0, 0, 15, 0]), 0x000f);
+        assert_eq!(w.pack([0, 0, 0, 15]), 0xf000);
+        assert_eq!(w.pack([1, 2, 3, 4]), 0x4123);
+        // The same codes under `ABGR4Unorm`'s order: a different word, the same channels.
+        let abgr4 = WordAttachment::layout(PixelFormat::ABGR4Unorm).unwrap();
+        assert_eq!(abgr4.pack([1, 2, 3, 4]), 0x1234);
+        for codes in [[1, 2, 3, 4], [15, 0, 8, 1], [0, 9, 9, 14]] {
+            assert_ne!(w.pack(codes), abgr4.pack(codes), "{codes:?}");
+            for (lane, (f, g)) in w.fields().iter().zip(abgr4.fields()).enumerate() {
+                let (f, g) = (f.unwrap(), g.unwrap());
+                let code = |w: u32, f: WordField| (w >> f.shift) & ((1 << f.bits) - 1);
+                assert_eq!(code(w.pack(codes), f), code(abgr4.pack(codes), g), "{lane}");
+            }
+        }
+    }
+
+    /// The value Metal's programmable blending hands a fragment function for each code of a
+    /// 4-bit channel of `BGRA4Unorm`: the code over 15 rounded to `half`, nearest even, which is
+    /// what the fetch's decode computes (`stage_io::word_color::decode`). These sixteen `f32`
+    /// bit patterns are Metal's own, from the probe `packed16_word_fetch` on an Apple M3 Max
+    /// under macOS 27.0.1: every code of every channel of `BGRA4Unorm` and `ABGR4Unorm`, through
+    /// a `float4` and a `half4` color input, gave the same pattern per code, and twelve fresh
+    /// processes agreed. The `f32` quotient, which an `RGBA8Unorm` control did read through a
+    /// `float4` input, differs at fourteen of the sixteen.
+    #[test]
+    fn a_four_bit_channels_fetched_value_is_the_half_of_its_quotient() {
+        const METAL: [u32; 16] = [
+            0x0000_0000,
+            0x3d88_8000,
+            0x3e08_8000,
+            0x3e4c_c000,
+            0x3e88_8000,
+            0x3eaa_a000,
+            0x3ecc_c000,
+            0x3eee_e000,
+            0x3f08_8000,
+            0x3f19_a000,
+            0x3f2a_a000,
+            0x3f3b_c000,
+            0x3f4c_c000,
+            0x3f5d_e000,
+            0x3f6e_e000,
+            0x3f80_0000,
+        ];
+        let mut unlike_the_quotient = 0;
+        for (code, metal) in METAL.into_iter().enumerate() {
+            let code = code as u32;
+            let quotient = code as f32 / 15.0;
+            let decoded =
+                crate::float16::f16_bits_to_f32(crate::float16::f32_to_f16_bits(quotient));
+            assert_eq!(decoded.to_bits(), metal, "code {code}");
+            if quotient.to_bits() != metal {
+                unlike_the_quotient += 1;
+            }
+            // And the value a function writes back stores the code it read.
+            assert_eq!(half_unorm_code(decoded, 4), code, "code {code}");
+        }
+        // The two rules are told apart: the `f32` quotient is Metal's value at 0 and 1 alone.
+        assert_eq!(unlike_the_quotient, 14);
+    }
+
     #[test]
     fn a_word_view_serves_where_the_device_holds_but_cannot_render_the_format() {
         use crate::pipeline::testing::{profile, EXACT_SAMPLING};
         let nvidia = profile("nvidia-rtx5080-laptop", EXACT_SAMPLING).unwrap();
         let lavapipe = profile("lavapipe", EXACT_SAMPLING).unwrap();
-        for pf in [PixelFormat::A1BGR5Unorm, PixelFormat::ABGR4Unorm] {
+        for pf in [
+            PixelFormat::A1BGR5Unorm,
+            PixelFormat::ABGR4Unorm,
+            PixelFormat::BGRA4Unorm,
+        ] {
             assert_eq!(
                 WordAttachment::of(pf, &nvidia),
                 WordAttachment::layout(pf),
