@@ -345,6 +345,19 @@ const PRECISE_DEVICE_WORDS: &[usize] = &[
 /// translation composes Metal's fast one), the fast `exp`, `log`, `exp10`, `log10`, `pow` and
 /// `powr` (15, 17, 18, 20 to 22: compositions of the device's `exp2` and `log2`), `fmod` (25: a
 /// composition of the device's reciprocal), nor `sinpi`, `cospi`, `tanpi` and `y`.
+///
+/// Words 12 and 13, `asinh` and `acosh`, are the two whose answer is not a function of the operand
+/// alone. The translation hands Metal the same `air.fast_asinh.f32`/`air.fast_acosh.f32` call on
+/// the same operand that Metal's own compile of the case writes, and Apple's backend expands each
+/// to different last bits depending on the basic block the call sits in: putting the store that
+/// consumes them inside a branch, which sinks the calls into that block, moves 34 of the 2048
+/// answers by one or two ulps, and at an operand where the expansion cancels
+/// (`asinh`/`acosh` of a large negative `x`, or `acosh` just above 1) that carries all the way to
+/// `NaN` against a finite answer. The precise entry's `asinh` and `acosh` do not move. So a
+/// difference in these two words is a question about the shape of the module the translation
+/// emits, not about either side's operand or lowering: the same guard written as a selected store
+/// index, which reads the same word and tests the same bit but branches on neither, answers every
+/// one of these words exactly.
 const FAST_DEVICE_WORDS: &[usize] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 16, 19, 23, 24, 29,
 ];
