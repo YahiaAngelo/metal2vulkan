@@ -14,18 +14,23 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::args::{key_of, Cx, Node};
+use super::args::{field_holder, key_of, Cx, MemberSpace, Node};
 use super::keys::Key;
 use super::md::{kept_bytes, kept_diag, Ops, Site, Tok};
 use super::{Member, MemberKind, StructInfo, StructRef, UserKey};
 use crate::error::{AbiError, DiagName};
 use crate::error::{Error, InternalError, InternalKind, Limit};
-use crate::ir::MdId;
+use crate::ir::{MdId, TypeId};
+
+/// A layout node together with the IR struct type whose fields its members describe (`None`
+/// where the module does not state one). Both decide what the layout decodes to, so both key
+/// [`Structs::memo`]: a member with no `air.address_space` takes it from its field.
+type LayoutKey = (MdId, Option<TypeId>);
 
 /// Ledger charge for one [`Structs::active`] entry (a tree entry, at twice its size).
-const ACTIVE_ENTRY: usize = 2 * std::mem::size_of::<MdId>();
+const ACTIVE_ENTRY: usize = 2 * std::mem::size_of::<LayoutKey>();
 /// Ledger charge for one [`Structs::memo`] entry.
-const MEMO_ENTRY: usize = 2 * std::mem::size_of::<(MdId, StructRef)>();
+const MEMO_ENTRY: usize = 2 * std::mem::size_of::<(LayoutKey, StructRef)>();
 /// Ledger charge for one frame of the decode stack.
 const FRAME: usize = std::mem::size_of::<Frame>();
 /// Ledger charge for one boxed argument-buffer member node.
@@ -46,18 +51,19 @@ pub(super) struct Structs {
     /// Whether each layout of `list` holds an argument-buffer member (`air.indirect_argument`)
     /// at any depth by value.
     indirect: Vec<bool>,
-    memo: BTreeMap<MdId, StructRef>,
-    active: BTreeSet<MdId>,
+    memo: BTreeMap<LayoutKey, StructRef>,
+    active: BTreeSet<LayoutKey>,
 }
 
 /// One layout being decoded: its members as read, and the layout nodes they name, which are
 /// all decoded (in order) before the layout is built.
 struct Frame {
-    id: MdId,
+    key: LayoutKey,
     site: Site,
     members: Vec<Read>,
-    /// The layout nodes the members name, in the order the members name them.
-    nested: Vec<(MdId, Site)>,
+    /// The layout nodes the members name, in the order the members name them, each with the
+    /// struct type whose fields its members describe.
+    nested: Vec<(LayoutKey, Site)>,
     /// How many of `nested` are decoded.
     done: usize,
     /// The greatest height of a decoded nested layout.
@@ -66,7 +72,11 @@ struct Frame {
 
 /// One member as read, before its nested layouts are decoded.
 struct Read {
-    layout: Option<MdId>,
+    layout: Option<LayoutKey>,
+    /// What the holding struct's field at `offset` says about this member's address space.
+    space: MemberSpace,
+    /// The holding struct's field at `offset`, the holding type of the layouts this member names.
+    field: Option<TypeId>,
     offset: u32,
     size: u32,
     array_len: u32,
@@ -86,13 +96,20 @@ enum ReadKind {
 }
 
 impl Structs {
-    /// The layout of node `id`, decoding it (and every layout it names) on first use.
-    pub(super) fn get(cx: &mut Cx<'_, '_>, id: MdId, site: &Site) -> Result<StructRef, Error> {
-        if let Some(&r) = cx.structs.memo.get(&id) {
+    /// The layout of node `id`, whose members are the fields of `holder` where the module states
+    /// one, decoding it (and every layout it names) on first use.
+    pub(super) fn get(
+        cx: &mut Cx<'_, '_>,
+        id: MdId,
+        site: &Site,
+        holder: Option<TypeId>,
+    ) -> Result<StructRef, Error> {
+        let key = (id, holder);
+        if let Some(&r) = cx.structs.memo.get(&key) {
             return Ok(r);
         }
         let mut stack = Vec::new();
-        open(cx, &mut stack, id, site)?;
+        open(cx, &mut stack, key, site)?;
         let mut last = None;
         while let Some(top) = stack.last_mut() {
             if let Some((child, child_site)) = top.nested.get(top.done) {
@@ -137,15 +154,20 @@ impl Structs {
 
 /// Start decoding layout `id` on top of `stack`: refuse a layout that contains itself or one
 /// nested past the cap, then read its members.
-fn open(cx: &mut Cx<'_, '_>, stack: &mut Vec<Frame>, id: MdId, site: &Site) -> Result<(), Error> {
+fn open(
+    cx: &mut Cx<'_, '_>,
+    stack: &mut Vec<Frame>,
+    layout: LayoutKey,
+    site: &Site,
+) -> Result<(), Error> {
     let key = Some(Key::StructTypeInfo.name());
     // Tree entries are charged at twice their size (node overhead), before insertion.
     cx.meter.charge(ACTIVE_ENTRY)?;
-    if !cx.structs.active.insert(id) {
+    if !cx.structs.active.insert(layout) {
         return Err(site.err(AbiError::BadValue, key));
     }
     cx.meter.cap(Limit::LayoutNesting, stack.len() as u64 + 1)?;
-    let frame = read(cx, id, site)?;
+    let frame = read(cx, layout, site)?;
     // Charged per push and released per pop ([`FRAME`]): the stack's charge is its depth.
     cx.meter.reserve(stack, 1)?;
     stack.push(frame);
@@ -161,12 +183,12 @@ fn finish(cx: &mut Cx<'_, '_>, frame: Frame) -> Result<(StructRef, u32), Error> 
     // The frame's lists were charged per element; the built members replace them.
     cx.meter.release(
         std::mem::size_of::<Read>().saturating_mul(frame.members.len())
-            + std::mem::size_of::<(MdId, Site)>().saturating_mul(frame.nested.len()),
+            + std::mem::size_of::<(LayoutKey, Site)>().saturating_mul(frame.nested.len()),
     );
     let mut members = Vec::new();
     cx.meter.reserve(&mut members, frame.members.len())?;
     for read in frame.members {
-        let decoded = |cx: &Cx<'_, '_>, id: MdId| {
+        let decoded = |cx: &Cx<'_, '_>, id: LayoutKey| {
             cx.structs
                 .memo
                 .get(&id)
@@ -181,8 +203,11 @@ fn finish(cx: &mut Cx<'_, '_>, frame: Frame) -> Result<(StructRef, u32), Error> 
             ReadKind::Plain => MemberKind::Plain,
             ReadKind::IndirectStruct { first_id } => MemberKind::IndirectStruct { first_id },
             ReadKind::Indirect(node) => {
-                let layouts = node.layouts(|id, _| decoded(cx, id))?;
-                let arg = cx.indirect(&node, layouts)?;
+                // A layout the member's own node names is keyed by the member's field, the type
+                // its members are fields of, as `read` pushed it.
+                let field = read.field;
+                let layouts = node.layouts(|id, _| decoded(cx, (id, field)))?;
+                let arg = cx.indirect(&node, layouts, read.space)?;
                 cx.meter.release(NODE);
                 MemberKind::Indirect(arg)
             }
@@ -200,7 +225,7 @@ fn finish(cx: &mut Cx<'_, '_>, frame: Frame) -> Result<(StructRef, u32), Error> 
             key: read.key,
         });
     }
-    cx.structs.active.remove(&frame.id);
+    cx.structs.active.remove(&frame.key);
     cx.meter.release(ACTIVE_ENTRY);
     let r = u32::try_from(cx.structs.list.len())
         .map(StructRef)
@@ -217,39 +242,49 @@ fn finish(cx: &mut Cx<'_, '_>, frame: Frame) -> Result<(StructRef, u32), Error> 
     cx.structs.heights.push(height);
     cx.structs.indirect.push(indirect);
     cx.meter.charge(MEMO_ENTRY)?;
-    cx.structs.memo.insert(frame.id, r);
+    cx.structs.memo.insert(frame.key, r);
     Ok((r, height))
 }
 
-/// Read the members of layout `id`, noting the layout nodes they name.
-fn read(cx: &mut Cx<'_, '_>, id: MdId, site: &Site) -> Result<Frame, Error> {
+/// Read the members of a layout, noting the layout nodes they name and, for each member, what
+/// the holding struct's field at its offset says about its address space.
+fn read(cx: &mut Cx<'_, '_>, layout: LayoutKey, site: &Site) -> Result<Frame, Error> {
     let m = cx.m;
+    let (id, holder) = layout;
     let mut ops = Ops::node(m, id, site.clone())?;
     let mut members = Vec::new();
     let mut nested = Vec::new();
     while !ops.is_done() {
         cx.meter.tick(1)?;
-        let mut layout = None;
+        let mut nested_node = None;
         if matches!(ops.peek(), Some(Tok::Str(_))) {
             let k = key_of(&mut ops)?;
             if k != Key::StructTypeInfo {
                 return Err(ops.site.err(AbiError::UnknownKey, Some(k.name())));
             }
-            let child = ops.child(Some(k.name()))?;
-            cx.meter.reserve(&mut nested, 1)?;
-            nested.push((child, site.clone()));
-            layout = Some(child);
+            nested_node = Some(ops.child(Some(k.name()))?);
         }
         let key = Some(Key::StructTypeInfo.name());
         let offset = ops.u32(key)?;
         let size = ops.u32(key)?;
         let array_len = ops.u32(key)?;
+        // The member's own field of the holding struct: its address space where the member's node
+        // states none, and the holding type of the layout it names.
+        let space = MemberSpace::of(m, cx.layouts, holder, offset);
+        let field = field_holder(m, cx.layouts, holder, offset);
+        let layout = nested_node.map(|child| (child, field));
+        if let Some(child) = layout {
+            cx.meter.reserve(&mut nested, 1)?;
+            nested.push((child, site.clone()));
+        }
         let type_name = ops.diag(key, cx.meter)?;
         let raw = ops.string(key)?;
         let name = kept_diag(raw, cx.meter)?;
         let user = UserKey(kept_bytes(raw, cx.meter)?);
         let mut member = Read {
             layout,
+            space,
+            field,
             offset,
             size,
             array_len,
@@ -264,14 +299,14 @@ fn read(cx: &mut Cx<'_, '_>, id: MdId, site: &Site) -> Result<Frame, Error> {
         if let ReadKind::Indirect(node) = &member.kind {
             for child in node.nested() {
                 cx.meter.reserve(&mut nested, 1)?;
-                nested.push((child, node.site().clone()));
+                nested.push(((child, field), node.site().clone()));
             }
         }
         cx.meter.reserve(&mut members, 1)?;
         members.push(member);
     }
     Ok(Frame {
-        id,
+        key: layout,
         site: site.clone(),
         members,
         nested,

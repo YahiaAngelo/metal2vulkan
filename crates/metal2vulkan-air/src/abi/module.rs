@@ -9,10 +9,11 @@ use super::{
     LinkageSignature, LinkageSignatureKind, ModuleLimits, ParamRole, PatchInfo, PatchKind, Stage,
     StaticSampler, Version, VisibleFunctionRef, VisibleSymbol, VisibleTarget,
 };
+use crate::bitcode::PointeeTable;
 use crate::budget::Meter;
 use crate::error::Error;
 use crate::error::{AbiError, DiagName, Feature, InputError, InputErrorKind, Location};
-use crate::ir::{MdId, Module, Type, TypeId};
+use crate::ir::{MdId, Module, Type, TypeId, TypeLayouts};
 
 /// The closed set of named metadata lists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,7 +66,12 @@ const GLOBAL_BINDINGS: &str = "air.global_bindings";
 
 /// Decode every named list of `m`. Entries are decoded kernel, vertex, fragment, object, mesh,
 /// each in list order.
-pub(super) fn decode(m: &Module, meter: &mut Meter) -> Result<AirAbi, Error> {
+pub(super) fn decode(
+    m: &Module,
+    pointees: &PointeeTable,
+    layouts: Option<&TypeLayouts>,
+    meter: &mut Meter,
+) -> Result<AirAbi, Error> {
     let mut lists: Vec<(Named, &[MdId])> = Vec::new();
     for named in m.named_md() {
         meter.tick(1)?;
@@ -110,6 +116,8 @@ pub(super) fn decode(m: &Module, meter: &mut Meter) -> Result<AirAbi, Error> {
         m,
         meter,
         structs: Structs::default(),
+        pointees,
+        layouts,
     };
     for &(kind, ops) in &lists {
         let site = Site::module();
@@ -475,7 +483,7 @@ fn entry(cx: &mut Cx<'_, '_>, stage: Named, id: MdId) -> Result<EntryPoint, Erro
     cx.meter.reserve(&mut params, input_ids.len())?;
     for &op in input_ids {
         let op = op.ok_or_else(|| site.err(AbiError::BadValue, None))?;
-        params.push(cx.param(op, &name, &stage, types)?);
+        params.push(cx.param(op, &name, &stage, types, func)?);
     }
     // Metal's compiler requires `[[early_fragment_tests]]` of a function that reads the coverage
     // after the depth test ("'early_fragment_tests' is required ... by attribute

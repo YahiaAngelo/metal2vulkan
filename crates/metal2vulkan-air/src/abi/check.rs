@@ -16,18 +16,15 @@ use crate::error::{Error, Feature};
 use crate::ir::{AddrSpace, Const, FuncId, Module, Section, Type, TypeId, TypeLayouts};
 use crate::metal::DataType;
 
-/// Check `abi` against `m` (and, for typed-pointer bitcode, the pointees).
+/// Check `abi` against `m` (and, for typed-pointer bitcode, the pointees). `layouts` are the
+/// struct layouts [`super::decode`] built for that bitcode, `None` when no pointee is recorded.
 pub(super) fn module(
     m: &Module,
     pointees: &PointeeTable,
+    layouts: Option<&TypeLayouts>,
     abi: &AirAbi,
     meter: &mut Meter,
 ) -> Result<(), Error> {
-    let layouts = if pointees.is_empty() {
-        None
-    } else {
-        Some(TypeLayouts::new(m.data_layout(), m.types(), meter)?)
-    };
     let mut funcs = BTreeSet::new();
     for e in &abi.entries {
         meter.tick(1)?;
@@ -39,7 +36,7 @@ pub(super) fn module(
         if !funcs.insert(e.func) {
             return Err(site.err(AbiError::BadValue, None));
         }
-        entry(m, pointees, layouts.as_ref(), abi, e, &site, meter)?;
+        entry(m, pointees, layouts, abi, e, &site, meter)?;
     }
     let mut visible = BTreeSet::new();
     for v in &abi.visible_functions {
@@ -65,7 +62,7 @@ pub(super) fn module(
         if !core_image.insert(k.func) {
             return Err(site.err(AbiError::BadValue, Some(super::core_image::LIST)));
         }
-        core_image_kernel(m, pointees, layouts.as_ref(), k, &site, meter)?;
+        core_image_kernel(m, pointees, layouts, k, &site, meter)?;
     }
     let mut indices = BTreeSet::new();
     for fc in &abi.function_constants {

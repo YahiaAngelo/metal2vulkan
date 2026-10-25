@@ -14,16 +14,92 @@ use super::{
     ParamRole, PatchInput, Predicate, Sampling, Slot, Stage, StructRef, TextureArg, UserKey,
     Varying,
 };
+use crate::bitcode::PointeeTable;
 use crate::budget::Meter;
 use crate::error::Error;
 use crate::error::{AbiError, DiagName};
-use crate::ir::{AddrSpace, MdId, Module, Type, TypeId};
+use crate::ir::{AddrSpace, FuncId, MdId, Module, Type, TypeId, TypeLayouts};
 
-/// The decoder state shared by every node: the module, the meter, and the layout arena.
+/// The decoder state shared by every node: the module, the meter, the layout arena, and the two
+/// tables that reach the IR type holding an argument buffer (see [`MemberSpace`]).
 pub(super) struct Cx<'m, 'a> {
     pub(super) m: &'m Module,
     pub(super) meter: &'a mut Meter,
     pub(super) structs: Structs,
+    /// The typed-pointer pointees: the pointee of an argument buffer's parameter is the struct
+    /// type whose fields its `air.struct_type_info` members describe. Empty for opaque-pointer
+    /// bitcode.
+    pub(super) pointees: &'a PointeeTable,
+    /// Struct field offsets, which select a member's field by its byte offset. `None` when no
+    /// pointee is recorded, since there is then no holding type to index.
+    pub(super) layouts: Option<&'a TypeLayouts>,
+}
+
+/// What the module's own types say about an argument-buffer member's address space, for a member
+/// whose node states no `air.address_space` (every emitter before AIR 2.5 writes one that way).
+///
+/// The member's byte offset selects a field of the struct the argument buffer's parameter points
+/// to, and a buffer member's field is a pointer in the member's address space. The holding type is
+/// reached from the parameter's pointee, never from a type name, so nothing here is keyed to a
+/// name or to a recorded AIR version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MemberSpace {
+    /// The module does not carry the holding type: opaque-pointer bitcode erases the parameter's
+    /// pointee, and nothing else links the metadata to a struct type structurally.
+    Unstated,
+    /// The field at the member's offset is a pointer into this space.
+    Field(AddrSpace),
+    /// The field at the member's offset is not a pointer, so the module's types and the member's
+    /// buffer role disagree.
+    NotAPointer,
+}
+
+impl MemberSpace {
+    /// What the field at byte offset `offset` of `holder` says. Arrays are stepped through: an
+    /// `array<device T *, n>` member's field is `[n x ptr]`, whose elements carry the space.
+    pub(super) fn of(
+        m: &Module,
+        layouts: Option<&TypeLayouts>,
+        holder: Option<TypeId>,
+        offset: u32,
+    ) -> MemberSpace {
+        match field_holder(m, layouts, holder, offset).map(|ty| m.types().get(ty)) {
+            None => MemberSpace::Unstated,
+            Some(Some(Type::Ptr { space })) => MemberSpace::Field(*space),
+            Some(_) => MemberSpace::NotAPointer,
+        }
+    }
+}
+
+/// The field of `holder` at byte offset `offset`, with any enclosing arrays stepped through. It
+/// is the holding type of a nested layout the member names, as well as the carrier of the
+/// member's own address space. `None` when there is no holding type, no field offsets, or no
+/// field exactly at `offset` (a bitfield's members share one storage unit, so only the first is
+/// a field of its own).
+pub(super) fn field_holder(
+    m: &Module,
+    layouts: Option<&TypeLayouts>,
+    holder: Option<TypeId>,
+    offset: u32,
+) -> Option<TypeId> {
+    let layouts = layouts?;
+    let holder = strip_arrays(m, holder?);
+    let Some(Type::Struct { fields, .. }) = m.types().get(holder) else {
+        return None;
+    };
+    let offsets = layouts.field_offsets(holder)?;
+    let at = offsets.iter().position(|&o| o == u64::from(offset))?;
+    fields.get(at).copied().map(|ty| strip_arrays(m, ty))
+}
+
+/// `ty` with every enclosing array removed, so an array of members is the member it holds.
+fn strip_arrays(m: &Module, ty: TypeId) -> TypeId {
+    let mut ty = ty;
+    // Each step reaches a type interned before the one it came from, so this terminates.
+    while let Some(Type::Array { elem, .. }) = m.types().get(ty) {
+        ty = *elem;
+    }
+    ty
 }
 
 /// Which list a node sits in.
@@ -225,6 +301,7 @@ impl<'m> Cx<'m, '_> {
         entry: &DiagName,
         stage: &Stage,
         types: &[TypeId],
+        func: FuncId,
     ) -> Result<ParamBinding, Error> {
         let node = self.node(id, Context::Input, entry)?;
         let param = node.index.unwrap_or_default();
@@ -234,8 +311,16 @@ impl<'m> Cx<'m, '_> {
                 Some(Type::Ptr { space }) => Some(*space),
                 _ => None,
             });
-        let layouts = node.layouts(|id, site| Structs::get(self, id, site))?;
-        let role = self.role(&node, layouts, Context::Input, pointer)?;
+        // The parameter's pointee holds the layout's members as fields ([`MemberSpace`]).
+        let holder = self.pointees.param(func, param as usize);
+        let layouts = node.layouts(|id, site| Structs::get(self, id, site, holder))?;
+        let role = self.role(
+            &node,
+            layouts,
+            Context::Input,
+            pointer,
+            MemberSpace::Unstated,
+        )?;
         if !input_in_stage(&role, stage) {
             return Err(node.site.err(AbiError::UnknownKey, Some(node.role.name())));
         }
@@ -258,7 +343,7 @@ impl<'m> Cx<'m, '_> {
         stage: &Stage,
     ) -> Result<OutputBinding, Error> {
         let node = self.node(id, Context::Output, entry)?;
-        let layouts = node.layouts(|id, site| Structs::get(self, id, site))?;
+        let layouts = node.layouts(|id, site| Structs::get(self, id, site, None))?;
         let role = self.output_role(&node, layouts)?;
         if !output_in_stage(&role, stage) {
             return Err(node.site.err(AbiError::UnknownKey, Some(node.role.name())));
@@ -285,9 +370,15 @@ impl<'m> Cx<'m, '_> {
         self.node(id, Context::Indirect, &entry)
     }
 
-    /// Build one argument-buffer member binding from its node and resolved layouts.
-    pub(super) fn indirect(&mut self, node: &Node, layouts: Layouts) -> Result<IndirectArg, Error> {
-        let role = self.role(node, layouts, Context::Indirect, None)?;
+    /// Build one argument-buffer member binding from its node, its resolved layouts, and what
+    /// the holding struct's field at the member's offset says about its address space.
+    pub(super) fn indirect(
+        &mut self,
+        node: &Node,
+        layouts: Layouts,
+        member: MemberSpace,
+    ) -> Result<IndirectArg, Error> {
+        let role = self.role(node, layouts, Context::Indirect, None, member)?;
         if node.attrs.unused {
             return Err(node
                 .site
@@ -468,6 +559,7 @@ impl<'m> Cx<'m, '_> {
         l: Layouts,
         cx: Context,
         pointer: Option<AddrSpace>,
+        member: MemberSpace,
     ) -> Result<ParamRole, Error> {
         let a = &n.attrs;
         let site = &n.site;
@@ -508,16 +600,29 @@ impl<'m> Cx<'m, '_> {
                         ),
                         _,
                     ) => Some(s),
-                    // An argument buffer's member has no parameter to carry a space, and the
-                    // key arrived with AIR 2.5: before it, every emitter writes a buffer member
-                    // with none. The member's own pointer field in the holding struct is the
-                    // module's only other carrier, and the metadata reaches it by the struct's
-                    // type name alone, which is not a structural fact to decide on. Device space
-                    // is the answer that assumes nothing: Metal encodes a `device` and a
-                    // `constant` member identically (`setBuffer:offset:atIndex:`), the member's
-                    // own access already says whether the shader writes it, and device space is
-                    // the one that claims no uniform-block containment for it.
-                    (None, _, true) => Some(AddrSpace::Device),
+                    // An argument buffer's member has no parameter to carry a space, and the key
+                    // arrived with AIR 2.5: before it, every emitter writes a buffer member with
+                    // none. The member's own field in the holding struct carries it, and the
+                    // metadata reaches that struct structurally -- through the pointee of the
+                    // argument buffer's parameter, then by the member's byte offset, with no type
+                    // name and no recorded version read ([`MemberSpace`]) -- so wherever the
+                    // module states the holding type the answer is exact.
+                    (None, _, true) => match member {
+                        MemberSpace::Field(s) => Some(s),
+                        // The holding type is in the module and says this member is not a
+                        // pointer, so its types and its buffer role disagree.
+                        MemberSpace::NotAPointer => {
+                            return Err(site.err(AbiError::BadValue, Some(Key::AddressSpace.name())))
+                        }
+                        // Opaque-pointer bitcode erases the parameter's pointee, so no holding
+                        // type is stated anywhere and the module does not answer. Metal accepts
+                        // the input, so it is read, not refused: device space is the reading that
+                        // assumes least, since Metal encodes a `device` and a `constant` member
+                        // identically (`setBuffer:offset:atIndex:`), the member's own access
+                        // already says whether the shader writes it, and device space is the one
+                        // that claims no uniform-block containment for it.
+                        MemberSpace::Unstated => Some(AddrSpace::Device),
+                    },
                     (None, _, false) => {
                         return Err(site.err(AbiError::MissingKey, Some(Key::AddressSpace.name())))
                     }

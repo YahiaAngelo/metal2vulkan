@@ -83,6 +83,22 @@ impl PointeeTable {
         self.funcs.get(func.index())?.ret
     }
 
+    /// A table of parameter pointees for tests, which build a [`Module`](crate::ir::Module)
+    /// directly instead of decoding typed-pointer bitcode: `params[i]` holds the pointees of
+    /// function `i`'s parameters, in order.
+    #[cfg(test)]
+    pub fn from_params(params: &[&[Option<TypeId>]]) -> PointeeTable {
+        PointeeTable {
+            funcs: params
+                .iter()
+                .map(|p| FnPointees {
+                    ret: None,
+                    params: p.to_vec().into_boxed_slice(),
+                })
+                .collect(),
+        }
+    }
+
     /// Whether any pointee is recorded (false for opaque-pointer bitcode).
     pub fn is_empty(&self) -> bool {
         self.funcs

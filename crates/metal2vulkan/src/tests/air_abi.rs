@@ -12,11 +12,11 @@ use std::process::Command;
 
 use crate::air::abi::{
     self, AbiInt, Access, AddressMode, AirAbi, Builtin, DepthQualifier, EntryPoint, Filter,
-    MeshField, MeshFieldRole, MeshOutputs, MeshTopology, OutputRole, ParamRole, PatchInput, Stage,
-    VisibleTarget,
+    MemberKind, MeshField, MeshFieldRole, MeshOutputs, MeshTopology, OutputRole, ParamRole,
+    PatchInput, Stage, VisibleTarget,
 };
 use crate::air::bitcode::decode;
-use crate::air::ir::{FuncId, Type, TypeId, TypeTable};
+use crate::air::ir::{AddrSpace, FuncId, Type, TypeId, TypeTable};
 use crate::budget::{Budget, Meter};
 use crate::pipeline::testing::Scratch;
 
@@ -143,6 +143,38 @@ fn spelling(bytes: &[u8], what: &Path) -> Spelling {
         abi: d.abi,
         constant_types,
         functions,
+    }
+}
+
+/// Every argument-buffer member's buffer space of `abi`, in layout and member order.
+fn member_spaces(abi: &mut AirAbi) -> Vec<&mut AddrSpace> {
+    let mut out = Vec::new();
+    for info in &mut abi.structs {
+        for member in &mut info.members {
+            if let MemberKind::Indirect(arg) = &mut member.kind {
+                match &mut arg.role {
+                    ParamRole::Buffer(b)
+                    | ParamRole::ArgumentBuffer(b)
+                    | ParamRole::Threadgroup(b) => out.push(&mut b.space),
+                    _ => {}
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Bring `typed`'s argument-buffer member spaces to the reading `opaque` is held to, and only
+/// there: a member whose node states no `air.address_space` reads as device from the opaque
+/// spelling and as its field's space (device or constant) from the typed one, so a constant
+/// against a device is accepted and set aside. Every other pair, a stated threadgroup or a
+/// disagreement in either direction included, is left for the comparison to catch. See
+/// `typed_and_opaque_spellings_decode_the_same_abi`.
+fn reconcile_member_spaces(typed: &mut AirAbi, opaque: &mut AirAbi) {
+    for (t, o) in member_spaces(typed).into_iter().zip(member_spaces(opaque)) {
+        if *t == AddrSpace::Constant && *o == AddrSpace::Device {
+            *t = AddrSpace::Device;
+        }
     }
 }
 
@@ -560,6 +592,16 @@ fn function_constants_and_constexpr_samplers() {
 /// The typed-pointer and opaque-pointer spellings of a fixture decode to the same ABI; the typed
 /// spelling additionally passes the pointee checks.
 ///
+/// One ABI fact is exempt, and it is the one the opaque spelling cannot carry. An argument-buffer
+/// member states no `air.address_space` before AIR 2.5, and the space then comes from the
+/// member's field of the struct the argument buffer's parameter points to -- which the typed
+/// spelling states and opaque pointers erase, so the typed spelling reads a `constant` member as
+/// constant and the opaque one falls back to device. That one pairing, a typed constant against
+/// an opaque device, is set aside here and nothing else is; the difference itself is asserted on
+/// this same fixture pair by
+/// `metal2vulkan_air::bitcode::tests::an_argument_buffer_member_takes_its_space_from_the_holding_struct`.
+/// Everything else, a member's stated space included, is compared as decoded.
+///
 /// Module-local ids are compared through what they denote: a constant's type by its spelling, a
 /// function by its name. The two spellings are different bitcode modules, and their function lists
 /// need not share an order: LLVM's bitcode reader upgrades a typed-pointer intrinsic declaration
@@ -611,7 +653,9 @@ fn typed_and_opaque_spellings_decode_the_same_abi() {
             });
             FuncId::new(u32::try_from(at).unwrap())
         });
-        assert_eq!(typed_spelling.abi, opaque_spelling.abi, "{stem}");
+        let mut opaque_abi = opaque_spelling.abi;
+        reconcile_member_spaces(&mut typed_spelling.abi, &mut opaque_abi);
+        assert_eq!(typed_spelling.abi, opaque_abi, "{stem}");
         compared += 1;
     }
     assert!(compared > 0);

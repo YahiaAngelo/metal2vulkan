@@ -172,7 +172,7 @@ fn abi_kind(e: Error) -> AbiError {
     }
 }
 
-fn expect_abi(r: Result<AirAbi, Error>, want: AbiError) {
+fn expect_abi<T: std::fmt::Debug>(r: Result<T, Error>, want: AbiError) {
     assert_eq!(abi_kind(r.expect_err("decode must fail")), want);
 }
 
@@ -746,6 +746,15 @@ fn vertex_and_fragment_interfaces_decode() {
 /// `[[centroid_perspective]]` output carries `air.centroid` alone). AIR 2.2 and later write the
 /// same module without the keys, so a vertex output decodes with or without them, and to the same
 /// role either way. Which keys are present is read from the node, so one case covers the range.
+///
+/// The spellings below are the emitter's whole set, measured by compiling the seven MSL
+/// interpolation qualifiers at every reachable deployment target: AIR 1.6
+/// (`-mios-version-min=8.0`), 1.8 (`10.11`), 1.11 (`10.12`), 2.0 (`10.13`) and 2.1 (`10.14`)
+/// write them, and 2.2 (`10.15`) and later write none. `air.centroid` alone is the only partial
+/// one; the matching `air.fragment_input` spells `air.centroid, air.perspective` at every
+/// version, and a bare sampling key there is still refused
+/// (`interpolation_must_be_complete`), so accepting the bare form here does not make a bare
+/// `air.centroid` mean anything where interpolation is read.
 #[test]
 fn a_vertex_output_accepts_the_interpolation_keys_older_air_states_on_it() {
     let vertex_output = |keys: &[&'static str]| {
@@ -938,9 +947,13 @@ fn a_render_target_without_a_dual_source_index_is_index_zero() {
 }
 
 /// A buffer member of an argument buffer states no `air.address_space` before AIR 2.5: the key
-/// arrived there, and the member has no parameter whose pointer type could carry it. Such a member
-/// decodes to device space, which Metal cannot tell from `constant` in an argument buffer (both
-/// are `setBuffer:offset:atIndex:`) and which claims no uniform-block containment. A member that
+/// arrived there, and the member has no parameter whose pointer type could carry it. The holding
+/// struct's field at the member's byte offset carries it instead, reached from the argument
+/// buffer's parameter pointee, so a member of a typed-pointer module reads its true space
+/// (`an_argument_buffer_member_takes_its_space_from_the_holding_field`). Where the bitcode states
+/// no holding type at all -- opaque pointers erase the pointee -- the member decodes to device
+/// space, which Metal cannot tell from `constant` in an argument buffer (both are
+/// `setBuffer:offset:atIndex:`) and which claims no uniform-block containment. A member that
 /// states a space keeps it, and a top-level buffer with no parameter pointer still needs the key.
 /// Transcribed from `xcrun metal -c -mmacosx-version-min=12.0` (`air64_v24`) and `=13.0`
 /// (`air64_v25`).
@@ -1022,6 +1035,182 @@ fn an_argument_buffer_member_without_an_address_space_is_device() {
     // The default is the member's alone: a top-level buffer still takes its parameter's pointer
     // space (`a_buffer_without_an_address_space_takes_its_pointer_s`), and one with no carrier at
     // all is still `MissingKey` (`missing_key_is_refused`).
+}
+
+/// The member's own field of the struct the argument buffer's parameter points to decides its
+/// address space when its node states none. The field is selected by the member's byte offset --
+/// no type name, no function name, and no recorded AIR version is read -- so one reading covers
+/// every emitter that writes the key-less shape. Three answers, by what the module states:
+///
+/// - a pointer field: that pointer's space, so a `constant` member reads as constant and a
+///   `device` member as device, exactly as AIR 2.5 and later spell them;
+/// - a field that is not a pointer: the module's types and the member's buffer role disagree, so
+///   `BadValue` rather than a space picked for it;
+/// - no holding type (opaque-pointer bitcode): the documented device default
+///   (`an_argument_buffer_member_without_an_address_space_is_device`).
+///
+/// The field offsets are the holding struct's own, so a padding field before the member does not
+/// shift the answer. The layout shape is that of `xcrun metal -c -mmacosx-version-min=12.0`
+/// (`air64_v24`) on an argument buffer of a `constant float4 *` and a `device float4 *`.
+#[test]
+fn an_argument_buffer_member_takes_its_space_from_the_holding_field() {
+    // One argument-buffer member at `offset`, stating no address space.
+    let member_at = |b: &mut ModuleBuilder, id: u64, offset: u64| {
+        let arg = node(
+            b,
+            &[
+                I(id),
+                S("air.buffer"),
+                S("air.location_index"),
+                I(id),
+                I(1),
+                S("air.read"),
+                S("air.arg_type_size"),
+                I(16),
+            ],
+        );
+        vec![
+            I(offset),
+            I(16),
+            I(0),
+            S("float4"),
+            S("m"),
+            S("air.indirect_argument"),
+            N(arg),
+        ]
+    };
+    // A kernel taking one argument buffer whose holding struct is `fields`, with members at the
+    // byte offsets `at`. `holder` selects whether the parameter's pointee is recorded.
+    let decoded = |fields: &dyn Fn(&mut ModuleBuilder) -> Vec<TypeId>, at: &[u64], holder: bool| {
+        let mut b = ModuleBuilder::new();
+        // The argument buffer is a `constant` pointer, as its node states (`check::role_type`);
+        // the rest are the standard kernel's texture, sampler and grid position.
+        let dev = b.ptr(AddrSpace::Device);
+        let cst = b.ptr(AddrSpace::Constant);
+        let i32t = b.int(32);
+        let v3 = b.vector(i32t, 3);
+        let void = b.void();
+        let f = entry_fn(&mut b, "k", void, &[cst, dev, cst, v3]);
+        let field_tys = fields(&mut b);
+        let ab = b.struct_ty(&field_tys);
+        let mut layout_ops = Vec::new();
+        for (i, &offset) in at.iter().enumerate() {
+            layout_ops.extend(member_at(&mut b, i as u64, offset));
+        }
+        let layout = node(&mut b, &layout_ops);
+        let buf = vec![
+            I(0),
+            S("air.indirect_buffer"),
+            S("air.location_index"),
+            I(0),
+            I(1),
+            S("air.read"),
+            S("air.address_space"),
+            I(2),
+            S("air.struct_type_info"),
+            N(layout),
+        ];
+        let args = [buf, texture_arg(1), sampler_arg(2), gid_arg(3)];
+        let arg_nodes: Vec<_> = args.iter().map(|a| N(node(&mut b, a))).collect();
+        let inputs = node(&mut b, &arg_nodes);
+        let outputs = node(&mut b, &[]);
+        let e = node(&mut b, &[F(f), N(outputs), N(inputs)]);
+        b.named_md("air.kernel", &[e]);
+        let m = b.finish().unwrap();
+        // Parameter 0 of function 0 points at the argument buffer; the rest are opaque.
+        let pointees = if holder {
+            PointeeTable::from_params(&[&[Some(ab), None, None, None]])
+        } else {
+            PointeeTable::default()
+        };
+        let abi = decode(&m, &pointees, &mut meter())?;
+        let ParamRole::ArgumentBuffer(arg) = &abi.entries[0].params[0].role else {
+            panic!("argument buffer")
+        };
+        let info = abi.struct_info(arg.layout.unwrap()).unwrap();
+        let spaces: Vec<AddrSpace> = info
+            .members
+            .iter()
+            .map(|mem| match &mem.kind {
+                MemberKind::Indirect(member) => match &member.role {
+                    ParamRole::Buffer(b) => b.space,
+                    other => panic!("buffer member, not {other:?}"),
+                },
+                other => panic!("indirect member, not {other:?}"),
+            })
+            .collect();
+        Ok::<Vec<AddrSpace>, Error>(spaces)
+    };
+
+    // `struct { constant float4 *ro; device float4 *rw; }`: each member reads its field's space,
+    // so the constant member is no longer read as device.
+    let two_pointers = |b: &mut ModuleBuilder| {
+        let cst = b.ptr(AddrSpace::Constant);
+        let dev = b.ptr(AddrSpace::Device);
+        vec![cst, dev]
+    };
+    assert_eq!(
+        decoded(&two_pointers, &[0, 8], true).unwrap(),
+        [AddrSpace::Constant, AddrSpace::Device]
+    );
+    // The same metadata with no pointee recorded keeps the device default, so the field is what
+    // moved the answer and not the member's own node.
+    assert_eq!(
+        decoded(&two_pointers, &[0, 8], false).unwrap(),
+        [AddrSpace::Device, AddrSpace::Device]
+    );
+
+    // `struct { array<device float4 *, 2> arr; }`: an array member's field is the array, whose
+    // elements carry the space.
+    let array_of_pointers = |b: &mut ModuleBuilder| {
+        let dev = b.ptr(AddrSpace::Device);
+        let arr = b.array(dev, 2);
+        vec![arr]
+    };
+    assert_eq!(
+        decoded(&array_of_pointers, &[0], true).unwrap(),
+        [AddrSpace::Device]
+    );
+    let array_of_constants = |b: &mut ModuleBuilder| {
+        let cst = b.ptr(AddrSpace::Constant);
+        let arr = b.array(cst, 2);
+        vec![arr]
+    };
+    assert_eq!(
+        decoded(&array_of_constants, &[0], true).unwrap(),
+        [AddrSpace::Constant]
+    );
+
+    // A leading padding field does not shift the answer: the member at offset 8 is the pointer
+    // field there, not the second field in declaration order.
+    let padded = |b: &mut ModuleBuilder| {
+        let i8t = b.int(8);
+        let pad = b.array(i8t, 8);
+        let cst = b.ptr(AddrSpace::Constant);
+        vec![pad, cst]
+    };
+    assert_eq!(decoded(&padded, &[8], true).unwrap(), [AddrSpace::Constant]);
+
+    // A field that is not a pointer contradicts the member's buffer role, so the space is not
+    // guessed: `air.address_space` is `BadValue`.
+    let not_a_pointer = |b: &mut ModuleBuilder| {
+        let i32t = b.int(32);
+        let v4 = b.vector(i32t, 4);
+        vec![v4]
+    };
+    expect_abi(decoded(&not_a_pointer, &[0], true), AbiError::BadValue);
+    // A pointer into a space no buffer can live in is refused by the same arm that refuses a
+    // stated one (`air.address_space` of a thread-space pointer).
+    let thread_pointer = |b: &mut ModuleBuilder| {
+        let thr = b.ptr(AddrSpace::Thread);
+        vec![thr]
+    };
+    expect_abi(decoded(&thread_pointer, &[0], true), AbiError::BadValue);
+    // No field at the member's offset is no statement at all, so the default stands.
+    assert_eq!(
+        decoded(&two_pointers, &[4], true).unwrap(),
+        [AddrSpace::Device]
+    );
 }
 
 /// A role belongs to the stages that define it: a stage input, varying, builtin, or output of
@@ -1208,31 +1397,69 @@ fn a_vertex_input_s_location_may_carry_its_user_key() {
     }
 }
 
+/// A fragment input states its interpolation in full at every AIR version, so a sampling key
+/// without a perspective key is incomplete there and refused. `air.centroid` alone is the
+/// spelling AIR 1.6 to 2.1 write on an `air.vertex_output`
+/// (`a_vertex_output_accepts_the_interpolation_keys_older_air_states_on_it`): accepting it there
+/// must not make it readable here, where the interpolation is what the rasterizer is set from.
 #[test]
 fn interpolation_must_be_complete() {
-    let mut b = ModuleBuilder::new();
-    let f32t = b.float();
-    let v4 = b.vector(f32t, 4);
-    let void = b.void();
-    let fs = entry_fn(&mut b, "fs", void, &[v4]);
-    let arg = node(
-        &mut b,
-        &[
-            I(0),
-            S("air.fragment_input"),
-            S("user(locn0)"),
-            S("air.center"),
-        ],
-    );
-    let ins = node(&mut b, &[N(arg)]);
-    let outs = node(&mut b, &[]);
-    let e = node(&mut b, &[F(fs), N(outs), N(ins)]);
-    b.named_md("air.fragment", &[e]);
-    let m = b.finish().unwrap();
-    expect_abi(
-        decode(&m, &PointeeTable::default(), &mut meter()),
-        AbiError::BadValue,
-    );
+    let fragment_input = |keys: &[&'static str]| {
+        let mut b = ModuleBuilder::new();
+        let f32t = b.float();
+        let v4 = b.vector(f32t, 4);
+        let void = b.void();
+        let fs = entry_fn(&mut b, "fs", void, &[v4]);
+        let mut ops = vec![I(0), S("air.fragment_input"), S("user(locn0)")];
+        ops.extend(keys.iter().map(|&k| S(k)));
+        let arg = node(&mut b, &ops);
+        let ins = node(&mut b, &[N(arg)]);
+        let outs = node(&mut b, &[]);
+        let e = node(&mut b, &[F(fs), N(outs), N(ins)]);
+        b.named_md("air.fragment", &[e]);
+        let m = b.finish().unwrap();
+        decode(&m, &PointeeTable::default(), &mut meter())
+    };
+    for keys in [
+        &["air.center"][..],
+        &["air.centroid"],
+        &["air.sample"],
+        &["air.perspective"],
+        &["air.no_perspective"],
+    ] {
+        expect_abi(fragment_input(keys), AbiError::BadValue);
+    }
+    // The complete pairs the emitter writes on a fragment input do read, at every version.
+    for (keys, want) in [
+        (
+            &["air.centroid", "air.perspective"][..],
+            Interpolation::Smooth {
+                sampling: Sampling::Centroid,
+                perspective: true,
+            },
+        ),
+        (
+            &["air.center", "air.no_perspective"],
+            Interpolation::Smooth {
+                sampling: Sampling::Center,
+                perspective: false,
+            },
+        ),
+        (
+            &["air.sample", "air.perspective"],
+            Interpolation::Smooth {
+                sampling: Sampling::Sample,
+                perspective: true,
+            },
+        ),
+        (&["air.flat"], Interpolation::Flat),
+    ] {
+        let abi = fragment_input(keys).unwrap_or_else(|e| panic!("{keys:?}: {e:?}"));
+        let ParamRole::FragmentInput(v) = &abi.entries[0].params[0].role else {
+            panic!("{keys:?}: a fragment input")
+        };
+        assert_eq!(v.interpolation, want, "{keys:?}");
+    }
 }
 
 // ---- Struct layouts ----

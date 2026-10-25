@@ -1420,6 +1420,75 @@ fn have_metal_as() -> bool {
             .is_ok_and(|o| o.status.success())
 }
 
+/// An argument-buffer member of a module Apple's compiler wrote before AIR 2.5 states no
+/// `air.address_space`, and the holding struct's field at the member's byte offset is what gives
+/// it. `engine/air_2_4_front_end` is our own MSL compiled at `-mmacosx-version-min=12.0`
+/// (`air64_v24`), whose argument buffer is
+/// `<{ texture2d, sampler, ptr addrspace(1), ptr addrspace(2), i32, [4 x i8] }>` with a
+/// `device float4 *writable` at byte 16 and a `constant float4 *readable` at byte 24: through
+/// `xcrun metal-as` the parameter keeps its pointee and the two members read device and constant,
+/// and through `llvm-as` -- whose opaque pointers erase the pointee, so the module states no
+/// holding type -- both read as the documented device default. One fixture, two assemblers, so
+/// the field is demonstrably what decides it.
+#[test]
+fn an_argument_buffer_member_takes_its_space_from_the_holding_struct() {
+    let Some(tool) = llvm_as() else {
+        eprintln!("SKIP an_argument_buffer_member_takes_its_space_from_the_holding_struct: llvm-as not found");
+        return;
+    };
+    if !have_metal_as() {
+        eprintln!(
+            "SKIP an_argument_buffer_member_takes_its_space_from_the_holding_struct: xcrun metal-as not found"
+        );
+        return;
+    }
+    let scratch = Scratch::new();
+    let dir = fixtures_dir().join("engine");
+    // The buffer members of the kernel's argument buffer, in layout order.
+    let spaces = |bytes: &[u8]| -> Vec<crate::ir::AddrSpace> {
+        let d = super::decode(stream_of(bytes), &mut meter()).expect("decode");
+        let e = d
+            .abi
+            .entries
+            .iter()
+            .find(|e| matches!(e.stage, crate::abi::Stage::Kernel { .. }))
+            .expect("the kernel");
+        let crate::abi::ParamRole::ArgumentBuffer(arg) = &e.params[0].role else {
+            panic!("an argument buffer, not {:?}", e.params[0].role)
+        };
+        d.abi
+            .struct_info(arg.layout.expect("its layout"))
+            .expect("the layout")
+            .members
+            .iter()
+            .filter_map(|mem| match &mem.kind {
+                crate::abi::MemberKind::Indirect(member) => match &member.role {
+                    crate::abi::ParamRole::Buffer(b) => Some(b.space),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    };
+    let air_ll = dir.join("air_2_4_front_end.air.ll");
+    let args = [std::ffi::OsStr::new("metal-as"), air_ll.as_os_str()];
+    let typed = assemble(Path::new("xcrun"), &args, &scratch.0.join("t.air"))
+        .unwrap_or_else(|| panic!("xcrun metal-as rejected {air_ll:?}"));
+    assert_eq!(
+        spaces(&typed),
+        [crate::ir::AddrSpace::Device, crate::ir::AddrSpace::Constant],
+        "typed-pointer bitcode reads each member's own field"
+    );
+    let ll = dir.join("air_2_4_front_end.ll");
+    let opaque =
+        assemble(&tool, &[ll.as_os_str()], &scratch.0.join("o.bc")).expect("llvm-as the .ll form");
+    assert_eq!(
+        spaces(&opaque),
+        [crate::ir::AddrSpace::Device, crate::ir::AddrSpace::Device],
+        "opaque pointers state no holding type, so the device default stands"
+    );
+}
+
 /// Typed-pointer bitcode from the committed `.air.ll` companions through `xcrun metal-as`.
 #[test]
 fn typed_pointer_fixtures_keep_their_pointees() {

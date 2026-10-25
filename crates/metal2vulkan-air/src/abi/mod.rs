@@ -63,7 +63,7 @@ use crate::budget::Meter;
 use crate::container::LibraryFunction;
 use crate::error::DiagName;
 use crate::error::Error;
-use crate::ir::{AddrSpace, FuncId, GlobalId, Module, TypeId};
+use crate::ir::{AddrSpace, FuncId, GlobalId, Module, TypeId, TypeLayouts};
 
 use super::bitcode::PointeeTable;
 
@@ -75,8 +75,20 @@ pub fn decode(
     pointees: &PointeeTable,
     meter: &mut Meter,
 ) -> Result<AirAbi, Error> {
-    let abi = module::decode(module, meter)?;
-    check::module(module, pointees, &abi, meter)?;
+    // Struct field offsets, which the decode needs to select an argument-buffer member's field
+    // and the checks need for the pointee comparisons. Both reach a holding type only through a
+    // recorded pointee, so with none there is nothing to lay out.
+    let layouts = if pointees.is_empty() {
+        None
+    } else {
+        Some(TypeLayouts::new(
+            module.data_layout(),
+            module.types(),
+            meter,
+        )?)
+    };
+    let abi = module::decode(module, pointees, layouts.as_ref(), meter)?;
+    check::module(module, pointees, layouts.as_ref(), &abi, meter)?;
     Ok(abi)
 }
 
