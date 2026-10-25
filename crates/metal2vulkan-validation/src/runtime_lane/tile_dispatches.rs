@@ -17,7 +17,8 @@
 //! - A region tile dispatch runs the tiles its region touches, as Metal takes the region.
 //! - A pass's tile size and memory are refused where Metal's validation refuses them, and a
 //!   dispatch where it refuses its state or its threads per tile, but for a depth other than 1,
-//!   which runs as 1, as plain Metal runs it.
+//!   which runs as 1, and threads per tile past Metal's limit for the state, which run nothing
+//!   whether or not they are also past the tile, as plain Metal runs them.
 //! - A tile state of a color more than the pass's, past the ones its function reaches, and a pass
 //!   of a color more than the state's, run as the state of the pass's colors runs, the color the
 //!   function does not reach untouched, as plain Metal runs them.
@@ -395,6 +396,67 @@ fn a_tile_dispatch_announces_its_scratch_and_split_once() {
         "{}",
         split.reason
     );
+}
+
+/// Threads per tile past Metal's limit for the state run nothing and the dispatch is taken, as
+/// plain Metal runs it, whether or not they are also past the pass's tile (an Apple M3 Max, macOS
+/// 27.0.1, probe `refusals_without_a_named_device` shapes `tilec-32x64` and `tilec-64x64` over a
+/// 32 by 32 target in 16 by 16 tiles, four fresh processes each: a visit counter per position per
+/// tile counted no thread at all, with no error, where 32 by 32 threads per tile -- the limit
+/// itself -- ran 2304 of them). So the pass keeps every pixel, where a dispatch that runs stores
+/// `f * 2 + 1`. Threads per tile past the tile but within the limit stay refused, the limit itself
+/// among them (`DrawProblem::ThreadsPerTilePastTile`, whose doc holds what plain Metal runs).
+#[test]
+fn a_tile_dispatch_past_metals_limit_runs_nothing_past_the_tile_too() {
+    on_device(|device| {
+        let state = tile_state(device);
+        let f = |x: u64, y: u64| (x + 100 * y) as f32;
+        let v = |x: u64, y: u64| (7 * x + y) as u32;
+        let targets = [
+            attachment(device, FORMATS[0], |x, y| f(x, y).to_bits()),
+            attachment(device, FORMATS[1], v),
+            attachment(device, FORMATS[2], |_, _| 0),
+        ];
+        let out = device
+            .new_buffer(RECORDS, ResourceOptions::shared())
+            .unwrap();
+        let recorded = device.work_counts().tile_dispatches_recorded;
+        run(device, &pass(&targets, LoadAction::Load, 0.0), |encoder| {
+            encoder.set_render_pipeline_state(&state).unwrap();
+            encoder.set_tile_buffer(Some(&out), 0, 0).unwrap();
+            // 2048 and 4096 threads, past the state's Metal limit of 1024 (the fixture's
+            // descriptor sets none) and past the pass's 16 by 16 tile.
+            for threads in [Size::new(32, 64, 1), Size::new(64, 64, 1)] {
+                assert_eq!(
+                    encoder.dispatch_threads_per_tile(threads),
+                    Ok(()),
+                    "{threads:?} past Metal's limit"
+                );
+            }
+            // 1024 threads, the limit itself, past the tile.
+            assert_eq!(
+                encoder.dispatch_threads_per_tile(Size::new(64, 16, 1)),
+                Err(Error::Invalid(Invalid::new(
+                    "dispatch_threads_per_tile",
+                    Problem::Draw(DrawProblem::ThreadsPerTilePastTile {
+                        threads: [64, 16],
+                        tile: [16, 16],
+                    }),
+                )))
+            );
+        });
+        assert_eq!(
+            device.work_counts().tile_dispatches_recorded,
+            recorded + 2,
+            "the dispatches past Metal's limit counted, the refused one not"
+        );
+        let [fs, vs, tags] = [&targets[0], &targets[1], &targets[2]].map(words);
+        for (i, (x, y)) in pixels().enumerate() {
+            assert_eq!(f32::from_bits(fs[i]), f(x, y), "f at ({x}, {y})");
+            assert_eq!(vs[i], v(x, y), "v at ({x}, {y})");
+            assert_eq!(tags[i], 0, "tag at ({x}, {y})");
+        }
+    });
 }
 
 /// The passes and dispatches Metal refuses are refused, and a refused dispatch is not counted

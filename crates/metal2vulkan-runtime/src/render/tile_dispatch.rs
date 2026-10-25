@@ -5,14 +5,19 @@
 //!   a tile pipeline's ("the renderPipelineState was not created with a tileDescriptor"); the
 //!   threads per tile are not empty and fit the pass's tile ("threadsPerTile.width(32) must be
 //!   <= 16"). Threads per tile past Metal's limit for the state, which Metal's validation stops,
-//!   run nothing, as plain Metal runs them (an M4); those within it but past the state's
+//!   run nothing, as plain Metal runs them (an M4, and an M3 Max for threads also past the tile),
+//!   and that limit is read first, so a dispatch past both it and the tile runs nothing rather
+//!   than being refused; those within it but past the state's
 //!   `max_total_threads_per_threadgroup`, where this device's limit is lower, are refused typed by
 //!   the binder. A depth other than 1, which Metal's validation stops ("threadsPerTile.depth(2)
 //!   must be 1"), runs as 1, as plain Metal runs it (a Metal probe on an M4: 8x8 threads per tile
 //!   of depth 2 and 4 ran 64 threads a tile, each `z` 0 and `threads_per_threadgroup.z` 1). Threads
-//!   per tile past the tile stay refused: plain Metal runs them, their imageblock cells past the
-//!   tile landing in the neighbouring tiles' pixels, a layout of Metal's tile memory the runtime
-//!   does not model. A pass is single-sampled: the compile layer stages one sample a pixel, so a
+//!   per tile past the tile but within Metal's limit stay refused: plain Metal runs them at the
+//!   pixels of the tiles that follow, so a pixel within the threads per tile of more than one
+//!   tile's origin runs once for each of them, on overlapping threadgroups the runtime does not
+//!   model (`DrawProblem::ThreadsPerTilePastTile` holds the counted reading). Serving such a
+//!   dispatch as the tile's own threads would store once where Metal stores repeatedly. A pass is
+//!   single-sampled: the compile layer stages one sample a pixel, so a
 //!   tile state of more samples is not made (`Unsupported`), and the encoder takes no state of
 //!   another sample count than its pass's. The state's color formats may differ from the pass's
 //!   past the last color its function reaches through its implicit imageblock, which plain Metal
@@ -771,15 +776,6 @@ impl RenderLowering {
         }
         // Any other depth runs as 1, as plain Metal runs it: the threadgroups below are one deep.
         let tile = self.layout.tile_size()?;
-        if width > tile[0] || height > tile[1] {
-            return Err(draw_problem(
-                call,
-                DrawProblem::ThreadsPerTilePastTile {
-                    threads: [width, height],
-                    tile,
-                },
-            ));
-        }
         let kernel = state.kernel().clone();
         // A tile function's explicit imageblock aliased onto the attachments is threadgroup
         // memory of its dispatch, staged from and to them, where Metal's is the tile memory the
@@ -798,13 +794,30 @@ impl RenderLowering {
         }
         // Threads per tile past Metal's limit for the state run nothing, as plain Metal runs them
         // (a state of 256 threads dispatched 32x32 per tile left every pixel
-        // and record as the pass had them; Metal's validation stops it). Threads within it but
+        // and record as the pass had them; Metal's validation stops it), whether or not they are
+        // also past the pass's tile: Metal's limit is read first, so a dispatch past both runs
+        // nothing rather than being refused below (measured on an Apple M3 Max, macOS 27.0.1,
+        // probe `refusals_without_a_named_device` shapes `tilec-32x64` and `tilec-64x64` over a 16
+        // by 16 tile: no thread ran at all, with no error). Threads within it but
         // past this device's lower limit (`max_total_threads_per_threadgroup`) are the device's
         // gap, which Metal runs: the binder refuses them typed below (`Bind`, `Unsupported`), and
         // never runs nothing for them.
         let metal = kernel.metal_max_total_threads_per_threadgroup();
         if u64::from(width) * u64::from(height) > u64::from(metal) {
             return Ok(());
+        }
+        // Threads per tile wider or taller than the pass's tile, which Metal's limit above leaves,
+        // are refused: plain Metal takes such a dispatch, but it runs the threads past the tile at
+        // the pixels of the tiles that follow, which the runtime does not model
+        // (`DrawProblem::ThreadsPerTilePastTile`).
+        if width > tile[0] || height > tile[1] {
+            return Err(draw_problem(
+                call,
+                DrawProblem::ThreadsPerTilePastTile {
+                    threads: [width, height],
+                    tile,
+                },
+            ));
         }
         // A size other than the state's required one runs as given, as plain Metal runs it
         // (Metal's API validation stops it).
@@ -1417,10 +1430,12 @@ impl RenderCommandEncoder {
 
     /// `dispatchThreadsPerTile:`: run the tile pipeline's state set on every tile of the pass
     /// (the module docs). Threads per tile of a depth other than 1 run as 1, and threads per tile
-    /// past Metal's limit for the state run nothing, as plain Metal runs them. Refused
+    /// past Metal's limit for the state run nothing, as plain Metal runs them, whether or not
+    /// they are also past the pass's tile (Metal's limit is read first). Refused
     /// (`Invalid`), as Metal's validation refuses it: no state set, a drawing state
-    /// (`DrawProblem::NotTileState`), threads per tile that are empty or wider or taller than
-    /// the pass's tile (`DrawProblem::ThreadsPerTilePastTile`). What the binder refuses is
+    /// (`DrawProblem::NotTileState`), threads per tile that are empty or, within Metal's limit,
+    /// wider or taller than the pass's tile (`DrawProblem::ThreadsPerTilePastTile`, whose doc
+    /// says what plain Metal runs instead). What the binder refuses is
     /// refused (`Bind`, `Unsupported`), threads per tile within Metal's limit but past the
     /// state's `max_total_threads_per_threadgroup` (this device's lower limit) among them. A
     /// refused dispatch records nothing and changes nothing.

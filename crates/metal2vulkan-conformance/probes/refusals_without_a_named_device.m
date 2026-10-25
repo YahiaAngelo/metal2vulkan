@@ -433,6 +433,37 @@ kernel void tile_mark(device uint *out [[buffer(0)]],\n\
     uint i = uint(tp.y) * 64u + uint(tp.x);\n\
     if (i < 4096u) { out[i] = 0xA5A50000u | i; }\n\
 }\n\
+kernel void tile_visit(device atomic_uint *out [[buffer(0)]],\n\
+                       ushort2 tp [[thread_position_in_threadgroup]],\n\
+                       ushort2 size [[threads_per_threadgroup]],\n\
+                       ushort2 tgp [[threadgroup_position_in_grid]],\n\
+                       ushort li [[thread_index_in_threadgroup]]) {\n\
+    uint tile = uint(tgp.y) * 2u + uint(tgp.x);\n\
+    if (tile < 4u && tp.x < 64u && tp.y < 64u) {\n\
+        uint i = tile * 4096u + uint(tp.y) * 64u + uint(tp.x);\n\
+        atomic_fetch_add_explicit(&out[i], 1u, memory_order_relaxed);\n\
+    } else {\n\
+        atomic_fetch_add_explicit(&out[16384u + 11u], 1u, memory_order_relaxed);\n\
+    }\n\
+    device atomic_uint *x = out + 16384u;\n\
+    atomic_fetch_max_explicit(x + 0u, uint(size.x), memory_order_relaxed);\n\
+    atomic_fetch_max_explicit(x + 1u, uint(size.y), memory_order_relaxed);\n\
+    atomic_fetch_add_explicit(x + 2u, 1u, memory_order_relaxed);\n\
+    if (tp.x >= 16u) { atomic_fetch_add_explicit(x + 3u, 1u, memory_order_relaxed); }\n\
+    if (tp.y >= 16u) { atomic_fetch_add_explicit(x + 4u, 1u, memory_order_relaxed); }\n\
+    atomic_fetch_max_explicit(x + 5u, uint(tp.x), memory_order_relaxed);\n\
+    atomic_fetch_max_explicit(x + 6u, uint(tp.y), memory_order_relaxed);\n\
+    atomic_fetch_max_explicit(x + 7u, tile, memory_order_relaxed);\n\
+    atomic_fetch_max_explicit(x + 8u, uint(li), memory_order_relaxed);\n\
+}\n\
+vertex VOut vrec(uint vid [[vertex_id]], device atomic_uint *rec [[buffer(0)]]) {\n\
+    atomic_fetch_add_explicit(&rec[vid & 4095u], 1u, memory_order_relaxed);\n\
+    atomic_fetch_add_explicit(&rec[4096u], 1u, memory_order_relaxed);\n\
+    atomic_fetch_max_explicit(&rec[4097u], vid, memory_order_relaxed);\n\
+    atomic_fetch_min_explicit(&rec[4098u], vid, memory_order_relaxed);\n\
+    if (vid >= 4096u) { atomic_fetch_add_explicit(&rec[4099u], 1u, memory_order_relaxed); }\n\
+    VOut o; o.position = float4(0.0, 0.0, 0.0, 1.0); return o;\n\
+}\n\
 [[patch(quad, 4)]] vertex VOut tess_post(float2 uv [[position_in_patch]],\n\
                                          const device float2 *pts [[buffer(0)]]) {\n\
     VOut o;\n\
@@ -995,6 +1026,269 @@ static int group_tile(const char *shape) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// `DrawProblem::ThreadsPerTilePastTile`, the counting legs: the reading `tile-threads-*` takes
+// (which thread positions wrote a mark) cannot separate a thread that never ran from one that ran
+// with its position clamped into the tile, because both leave the in-tile mark alone. These legs
+// count every visit to every position of every tile atomically, so a position two threads reach
+// reads 2, and they read the threads per threadgroup the tile function is told it has, which says
+// whether Metal cut the dispatch or kept it. The target is 32 by 32 in 16 by 16 tiles, four of
+// them, so a dispatch that runs on every tile is separable from one that runs on one.
+//
+// Slots: 4096 per tile for its positions, then the aggregates at 16384.
+
+static int group_tile_visits(const char *shape) {
+    // `tilec-WxH`.
+    NSUInteger wide = 0, high = 0;
+    if (sscanf(shape + strlen("tilec-"), "%lux%lu", (unsigned long *)&wide,
+               (unsigned long *)&high) != 2) {
+        return 3;
+    }
+    id<MTLLibrary> lib = library();
+    if (lib == nil) { return 2; }
+    id<MTLTexture> target = color_target(1, 32, YES);
+    MTLTileRenderPipelineDescriptor *td = [[MTLTileRenderPipelineDescriptor alloc] init];
+    td.tileFunction = [lib newFunctionWithName:@"tile_visit"];
+    td.colorAttachments[0].pixelFormat = MTLPixelFormatR32Float;
+    td.threadgroupSizeMatchesTileSize = NO;
+    NSError *err = nil;
+    id<MTLRenderPipelineState> ps =
+        [gDevice newRenderPipelineStateWithTileDescriptor:td options:MTLPipelineOptionNone
+                                              reflection:nil error:&err];
+    if (ps == nil) {
+        readv("tile-pipeline", "nil error %s", err.localizedDescription.UTF8String);
+        return 2;
+    }
+    readv("tile-state", "maxTotalThreadsPerThreadgroup %lu",
+          (unsigned long)ps.maxTotalThreadsPerThreadgroup);
+    const NSUInteger slots = 16384 + 16;
+    id<MTLBuffer> visits = [gDevice newBufferWithLength:slots * sizeof(uint32_t)
+                                               options:MTLResourceStorageModeShared];
+    memset(visits.contents, 0, visits.length);
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = target;
+    rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+    rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rp.tileWidth = 16;
+    rp.tileHeight = 16;
+    readv("pass", "target 32x32 tile asked 16x16 kept %lux%lu dispatch %lux%lu",
+          (unsigned long)rp.tileWidth, (unsigned long)rp.tileHeight, (unsigned long)wide,
+          (unsigned long)high);
+    id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+    id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+    [enc setRenderPipelineState:ps];
+    [enc setTileBuffer:visits offset:0 atIndex:0];
+    readv("encoder-tile", "width %lu height %lu", (unsigned long)enc.tileWidth,
+          (unsigned long)enc.tileHeight);
+    [enc dispatchThreadsPerTile:MTLSizeMake(wide, high, 1)];
+    [enc endEncoding];
+    commit_and_read(cb, "command-buffer");
+    const uint32_t *v = (const uint32_t *)visits.contents;
+    for (NSUInteger t = 0; t < 4; t++) {
+        const uint32_t *tv = v + t * 4096;
+        NSUInteger visited = 0, twice = 0, highest_count = 0;
+        NSUInteger max_x = 0, max_y = 0;
+        BOOL any = NO;
+        for (NSUInteger y = 0; y < 64; y++) {
+            for (NSUInteger x = 0; x < 64; x++) {
+                uint32_t c = tv[y * 64 + x];
+                if (c == 0) { continue; }
+                visited++;
+                if (c > 1) { twice++; }
+                if (c > highest_count) { highest_count = c; }
+                if (!any || x > max_x) { max_x = x; }
+                if (!any || y > max_y) { max_y = y; }
+                any = YES;
+            }
+        }
+        readv("tile-visits", "tile %lu positions %lu highest-x %lu highest-y %lu "
+              "positions-visited-more-than-once %lu highest-visit-count %lu",
+              (unsigned long)t, (unsigned long)visited, (unsigned long)max_x,
+              (unsigned long)max_y, (unsigned long)twice, (unsigned long)highest_count);
+    }
+    const uint32_t *x = v + 16384;
+    readv("aggregates", "threads-per-threadgroup %ux%u invocations %u past-tile-x %u "
+          "past-tile-y %u highest-position %ux%u highest-tile %u highest-thread-index %u "
+          "out-of-slot %u",
+          x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[11]);
+    read_texels(target, "target-after");
+    done(shape);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------------------------
+// `DrawProblem::IndexBufferRange` and the index fetch past an index buffer's end: what an indexed
+// draw's positions past the buffer fetch. The index buffer is a short buffer placed over a long
+// one in a shared placement heap, every word of which holds its own word number, so a fetched
+// index names the word it came from: a position that fetched the memory after the short buffer
+// reads back as that word's own number, and one Metal bounded reads back as 0. The vertex
+// function records every `vertex_id` it is given; it puts every vertex at one point, so nothing
+// rasterizes and the recording is the whole reading.
+//
+// Record slots: 4096 for the index values, then the total at 4096, the highest at 4097, the
+// lowest at 4098 (seeded to all ones) and the values past the slots at 4099.
+
+// The indirect command buffer the ICB legs make (the ICB section below).
+static id<MTLIndirectCommandBuffer> icb(MTLIndirectCommandType types, BOOL inherit,
+                                        NSUInteger count, NSUInteger kernel_binds);
+
+static const NSUInteger kIdxHeapBytes = 1u << 18;
+static const NSUInteger kIdxLong = 4096;      // the long buffer's bytes, at heap offset 0
+static const NSUInteger kRecOffset = 1u << 16;  // the record buffer's heap offset
+static const NSUInteger kRecSlots = 4100;
+static const NSUInteger kGuardOffset = 1u << 17;  // 256-aligned, past the record buffer
+static const NSUInteger kGuardBytes = 1024;
+
+// The heap every index leg places its buffers in, shared so the probe can stamp and read it.
+static id<MTLHeap> index_heap(void) {
+    MTLHeapDescriptor *hd = [[MTLHeapDescriptor alloc] init];
+    hd.type = MTLHeapTypePlacement;
+    hd.size = kIdxHeapBytes;
+    hd.storageMode = MTLStorageModeShared;
+    return [gDevice newHeapWithDescriptor:hd];
+}
+
+// Read `rec` back: the index values recorded, in order, with their counts.
+static void read_record(id<MTLBuffer> rec, const char *key) {
+    const uint32_t *r = (const uint32_t *)rec.contents;
+    char line[1024];
+    size_t at = 0;
+    NSUInteger distinct = 0;
+    for (NSUInteger i = 0; i < 4096; i++) {
+        if (r[i] == 0) { continue; }
+        distinct++;
+        if (at + 24 < sizeof(line)) {
+            at += (size_t)snprintf(line + at, sizeof(line) - at, "%lu:%u ", (unsigned long)i,
+                                   r[i]);
+        }
+    }
+    line[at] = 0;
+    readv(key, "invocations %u distinct %lu highest %u lowest %u past-slots %u values %s",
+          r[4096], (unsigned long)distinct, r[4097],
+          r[4098] == 0xFFFFFFFFu ? 0xFFFFFFFFu : r[4098], r[4099], line);
+}
+
+static int group_index_fetch(const char *shape) {
+    id<MTLLibrary> lib = library();
+    if (lib == nil) { return 2; }
+    id<MTLHeap> heap = index_heap();
+    if (heap == nil) {
+        readv("heap", "nil (no shared placement heap)");
+        return 2;
+    }
+    // The long buffer: word `i` holds `i`, so a fetched index names its own word.
+    id<MTLBuffer> longer = [heap newBufferWithLength:kIdxLong
+                                            options:MTLResourceStorageModeShared offset:0];
+    if (longer == nil) {
+        readv("long-buffer", "nil");
+        return 2;
+    }
+    uint32_t *words = (uint32_t *)longer.contents;
+    for (NSUInteger i = 0; i < kIdxLong / 4; i++) { words[i] = (uint32_t)i; }
+    // The short buffer over its first bytes: the index buffer every leg draws from.
+    NSUInteger length = 512, offset = 480, count = 12;
+    if (strcmp(shape, "idxv-inside") == 0 || strcmp(shape, "idxc-inside") == 0) {
+        offset = 464;
+    } else if (strcmp(shape, "idxv-past") == 0 || strcmp(shape, "idxc-past") == 0) {
+        offset = 480;
+    } else if (strcmp(shape, "idxv-at-end") == 0) {
+        offset = 512;
+    } else if (strcmp(shape, "idxv-past-end-start") == 0) {
+        offset = 520;
+    } else if (strcmp(shape, "idxv-tail-510") == 0) {
+        length = 510;
+    } else if (strcmp(shape, "idxv-tail-509") == 0) {
+        length = 509;
+    } else {
+        return 3;
+    }
+    id<MTLBuffer> indices = [heap newBufferWithLength:length
+                                             options:MTLResourceStorageModeShared offset:0];
+    if (indices == nil) {
+        readv("index-buffer", "nil");
+        return 2;
+    }
+    readv("index-buffer", "length %lu offset %lu indexCount %lu bytes-needed %lu "
+          "words-in-range %lu first-word %lu",
+          (unsigned long)indices.length, (unsigned long)offset, (unsigned long)count,
+          (unsigned long)(offset + count * 4), (unsigned long)(length / 4),
+          (unsigned long)(offset / 4));
+    // The record buffer, and a guard of 0xEE at the next 256-aligned offset past it.
+    id<MTLBuffer> rec = [heap newBufferWithLength:kRecSlots * sizeof(uint32_t)
+                                         options:MTLResourceStorageModeShared
+                                          offset:kRecOffset];
+    id<MTLBuffer> guard = [heap newBufferWithLength:kGuardBytes
+                                           options:MTLResourceStorageModeShared
+                                            offset:kGuardOffset];
+    if (rec == nil || guard == nil) {
+        readv("record", "nil");
+        return 2;
+    }
+    memset(rec.contents, 0, rec.length);
+    ((uint32_t *)rec.contents)[4098] = 0xFFFFFFFFu;
+    memset(guard.contents, 0xEE, guard.length);
+
+    MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor alloc] init];
+    pd.vertexFunction = [lib newFunctionWithName:@"vrec"];
+    pd.fragmentFunction = [lib newFunctionWithName:@"fmain"];
+    pd.colorAttachments[0].pixelFormat = MTLPixelFormatR32Float;
+    pd.supportIndirectCommandBuffers = YES;
+    NSError *err = nil;
+    id<MTLRenderPipelineState> ps = [gDevice newRenderPipelineStateWithDescriptor:pd error:&err];
+    if (ps == nil) {
+        readv("pipeline", "nil error %s", err.localizedDescription.UTF8String);
+        return 2;
+    }
+    id<MTLTexture> target = color_target(1, 64, YES);
+    clear_color(target, -1.0f);
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = target;
+    rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    BOOL through_icb = strncmp(shape, "idxc-", 5) == 0;
+    id<MTLIndirectCommandBuffer> b = nil;
+    if (through_icb) {
+        b = icb(MTLIndirectCommandTypeDrawIndexed, NO, 4, 4);
+        id<MTLIndirectRenderCommand> cmd = [b indirectRenderCommandAtIndex:0];
+        [cmd setRenderPipelineState:ps];
+        [cmd setVertexBuffer:rec offset:0 atIndex:0];
+        [cmd drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:count
+                        indexType:MTLIndexTypeUInt32 indexBuffer:indices
+                indexBufferOffset:offset instanceCount:1 baseVertex:0 baseInstance:0];
+        readv("draw", "an indirect command's drawIndexedPrimitives: returned");
+    }
+    id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+    id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+    if (through_icb) {
+        [enc useResource:indices usage:MTLResourceUsageRead
+                  stages:MTLRenderStageVertex | MTLRenderStageFragment];
+        [enc useResource:longer usage:MTLResourceUsageRead
+                  stages:MTLRenderStageVertex | MTLRenderStageFragment];
+        [enc useResource:rec usage:MTLResourceUsageRead | MTLResourceUsageWrite
+                  stages:MTLRenderStageVertex];
+        [enc executeCommandsInBuffer:b withRange:NSMakeRange(0, 1)];
+    } else {
+        [enc setRenderPipelineState:ps];
+        [enc setVertexBuffer:rec offset:0 atIndex:0];
+        [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:count
+                        indexType:MTLIndexTypeUInt32 indexBuffer:indices
+                indexBufferOffset:offset instanceCount:1 baseVertex:0 baseInstance:0];
+        readv("draw", "drawIndexedPrimitives: returned");
+    }
+    [enc endEncoding];
+    commit_and_read(cb, "command-buffer");
+    read_record(rec, "indices-fetched");
+    const unsigned char *g = (const unsigned char *)guard.contents;
+    NSUInteger stomped = 0;
+    for (NSUInteger i = 0; i < kGuardBytes; i++) {
+        if (g[i] != 0xEE) { stomped++; }
+    }
+    readv("guard", "bytes other than 0xEE %lu", (unsigned long)stomped);
+    done(shape);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------------------------
 // `DrawProblem::NoTessellationFactorBuffer`: a patch draw while the encoder has no tessellation
 // factor buffer, for which the refusal says Metal without its validation stops the process. The
 // control is the same patch draw with the factor buffer set.
@@ -1373,6 +1667,12 @@ static const char *const kShapes[] = {
     "resolve-mix-both-stored", "resolve-mix-stencil-resolved",
     // DrawProblem::ThreadsPerTilePastTile
     "tile-threads-8", "tile-threads-16", "tile-threads-32",
+    // DrawProblem::ThreadsPerTilePastTile, counting every visit to every position
+    "tilec-16x16", "tilec-8x8", "tilec-32x1", "tilec-17x1", "tilec-24x1", "tilec-16x32",
+    "tilec-32x32", "tilec-64x16", "tilec-16x64", "tilec-33x31", "tilec-32x64", "tilec-64x64",
+    // DrawProblem::IndexBufferRange, and the index fetch past the buffer's end
+    "idxv-inside", "idxv-past", "idxv-at-end", "idxv-past-end-start", "idxv-tail-510",
+    "idxv-tail-509", "idxc-inside", "idxc-past",
     // DrawProblem::NoTessellationFactorBuffer
     "tess-with-factors", "tess-without-factors",
     // IndirectCommandBufferProblem::BindCount
@@ -1428,7 +1728,11 @@ int main(int argc, const char *argv[]) {
         }
         if (strncmp(shape, "copy-", 5) == 0) { return group_copy(shape); }
         if (strncmp(shape, "resolve-", 8) == 0) { return group_resolve(shape); }
+        if (strncmp(shape, "tilec-", 6) == 0) { return group_tile_visits(shape); }
         if (strncmp(shape, "tile-", 5) == 0) { return group_tile(shape); }
+        if (strncmp(shape, "idxv-", 5) == 0 || strncmp(shape, "idxc-", 5) == 0) {
+            return group_index_fetch(shape);
+        }
         if (strncmp(shape, "tess-", 5) == 0) { return group_tessellation(shape); }
         if (strncmp(shape, "icb-", 4) == 0) { return group_icb(shape); }
         fprintf(stderr, "no such shape: %s\n", shape);

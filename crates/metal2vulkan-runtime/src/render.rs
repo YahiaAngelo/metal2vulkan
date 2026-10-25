@@ -537,14 +537,29 @@ pub enum DrawProblem {
     /// tileDescriptor").
     NotTileState,
     /// `dispatch_threads_per_tile` with threads per tile wider or taller than the pass's tile
-    /// (measured: "threadsPerTile.width(32) must be <= 16"). Plain Metal takes the dispatch, whose
-    /// threads report positions inside the tile alone: a layout of Metal's tile memory the runtime
-    /// does not model, so refused.
+    /// (measured: "threadsPerTile.width(32) must be <= 16"), within Metal's limit for the state:
+    /// past that limit the dispatch runs nothing instead, as plain Metal runs it. Plain Metal
+    /// takes such a dispatch, and runs the threads past the tile at the pixels of the tiles that
+    /// follow it: for every tile of the pass it runs the threads whose pixels lie in the threads
+    /// per tile from that tile's origin and inside the render area, each thread reporting the
+    /// threadgroup position of the tile holding its own pixel and its position in that tile, and
+    /// the threads per threadgroup as the dispatch's own. A pixel within the threads per tile of
+    /// more than one tile's origin therefore runs once for each of them, on overlapping
+    /// threadgroups the runtime does not model: a dispatch of the tile's own threads would run
+    /// each pixel once and store once where Metal stores repeatedly, so this is refused rather
+    /// than served by a narrower dispatch.
     ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal completes a pass whose
-    /// dispatch is 32 threads wide over a 16 by 16 tile, with no error, its tile function reporting
-    /// positions 0 to 15 alone, where a dispatch of 8 reports 0 to 7: so the refusal reaches past
-    /// Metal, and no thread past the tile was seen to run).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1, probe
+    /// `refusals_without_a_named_device` shapes `tilec-*` over a 32 by 32 target in 16 by 16
+    /// tiles, four fresh processes each with one reading: plain Metal completes the pass with no
+    /// error, and an atomic visit counter per position per tile counts, for threads per tile of 32
+    /// by 1, 17 by 1, 24 by 1, 16 by 32, 32 by 32, 64 by 16, 16 by 64 and 33 by 31, exactly the
+    /// pixels of the rectangle of that size from each tile's origin cut to the render area -- 96,
+    /// 66, 80, 1536, 2304, 1536, 1536 and 2256 invocations -- with the overlapped tiles' positions
+    /// visited 2 and 4 times, and the threads per threadgroup reported as the dispatch's own: so
+    /// the threads past the tile neither vanish nor clamp onto the tile's own positions; the
+    /// refusal reaches past Metal, and what Metal runs is more than a dispatch of the tile's
+    /// threads).
     ThreadsPerTilePastTile {
         /// The threads per tile's width and height.
         threads: [u32; 2],
@@ -619,12 +634,18 @@ pub enum DrawProblem {
     /// down to a multiple of the index size, as Metal reads it) run past its index buffer's
     /// `length` (measured: `indexBufferOffset(0) + (indexCount(6) * 4)
     /// must be <= [indexBuffer length](16)`); plain Metal draws from whatever memory follows the
-    /// buffer (`idx_past_end`: undefined, so refused).
+    /// buffer, which the command's record does not bound: it holds the index buffer as one address
+    /// and no length, where a direct draw's fetch stops at the buffer (the module docs, "Index
+    /// positions past the index buffer"). The memory past the buffer is memory the draw was not
+    /// given: undefined, so refused.
     ///
-    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1: plain Metal completes an indirect indexed
-    /// draw of 6 indices from a 16-byte index buffer, with no error, and paints the target as the
-    /// same draw from a 64-byte buffer does, where a draw whose six in-bounds indices are
-    /// degenerate paints nothing: so the refusal reaches past Metal).
+    /// Basis: metal-takes (an Apple M3 Max, macOS 27.0.1, probe
+    /// `refusals_without_a_named_device` shape `idxc-past`, four fresh processes with one reading:
+    /// plain Metal completes an indirect indexed draw of 12 indices from byte 480 of a 512-byte
+    /// index buffer, with no error, and its vertex function is given the eight indices inside the
+    /// buffer and then the four words that follow it in the heap, each of which holds its own word
+    /// number -- so the fetch read the following memory by name, where the same draw made directly
+    /// on the encoder was given index 0 at those four positions, `idxv-past`).
     IndexBufferRange {
         /// `indexBufferOffset`.
         offset: u64,
