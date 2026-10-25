@@ -46,10 +46,10 @@
 //! A screen extent of 0 is a descriptor Metal's own API validation refuses and plain Metal
 //! compiles, and [`crate::cases::rate_maps`]'s `rate-map-zero-screen-width` compares one of them
 //! whole, parameter data included. It compares exactly **one** construction route, because it
-//! predates the others; [`Walk::Forms`] compares all five routes but only at
+//! predates the others; `Walk::Forms` compares all five routes but only at
 //! [`space::SWEEP_EXTENT`], where nothing is degenerate. So the crossing of the two — a route
 //! other than `setLayer:atIndex:` reaching a descriptor whose screen has a zero axis — was
-//! covered by nothing. [`Walk::DegenerateForms`] is that crossing: every route that builds a
+//! covered by nothing. `Walk::DegenerateForms` is that crossing: every route that builds a
 //! descriptor of one layer, over each of the three degenerate screens
 //! ([`DEGENERATE_SCREENS`]), with `setLayer:atIndex:` among them as the control the other three
 //! are read against. The three one-layer routes at `0` by `64` are compared whole, parameter data
