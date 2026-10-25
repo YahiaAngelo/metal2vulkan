@@ -1334,6 +1334,7 @@ const EXTENSIONS: &[ExtensionName] = {
             Some(X::ExtTextureCompressionAstcHdr),
         ),
         e(c"VK_IMG_format_pvrtc", Some(X::ImgFormatPvrtc)),
+        e(c"VK_EXT_4444_formats", Some(X::Ext4444Formats)),
         e(
             c"VK_EXT_border_color_swizzle",
             Some(X::ExtBorderColorSwizzle),
