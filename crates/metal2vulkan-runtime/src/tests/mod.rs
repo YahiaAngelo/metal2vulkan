@@ -203,6 +203,9 @@ mod rotated;
 mod sample_interleave;
 mod sample_planes;
 mod sampler;
+mod sampler_cache;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod sampler_cache_live;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod sampler_sets;
 mod scheduler;

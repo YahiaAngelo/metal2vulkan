@@ -5,9 +5,10 @@
 //! a function samples through it (with depth comparison or not) and the texture it meets (an
 //! integer one is never filtered) decide fields Metal keeps out of the descriptor
 //! (`bind::sampler_desc`), and a bind's LOD clamps (`set_sampler_state_with_lod_clamps`) replace
-//! the descriptor's. Each distinct Vulkan sampler is made at its first bind and kept by the state,
-//! at most [`KEPT`] of them: past that the least recently bound one is forgotten, and the command
-//! buffers that bound it keep it until they complete.
+//! the descriptor's. Each distinct Vulkan sampler is made at its first bind and kept by the state
+//! ([`KeptSamplers`]), at most [`KEPT`] of them and at most as many as the device allows live:
+//! past that the least recently bound one is forgotten, and the command buffers that bound it keep
+//! it until they complete.
 //!
 //! **Metal's rules** (probe 7: an Apple M3 Max on macOS 26.7 and an M4 on 27.0.1, each case run
 //! without and with API validation). Metal's API validation stops, at
@@ -76,6 +77,7 @@ use super::degradation::Degradation;
 use super::device::lock;
 use super::error::{Error, SamplerLimit};
 use super::exit_guard;
+use super::key_hash::KeyMap;
 use super::resource_ids::{ElementHold, Holder, IdHold, IdPlacement, IdSpace, ResourceId};
 use super::retained::HeldBy;
 use super::Device;
@@ -144,8 +146,21 @@ impl SamplerKey {
     }
 }
 
-/// The most Vulkan samplers a sampler state keeps.
-const KEPT: usize = 16;
+/// The most Vulkan samplers one sampler state keeps for its binds, the device's
+/// `maxSamplerAllocationCount` being the other ceiling: a state keeps at most the smaller of the
+/// two, and the device's live samplers are held to its limit on every creation ([`SamplerCount`]).
+///
+/// A state's distinct Vulkan samplers are its descriptor's, one per fact Metal keeps out of the
+/// descriptor: how a function samples through it (`SamplerUse`, eight in all: a depth comparison,
+/// an integer texture and a cube's explicit gradients), the opaque-black border a view needs, and
+/// the LOD clamps a bind replaces the descriptor's with. Without a bind's clamps a state has at
+/// most **8** descriptions on every committed device profile, and over the sixteen mip levels a
+/// texture-streaming workload clamps to it has **128** (`tests/sampler_cache.rs`, which enumerates
+/// them through `bind::sampler_desc` over every profile in `validation/profiles`). A bind's clamps
+/// are taken on Metal's grid of a sixty-fourth of a level, so a workload clamping off the integer
+/// levels can ask one state for more than this; it then forgets and makes Vulkan samplers, which
+/// is why the lookup is a map and not a walk of what the state keeps ([`KeptSamplers`]).
+const KEPT: usize = 128;
 
 /// The device's live Vulkan samplers, at most `maxSamplerAllocationCount`: every sampler the
 /// runtime makes (a state's, a pipeline layout's immutable one, a neutral one) is counted from its
@@ -188,16 +203,152 @@ impl SamplerCount {
     pub(crate) fn live(&self) -> u32 {
         self.live.load(Ordering::Acquire)
     }
+
+    /// The device's `maxSamplerAllocationCount`: the samplers it allows live at once, which is
+    /// also a ceiling on what one sampler state keeps ([`KEPT`]).
+    pub(super) fn limit(&self) -> u32 {
+        self.limit
+    }
 }
 
-/// The entry of a full cache of samplers to forget, `kept` least recently bound first: the first
-/// that only the cache holds, whose sampler is destroyed as it goes, else the first, which the
-/// command buffers that bound it keep until they complete. No sampler a pending command buffer
-/// holds is destroyed.
-pub(super) fn forgotten<K, T>(kept: &[(K, Arc<T>)]) -> usize {
-    kept.iter()
-        .position(|(_, sampler)| Arc::strong_count(sampler) == 1)
-        .unwrap_or(0)
+/// The Vulkan samplers a sampler state made for its binds, each by its description.
+///
+/// Every bind of the state asks it for the sampler of one description --- a separate sampler
+/// slot's, a heap set's sampler array's, an argument buffer's ([`SamplerState::vk_sampler`]) ---
+/// so the encoding thread reads this at every draw and dispatch that samples through the state.
+/// It is a map ([`KeyMap`], whose keys are descriptions of Vulkan objects as its docs describe),
+/// not a list walked from the least recently bound: a bind pays one hash of the description
+/// however many samplers the state keeps, so the state can keep enough of them for a workload
+/// cycling its descriptions to find them all rather than make and destroy a `VkSampler` at every
+/// bind. Making room is the only walk, on a bind that makes a sampler with the cache full.
+///
+/// `T` is [`OwnedSampler`]; the tests drive these rules over a value of their own.
+pub(super) struct KeptSamplers<T> {
+    /// The samplers kept, each with the bind that last read it.
+    kept: KeyMap<metal2vulkan::vk::SamplerDesc, Kept<T>>,
+    /// The binds that read the cache so far: what stamps the sampler a bind reads or makes.
+    binds: u64,
+    /// What the cache has done ([`KeptCounts`]). Only the tests that measure the cache read it, so
+    /// a build that runs none counts nothing.
+    #[cfg(test)]
+    counts: KeptCounts,
+}
+
+/// What a sampler state's cache of Vulkan samplers has done since the state was made
+/// ([`KeptSamplers`]). A `found` of nothing over many binds is a workload cycling more
+/// descriptions than the state keeps, which makes and destroys a `VkSampler` at each of them.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct KeptCounts {
+    /// The binds that found the sampler they asked for kept.
+    pub(super) found: u64,
+    /// The binds that made the sampler they asked for.
+    pub(super) made: u64,
+    /// The kept samplers forgotten, to make room for another or to leave the device a slot.
+    pub(super) forgot: u64,
+}
+
+/// A Vulkan sampler a state keeps ([`KeptSamplers`]).
+struct Kept<T> {
+    sampler: Arc<T>,
+    /// The count of binds at the one that last read it.
+    read_at: u64,
+}
+
+impl<T> KeptSamplers<T> {
+    /// No sampler kept.
+    pub(super) fn new() -> KeptSamplers<T> {
+        KeptSamplers {
+            kept: KeyMap::default(),
+            binds: 0,
+            #[cfg(test)]
+            counts: KeptCounts::default(),
+        }
+    }
+
+    /// The sampler of `desc` this bind asks for, where the cache keeps it, read now so that it is
+    /// the last the cache forgets. Counts the bind, found or not.
+    pub(super) fn found(&mut self, desc: &metal2vulkan::vk::SamplerDesc) -> Option<Arc<T>> {
+        self.binds += 1;
+        let read_at = self.binds;
+        let kept = self.kept.get_mut(desc)?;
+        kept.read_at = read_at;
+        let sampler = Arc::clone(&kept.sampler);
+        #[cfg(test)]
+        {
+            self.counts.found += 1;
+        }
+        Some(sampler)
+    }
+
+    /// Forget samplers until fewer than `limit` are kept.
+    pub(super) fn make_room(&mut self, limit: usize) {
+        while self.kept.len() >= limit.max(1) {
+            self.forget(false);
+        }
+    }
+
+    /// Forget the least recently bound sampler that only the cache holds, whose `VkSampler` is
+    /// destroyed as it goes and its slot of the device's samplers given back
+    /// ([`SamplerCount::give`]), so that a device holding as many as it allows has room for one
+    /// more: whether one went.
+    pub(super) fn forget_spare(&mut self) -> bool {
+        self.forget(true)
+    }
+
+    /// Forget the least recently bound sampler, one only the cache holds first: its `VkSampler` is
+    /// destroyed as it goes, where one a pending command buffer holds stays until the buffer
+    /// completes. `spare_only` forgets none where every one kept is held. Whether one went.
+    fn forget(&mut self, spare_only: bool) -> bool {
+        let least = |spare: bool| {
+            self.kept
+                .iter()
+                .filter(|(_, kept)| !spare || Arc::strong_count(&kept.sampler) == 1)
+                .min_by_key(|(_, kept)| kept.read_at)
+                .map(|(desc, _)| *desc)
+        };
+        let desc = match least(true) {
+            Some(desc) => desc,
+            None if spare_only => return false,
+            None => match least(false) {
+                Some(desc) => desc,
+                None => return false,
+            },
+        };
+        self.kept.remove(&desc);
+        #[cfg(test)]
+        {
+            self.counts.forgot += 1;
+        }
+        true
+    }
+
+    /// Keep `sampler`, the one this bind made of `desc`.
+    pub(super) fn keep(&mut self, desc: metal2vulkan::vk::SamplerDesc, sampler: &Arc<T>) {
+        #[cfg(test)]
+        {
+            self.counts.made += 1;
+        }
+        self.kept.insert(
+            desc,
+            Kept {
+                sampler: Arc::clone(sampler),
+                read_at: self.binds,
+            },
+        );
+    }
+
+    /// The samplers kept now.
+    #[cfg(test)]
+    pub(super) fn samplers_kept(&self) -> usize {
+        self.kept.len()
+    }
+
+    /// What the cache has done ([`KeptCounts`]).
+    #[cfg(test)]
+    pub(super) fn counts(&self) -> KeptCounts {
+        self.counts
+    }
 }
 
 /// Metal's largest `maxAnisotropy`.
@@ -320,8 +471,8 @@ pub(super) struct SamplerShared {
     id: IdHold,
     /// The state's element of the set-1 sampler arrays (`resource_ids.rs`).
     element: ElementHold,
-    /// The Vulkan samplers made for binds, least recently bound first.
-    kept: Mutex<Vec<(metal2vulkan::vk::SamplerDesc, Arc<OwnedSampler>)>>,
+    /// The Vulkan samplers made for binds, by their description ([`KeptSamplers`]).
+    kept: Mutex<KeptSamplers<OwnedSampler>>,
     /// The encoder core that holds it from an argument table's retain (`retained::HeldBy`).
     held_by: HeldBy,
 }
@@ -484,7 +635,7 @@ impl Device {
             descriptor: taken,
             id,
             element,
-            kept: Mutex::new(Vec::new()),
+            kept: Mutex::new(KeptSamplers::new()),
             held_by: HeldBy::default(),
         }));
         live.retain(|_, state| state.strong_count() > 0);
@@ -676,39 +827,50 @@ impl SamplerState {
     }
 
     /// The Vulkan sampler of `desc` (one of this state's binds, its view mapping included): the
-    /// kept one, else a new one, kept in place of the one [`forgotten`] names when the state keeps
-    /// [`KEPT`]; refused, `Error::SamplerLimit`, where the device's samplers are at its limit
+    /// one the state keeps, else a new one, kept once the cache has room for it ([`KeptSamplers`],
+    /// at most [`KEPT`] and at most as many as the device allows live). Where the device already
+    /// holds as many samplers as it allows, one this state keeps that no command buffer holds goes
+    /// to make room; `Error::SamplerLimit` is the answer only where every one it keeps is held
     /// ([`SamplerCount`]).
     pub(super) fn vk_sampler(
         &self,
         desc: &metal2vulkan::vk::SamplerDesc,
     ) -> Result<Arc<OwnedSampler>, Error> {
+        let device = &self.0.device;
         let mut kept = lock(&self.0.kept);
-        if let Some(at) = kept.iter().position(|(d, _)| d == desc) {
-            let entry = kept.remove(at);
-            let sampler = Arc::clone(&entry.1);
-            kept.push(entry);
+        if let Some(sampler) = kept.found(desc) {
             return Ok(sampler);
         }
-        if kept.len() == KEPT {
-            let at = forgotten(&kept);
-            kept.remove(at);
-        }
+        kept.make_room(KEPT.min(device.shared().sampler_count.limit() as usize));
         let mut reduction = vk::SamplerReductionModeCreateInfo::default();
         let mut border = vk::SamplerBorderColorComponentMappingCreateInfoEXT::default();
         let info =
             metal2vulkan::ash_interop::sampler_create_info(desc, &mut reduction, &mut border);
-        let device = &self.0.device;
-        // SAFETY: the create info is valid for the device: `check_sampler` admitted its
-        // features, its LOD range is ordered (`bind::sampler_desc`), and a border mapping is
-        // chained only where the device has `borderColorSwizzle`
-        // (`metal::sampler::opaque_black_border`).
-        let raw = unsafe { device.shared().create_sampler(&info) }?;
+        let raw = loop {
+            // SAFETY: the create info is valid for the device: `check_sampler` admitted its
+            // features, its LOD range is ordered (`bind::sampler_desc`), and a border mapping is
+            // chained only where the device has `borderColorSwizzle`
+            // (`metal::sampler::opaque_black_border`).
+            match unsafe { device.shared().create_sampler(&info) } {
+                Ok(raw) => break raw,
+                Err(limit @ Error::SamplerLimit(_)) if !kept.forget_spare() => return Err(limit),
+                Err(Error::SamplerLimit(_)) => {}
+                Err(error) => return Err(error),
+            }
+        };
         let sampler = Arc::new(OwnedSampler {
             device: device.clone(),
             raw,
         });
-        kept.push((*desc, Arc::clone(&sampler)));
+        kept.keep(*desc, &sampler);
         Ok(sampler)
+    }
+
+    /// What its cache of Vulkan samplers has done ([`KeptCounts`]), and how many it keeps now: the
+    /// device tests that measure the cache read them.
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+    pub(crate) fn kept_counts(&self) -> (KeptCounts, usize) {
+        let kept = lock(&self.0.kept);
+        (kept.counts(), kept.samplers_kept())
     }
 }

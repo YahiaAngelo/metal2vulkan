@@ -4,8 +4,7 @@
 //! (`SamplerCount`).
 
 use super::super::sampler::{
-    forgotten, metal_anisotropy, metal_lod_clamps, sampler_border_color, taken_descriptor,
-    SamplerCount,
+    metal_anisotropy, metal_lod_clamps, sampler_border_color, taken_descriptor, SamplerCount,
 };
 use super::super::{Error, SamplerLimit};
 use metal2vulkan::bind::SamplerDescriptor;
@@ -387,27 +386,4 @@ fn live_samplers_never_pass_the_limit_from_many_threads() {
         .map(|thread| thread.join().unwrap())
         .sum();
     assert_eq!(taken, 64, "256 asked of 64: exactly 64 made");
-}
-
-#[test]
-fn a_full_cache_forgets_the_first_sampler_nothing_else_holds() {
-    let held = std::sync::Arc::new(());
-    let kept: Vec<(u32, std::sync::Arc<()>)> = vec![
-        (0, std::sync::Arc::clone(&held)),
-        (1, std::sync::Arc::new(())),
-        (2, std::sync::Arc::new(())),
-    ];
-    assert_eq!(
-        forgotten(&kept),
-        1,
-        "the least recently bound is still bound by a pending command buffer: the next goes"
-    );
-    let all_held: Vec<(u32, std::sync::Arc<()>)> = (0..3)
-        .map(|key| (key, std::sync::Arc::clone(&held)))
-        .collect();
-    assert_eq!(
-        forgotten(&all_held),
-        0,
-        "every one held: the least recently bound leaves the cache, its holders keep it"
-    );
 }
