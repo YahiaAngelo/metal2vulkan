@@ -527,7 +527,15 @@ impl TextureDescriptor {
         if odd_sided_chroma_pairs(pf, [w, h], ty, self.usage) {
             return Err(Refused::Nil(TextureProblem::ExtentForFormat));
         }
-        if no_texture_alone(pf) && !(over_surface && ycbcr(pf)) {
+        // Plain Metal makes a memoryless texture of a format whose heap footprint counts no
+        // bytes, where `newTextureWithDescriptor:` answers nil for one of every mode that holds
+        // memory. The device's creation refuses it as this crate's own gap, holding no image of
+        // either format ([`made_only_memoryless`], `Device::new_texture`). The other creators
+        // keep the nil: the shared creator answers nil for every format outside `Private`
+        // storage, no buffer and no IOSurface plane is memoryless, and the heap size query
+        // answers 0 bytes for these formats (`metal::format::Footprint::NoTexture`).
+        let made_memoryless = memoryless && creator == Creator::Device && made_only_memoryless(pf);
+        if no_texture_alone(pf) && !(over_surface && ycbcr(pf)) && !made_memoryless {
             return Err(Refused::Nil(TextureProblem::NoTextureOfFormat));
         }
         // Plain Metal makes no `Unspecialized` texture and answers nil, whatever the storage
@@ -813,7 +821,10 @@ pub enum TextureProblem {
 /// Metal takes a descriptor naming either in every texture type and `newTextureWithDescriptor:`
 /// answers **nil** for every one, while the heap size query answers 0 bytes
 /// (`metal::format::Footprint::NoTexture`; an Apple M3 Max under macOS 27.0.1, plain Metal, every
-/// type in both storage modes, the `format-footprints-packed-without-textures` recording).
+/// type in `Shared` and `Private` storage, the `format-footprints-packed-without-textures`
+/// recording). `Managed` storage answers nil with them, and `Memoryless` storage does **not**: it
+/// answers a texture of both, which [`made_only_memoryless`] carries and `check_made` carves out
+/// of this rule for the device's creator.
 pub(super) fn no_texture_alone(pf: PixelFormat) -> bool {
     ycbcr_format(pf).is_some()
         || matches!(footprint(pf), Some(Footprint::NoTexture))
@@ -892,6 +903,27 @@ fn laid_in_planes(pf: PixelFormat) -> bool {
 /// Whether `pf` is a two-plane extended-range format (`RGB10A8_2P_XR10` or its sRGB twin).
 fn two_planes(pf: PixelFormat) -> bool {
     ExtendedRange::of(pf).is_some_and(|f| !f.holds_metal_bytes())
+}
+
+/// Whether plain Metal makes a texture of `pf` in `Memoryless` storage alone, answering nil from
+/// `newTextureWithDescriptor:` in every mode that holds memory: the formats whose heap footprint
+/// counts no bytes (`metal::format::Footprint::NoTexture`, `R10Unorm_PACKED` and
+/// `RG10Unorm_PACKED`), whose packed 10-bit codes cross byte boundaries, so there is no element
+/// size to count.
+///
+/// Measured on an Apple M3 Max under macOS 27.0.1 (26A434), plain Metal, one cell per fresh
+/// process and four processes a cell, with `RGBA8Unorm` and `R10Unorm_X6` made beside each cell in
+/// the same mode and usage so that a mode's nil could not be read as a format's: for a 2D 8x8
+/// texture of either format, `Private`, `Shared` and `Managed` storage answered nil 4 of 4 under
+/// each of `ShaderRead`, `ShaderRead | ShaderWrite`, `ShaderRead | RenderTarget` and
+/// `RenderTarget` usage, and `Memoryless` storage answered a **texture** 4 of 4 under all four
+/// (`conformance/probes/packed10_texture_alone.m`). The other texture types are not measured
+/// memoryless; `check_made` carves them in too, because the answer past the carve is this crate's
+/// own `Unsupported(Format, NotImplemented)`, which is true of the format in every type, where
+/// the nil would claim Metal refuses the descriptor.
+fn made_only_memoryless(pf: PixelFormat) -> bool {
+    use metal2vulkan::metal::format::Footprint;
+    matches!(footprint(pf), Some(Footprint::NoTexture))
 }
 
 /// Whether `ty` in `pf` is a two-plane extended-range cube or cube array, which plain Metal makes

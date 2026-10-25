@@ -13,12 +13,12 @@ use crate::case::{TextureFormat as CaseFormat, TextureType as CaseType};
 use crate::executor_contract::multisample::{ReadbackView, SampleRead};
 use crate::gpu::TEST_DEVICE;
 use crate::literal::texture_layout;
-use metal2vulkan::error::Feature;
+use metal2vulkan::error::{Feature, Needs};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
-    BlitOption, Buffer, CommandBufferStatus, CopyProblem, Device, Error, HeapDescriptor, HeapType,
-    Invalid, Origin, Problem, Region, ResourceOptions, Size, StorageMode, Texture,
-    TextureDescriptor, TextureProblem, ViewProblem,
+    BlitOption, Buffer, CommandBufferStatus, CopyProblem, CpuCacheMode, Device, Error,
+    HazardTrackingMode, HeapDescriptor, HeapType, Invalid, Origin, Problem, Region,
+    ResourceOptions, Size, StorageMode, Texture, TextureDescriptor, TextureProblem, ViewProblem,
 };
 
 fn invalid(call: &'static str, problem: Problem) -> Error {
@@ -62,8 +62,9 @@ pub(super) fn texel_bytes(pf: PixelFormat) -> Option<usize> {
 ///
 /// `Memoryless` storage is the one mode where that same measurement made a texture of both, 4 of
 /// 4 at all four usages. No caller of this helper asks it (a heap holds no memoryless texture,
-/// and the device's textures here are `Shared`), so the helper does not answer for it; the
-/// runtime's nil there is a separate, open question.
+/// and the device's textures here are `Shared`), so the helper does not answer for it: the
+/// runtime's memoryless answer is its own refusal, which
+/// [`memoryless_packed_ten_bit_is_our_gap_and_not_metals_nil`] holds.
 pub(super) fn no_texture_alone(pf: PixelFormat) -> bool {
     metal2vulkan::metal::format::ycbcr_format(pf).is_some()
         || matches!(
@@ -74,6 +75,147 @@ pub(super) fn no_texture_alone(pf: PixelFormat) -> bool {
                 | PixelFormat::R10UnormPACKED
                 | PixelFormat::RG10UnormPACKED
         )
+}
+
+/// What `Device::new_texture` answers for a descriptor, as the three answers this rule has to
+/// keep apart: a texture, Metal's nil, and the runtime's own typed refusal. A test that only
+/// asked "not a texture" would pass for either refusal, and the whole point of
+/// [`memoryless_packed_ten_bit_is_our_gap_and_not_metals_nil`] is which of the two it is.
+#[derive(Debug, PartialEq, Eq)]
+enum Answer {
+    /// A texture of the format asked for.
+    Texture(PixelFormat),
+    /// `Error::Nil`: plain Metal makes no texture of this descriptor.
+    Nil(Problem),
+    /// `Error::Unsupported`: Metal makes the texture and this crate does not build it.
+    Unsupported(Feature, Needs, Option<String>),
+    /// Any other refusal, rendered.
+    Other(String),
+}
+
+/// [`Answer`] for `device.new_texture(descriptor)`.
+fn answer(device: &Device, descriptor: &TextureDescriptor) -> Answer {
+    match device.new_texture(descriptor) {
+        Ok(texture) => Answer::Texture(texture.pixel_format()),
+        Err(Error::Nil(nil)) => Answer::Nil(nil.problem),
+        Err(Error::Unsupported(u)) => {
+            Answer::Unsupported(u.feature, u.needs, u.symbol.as_ref().map(|s| s.to_string()))
+        }
+        Err(other) => Answer::Other(format!("{other:?}")),
+    }
+}
+
+/// `R10Unorm_PACKED` and `RG10Unorm_PACKED` are the one family plain Metal makes a texture of in
+/// `Memoryless` storage and in no mode that holds memory, so the runtime's answer there is its
+/// own gap and not Metal's nil: `Unsupported(Format, NotImplemented)` naming the format, as every
+/// format this crate holds no image of answers, where `Private` and `Shared` keep
+/// `Nil(NoTextureOfFormat)`.
+///
+/// The distinction is the point. `Error::Nil` says *Metal* rejects the descriptor, which the
+/// measurement shows is false for `Memoryless`, and a consumer branching on it would conclude its
+/// own descriptor is wrong. `Error::Unsupported` says this crate does not implement the format,
+/// which is true: both are in the translator's `formats_named_not_held!` family, so no image of
+/// either exists to back a texture. So the three answers are told apart here ([`Answer`]) rather
+/// than collapsed into "not a texture".
+///
+/// Measured on an Apple M3 Max under macOS 27.0.1 (26A434) with plain Metal, one cell per fresh
+/// process and four processes a cell, each cell printing its own format, storage mode and usage
+/// (`metal2vulkan-conformance/probes/packed10_texture_alone.m`):
+/// `newTextureWithDescriptor:` for a 2D 8x8 texture of either format answered **nil** 4 of 4 in
+/// `Private`, `Shared` and `Managed` storage and a **texture** 4 of 4 in `Memoryless`, under each
+/// of `ShaderRead`, `ShaderRead | ShaderWrite`, `ShaderRead | RenderTarget` and `RenderTarget`
+/// usage. `RGBA8Unorm` and `R10Unorm_X6` stood beside every cell in the same mode and usage and
+/// were made in all of them, so no cell's answer is its mode's or its usage's, and "padded
+/// 10-bit" does not stand in for these two. `Managed` is left out below: this test asks the
+/// runtime, whose managed textures are a question of their own.
+#[test]
+fn memoryless_packed_ten_bit_is_our_gap_and_not_metals_nil() {
+    let cache = ScratchCache::new().unwrap();
+    let messages = Messages::default();
+    {
+        let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
+        let usages = [
+            TextureUsage::SHADER_READ,
+            TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE,
+            TextureUsage::SHADER_READ | TextureUsage::RENDER_TARGET,
+            TextureUsage::RENDER_TARGET,
+        ];
+        let mut cells = 0;
+        let mut controls = 0;
+        for mode in [
+            StorageMode::Private,
+            StorageMode::Shared,
+            StorageMode::Memoryless,
+        ] {
+            let options = ResourceOptions::new(
+                mode,
+                CpuCacheMode::DefaultCache,
+                HazardTrackingMode::Default,
+            );
+            for usage in usages {
+                let of = |pf| {
+                    let mut d = TextureDescriptor::texture_2d(pf, 8, 8, false);
+                    d.usage = usage;
+                    d.resource_options = options;
+                    d
+                };
+                // The controls, in this very mode and usage: a mode's or a usage's refusal would
+                // show here first and the cell below would say nothing.
+                for control in [PixelFormat::RGBA8Unorm, PixelFormat::R10UnormX6] {
+                    assert_eq!(
+                        answer(&device, &of(control)),
+                        Answer::Texture(control),
+                        "{control:?} {mode:?} {usage:?}"
+                    );
+                    controls += 1;
+                }
+                for pf in [PixelFormat::R10UnormPACKED, PixelFormat::RG10UnormPACKED] {
+                    let want = match mode {
+                        StorageMode::Memoryless => Answer::Unsupported(
+                            Feature::Format,
+                            Needs::NotImplemented,
+                            Some(pf.name().to_owned()),
+                        ),
+                        _ => Answer::Nil(Problem::Texture(TextureProblem::NoTextureOfFormat)),
+                    };
+                    assert_eq!(answer(&device, &of(pf)), want, "{pf:?} {mode:?} {usage:?}");
+                    cells += 1;
+                }
+            }
+        }
+        assert_eq!((cells, controls), (24, 24));
+        // The carve is keyed on the format's footprint and not on a shape, so every type it lets
+        // through must answer the same refusal and none may answer a texture: this crate holds no
+        // image and no texel-buffer format for either, so a texture of any shape would be a claim
+        // it cannot back. A memoryless texture buffer is the one that could slip -- the runtime
+        // makes one of `RGBA8Unorm`, announcing it -- so it is asked here beside a 2D array.
+        let memoryless = ResourceOptions::new(
+            StorageMode::Memoryless,
+            CpuCacheMode::DefaultCache,
+            HazardTrackingMode::Default,
+        );
+        for pf in [PixelFormat::R10UnormPACKED, PixelFormat::RG10UnormPACKED] {
+            let want = Answer::Unsupported(
+                Feature::Format,
+                Needs::NotImplemented,
+                Some(pf.name().to_owned()),
+            );
+            let mut array = TextureDescriptor::texture_2d(pf, 8, 8, false);
+            array.texture_type = TextureType::Type2DArray;
+            array.array_length = 3;
+            array.usage = TextureUsage::SHADER_READ | TextureUsage::RENDER_TARGET;
+            array.resource_options = memoryless;
+            assert_eq!(answer(&device, &array), want, "{pf:?} memoryless 2D array");
+            let texels =
+                TextureDescriptor::texture_buffer(pf, 64, memoryless, TextureUsage::SHADER_READ);
+            assert_eq!(answer(&device, &texels), want, "{pf:?} memoryless buffer");
+        }
+        eprintln!(
+            "packed 10-bit textures on {}: {cells} cells beside {controls} controls",
+            device.name()
+        );
+    }
+    layer_reported_nothing_at_all(&messages);
 }
 
 /// `R10Unorm_X6` and `RG10Unorm_X12`, and their `_sRGB` twins, are made in memory of their own as
