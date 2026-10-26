@@ -1042,6 +1042,7 @@
         "object_churn.buffers_parked": 19,
         "object_churn.buffers_recycled": 13,
         "object_churn.images_other": 30,
+        "object_churn.making_sites_dropped": 60,
         "object_churn.textures_in_heaps": 30,
         "object_churn.vk_buffer_bindings": 24,
         "object_churn.vk_buffers_destroyed": 6,

@@ -264,6 +264,7 @@
         "argument_objects_retained": 1280,
         "argument_tables_retained": 512,
         "bare_starts": 512,
+        "batches_held_past_a_look": 2,
         "batches_submitted_by_waiters": 510,
         "batches_with_none_pending": 512,
         "bound_notices_made": 1,
@@ -275,7 +276,7 @@
         "command_buffers_begun_segments": 2,
         "command_buffers_deferred": 516,
         "command_buffers_replayed": 6,
-        "command_buffers_replayed_inline": 512,
+        "command_buffers_replayed_inline": 510,
         "command_buffers_submitted": 1030,
         "commands_replayed.begin_command_buffer": 516,
         "commands_replayed.cmd_bind_descriptor_sets": 512,
@@ -299,10 +300,11 @@
         "functions_translated": 2,
         "gate_waits": 512,
         "gate_waits_slept": 512,
-        "new_buffer_bytes_cleared": 786432,
+        "heads_held_for_host_steps": 5,
+        "new_buffer_bytes_cleared": 819200,
         "object_churn.buffers_evicted": 513,
-        "object_churn.buffers_parked": 1024,
-        "object_churn.buffers_recycled": 511,
+        "object_churn.buffers_parked": 1536,
+        "object_churn.buffers_recycled": 1023,
         "object_churn.images_evicted": 512,
         "object_churn.images_own_memory": 512,
         "object_churn.images_parked": 512,
@@ -320,7 +322,7 @@
         "queues_sharing_a_vk_queue": 1,
         "scheduled_where_submitted": 512,
         "scheduler_passes": 517,
-        "scheduler_passes_by_waiters": 510,
+        "scheduler_passes_by_waiters": 512,
         "scheduler_sleeps": 515,
         "scheduler_wakes_commit": 512,
         "scheduler_wakes_host": 4,
@@ -332,12 +334,13 @@
         "trail_waits": 512,
         "variant_pipelines_made": 2,
         "wakes_completion_waiters": 512,
-        "wakes_spared": 3584
+        "wakes_spared": 3585
       },
       "moving": {
         "batches_submitted_by_waiters": 232,
         "commands_replayed.begin_command_buffer": 498,
-        "gate_waits_slept": 494
+        "gate_waits_slept": 494,
+        "heads_held_for_host_steps": 4
       },
       "composed": {
         "addressable_buffers_made": 2,

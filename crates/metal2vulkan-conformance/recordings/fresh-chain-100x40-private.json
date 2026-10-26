@@ -238,7 +238,6 @@
         "gate_waits_slept": 3,
         "new_buffer_bytes_cleared": 58624,
         "object_churn.buffers_parked": 3,
-        "object_churn.images_evicted": 7,
         "object_churn.images_own_memory": 2,
         "object_churn.images_parked": 2,
         "object_churn.images_recycled": 1,

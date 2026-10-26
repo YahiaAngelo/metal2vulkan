@@ -16477,6 +16477,7 @@
         "object_churn.images_evicted": 104,
         "object_churn.images_own_memory": 104,
         "object_churn.images_parked": 104,
+        "object_churn.making_sites_dropped": 74,
         "object_churn.textures_image": 104,
         "object_churn.textures_texels": 13,
         "object_churn.vk_buffer_bindings": 14,

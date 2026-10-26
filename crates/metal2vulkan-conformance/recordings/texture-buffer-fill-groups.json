@@ -8505,7 +8505,7 @@
         "new_buffer_bytes_cleared": 127520,
         "object_churn.buffers_evicted": 203,
         "object_churn.buffers_parked": 552,
-        "object_churn.buffers_recycled": 350,
+        "object_churn.buffers_recycled": 349,
         "object_churn.textures_texels": 226,
         "object_churn.vk_buffer_bindings": 203,
         "object_churn.vk_buffers_destroyed": 203,

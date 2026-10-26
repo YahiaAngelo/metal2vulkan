@@ -1684,6 +1684,7 @@
         "device_memory_allocated": 201326592,
         "heap_texture_lossless_layouts": 9,
         "object_churn.images_in_heaps": 15,
+        "object_churn.making_sites_dropped": 31,
         "object_churn.textures_in_heaps": 15,
         "object_churn.vk_buffer_bindings": 3,
         "object_churn.vk_buffers_destroyed": 3,

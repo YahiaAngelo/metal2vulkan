@@ -598,6 +598,7 @@
         "argument_samplers_taken": 4,
         "argument_tables_retained": 4,
         "bare_starts": 4,
+        "batches_held_past_a_look": 2,
         "batches_submitted_by_waiters": 2,
         "batches_with_none_pending": 4,
         "bound_notices_made": 4,
@@ -610,7 +611,7 @@
         "command_buffers_begun_segments": 2,
         "command_buffers_deferred": 14,
         "command_buffers_replayed": 12,
-        "command_buffers_replayed_inline": 6,
+        "command_buffers_replayed_inline": 2,
         "command_buffers_submitted": 11,
         "commands_replayed.begin_command_buffer": 14,
         "commands_replayed.cmd_begin_render_pass": 4,
@@ -662,6 +663,7 @@
         "gate_waits": 4,
         "gate_waits_slept": 4,
         "graphics_pipelines_looked_up": 4,
+        "heads_held_for_host_steps": 5,
         "host_texel_copies": 4,
         "images_started_on_the_host": 4,
         "inline_passes": 2,
@@ -688,7 +690,7 @@
         "render_passes_begun_instances": 2,
         "render_passes_made": 2,
         "scheduled_where_submitted": 4,
-        "scheduler_passes": 10,
+        "scheduler_passes": 9,
         "scheduler_passes_by_waiters": 4,
         "scheduler_sleeps": 7,
         "scheduler_wakes_commit": 4,
@@ -704,11 +706,12 @@
         "trail_waits": 4,
         "variant_pipelines_made": 6,
         "wakes_completion_waiters": 4,
-        "wakes_handler_threads": 3,
-        "wakes_spared": 28
+        "wakes_handler_threads": 2,
+        "wakes_spared": 29
       },
       "moving": {
-        "batches_submitted_by_waiters": 1
+        "batches_submitted_by_waiters": 1,
+        "heads_held_for_host_steps": 4
       },
       "composed": {
         "argument_samplers_taken": 4,

@@ -813,9 +813,9 @@
         "gate_waits_slept": 1,
         "indirect_records_read": 6,
         "live_tables_uploaded": 1,
-        "new_buffer_bytes_cleared": 14432,
-        "object_churn.buffers_parked": 7,
-        "object_churn.buffers_recycled": 3,
+        "new_buffer_bytes_cleared": 14816,
+        "object_churn.buffers_parked": 8,
+        "object_churn.buffers_recycled": 4,
         "object_churn.vk_buffer_bindings": 4,
         "object_churn.vk_buffers_made": 4,
         "pipeline_layouts_made": 1,
@@ -827,7 +827,6 @@
         "scheduler_passes_by_waiters": 1,
         "scheduler_sleeps": 1,
         "scheduler_wakes_commit": 1,
-        "scheduler_wakes_host": 1,
         "shader_modules_made": 1,
         "slot_returns": 1,
         "spare_command_pools_taken": 2,
@@ -836,7 +835,7 @@
         "variant_pipelines_made": 4,
         "variants_taken_back": 1,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 7
+        "wakes_spared": 8
       },
       "composed": {
         "addressable_buffers_made": 1,

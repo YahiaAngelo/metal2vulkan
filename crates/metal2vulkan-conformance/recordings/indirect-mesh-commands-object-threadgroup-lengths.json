@@ -569,7 +569,9 @@
         "indirect_records_read": 6,
         "linked_use_questions_asked": 3,
         "live_tables_uploaded": 1,
-        "new_buffer_bytes_cleared": 8992,
+        "memory_frees.blocks": 1,
+        "memory_frees.dedicated": 1,
+        "new_buffer_bytes_cleared": 5136,
         "object_churn.buffers_parked": 5,
         "object_churn.buffers_recycled": 5,
         "object_churn.images_own_memory": 1,
@@ -596,9 +598,8 @@
         "scheduled_where_submitted": 1,
         "scheduler_passes": 2,
         "scheduler_passes_by_waiters": 1,
-        "scheduler_sleeps": 2,
+        "scheduler_sleeps": 1,
         "scheduler_wakes_commit": 1,
-        "scheduler_wakes_host": 1,
         "set_zero_sets_reused": 1,
         "shader_modules_made": 4,
         "slot_returns": 1,
@@ -610,7 +611,7 @@
         "trail_waits": 1,
         "variant_pipelines_made": 6,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 7
+        "wakes_spared": 8
       },
       "composed": {
         "device_memory_allocated": 1342177280

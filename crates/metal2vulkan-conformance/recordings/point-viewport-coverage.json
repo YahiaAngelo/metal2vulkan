@@ -5259,7 +5259,7 @@
         "command_buffers_begun_secondaries": 882,
         "command_buffers_begun_segments": 294,
         "command_buffers_deferred": 2058,
-        "command_buffers_replayed": 783,
+        "command_buffers_replayed": 608,
         "command_buffers_submitted": 1765,
         "commands_replayed.begin_command_buffer": 2058,
         "commands_replayed.cmd_begin_render_pass": 294,
@@ -5312,7 +5312,7 @@
         "inline_passes": 293,
         "linked_use_questions_asked": 2,
         "live_tables_uploaded": 1,
-        "new_buffer_bytes_cleared": 87616,
+        "new_buffer_bytes_cleared": 77680,
         "object_churn.buffers_evicted": 3,
         "object_churn.buffers_parked": 4,
         "object_churn.buffers_recycled": 1,
@@ -5355,7 +5355,7 @@
         "trail_waits": 1,
         "variant_pipelines_made": 2,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 7
+        "wakes_spared": 8
       },
       "moving": {
         "command_buffers_begun": 1182,

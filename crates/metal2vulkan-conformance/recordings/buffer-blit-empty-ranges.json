@@ -185,7 +185,6 @@
         "gate_waits_slept": 1,
         "new_buffer_bytes_cleared": 48,
         "object_churn.buffers_parked": 2,
-        "object_churn.buffers_recycled": 1,
         "object_churn.vk_buffer_bindings": 2,
         "object_churn.vk_buffers_made": 2,
         "pooled_memory_blocks_made": 3,

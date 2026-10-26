@@ -562,7 +562,7 @@
         "graphics_pipelines_looked_up": 1,
         "inline_passes": 1,
         "linked_use_questions_asked": 2,
-        "new_buffer_bytes_cleared": 12352,
+        "new_buffer_bytes_cleared": 8320,
         "object_churn.buffers_parked": 4,
         "object_churn.buffers_recycled": 4,
         "object_churn.images_own_memory": 2,

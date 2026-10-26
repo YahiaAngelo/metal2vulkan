@@ -165,6 +165,7 @@
         "object_churn.images_other": 25,
         "object_churn.images_parked": 25,
         "object_churn.images_recycled": 21,
+        "object_churn.making_sites_dropped": 4,
         "object_churn.textures_in_heaps": 25,
         "object_churn.vk_buffer_bindings": 25,
         "object_churn.vk_buffers_destroyed": 25,

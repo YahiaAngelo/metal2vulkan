@@ -193,8 +193,10 @@
         "fence_waits": 1,
         "fills_recorded": 1,
         "finales_folded": 1,
+        "object_churn.buffers_evicted": 37,
         "object_churn.buffers_parked": 1,
         "object_churn.buffers_recycled": 1,
+        "object_churn.vk_buffers_destroyed": 37,
         "pooled_memory_blocks_made": 3,
         "primaries_begun_ahead": 1,
         "queue_submissions": 1,
@@ -209,7 +211,7 @@
         "wakes_command_buffer_waiters": 2,
         "wakes_completion_waiters": 1,
         "wakes_handler_threads": 1,
-        "wakes_spared": 4
+        "wakes_spared": 5
       },
       "moving": {
         "commands_replayed.begin_command_buffer": 0

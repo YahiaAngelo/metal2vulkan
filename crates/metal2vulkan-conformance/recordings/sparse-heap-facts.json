@@ -218,6 +218,7 @@
         "object_churn.buffers_evicted": 3,
         "object_churn.buffers_parked": 3,
         "object_churn.images_other": 2,
+        "object_churn.making_sites_dropped": 4,
         "object_churn.textures_in_heaps": 2,
         "object_churn.vk_buffer_bindings": 5,
         "object_churn.vk_buffers_destroyed": 3,

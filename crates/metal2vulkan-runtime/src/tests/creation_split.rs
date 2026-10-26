@@ -15,11 +15,21 @@
 //!
 //! # The attribution it holds
 //!
-//! - **A creation that makes no `VkPipeline` adds no driver time.** A compute state's creation
-//!   makes its region's pipeline at the dispatch, not at the creation, so on a device that
-//!   predicts no region the sweep here makes none -- and both driver figures must stand still
-//!   while the directory's reads move. The two figures are asserted to move *exactly* where a
-//!   `VkPipeline` was made, so the leg holds on a device that does predict one as well.
+//! - **A counted making moved its figure.** A compute state's creation makes its region's
+//!   pipeline at the dispatch, not at the creation, so on a device that predicts no region the
+//!   sweep here makes none, and on one that does it makes some; either way, where a making is
+//!   counted the call's figure must have moved. That direction is what this leg holds, and on a
+//!   device that predicts no region it is the render creation below that carries it.
+//!   **The converse is not ours to assert.** The figures are the time in *every* making the
+//!   runtime asked the device for through the one door (`device/compiles.rs`), and makings that
+//!   no `WorkCounts` field counts reach that door too: the device's own answer about a dynamic
+//!   binding of several variables, asked inside the first creation whose plan raises the
+//!   question and paid for whichever way the driver answers (`pipeline/objects.rs`'s
+//!   `takes_multi_variable_dynamic`, a compile this host's driver refuses); priming's kernels
+//!   (`device/prime.rs`); and the runtime's own blit, depth, stencil, resolve and plane kernels.
+//!   A moved figure therefore names no making, and a creation that made no `VkPipeline` can
+//!   still have spent driver time. Counting those makings is not this test's business; until
+//!   something counts them, the figure is a cost, not a census.
 //! - **A render creation's time is the graphics call's.** It moves the render figure and leaves
 //!   the compute figure where it was.
 //! - **Every creation asks the directory**, so the reads move in both legs. A creation of this
@@ -110,13 +120,14 @@ fn a_creation_s_driver_time_and_directory_reads_reach_the_work_counts() {
     }
     let swept = device.work_counts();
     // A compute state's creation makes its region's pipeline at the dispatch unless the device
-    // predicts one, so the driver figures move exactly where a `VkPipeline` was made.
+    // predicts one, so a sweep here may make none. Where it made one, the compute figure must
+    // have moved; a figure that moved on its own names no making (the module's note).
     let made_a_pipeline = swept.variant_pipelines_made > before.variant_pipelines_made
         || swept.creation_pipelines_made > before.creation_pipelines_made;
-    assert_eq!(
-        swept.compute_pipeline_create_nanos > before.compute_pipeline_create_nanos,
-        made_a_pipeline,
-        "the compute figure moves exactly where the sweep made a `VkPipeline`: {} to {} ns, \
+    assert!(
+        !made_a_pipeline
+            || swept.compute_pipeline_create_nanos > before.compute_pipeline_create_nanos,
+        "the sweep made a `VkPipeline` and the compute figure stood still: {} to {} ns, \
          {} to {} variants and {} to {} at creation",
         before.compute_pipeline_create_nanos,
         swept.compute_pipeline_create_nanos,

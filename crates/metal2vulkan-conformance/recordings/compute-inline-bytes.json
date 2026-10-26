@@ -447,7 +447,7 @@
         "gate_waits_slept": 1,
         "host_texel_copies": 1,
         "images_started_on_the_host": 1,
-        "new_buffer_bytes_cleared": 4320,
+        "new_buffer_bytes_cleared": 352,
         "object_churn.buffers_parked": 3,
         "object_churn.buffers_recycled": 3,
         "object_churn.images_own_memory": 1,

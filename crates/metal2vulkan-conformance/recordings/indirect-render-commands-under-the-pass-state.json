@@ -598,6 +598,7 @@
         "command_buffers_begun_segments": 2,
         "command_buffers_deferred": 14,
         "command_buffers_replayed": 14,
+        "command_buffers_replayed_inline": 14,
         "command_buffers_submitted": 12,
         "commands_replayed.begin_command_buffer": 14,
         "commands_replayed.cmd_begin_render_pass": 2,

@@ -453,7 +453,6 @@
         "command_buffers_begun_segments": 1,
         "command_buffers_deferred": 6,
         "command_buffers_replayed": 6,
-        "command_buffers_replayed_inline": 6,
         "command_buffers_submitted": 4,
         "commands_replayed.begin_command_buffer": 6,
         "commands_replayed.cmd_begin_render_pass": 1,
@@ -498,9 +497,9 @@
         "indirect_records_read": 2,
         "linked_use_questions_asked": 4,
         "live_tables_uploaded": 1,
-        "new_buffer_bytes_cleared": 4704,
-        "object_churn.buffers_parked": 4,
-        "object_churn.buffers_recycled": 4,
+        "new_buffer_bytes_cleared": 4832,
+        "object_churn.buffers_parked": 5,
+        "object_churn.buffers_recycled": 5,
         "passes_not_inline_layouts": 1,
         "pipeline_layouts_made": 2,
         "pooled_memory_blocks_made": 3,
@@ -525,7 +524,7 @@
         "trail_waits": 1,
         "variant_pipelines_made": 1,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 7
+        "wakes_spared": 8
       },
       "composed": {
         "device_memory_allocated": 201326592,
