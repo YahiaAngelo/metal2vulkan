@@ -3,13 +3,10 @@
 //!
 //! # Why this is a count
 //!
-//! Every creation wrote two entries on its own thread: the pipeline artifact
-//! (`store_render_pipeline`) and the record naming the pipeline key of its descriptor's variant
-//! (`keep_variant_pipeline`). Each was a `mkdir`, a temporary file, a write and a `rename` --
-//! four journalled filesystem calls -- and over a sweep of states differing only in fixed-function
-//! state, where every descriptor is distinct, nothing in the process ever reads either back. The
-//! entries are still written, under the same names and committed by the same `rename`; the
-//! creating thread no longer waits for them.
+//! Every entry a creation gives the directory used to be written on the creating thread: a
+//! `mkdir`, a temporary file, a write and a `rename`, four journalled filesystem calls each,
+//! which the caller waited for. The entries are still written, under the same names and
+//! committed by the same `rename`; the creating thread no longer waits for them.
 //!
 //! The assertion is a count of writes, never a time: a count is a fact of the structure, so it
 //! holds on any host under any load, and the figure this run would give for the time saved would
@@ -17,11 +14,20 @@
 //! a pass from being vacuous: a sweep that writes nothing at all would read zero queued writes and
 //! zero writes of its own alike.
 //!
+//! # What a sweep gives the directory
+//!
+//! A sweep of states over one function pair hands over its stages' two compiled functions and
+//! nothing else. Its pipelines are stored only where re-linking them would translate, and where
+//! the directory holds their stages it does not (`Sources::linked_render`); the record of which
+//! key to find a pipeline under is written only beside the pipeline it names, since all the
+//! record does is hand a later process that key (`ShaderCache::record_variant_pipeline`). So the
+//! second device finds the pair, links each sibling's pipeline itself, and translates nothing.
+//!
 //! The second test is the durability half, and it is what makes the move honest: a second device
 //! over the first one's directory must find every entry the first one's creations handed over, so
-//! `Worker::stop` writes what is queued before the cache thread ends. Without that drain a queued
-//! entry would be lost whenever a device went while its thread was behind, and a cross-process
-//! cache hit would turn into a silent miss.
+//! `Worker::stop` writes what is queued before the cache thread ends. Without that drain the
+//! functions would be lost whenever a device went while its thread was behind, and the second
+//! device would translate the pair again rather than read it.
 //!
 //! Each test owns an empty cache directory, removed first and removed again when dropped, so no
 //! run reads what an earlier run left.
@@ -38,6 +44,10 @@ use std::path::{Path, PathBuf};
 
 /// The states each sweep makes.
 const SWEEP: u64 = 16;
+
+/// The compiled functions a sweep's states are all of: one vertex and one fragment. They are
+/// every entry the directory takes from a sweep, so they are every entry a second device finds.
+const STAGES: u64 = 2;
 
 /// Blend factors no two of which make one pipeline: each state is its own descriptor, so each
 /// writes its own entries.
@@ -144,15 +154,20 @@ fn the_entries_a_device_handed_over_are_on_disk_once_it_has_gone() {
     );
     let second = sweep(fresh.path());
     assert_eq!(
-        (second.misses, second.writes, second.write_failures),
-        (0, 0, 0),
-        "the second device compiled or wrote something the first one had already stored: \
-         {second:?}"
+        (second.writes, second.write_failures),
+        (0, 0),
+        "the second device translated something the first one had already stored: {second:?}"
     );
     assert_eq!(
         (second.hits, second.queued_hits),
-        (SWEEP, 0),
-        "every state of the second device's sweep must find its pipeline in the first one's \
-         directory, read from its file and not from a queue of its own: {second:?}"
+        (STAGES, 0),
+        "the second device's sweep must find the pair's {STAGES} compiled functions in the first \
+         one's directory, read from their files and not from a queue of its own: {second:?}"
+    );
+    assert_eq!(
+        second.misses, SWEEP,
+        "each of the {SWEEP} states must link its own pipeline, which the directory holds none \
+         of: {} lookups found nothing",
+        second.misses
     );
 }

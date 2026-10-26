@@ -52,6 +52,24 @@ const VARIANT_MAGIC: &[u8; 8] = b"M2VVPIP\0";
 /// A variant record's length: its magic, its name, the pipeline key, and the checksum.
 const VARIANT_RECORD: usize = 8 + 32 + 32 + 32;
 
+/// The variant records this process gave the directory, which `tests::render_stage_digests`'
+/// count reads: a sweep whose pipelines the directory does not hold must give it none. Carried
+/// only where that device test is compiled, since nothing else reads it.
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+static RECORDS_WRITTEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// [`RECORDS_WRITTEN`].
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+pub(crate) fn variant_records_written() -> u64 {
+    RECORDS_WRITTEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Count a variant record given to the directory.
+fn note_variant_record_written() {
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+    RECORDS_WRITTEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The device's memo of what its render creations worked out before their compiles (the module
 /// docs).
 pub(crate) struct CreationMemo {
@@ -132,24 +150,48 @@ impl ShaderCache {
         Some(pipeline)
     }
 
-    /// Keep `pipeline` as the key of the pipeline of the render descriptor of `key` on `compile`
-    /// under `variant`, in the memo and, where the memo did not hold it, the directory.
-    pub(crate) fn keep_variant_pipeline(
+    /// Keep `pipeline` as the key of the pipeline of the render descriptor of `key` under
+    /// `variant` in the memo, which is what spares another creation of the same descriptor in
+    /// this process its [`Device::render_variant_key`]; whether the memo did not already hold
+    /// it, and so whether the directory's record of it is one this creation would write
+    /// ([`record_variant_pipeline`](Self::record_variant_pipeline)).
+    ///
+    /// [`Device::render_variant_key`]: metal2vulkan::device::Device::render_variant_key
+    pub(crate) fn remember_variant_pipeline(
+        &self,
+        key: &PipelineKey,
+        variant: &VariantKey,
+        pipeline: &PipelineKey,
+    ) -> bool {
+        let at = (*key, variant.clone());
+        let mut pipelines = lock(&self.creation.pipelines);
+        if pipelines.get(&at) == Some(pipeline) {
+            return false;
+        }
+        pipelines.insert(at, *pipeline, 1);
+        true
+    }
+
+    /// Write the directory's record that the pipeline of the render descriptor of `key` on
+    /// `compile` under `variant` is `pipeline`.
+    ///
+    /// **A record is written only where the pipeline it names can be found.** All the record does
+    /// for a later process is hand it a key to look the pipeline up by, sparing it one
+    /// `render_variant_key`; a record whose pipeline neither the directory nor an archive holds
+    /// answers nothing, and the process asks for its keys anyway. A sweep of states over one
+    /// function pair is exactly that case: the pipeline's own artifact is stored only where
+    /// re-linking it would translate (`Sources::linked_render`), so every sibling's record would
+    /// name a pipeline nothing holds, and the next process would pay a directory read of the
+    /// record, and this one a write of it, for a key it computes regardless.
+    pub(crate) fn record_variant_pipeline(
         &self,
         compile: &CompileDevice,
         key: &PipelineKey,
         variant: &VariantKey,
         pipeline: &PipelineKey,
     ) {
-        let at = (*key, variant.clone());
-        {
-            let mut pipelines = lock(&self.creation.pipelines);
-            if pipelines.get(&at) == Some(pipeline) {
-                return;
-            }
-            pipelines.insert(at, *pipeline, 1);
-        }
         let name = variant_name(key, variant);
+        note_variant_record_written();
         self.keep_answer(
             EntryKind::VariantPipeline,
             &name,

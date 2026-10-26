@@ -28,6 +28,16 @@
 //! all, where every creation encodes its artifact as every creation once did: without that half
 //! the zero would say nothing about the condition.
 //!
+//! # The variant record
+//!
+//! Beside the artifact the directory takes a record of the key a creation of this descriptor
+//! learned for this variant, so that a later process can look the pipeline up without asking for
+//! its keys again (`ShaderCache::record_variant_pipeline`). All the record does is hand over that
+//! key, so a record whose pipeline neither the directory nor an archive holds answers nothing and
+//! the later process computes the key regardless. A sweep's pipelines are exactly the ones the
+//! directory does not take, so its records are written only where its artifacts are, and the same
+//! pair of devices says it.
+//!
 //! # The memo's weight
 //!
 //! The memo bounds itself by bytes, and what a creation gives it is the length of the encoding it
@@ -47,6 +57,7 @@ use super::blit_holds::Scratch;
 use super::descriptor_key_once::descriptor;
 use crate::pipeline::objects::words_digests_derived;
 use crate::pipeline::render_artifacts_encoded;
+use crate::shader_cache::variant_records_written;
 use crate::{Device, DeviceKind, DeviceOptions, PipelineOptions, ShaderCacheOptions};
 use metal2vulkan::metal::{BlendFactor, BlendOperation};
 use metal2vulkan::pipeline::{RenderPipeline, RenderPipelineDescriptor};
@@ -196,6 +207,59 @@ fn a_sweep_encodes_a_pipeline_artifact_only_where_its_functions_are_absent() {
         encoded, RUN as u64,
         "a sweep of {RUN} creations against a directory holding none of their functions must \
          encode its artifact for each of them, not {encoded}"
+    );
+}
+
+/// A sweep gives the directory **no** variant record where it gives it no pipeline artifact, and
+/// one per creation where it gives it one.
+#[test]
+fn a_sweep_records_a_variant_pipeline_only_where_its_artifact_is_stored() {
+    let held = Scratch::new("render-variant-records-held");
+    let device = device(&held.0, ShaderCacheOptions::default().capacity);
+    let base = descriptor(&device);
+    let options = PipelineOptions::default();
+    let before = variant_records_written();
+    let encoded_before = render_artifacts_encoded();
+    let mut kept = Vec::with_capacity(RUN);
+    for i in 0..RUN {
+        kept.push(
+            device
+                .new_render_pipeline_state(&sibling(&base, i), &options)
+                .unwrap(),
+        );
+    }
+    let written = variant_records_written() - before;
+    let encoded = render_artifacts_encoded() - encoded_before;
+    assert_eq!(
+        encoded, 0,
+        "the sweep's creations must store no pipeline artifact, else the records below are of \
+         pipelines the directory does hold and this says nothing: {encoded} artifacts encoded"
+    );
+    assert_eq!(
+        written, 0,
+        "a sweep of {RUN} creations whose pipelines the directory does not hold gave it \
+         {written} records of where to find them"
+    );
+    // The half that says the zero is a fact about the condition: a directory that takes no entry
+    // holds none of the stages' functions, so each creation stores its artifact, and the record
+    // of which key to find it under is then an answer a later process can use.
+    let none = Scratch::new("render-variant-records-none");
+    let capped = capped_device(&none.0);
+    let base = descriptor(&capped);
+    let before = variant_records_written();
+    let mut kept = Vec::with_capacity(RUN);
+    for i in 0..RUN {
+        kept.push(
+            capped
+                .new_render_pipeline_state(&sibling(&base, i), &options)
+                .unwrap(),
+        );
+    }
+    let written = variant_records_written() - before;
+    assert_eq!(
+        written, RUN as u64,
+        "a sweep of {RUN} creations that stores its artifacts must record the key of each of \
+         them, not {written}"
     );
 }
 

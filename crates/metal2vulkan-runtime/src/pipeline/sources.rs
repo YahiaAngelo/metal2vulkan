@@ -253,11 +253,16 @@ impl<'a> Sources<'a> {
     /// would have been ([`RenderPipeline::footprint`]), so the memo's byte bound holds whichever
     /// way the artifact was kept. Weighing a skipped entry at the zero bytes a skipped encoding
     /// returns would let the memo hold its 4096 entries believing its bound untouched.
+    ///
+    /// Answers whether the artifact went to the directory, which is also what decides whether
+    /// the creation's variant record is worth writing: a record names a pipeline to look up, and
+    /// a key whose pipeline the directory does not hold answers nothing
+    /// (`ShaderCache::record_variant_pipeline`).
     pub(crate) fn linked_render(
         &self,
         pipeline: RenderPipeline,
         stage_keys: &[FunctionCompileKey],
-    ) -> Arc<RenderPipeline> {
+    ) -> (Arc<RenderPipeline>, bool) {
         let compile = self.device.compile_device();
         let cache = &self.device.shared().shader_cache;
         let pipeline = Arc::new(pipeline);
@@ -274,6 +279,6 @@ impl<'a> Sources<'a> {
         };
         cache.memo.keep_render(&pipeline, weight);
         self.note(Artifact::Render(Arc::clone(&pipeline)));
-        pipeline
+        (pipeline, !functions_held)
     }
 }

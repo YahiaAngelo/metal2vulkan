@@ -48,6 +48,10 @@
 //!   kept without being encoded, at what it retains (`RenderPipeline::footprint`).
 
 mod creation;
+/// The variant records this process gave the directory, which `tests::render_stage_digests`'
+/// count reads (`creation.rs`).
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+pub(crate) use creation::variant_records_written;
 pub(crate) mod driver;
 pub(super) mod store;
 pub(super) mod worker;

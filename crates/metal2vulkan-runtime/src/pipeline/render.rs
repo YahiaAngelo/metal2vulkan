@@ -2588,15 +2588,26 @@ impl RenderVariant {
         // The pipeline a creation of a descriptor of the same key learned for `key`, found
         // without asking its keys again; else the keys, kept for the next one.
         let cache = &sources.device().shared().shader_cache;
+        let mut asked = None;
         if let Some(pipeline) = cache.variant_pipeline(compile, descriptor_key, key) {
             if let Some(found) = sources.render(&pipeline) {
                 return Ok(CompiledVariant::found(found));
             }
+            asked = Some(pipeline);
         }
         let keys = compile.render_variant_key(descriptor, key, &budget, entries)?;
-        cache.keep_variant_pipeline(compile, descriptor_key, key, &keys.pipeline);
-        if let Some(found) = sources.render(&keys.pipeline) {
-            return Ok(CompiledVariant::found(found));
+        let unrecorded = cache.remember_variant_pipeline(descriptor_key, key, &keys.pipeline);
+        // The key a record gave is the key this creation computes, so asking for its pipeline
+        // again would repeat a lookup that has just missed. The keys are compared rather than
+        // assumed equal: a record of another key is one this build does not recognize, and it is
+        // looked up as any other.
+        if asked != Some(keys.pipeline) {
+            if let Some(found) = sources.render(&keys.pipeline) {
+                if unrecorded {
+                    cache.record_variant_pipeline(compile, descriptor_key, key, &keys.pipeline);
+                }
+                return Ok(CompiledVariant::found(found));
+            }
         }
         let mut linked = descriptor.clone();
         if let (StageSource::Function(function), Some(inputs)) =
@@ -2635,8 +2646,14 @@ impl RenderVariant {
             .collect();
         let stage_keys: Vec<FunctionCompileKey> =
             std::iter::once(keys.vertex).chain(keys.fragment).collect();
+        let (pipeline, stored) = sources.linked_render(pipeline, &stage_keys);
+        // Recorded where the pipeline it names went to the directory with it, and so where a
+        // later process can answer the record (`ShaderCache::record_variant_pipeline`).
+        if unrecorded && stored {
+            cache.record_variant_pipeline(compile, descriptor_key, key, &keys.pipeline);
+        }
         Ok(CompiledVariant {
-            remembered: Remembered::Compiled(sources.linked_render(pipeline, &stage_keys)),
+            remembered: Remembered::Compiled(pipeline),
             functions,
         })
     }
