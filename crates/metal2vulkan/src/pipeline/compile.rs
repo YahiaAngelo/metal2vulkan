@@ -517,12 +517,12 @@ pub(crate) fn compile_stage_from(
     m: &mut Meter,
 ) -> Result<CompiledFunction, Error> {
     guarded(|| {
-        with_request_kept(
+        with_request_shared(
             &fd.function,
             &fd.constants,
             (&fd.linked, &fd.libraries),
             inputs,
-            Some((entries, fd)),
+            Shared::Entry(entries, fd),
             |r| compile_one(r, p, m, SPIRV_WORDS).map(CompiledFunction::new),
         )
     })
@@ -789,10 +789,22 @@ pub(crate) fn stage_uses_direct_arguments(
 /// descriptor alone, so the object keeps it beside the entries and a sweep of states decodes for
 /// it once.
 ///
+/// **The module decodes too.** Decoding a module reads its bitcode and nothing else: which entry
+/// of it is being compiled, and with which constants and linked functions, reaches no part of the
+/// decode. So the object keeps the decode of each module it reads, by the module's AIR hash (the
+/// function's `FunctionInfo::air_hash`, which its library states without decoding), and every
+/// later ask over the same bytes copies that decode instead of reading the bitstream, the bitcode
+/// records and the AIR metadata ABI again. A library of six entries decodes once rather than six
+/// times, and the same function asked for at two call-stack depths, with two sets of constants,
+/// or for a plain answer and then an entry, decodes once rather than twice. The same work happens
+/// at the same time for the same inputs: the whole module is decoded, with every entry's argument
+/// metadata, by the first ask that needs it.
+///
 /// **Bounded.** It keeps at most 32 specialized entries and at most 64 MiB of them (each entry
-/// charged what specializing it charged the ledger), and at most 32 plain answers; past any of
-/// those, the least recently used go, so an object that outlives one creation never grows without
-/// bound. A refusal is not kept: the next ask makes it again.
+/// charged what specializing it charged the ledger), at most 32 plain answers, and at most 4
+/// module decodes and 32 MiB of them (each charged what decoding it charged the ledger); past any
+/// of those, the least recently used go, so an object that outlives one creation never grows
+/// without bound. A refusal is not kept: the next ask makes it again.
 #[derive(Default)]
 pub struct StageEntries {
     kept: std::sync::Mutex<Kept>,
@@ -808,16 +820,45 @@ const KEPT_ENTRIES: usize = 32;
 /// an object shared between creations holds a fraction of one attempt's room.
 const KEPT_ENTRY_BYTES: u64 = 64 << 20;
 
-/// What a [`StageEntries`] holds: its specialized entries and its plain answers, each least
-/// recently used first, the bytes the entries were charged, and the totals its counts report.
+/// The most module decodes one [`StageEntries`] keeps, whatever their sizes: a render creation's
+/// three stages and one more, which is the window a sweep of states, or a library's entries
+/// compiled in turn, asks over.
+const KEPT_DECODES: usize = 4;
+
+/// The most bytes of module decodes one [`StageEntries`] keeps: 32 MiB, each decode charged what
+/// decoding it charged the compile's ledger. Half the entries' room, and a sixteenth of one
+/// translation attempt's 500 MiB.
+pub(crate) const KEPT_DECODE_BYTES: u64 = 32 << 20;
+
+/// What a [`StageEntries`] holds: its specialized entries, its plain answers and its module
+/// decodes, each least recently used first, the bytes the entries and the decodes were charged,
+/// and the totals its counts report.
 #[derive(Default)]
 struct Kept {
     entries: Vec<StageEntry>,
     /// The answers read of a stage's AIR without specializing it.
     answers: Vec<StageAnswer>,
+    /// The module decodes every ask over the same bitcode copies instead of reading again.
+    decodes: Vec<KeptDecode>,
     bytes: u64,
     made: u64,
     found: u64,
+    /// The decodes read of a module's bitcode, and the asks that copied one already read.
+    decodes_read: u64,
+    decodes_copied: u64,
+    decode_bytes: u64,
+}
+
+/// One module decode of [`StageEntries`], with what tells it apart: the bitcode's own AIR hash,
+/// which decides the decode completely.
+struct KeptDecode {
+    /// SHA-256 of the module's bitcode: the function's AIR hash, which its library states without
+    /// decoding anything (a metallib's verified `HASH`, or a module's own hash, which every entry
+    /// of it carries).
+    air_hash: Hash256,
+    /// What decoding it charged the ledger, which the byte bound counts.
+    bytes: u64,
+    decoded: Arc<air::Decoded>,
 }
 
 /// One plain answer of [`StageEntries`], read of a stage's AIR without specializing it, with what
@@ -855,13 +896,64 @@ impl StageEntries {
         StageEntries::default()
     }
 
-    /// How many times it has decoded a stage's AIR -- to specialize an entry, or alone for a
+    /// How many times it has read a stage's AIR -- to specialize an entry, or alone for a
     /// plain answer -- and how many asks found what an earlier one read, over its whole life
     /// (neither ever falls). A consumer that gives one object to every pipeline creation reads
-    /// the decodes it spared in the second.
+    /// the entries it spared in the second.
     pub fn counts(&self) -> (u64, u64) {
         let kept = self.kept.lock();
         kept.as_ref().map_or((0, 0), |k| (k.made, k.found))
+    }
+
+    /// How many module decodes it has read of bitcode, and how many asks copied a decode an
+    /// earlier ask had read, over its whole life (neither ever falls). Every entry it specializes
+    /// and every plain answer it reads needs the decode of its module, so the entries of one
+    /// library, and the descriptors and depths of one function, read one decode between them.
+    #[cfg(test)]
+    pub(crate) fn decodes(&self) -> (u64, u64) {
+        let kept = self.kept.lock();
+        kept.as_ref()
+            .map_or((0, 0), |k| (k.decodes_read, k.decodes_copied))
+    }
+
+    /// The decode of the module whose AIR hash is `air_hash`, whose bitcode is `bitcode`: a copy
+    /// of the one an earlier ask read, else one read now under `m` and kept. A refusal is not
+    /// kept: the next ask reads it again.
+    ///
+    /// The copy is not charged to `m`, as a specialized entry an earlier ask made is not: what
+    /// bounds it is this object's own byte bound, and the compile that copies it would have
+    /// decoded the same module itself.
+    fn module(
+        &self,
+        air_hash: &Hash256,
+        bitcode: &[u8],
+        m: &mut Meter,
+    ) -> Result<air::Decoded, Error> {
+        let lock = || self.kept.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(decoded) = lock().decode(air_hash) {
+            return Ok(air::Decoded::clone(&decoded));
+        }
+        // What the decode charged the ledger, which the byte bound counts: the decode is what the
+        // charge is still held for once this returns.
+        let before = m.ledger();
+        let decoded = Arc::new(air::decode(bitcode, m)?);
+        let bytes = m.ledger().saturating_sub(before);
+        let mine = air::Decoded::clone(&decoded);
+        let mut kept = lock();
+        // Another caller may have decoded the same module meanwhile: the bytes decide the decode,
+        // so its decode is this one and the two share what is kept.
+        if let Some(theirs) = kept.decode(air_hash) {
+            return Ok(air::Decoded::clone(&theirs));
+        }
+        kept.decodes_read += 1;
+        kept.decode_bytes = kept.decode_bytes.saturating_add(bytes);
+        kept.decodes.push(KeptDecode {
+            air_hash: *air_hash,
+            bytes,
+            decoded,
+        });
+        kept.evict();
+        Ok(mine)
     }
 
     /// Whether the entry of stage `fd` returns a value: the answer an earlier ask read, else read
@@ -870,7 +962,7 @@ impl StageEntries {
     fn returns_value(
         &self,
         fd: &FunctionDescriptor,
-        read: impl FnOnce() -> Result<bool, Error>,
+        read: impl FnOnce(&StageEntries) -> Result<bool, Error>,
     ) -> Result<bool, Error> {
         // The library's table states it without decoding (`Function::info`).
         let air_hash = fd.function.info().air_hash;
@@ -878,7 +970,7 @@ impl StageEntries {
         if let Some(returns) = lock().answer(&air_hash, fd) {
             return Ok(returns);
         }
-        let returns_value = read()?;
+        let returns_value = read(self)?;
         let mut kept = lock();
         // As a specialized entry's: another caller may have read it meanwhile, and its answer is
         // this one.
@@ -919,11 +1011,12 @@ impl StageEntries {
         // What the specialization charged the ledger, which the byte bound counts: the entry is
         // what the charge is still held for once this returns.
         let before = m.ledger();
-        let specialized = Arc::new(with_request(
+        let specialized = Arc::new(with_request_shared(
             &fd.function,
             &fd.constants,
             (&fd.linked, &fd.libraries),
             InputsFrom::Given(&inputs),
+            Shared::Decode(self),
             |r| specialize_one(r, m),
         )?);
         let bytes = m.ledger().saturating_sub(before);
@@ -982,9 +1075,21 @@ impl Kept {
         Some(returns_value)
     }
 
-    /// Drop the least recently used entries and answers until the bounds hold, never the last one
-    /// of either: a bound below one would make the object useless to the creation that is asking
-    /// now.
+    /// The decode of the module whose AIR hash is `air_hash`, made the most recently used:
+    /// `None` where none is held. The hash decides the decode completely, so nothing else is
+    /// compared.
+    fn decode(&mut self, air_hash: &Hash256) -> Option<Arc<air::Decoded>> {
+        let at = self.decodes.iter().position(|d| d.air_hash == *air_hash)?;
+        let decode = self.decodes.remove(at);
+        let decoded = Arc::clone(&decode.decoded);
+        self.decodes.push(decode);
+        self.decodes_copied += 1;
+        Some(decoded)
+    }
+
+    /// Drop the least recently used entries, answers and decodes until the bounds hold, never the
+    /// last one of any: a bound below one would make the object useless to the creation that is
+    /// asking now.
     fn evict(&mut self) {
         while self.entries.len() > 1
             && (self.entries.len() > KEPT_ENTRIES || self.bytes > KEPT_ENTRY_BYTES)
@@ -994,6 +1099,12 @@ impl Kept {
         }
         while self.answers.len() > KEPT_ENTRIES.max(1) {
             self.answers.remove(0);
+        }
+        while self.decodes.len() > 1
+            && (self.decodes.len() > KEPT_DECODES || self.decode_bytes > KEPT_DECODE_BYTES)
+        {
+            let gone = self.decodes.remove(0);
+            self.decode_bytes = self.decode_bytes.saturating_sub(gone.bytes);
         }
     }
 }
@@ -1022,20 +1133,27 @@ pub(crate) fn stage_returns_value(
     entries: &StageEntries,
     m: &mut Meter,
 ) -> Result<bool, Error> {
-    entries.returns_value(fd, || stage_returns_value_read(fd, m))
+    entries.returns_value(fd, |shared| stage_returns_value_read(fd, shared, m))
 }
 
-/// [`stage_returns_value`]'s own read of the AIR, which [`StageEntries`] keeps the answer of.
-fn stage_returns_value_read(fd: &FunctionDescriptor, m: &mut Meter) -> Result<bool, Error> {
+/// [`stage_returns_value`]'s own read of the AIR, which [`StageEntries`] keeps the answer of. It
+/// reads the module's decode from `shared`, the same object, so the answer and the stage's entry
+/// decode the module once between them.
+fn stage_returns_value_read(
+    fd: &FunctionDescriptor,
+    shared: &StageEntries,
+    m: &mut Meter,
+) -> Result<bool, Error> {
     let inputs = LowerInputs::new();
     guarded(|| {
-        with_request(
+        with_request_shared(
             &fd.function,
             &fd.constants,
             (&fd.linked, &fd.libraries),
             InputsFrom::Given(&inputs),
+            Shared::Decode(shared),
             |r| {
-                let mut decoded = air::decode(r.bitcode, m)?;
+                let mut decoded = decoded_module(r, m)?;
                 if let Some(c) = r.container {
                     decoded.abi.check_container(&decoded.module, c, m)?;
                 }
@@ -1264,42 +1382,45 @@ fn with_request<T>(
     inputs: InputsFrom<'_>,
     g: impl FnOnce(&Request<'_>) -> Result<T, Error>,
 ) -> Result<T, Error> {
-    with_request_kept(f, consts, links, inputs, None, g)
+    with_request_shared(f, consts, links, inputs, Shared::Nothing, g)
 }
 
-/// [`with_request`], the request reading its specialized entry from `kept` where given
-/// (`Request::kept`).
-fn with_request_kept<'k, T>(
+/// [`with_request`], the request reading from what the creation `shared` holds
+/// (`Request::shared`).
+fn with_request_shared<'k, T>(
     f: &Function,
     consts: &FunctionConstantValues,
     (linked, libraries): (&LinkedFunctions, &DynamicLibraries),
     inputs: InputsFrom<'_>,
-    kept: Option<(&'k StageEntries, &'k FunctionDescriptor)>,
+    shared: Shared<'k>,
     g: impl FnOnce(&Request<'_>) -> Result<T, Error>,
 ) -> Result<T, Error> {
     let source = f.source()?;
+    let air_hash = f.info().air_hash;
     let dynamic = dynamic_order(f, linked, libraries);
     let linked = linked_sources(linked)?;
     let r = match &source {
         FunctionSource::Metallib(lf) => Request {
             bitcode: lf.bitcode,
+            air_hash,
             entry: EntryRef::Name(lf.name),
             container: Some(lf.as_ref()),
             consts,
             linked: &linked,
             dynamic,
             inputs,
-            kept,
+            shared,
         },
         FunctionSource::Module { bitcode, index, .. } => Request {
             bitcode,
+            air_hash,
             entry: EntryRef::Index(*index),
             container: None,
             consts,
             linked: &linked,
             dynamic,
             inputs,
-            kept,
+            shared,
         },
         FunctionSource::Visible => {
             let entries = f
@@ -1419,10 +1540,30 @@ pub(crate) fn plan_bitcode(
     })
 }
 
+/// What a creation shares with one compile request.
+#[derive(Clone, Copy, Default)]
+enum Shared<'a> {
+    /// Nothing: the request decodes and specializes for itself alone.
+    #[default]
+    Nothing,
+    /// The creation's specialized entries, with the stage's function descriptor: the compile reads
+    /// its specialized entry there, the one a check or key of the creation made, else one made
+    /// there now ([`specialize_one`]).
+    Entry(&'a StageEntries, &'a FunctionDescriptor),
+    /// The creation's module decodes: the request specializes here, reading the module's decode
+    /// from the creation's object, so the entries of one module decode it once
+    /// ([`StageEntries::module`]).
+    Decode(&'a StageEntries),
+}
+
 /// One per-function compile request.
 struct Request<'a> {
     /// A wrapped or raw bitcode module.
     bitcode: &'a [u8],
+    /// SHA-256 of `bitcode`: the function's AIR hash, which its library states without decoding
+    /// (`FunctionInfo::air_hash`, a metallib's verified `HASH` or a module's own hash) and which
+    /// the compile records and keys its decode by, rather than hashing the module again.
+    air_hash: Hash256,
     entry: EntryRef<'a>,
     /// A metallib function's container tags, cross-checked against the decoded AIR metadata.
     container: Option<&'a LibraryFunction<'a>>,
@@ -1432,10 +1573,8 @@ struct Request<'a> {
     /// The dynamic libraries the stage's imports are searched in.
     dynamic: DynamicOrder<'a>,
     inputs: InputsFrom<'a>,
-    /// A creation's specialized entries, with the stage's function descriptor: the compile reads
-    /// its specialized entry there, the one a check or key of the creation made, else one made
-    /// there now ([`specialize_one`]). `None` specializes for the compile alone.
-    kept: Option<(&'a StageEntries, &'a FunctionDescriptor)>,
+    /// What the creation shares with this request.
+    shared: Shared<'a>,
 }
 
 impl<'a> Request<'a> {
@@ -1450,13 +1589,14 @@ impl<'a> Request<'a> {
     ) -> Request<'a> {
         Request {
             bitcode,
+            air_hash: container::sha256(bitcode),
             entry,
             container: None,
             consts,
             linked,
             dynamic: DynamicOrder::default(),
             inputs: InputsFrom::Given(inputs),
-            kept: None,
+            shared: Shared::Nothing,
         }
     }
 }
@@ -2399,12 +2539,11 @@ fn specialize_one(r: &Request<'_>, m: &mut Meter) -> Result<Specialized, Error> 
     tests::inject::panic_if_armed();
     // The creation's entry of this stage: the same request's, made by a check or key of the
     // creation, else made there now.
-    if let Some((entries, fd)) = r.kept {
+    if let Shared::Entry(entries, fd) = r.shared {
         let kept = entries.specialized(fd, r.inputs.call_stack_depth(), m)?;
         return Ok(Specialized::clone(&kept));
     }
-    let air_hash = container::sha256(r.bitcode);
-    let mut decoded = air::decode(r.bitcode, m)?;
+    let mut decoded = decoded_module(r, m)?;
     if let Some(f) = r.container {
         decoded.abi.check_container(&decoded.module, f, m)?;
     }
@@ -2421,11 +2560,25 @@ fn specialize_one(r: &Request<'_>, m: &mut Meter) -> Result<Specialized, Error> 
     };
     let spec = specialize_request(decoded, &req, r, m)?;
     Ok(Specialized {
-        air_hash,
+        air_hash: r.air_hash,
         entry: req.entry,
         spec,
         before,
     })
+}
+
+/// The decode of the request's module: a copy of the one the creation's object holds (read there
+/// now where it holds none), else one read for this compile alone.
+///
+/// Decoding reads the bitcode and nothing else, so every entry of one module, and every
+/// descriptor and depth of one function, decodes the same bytes to the same module. A request
+/// that shares nothing ([`Shared::Nothing`], which is what [`compile_stage`] and every
+/// reflection read of a lone function make) decodes as it always did and keeps nothing.
+fn decoded_module(r: &Request<'_>, m: &mut Meter) -> Result<air::Decoded, Error> {
+    match r.shared {
+        Shared::Decode(entries) => entries.module(&r.air_hash, r.bitcode, m),
+        Shared::Entry(..) | Shared::Nothing => Ok(air::decode(r.bitcode, m)?),
+    }
 }
 
 /// [`specialize_one`], then Metal's grouping of multiply chains (`lower::arith::regroup`) and of

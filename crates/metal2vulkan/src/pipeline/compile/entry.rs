@@ -59,17 +59,19 @@ impl<'a> EntryDescriptor<'a> {
         }
     }
 
-    /// The compile request of the entry under `inputs`.
+    /// The compile request of the entry under `inputs`. A bare module has no library to state
+    /// its AIR hash, so the request hashes it here, as the compile did before.
     fn request(&self, inputs: InputsFrom<'a>) -> Request<'_> {
         Request {
             bitcode: self.bitcode,
+            air_hash: crate::air::container::sha256(self.bitcode),
             entry: self.entry,
             container: None,
             consts: &self.constants,
             linked: &self.linked,
             dynamic: super::DynamicOrder::default(),
             inputs,
-            kept: None,
+            shared: super::Shared::Nothing,
         }
     }
 }

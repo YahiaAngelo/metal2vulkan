@@ -23,12 +23,22 @@
 //! translate-split loop  <fixture-name> <iterations> <cache-directory> [--default-policy]
 //! translate-split parts <iterations> <cache-directory> [--default-policy]
 //! translate-split digest <cache-directory> [--default-policy]
+//! translate-split library <fixture-name> <iterations> <cache-directory> [--default-policy]
 //! ```
 //!
 //! `once` translates every `function-bindings-*` shader once in one process and prints the
 //! per-shader wall and thread CPU with the compile's own work units and ledger peak, which are
 //! deterministic and so immune to host load. `loop` repeats one shader's translation, which is the
 //! shape to record an Instruments Time Profiler over (`scripts/xctrace-run`).
+//!
+//! `library` translates **every** entry of one fixture's library once a round, twice over: with
+//! one `StageEntries` shared between the entries, as the runtime's device gives one object to
+//! every creation of its pipelines, and with an object an entry, which is what a consumer that
+//! shares nothing does. Nothing in a module's decode depends on which entry is being compiled, so
+//! the shared round reads one decode for the whole library and the apart round one an entry; the
+//! two rounds specialize and compile the same six entries from scratch, so what they differ by is
+//! five decodes. A round and not a loop: a second ask for one entry finds its specialized entry
+//! and compiles nothing at all, which is a different question (`parts`).
 //!
 //! The suite's device takes `DevicePolicy::exact_answers()`, so that is the default here and the
 //! figures line up with the ledger's; `--default-policy` reads the policy a consumer gets.
@@ -106,6 +116,20 @@ fn run() -> Result<(), String> {
                 .get(2)
                 .ok_or("usage: parts <iterations> <cache-directory>")?;
             parts_mode(times, directory, exact)
+        }
+        Some("library") => {
+            let name = positional
+                .get(1)
+                .ok_or("usage: library <fixture-name> <iterations> <cache-directory>")?;
+            let times: usize = positional
+                .get(2)
+                .ok_or("usage: library <fixture-name> <iterations> <cache-directory>")?
+                .parse()
+                .map_err(|_| "iterations is not a number".to_string())?;
+            let directory = positional
+                .get(3)
+                .ok_or("usage: library <fixture-name> <iterations> <cache-directory>")?;
+            library_mode(name, times, directory, exact)
         }
         Some("loop") => {
             let name = positional
@@ -335,6 +359,111 @@ fn parts_mode(times: usize, directory: &str, exact: bool) -> Result<(), String> 
     Ok(())
 }
 
+/// Every entry of one fixture's library translated, with one object shared between the entries
+/// and then with an object each: what a library of several entries pays for its module's decode.
+fn library_mode(name: &str, times: usize, directory: &str, exact: bool) -> Result<(), String> {
+    let &(fixture, _) = SHADERS
+        .iter()
+        .find(|(f, e)| *f == name || *e == name)
+        .ok_or(format!("no shader {name}; try `list`"))?;
+    let notices = Notices::default();
+    let device = Device::system_default_with(&options(&notices, directory, exact))
+        .map_err(|error| format!("no device: {error}"))?;
+    let compile = device.compile_device();
+    let budget = Budget::standard();
+    let inputs = LoweringInputs::new();
+    let bitcode = Fixture {
+        name: fixture,
+        entry: "",
+    }
+    .bitcode()?;
+    let parsed = metal2vulkan::library::Library::parse(&bitcode)
+        .map_err(|error| format!("{fixture} did not parse: {error}"))?;
+    let entries: Vec<String> = parsed
+        .functions()
+        .filter(|i| {
+            !matches!(
+                i.stage,
+                metal2vulkan::library::FunctionStage::Visible
+                    | metal2vulkan::library::FunctionStage::Exported
+            )
+        })
+        .map(|i| i.name.to_owned())
+        .collect();
+    let library = device.new_library_with_compile_library(parsed);
+    let stages: Vec<FunctionDescriptor> = entries
+        .iter()
+        .map(|name| {
+            library
+                .new_function_with_name(name)
+                .map(|f| f.function_descriptor())
+                .map_err(|error| format!("no function {name}: {error}"))
+        })
+        .collect::<Result<_, _>>()?;
+    println!(
+        "library {fixture} entries {} rounds {times} venue {} policy {} load {:.2}",
+        stages.len(),
+        device.name(),
+        if exact { "exact" } else { "default" },
+        load()
+    );
+    // Each round compiles every entry of the library ONCE, so what it times is a library's
+    // entries met one after another and not a loop over one of them: with the entry memo warm a
+    // later ask would compile nothing at all. Shared: one object for the round, so the entries
+    // read one decode between them. Apart: an object an entry, so each reads its own.
+    let round = |shared: bool| -> Result<u64, String> {
+        let own = StageEntries::new();
+        let mut took = 0u64;
+        for f in &stages {
+            let entries = if shared {
+                None
+            } else {
+                Some(StageEntries::new())
+            };
+            let use_it = entries.as_ref().unwrap_or(&own);
+            let started = std::time::Instant::now();
+            let made = compile.compile_function_from_entries(f, &inputs, &budget, use_it);
+            took += nanos_since(started);
+            made.map_err(|error| format!("the translation refused: {error}"))?;
+        }
+        Ok(took)
+    };
+    let median = |shared: bool| -> Result<f64, String> {
+        for _ in 0..(times / 16).max(4) {
+            round(shared)?;
+        }
+        let mut all = Vec::with_capacity(times);
+        for _ in 0..times {
+            all.push(round(shared)?);
+        }
+        all.sort_unstable();
+        Ok(all[all.len() / 2] as f64 / 1000.0)
+    };
+    // The apart rounds first, so neither ordering can be said to have warmed the other.
+    let apart = median(false)?;
+    let shared = median(true)?;
+    println!(
+        "a round of {} entries: {:.1} us sharing one decode against {:.1} us reading one each, \
+         {:.1} us less ({:.0}% of it)",
+        stages.len(),
+        shared,
+        apart,
+        apart - shared,
+        100.0 * (apart - shared) / apart,
+    );
+    // One round on a fresh object, to report what it read: one decode for the library, and an
+    // entry made for each of its entries with none found.
+    let fresh = StageEntries::new();
+    for f in &stages {
+        compile
+            .compile_function_from_entries(f, &inputs, &budget, &fresh)
+            .map_err(|error| format!("the translation refused: {error}"))?;
+    }
+    println!("one round's entries m/f {:?}", fresh.counts());
+    println!("load after {:.2}", load());
+    Ok(())
+}
+
 /// The median of `times` calls of `each`, after `warming` discarded, in microseconds.
 fn median_of(
     times: usize,
@@ -358,6 +487,12 @@ fn median_of(
 /// serialized SPIR-V words, the relocations, the requirements and every plain fact the compile
 /// records beside them. Two runs over one fixture set print the same lines or the change moved
 /// semantics.
+///
+/// Each shader is translated twice: on its own (`compile_function`, which shares nothing) and
+/// reading one `StageEntries` the whole run shares, as the runtime's device gives one object to
+/// every creation of its pipelines. The two digests must agree with each other and with the
+/// previous run's, so the line carries one digest and `shared` or the two digests where they
+/// differ.
 fn digest_mode(directory: &str, exact: bool) -> Result<(), String> {
     let notices = Notices::default();
     let device = Device::system_default_with(&options(&notices, directory, exact))
@@ -370,11 +505,14 @@ fn digest_mode(directory: &str, exact: bool) -> Result<(), String> {
         device.name(),
         if exact { "exact" } else { "default" }
     );
+    // One object the whole run shares, so a shader whose module another shader of the set also
+    // uses reads its decode rather than its own (`reflection/encoder_types`' six entries).
+    let shared = StageEntries::new();
     for &(fixture, entry) in SHADERS {
         let f = descriptor(&device, fixture, entry)?;
-        let line = match compile.compile_function(&f, &inputs, &budget) {
+        let digest = |made: Result<_, metal2vulkan::error::Error>| match made {
             Ok(compiled) => {
-                let bytes = compiled.to_bytes();
+                let bytes = metal2vulkan::library::CompiledFunction::to_bytes(&compiled);
                 format!(
                     "{} bytes {}",
                     metal2vulkan_conformance::sha256_hex(&bytes),
@@ -383,7 +521,16 @@ fn digest_mode(directory: &str, exact: bool) -> Result<(), String> {
             }
             Err(error) => format!("refused {error}"),
         };
+        let alone = digest(compile.compile_function(&f, &inputs, &budget));
+        let from_entries =
+            digest(compile.compile_function_from_entries(&f, &inputs, &budget, &shared));
+        let line = if alone == from_entries {
+            format!("{alone} shared")
+        } else {
+            format!("{alone} SHARED MOVED IT TO {from_entries}")
+        };
         println!("{:<46} {line}", format!("{fixture}:{entry}"));
     }
+    println!("entries m/f {:?}", shared.counts());
     Ok(())
 }
