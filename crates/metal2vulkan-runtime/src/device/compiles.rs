@@ -37,6 +37,13 @@
 //!   (`std::thread::scope`). Each device counts the calls in progress here, and in builds with
 //!   debug assertions the runtime's last hold of the device ([`unregister`], in the teardown just
 //!   before `vkDestroyDevice`) checks that none is.
+//! - **The time in the driver is counted.** Each call's nanoseconds inside the driver's entry
+//!   point are added to its device's record, graphics and compute apart ([`driver_nanos`],
+//!   `WorkCounts::render_pipeline_create_nanos` and `compute_pipeline_create_nanos`). The clock is
+//!   read on whichever thread makes the call, just before and just after the driver's one call, so
+//!   a call relayed to a thread of the runtime's is counted there and none is dropped; the relay's
+//!   own thread start and join, which the asking thread pays, lie outside the window and are the
+//!   runtime's.
 //! - Elsewhere than macOS there is no class: every call is made on the asking thread.
 //!
 //! The device's creation (`create.rs`) runs `vkCreateDevice` through [`at_user_initiated`] too,
@@ -48,11 +55,11 @@ use crate::{DebugMessage, MessageSink};
 use ash::vk;
 use std::cell::RefCell;
 use std::ffi::{c_void, CStr};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 
 /// A device whose pipeline makings come here: its driver's entry points, the runtime's holds of
-/// it, and its calls in progress.
+/// it, its calls in progress, and the time they spent in the driver.
 struct Driver {
     device: vk::Device,
     /// The runtime's devices over it: adopting one `VkDevice` twice holds it twice.
@@ -60,6 +67,17 @@ struct Driver {
     graphics: vk::PFN_vkCreateGraphicsPipelines,
     compute: vk::PFN_vkCreateComputePipelines,
     in_progress: Arc<AtomicUsize>,
+    nanos: Arc<Nanos>,
+}
+
+/// The time a routed device's pipeline makings spent inside its driver's entry points, by call
+/// ([`driver_nanos`], `WorkCounts::render_pipeline_create_nanos` and
+/// `compute_pipeline_create_nanos`). One record per `VkDevice`, so a `VkDevice` the runtime holds
+/// twice counts each making in both its devices' figures.
+#[derive(Default)]
+struct Nanos {
+    graphics: AtomicU64,
+    compute: AtomicU64,
 }
 
 /// Every device routed here and not yet let go ([`route`], [`unregister`]).
@@ -95,6 +113,7 @@ pub(super) unsafe fn route(device: ash::Device) -> ash::Device {
                 graphics: functions.create_graphics_pipelines,
                 compute: functions.create_compute_pipelines,
                 in_progress: Arc::default(),
+                nanos: Arc::default(),
             }),
         }
     }
@@ -142,17 +161,31 @@ pub(super) fn unregister(device: vk::Device) {
     }
 }
 
+/// Nanoseconds `device`'s pipeline makings spent inside its driver's entry points so far, graphics
+/// then compute; zeroes for a device not routed (`WorkCounts::render_pipeline_create_nanos`).
+pub(super) fn driver_nanos(device: vk::Device) -> (u64, u64) {
+    let drivers = DRIVERS.read().unwrap_or_else(PoisonError::into_inner);
+    match drivers.iter().find(|driver| driver.device == device) {
+        Some(driver) => (
+            driver.nanos.graphics.load(Ordering::Relaxed),
+            driver.nanos.compute.load(Ordering::Relaxed),
+        ),
+        None => (0, 0),
+    }
+}
+
 /// One call in progress on a routed device, counted until it returns.
 struct InProgress(Arc<AtomicUsize>);
 
 impl InProgress {
-    /// `device`'s driver entry points, with this call counted in progress; none for a device
-    /// not routed.
+    /// `device`'s driver entry points and its record of their time, with this call counted in
+    /// progress; none for a device not routed.
     fn of(
         device: vk::Device,
     ) -> Option<(
         vk::PFN_vkCreateGraphicsPipelines,
         vk::PFN_vkCreateComputePipelines,
+        Arc<Nanos>,
         InProgress,
     )> {
         let drivers = DRIVERS.read().unwrap_or_else(PoisonError::into_inner);
@@ -161,9 +194,22 @@ impl InProgress {
         Some((
             driver.graphics,
             driver.compute,
+            Arc::clone(&driver.nanos),
             InProgress(Arc::clone(&driver.in_progress)),
         ))
     }
+}
+
+/// `call`, the driver's one pipeline-making call, with the nanoseconds it took added to `counter`:
+/// the clock is read on whichever thread makes the call, just before and just after it, so the
+/// whole of the driver's work is in the window and nothing else of the runtime's is. The pair
+/// costs 27 ns on an M3 Max, against a driver's hundred microseconds and more.
+fn counting<R>(counter: &AtomicU64, call: impl FnOnce() -> R) -> R {
+    let entered = crate::gpu_time::host_nanos();
+    let made = call();
+    let taken = crate::gpu_time::host_nanos().saturating_sub(entered);
+    counter.fetch_add(taken, Ordering::Relaxed);
+    made
 }
 
 impl Drop for InProgress {
@@ -292,7 +338,7 @@ unsafe extern "system" fn create_graphics_pipelines(
     p_allocator: *const vk::AllocationCallbacks<'_>,
     p_pipelines: *mut vk::Pipeline,
 ) -> vk::Result {
-    let Some((driver, _, _in_progress)) = InProgress::of(device) else {
+    let Some((driver, _, nanos, _in_progress)) = InProgress::of(device) else {
         return vk::Result::ERROR_UNKNOWN;
     };
     let asked = Sent::new((
@@ -305,7 +351,9 @@ unsafe extern "system" fn create_graphics_pipelines(
     at_user_initiated(move || {
         let (cache, count, infos, allocator, pipelines) = asked.into_inner();
         // SAFETY: the caller's arguments, alive and untouched while it waits for this call.
-        let made = unsafe { driver(device, cache, count, infos, allocator, pipelines) };
+        let made = counting(&nanos.graphics, || unsafe {
+            driver(device, cache, count, infos, allocator, pipelines)
+        });
         exit_guard::called(Call::CreateGraphicsPipelines);
         made
     })
@@ -320,7 +368,7 @@ unsafe extern "system" fn create_compute_pipelines(
     p_allocator: *const vk::AllocationCallbacks<'_>,
     p_pipelines: *mut vk::Pipeline,
 ) -> vk::Result {
-    let Some((_, driver, _in_progress)) = InProgress::of(device) else {
+    let Some((_, driver, nanos, _in_progress)) = InProgress::of(device) else {
         return vk::Result::ERROR_UNKNOWN;
     };
     let asked = Sent::new((
@@ -333,7 +381,9 @@ unsafe extern "system" fn create_compute_pipelines(
     at_user_initiated(move || {
         let (cache, count, infos, allocator, pipelines) = asked.into_inner();
         // SAFETY: the caller's arguments, alive and untouched while it waits for this call.
-        let made = unsafe { driver(device, cache, count, infos, allocator, pipelines) };
+        let made = counting(&nanos.compute, || unsafe {
+            driver(device, cache, count, infos, allocator, pipelines)
+        });
         exit_guard::called(Call::CreateComputePipelines);
         made
     })
@@ -432,6 +482,122 @@ mod tests {
             )
             .pop()
             .expect("the warning of a dynamic restart")
+    }
+
+    /// How long a slow driver's pipeline making spends in the driver, in nanoseconds: a sleep, so
+    /// the call takes at least this however loaded the host is.
+    const SPENT: u64 = 2_000_000;
+
+    /// The makings of each kind [`a_making_s_time_in_the_driver_is_counted_by_the_call_it_made`]
+    /// asks for.
+    const MAKINGS: u64 = 3;
+
+    /// Spend [`SPENT`] nanoseconds, as a driver's compile does.
+    fn spend() {
+        std::thread::sleep(std::time::Duration::from_nanos(SPENT));
+    }
+
+    /// A driver's `vkCreateGraphicsPipelines` that spends [`SPENT`] nanoseconds and makes nothing.
+    unsafe extern "system" fn slow_graphics(
+        _: vk::Device,
+        _: vk::PipelineCache,
+        _: u32,
+        _: *const vk::GraphicsPipelineCreateInfo<'_>,
+        _: *const vk::AllocationCallbacks<'_>,
+        _: *mut vk::Pipeline,
+    ) -> vk::Result {
+        spend();
+        vk::Result::SUCCESS
+    }
+
+    /// A driver's `vkCreateComputePipelines` that spends [`SPENT`] nanoseconds and makes nothing.
+    unsafe extern "system" fn slow_compute(
+        _: vk::Device,
+        _: vk::PipelineCache,
+        _: u32,
+        _: *const vk::ComputePipelineCreateInfo<'_>,
+        _: *const vk::AllocationCallbacks<'_>,
+        _: *mut vk::Pipeline,
+    ) -> vk::Result {
+        spend();
+        vk::Result::SUCCESS
+    }
+
+    /// A device of handle `handle` whose driver has both slow makings, routed.
+    fn routed_slow(handle: u64) -> ash::Device {
+        let graphics: vk::PFN_vkCreateGraphicsPipelines = slow_graphics;
+        let compute: vk::PFN_vkCreateComputePipelines = slow_compute;
+        // SAFETY: a table of the two slow makings and ash's stubs; no other entry point is called.
+        let driver = unsafe {
+            ash::Device::load_with(
+                |name| {
+                    if name == c"vkCreateGraphicsPipelines" {
+                        graphics as *const c_void
+                    } else if name == c"vkCreateComputePipelines" {
+                        compute as *const c_void
+                    } else {
+                        std::ptr::null()
+                    }
+                },
+                vk::Device::from_raw(handle),
+            )
+        };
+        // SAFETY: its functions are the driver's.
+        unsafe { route(driver) }
+    }
+
+    /// The time a pipeline making spends inside the driver is counted on whichever thread makes
+    /// the call, and by the call it made: makings of one kind leave the other kind's figure
+    /// untouched, so a render-heavy run and a dispatch-heavy one are told apart. Each making here
+    /// sleeps [`SPENT`] nanoseconds in the driver, so the floor holds however loaded the host is;
+    /// a door that timed nothing would read zero for both.
+    #[test]
+    fn a_making_s_time_in_the_driver_is_counted_by_the_call_it_made() {
+        let device = routed_slow(0x6d32_7600_0010);
+        let handle = device.handle();
+        assert_eq!(
+            super::driver_nanos(handle),
+            (0, 0),
+            "a device just routed has made nothing"
+        );
+        let graphics_info = vk::GraphicsPipelineCreateInfo::default();
+        for _ in 0..MAKINGS {
+            // SAFETY: the routed device's making is the slow driver's, which reads no argument.
+            let _ = unsafe {
+                device.create_graphics_pipelines(vk::PipelineCache::null(), &[graphics_info], None)
+            };
+        }
+        let (graphics, compute) = super::driver_nanos(handle);
+        assert!(
+            graphics >= MAKINGS * SPENT,
+            "{MAKINGS} graphics makings of {SPENT} ns each read {graphics} ns"
+        );
+        assert_eq!(
+            compute, 0,
+            "a graphics making is not counted as a compute one"
+        );
+        let compute_info = vk::ComputePipelineCreateInfo::default();
+        for _ in 0..MAKINGS {
+            // SAFETY: as above.
+            let _ = unsafe {
+                device.create_compute_pipelines(vk::PipelineCache::null(), &[compute_info], None)
+            };
+        }
+        let (graphics_after, compute_after) = super::driver_nanos(handle);
+        assert!(
+            compute_after >= MAKINGS * SPENT,
+            "{MAKINGS} compute makings of {SPENT} ns each read {compute_after} ns"
+        );
+        assert_eq!(
+            graphics_after, graphics,
+            "a compute making is not counted as a graphics one"
+        );
+        unregister(handle);
+        assert_eq!(
+            super::driver_nanos(handle),
+            (0, 0),
+            "the record went with the device's last hold"
+        );
     }
 
     /// A device of handle `handle` whose driver has only `driver` ([`told`] or [`reports`]),

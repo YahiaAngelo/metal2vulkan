@@ -50,6 +50,8 @@ mod cpu_copy_layouts;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod creation_prediction_kinds;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod creation_split;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod deferred_calls;
 mod degradation;
 mod degradation_catalogue;
@@ -238,6 +240,7 @@ mod shader_cache;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod shader_cache_off_thread;
 mod shader_cache_queue;
+mod shader_cache_time;
 mod shadow;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod shadow_carried_read;

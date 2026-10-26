@@ -540,6 +540,13 @@ impl DeviceShared {
         self.functions.get()
     }
 
+    /// Nanoseconds the device's pipeline makings spent inside its driver, graphics then compute
+    /// (`compiles.rs`, `WorkCounts::render_pipeline_create_nanos` and
+    /// `compute_pipeline_create_nanos`).
+    pub(super) fn pipeline_create_nanos(&self) -> (u64, u64) {
+        compiles::driver_nanos(self.vk().handle())
+    }
+
     /// How much GPU work of the program's own the device has been given
     /// ([`gpu_work`](Self::gpu_work) field): the count a texture's host shadow is read against
     /// (`texture/host_shadow.rs`).

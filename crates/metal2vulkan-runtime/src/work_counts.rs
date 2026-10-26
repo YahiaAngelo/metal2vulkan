@@ -2868,6 +2868,74 @@ pub struct WorkCounts {
     /// `VkPipeline`s pipeline states' variants made (compute regions and their emulated mesh
     /// stages, indirect-bindable replays, and draws): none for one a released variant kept.
     pub variant_pipelines_made: u64,
+    /// Nanoseconds the runtime's `vkCreateGraphicsPipelines` calls spent inside the driver, from
+    /// the entry to its return (`device/compiles.rs`, the one door every graphics pipeline the
+    /// runtime makes on the device goes through): a state's variants and its creation's predicted
+    /// key (`pipeline/graphics.rs`), the device's own blit, resolve, copy and interleave
+    /// pipelines, and priming's. A call that makes several pipelines counts once, as the one call
+    /// it is.
+    ///
+    /// The clock is read on whichever thread makes the call, so none is dropped and none counted
+    /// twice: a program's thread; one of the pipeline pool's, which runs a creation's first piece
+    /// on the calling thread and the rest on its own (`pipeline/pool.rs`); or, where the asking
+    /// thread is below the user-initiated class on macOS, a thread of the runtime's that makes the
+    /// call while the asking thread waits (`device/compiles.rs`). Outside the window, and so the
+    /// runtime's rather than the driver's: the start and join of that thread, the building of the
+    /// create infos, and the `VkShaderModule`s, which are a Vulkan call of their own before this
+    /// one and are shared between creations (`shader_modules_made`, `shader_modules_shared`) --
+    /// on MoltenVK 1.4.2 one module is 100-190 us and is not made per creation.
+    ///
+    /// A render state's creation that makes no `VkPipeline` adds nothing here, a tile state's
+    /// among them (its creation makes none at all). A `VkDevice` the runtime adopted twice counts
+    /// each making in both its devices' figures.
+    pub render_pipeline_create_nanos: u64,
+    /// Nanoseconds the runtime's `vkCreateComputePipelines` calls spent inside the driver, read
+    /// exactly as [`render_pipeline_create_nanos`](Self::render_pipeline_create_nanos) is and over
+    /// the same one door: a compute state's variants and regions, a tile dispatch's, the device's
+    /// own blit, fill, mipmap and copy kernels, and priming's. The two are apart because a
+    /// dispatch-heavy run and a draw-heavy run ask the driver for different work, and one figure
+    /// over both cannot say which.
+    pub compute_pipeline_create_nanos: u64,
+    /// Nanoseconds the shader cache's directory reads took on the threads that asked for an
+    /// artifact (`shader_cache/store.rs`): the `stat` of each question about an entry
+    /// (`holds_function`, which a render creation's linking asks once per stage), and the `open`,
+    /// `stat` and `read` of each entry read -- a translated function, a compiled compute or render
+    /// pipeline, a render descriptor's linked-use answers, its reflection, its variant record, and
+    /// a making's driver pipeline data -- with the refresh of a hit's access time and the removal
+    /// of an entry a decoder refused.
+    ///
+    /// The directory's calls alone are in the window. A lookup the device's memo answered never
+    /// reaches the directory; one the write queue answered reads no file
+    /// (`ShaderCacheStatistics::queued_hits`); and the encode and decode of an entry's bytes lie
+    /// outside it, which matters because the kinds differ -- a compute or tile state stores its
+    /// artifact on every miss and a later process decodes it, where a render state stores one only
+    /// when linking a variant again would translate, so a warm render creation decodes none
+    /// (`pipeline/sources.rs`). `ShaderCacheStatistics`' per-kind hits and misses say which kind a
+    /// run's lookups walked. These reads are always on a thread that asked -- a program's or one
+    /// of the pipeline pool's -- never the cache thread's.
+    pub shader_cache_read_nanos: u64,
+    /// Nanoseconds the shader cache's directory writes took on the threads that asked for an
+    /// artifact: the `mkdir`, the temporary file, its write and flush, and the `rename` over the
+    /// entry -- four journalled filesystem calls -- of each entry such a thread wrote itself,
+    /// which is each entry counted in
+    /// [`shader_cache_writes_on_thread`](Self::shader_cache_writes_on_thread). A creation whose
+    /// entry the device's cache thread took adds nothing here.
+    pub shader_cache_write_nanos: u64,
+    /// Nanoseconds the device's cache thread spent in the directory (`shader_cache/worker.rs`):
+    /// the writes it took from the queue, and the scan at device creation and the removals that
+    /// keep the directory under its cap. None of this is on a creation's path -- it is here so the
+    /// directory's whole cost is attributable and no part of it is dropped -- and it is host CPU
+    /// that runs beside the program's threads.
+    pub shader_cache_off_thread_nanos: u64,
+    /// Entries a thread that asked for an artifact wrote itself rather than hand to the device's
+    /// cache thread, because the queue was at one of its bounds or the entry is larger than the
+    /// whole bound: the same count as `ShaderCacheStatistics::writes_on_thread`, here because a
+    /// cost record carries `WorkCounts` and not that type. It partitions creations by a mechanism
+    /// rather than by their cost: on an M3 Max a creation on a fresh key that writes its own entry
+    /// costs about 180 us more than one the cache thread took (a median 223.9 us against 42.6 us),
+    /// so this is the largest mechanism left in a creation that reaches 200 us, and the time it
+    /// took is [`shader_cache_write_nanos`](Self::shader_cache_write_nanos).
+    pub shader_cache_writes_on_thread: u64,
     /// Of those, the makings that waited for a twin's making in the air, of the same functions
     /// and specialization, to land before their own (`pipeline/flight.rs`).
     pub flights_followed: u64,
@@ -4441,6 +4509,11 @@ impl Device {
         // (`render/deferral.rs`).
         self.shared().deferred.lower_all();
         let counters = &self.shared().counts;
+        // The driver's time in its pipeline makings (`device/compiles.rs`, by `VkDevice`), and
+        // what the shader cache's directory cost (`shader_cache/store.rs`): neither is in
+        // `Counters`.
+        let (render_create_nanos, compute_create_nanos) = self.shared().pipeline_create_nanos();
+        let directory = self.shared().shader_cache.directory_time();
         let churn = counters.churn.snapshot();
         let group_end = |end: GroupEnd| counters.group_ends[end as usize].load(Ordering::Relaxed);
         let first_work_order = self.shared().textures.first_moves.submissions_waited();
@@ -4543,6 +4616,12 @@ impl Device {
             pipeline_layouts_made: counters.pipeline_layouts_made.load(Ordering::Relaxed),
             pipeline_layouts_shared: counters.pipeline_layouts_shared.load(Ordering::Relaxed),
             variant_pipelines_made: counters.variant_pipelines_made.load(Ordering::Relaxed),
+            render_pipeline_create_nanos: render_create_nanos,
+            compute_pipeline_create_nanos: compute_create_nanos,
+            shader_cache_read_nanos: directory.read_nanos,
+            shader_cache_write_nanos: directory.write_nanos,
+            shader_cache_off_thread_nanos: directory.off_thread_nanos,
+            shader_cache_writes_on_thread: directory.writes_on_thread,
             flights_followed: counters.flights_followed.load(Ordering::Relaxed),
             predicated_loop_runs_again: counters.predicated_loop_runs_again.load(Ordering::Relaxed),
             variants_taken_back: counters.variants_taken_back.load(Ordering::Relaxed),

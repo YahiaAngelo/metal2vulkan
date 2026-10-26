@@ -70,7 +70,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use store::{count, entry_name, Directory, Lookup, Store};
+use store::{count, entry_name, Directory, Looked, Lookup, Store};
 use worker::{Asked, Worker};
 
 /// The default cap of a cache directory, in bytes: 25 GiB.
@@ -152,6 +152,19 @@ pub(crate) fn found_in_cache(
     Some(whole.flags.contains(hit) || every_stage)
 }
 
+/// What a device's shader cache directory cost it ([`ShaderCache::directory_time`]), which
+/// `WorkCounts` reports and [`ShaderCacheStatistics`] does not. Not part of the API.
+pub(super) struct DirectoryTime {
+    /// `WorkCounts::shader_cache_read_nanos`.
+    pub(super) read_nanos: u64,
+    /// `WorkCounts::shader_cache_write_nanos`.
+    pub(super) write_nanos: u64,
+    /// `WorkCounts::shader_cache_off_thread_nanos`.
+    pub(super) off_thread_nanos: u64,
+    /// `WorkCounts::shader_cache_writes_on_thread`.
+    pub(super) writes_on_thread: u64,
+}
+
 /// A device's shader cache counts since it was made ([`Device::shader_cache_statistics`]). No
 /// Metal counterpart.
 #[non_exhaustive]
@@ -161,6 +174,28 @@ pub struct ShaderCacheStatistics {
     pub hits: u64,
     /// Artifact lookups that found nothing usable, for any reason; each was compiled.
     pub misses: u64,
+    /// Of [`hits`](Self::hits), those of a translated function: a creation asks for one per stage
+    /// it compiles. The three kinds are counted apart because only the kind says which artifact a
+    /// lookup decoded, and they differ in size and in how often a creation stores one -- a
+    /// creation that makes one answered lookup and one unanswered one cannot be read off the
+    /// whole counts.
+    pub function_hits: u64,
+    /// Of [`misses`](Self::misses), those of a translated function: each one a function
+    /// translated.
+    pub function_misses: u64,
+    /// Of [`hits`](Self::hits), those of a compiled compute pipeline: a compute or tile state's
+    /// whole artifact, which such a creation stores on every miss
+    /// (`pipeline/sources.rs`'s `kernel`).
+    pub compute_pipeline_hits: u64,
+    /// Of [`misses`](Self::misses), those of a compiled compute pipeline.
+    pub compute_pipeline_misses: u64,
+    /// Of [`hits`](Self::hits), those of a compiled render pipeline: a render state's whole
+    /// artifact, which such a creation stores only where linking a variant again would translate
+    /// (`pipeline/sources.rs`'s `linked_render`), so a warm render creation decodes none of
+    /// these.
+    pub render_pipeline_hits: u64,
+    /// Of [`misses`](Self::misses), those of a compiled render pipeline.
+    pub render_pipeline_misses: u64,
     /// Entries found under the right name whose contents failed the checks, each removed.
     pub rejected: u64,
     /// Entries that could not be read.
@@ -467,7 +502,7 @@ impl ShaderCache {
         compile: &metal2vulkan::device::Device,
         key: &FunctionCompileKey,
     ) -> Option<(CompiledFunction, u64)> {
-        self.load(EntryKind::Function, key.digest(), compile, |bytes| {
+        self.load(Looked::Function, key.digest(), compile, |bytes| {
             CompiledFunction::from_bytes_for_key(bytes, key, compile)
         })
     }
@@ -475,8 +510,9 @@ impl ShaderCache {
     /// Whether the directory holds the function of `key` for `compile`'s profile: its file is in
     /// place, or its write is queued for the cache thread (`worker.rs`), whose rename has not
     /// happened yet. A question about the directory, so it reads no contents, decodes nothing and
-    /// counts in no statistic: a hit here is not a lookup answered, and a miss is not a
-    /// translation.
+    /// counts in no hit or miss: a hit here is not a lookup answered, and a miss is not a
+    /// translation. Its one `stat` is counted in the directory's read time
+    /// (`WorkCounts::shader_cache_read_nanos`).
     pub(super) fn holds_function(
         &self,
         compile: &metal2vulkan::device::Device,
@@ -512,7 +548,7 @@ impl ShaderCache {
         compile: &metal2vulkan::device::Device,
         key: &PipelineKey,
     ) -> Option<(ComputePipeline, u64)> {
-        self.load(EntryKind::ComputePipeline, key.digest(), compile, |bytes| {
+        self.load(Looked::ComputePipeline, key.digest(), compile, |bytes| {
             ComputePipeline::from_bytes_for_key(bytes, key, compile)
         })
     }
@@ -538,7 +574,7 @@ impl ShaderCache {
         compile: &metal2vulkan::device::Device,
         key: &PipelineKey,
     ) -> Option<(RenderPipeline, u64)> {
-        self.load(EntryKind::RenderPipeline, key.digest(), compile, |bytes| {
+        self.load(Looked::RenderPipeline, key.digest(), compile, |bytes| {
             RenderPipeline::from_bytes_for_key(bytes, key, compile)
         })
     }
@@ -557,11 +593,12 @@ impl ShaderCache {
         )
     }
 
-    /// The entry of `kind` under `key` for `compile`'s profile, as `decode` accepts it, and its
-    /// length. A miss when absent, unreadable, or refused (then removed).
+    /// The entry of `looked`'s kind under `key` for `compile`'s profile, as `decode` accepts it,
+    /// and its length. A miss when absent, unreadable, or refused (then removed). Counted in the
+    /// whole hit and miss counts and in `looked`'s own.
     fn load<T, E>(
         &self,
-        kind: EntryKind,
+        looked: Looked,
         key: &Hash256,
         compile: &metal2vulkan::device::Device,
         decode: impl FnOnce(&[u8]) -> Result<T, E>,
@@ -569,7 +606,7 @@ impl ShaderCache {
         let counters = &self.store.counters;
         let name = entry_name(
             self.store.directory().build(),
-            kind,
+            looked.kind(),
             key,
             &compile.profile_fingerprint(),
         );
@@ -579,11 +616,12 @@ impl ShaderCache {
             Lookup::Hit(found) => Some(found),
             Lookup::Absent | Lookup::Unreadable | Lookup::Rejected => None,
         };
-        count(if found.is_some() {
-            &counters.hits
-        } else {
-            &counters.misses
-        });
+        let (whole, by) = match found.is_some() {
+            true => (&counters.hits, &counters.hits_by),
+            false => (&counters.misses, &counters.misses_by),
+        };
+        count(whole);
+        count(&by[looked as usize]);
         found
     }
 
@@ -614,6 +652,20 @@ impl ShaderCache {
         length
     }
 
+    /// What the directory cost this device: its time, the asking threads' apart from the cache
+    /// thread's, and the entries an asking thread wrote itself
+    /// (`WorkCounts::shader_cache_read_nanos` and its fellows).
+    pub(super) fn directory_time(&self) -> DirectoryTime {
+        let counters = &self.store.counters;
+        let read = |counter: &std::sync::atomic::AtomicU64| counter.load(Ordering::Relaxed);
+        DirectoryTime {
+            read_nanos: read(&counters.read_nanos),
+            write_nanos: read(&counters.write_nanos),
+            off_thread_nanos: read(&counters.off_thread_nanos),
+            writes_on_thread: read(&counters.writes_on_thread),
+        }
+    }
+
     /// The counts so far.
     fn statistics(&self) -> ShaderCacheStatistics {
         let counters = &self.store.counters;
@@ -621,6 +673,12 @@ impl ShaderCache {
         ShaderCacheStatistics {
             hits: read(&counters.hits),
             misses: read(&counters.misses),
+            function_hits: read(&counters.hits_by[Looked::Function as usize]),
+            function_misses: read(&counters.misses_by[Looked::Function as usize]),
+            compute_pipeline_hits: read(&counters.hits_by[Looked::ComputePipeline as usize]),
+            compute_pipeline_misses: read(&counters.misses_by[Looked::ComputePipeline as usize]),
+            render_pipeline_hits: read(&counters.hits_by[Looked::RenderPipeline as usize]),
+            render_pipeline_misses: read(&counters.misses_by[Looked::RenderPipeline as usize]),
             rejected: read(&counters.rejected),
             read_failures: read(&counters.read_failures),
             writes: read(&counters.writes),

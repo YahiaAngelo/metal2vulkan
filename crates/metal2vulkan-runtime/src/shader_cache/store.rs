@@ -21,6 +21,12 @@
 //!   bounded, an entry queued is visible to this device's lookups at once, and what is queued when
 //!   the device goes is written before its drop returns (`worker.rs` states the bound and what
 //!   happens at it). A store with no cache thread (the tests') writes on the calling thread.
+//! - **The directory's time is counted**, in three figures the asking thread's are apart from the
+//!   cache thread's: the reads ([`Counters::read_nanos`]), the writes a thread that asked made
+//!   itself ([`Counters::write_nanos`]), and everything the device's cache thread did here
+//!   ([`Counters::off_thread_nanos`]). Each is read from the host's clock around the directory's
+//!   calls alone, so a lookup the write queue answered, and the encode and decode of an entry's
+//!   bytes, are in none of them (`WorkCounts::shader_cache_read_nanos`).
 //! - Every scan that finds the directory past its cap removes the least recently used entries,
 //!   by their access time, which a hit refreshes, down to [`LOW_WATER`] of the cap. At device
 //!   creation the scan also removes other builds' directories that nothing used for
@@ -193,6 +199,10 @@ enum Found {
 pub(crate) struct Counters {
     pub(crate) hits: AtomicU64,
     pub(crate) misses: AtomicU64,
+    /// Of `hits`, by the kind of artifact looked up, in [`Looked`]'s order.
+    pub(crate) hits_by: [AtomicU64; Looked::COUNT],
+    /// Of `misses`, likewise.
+    pub(crate) misses_by: [AtomicU64; Looked::COUNT],
     pub(crate) rejected: AtomicU64,
     pub(crate) read_failures: AtomicU64,
     pub(crate) writes: AtomicU64,
@@ -217,6 +227,50 @@ pub(crate) struct Counters {
     ///
     /// [`ShaderCacheStatistics`]: super::ShaderCacheStatistics
     pub(crate) driver_caches_shared: AtomicU64,
+    /// Nanoseconds the directory's reads took on the threads that asked for an artifact: the
+    /// questions about an entry ([`Store::holds`]), the reads of one ([`Store::load`],
+    /// [`Store::load_content`]), the refresh of a hit's access time, and the removal of an entry
+    /// a decoder refused or that is longer than the directory takes. Not in
+    /// [`ShaderCacheStatistics`]; `WorkCounts::shader_cache_read_nanos` reports it.
+    ///
+    /// [`ShaderCacheStatistics`]: super::ShaderCacheStatistics
+    pub(crate) read_nanos: AtomicU64,
+    /// Nanoseconds the directory's writes took on the threads that asked for an artifact: the
+    /// `mkdir`, the temporary file, its write and flush and the `rename` of each entry a thread
+    /// wrote itself because the queue was at a bound or the store has no cache thread
+    /// (`writes_on_thread`). Reported as `WorkCounts::shader_cache_write_nanos`.
+    pub(crate) write_nanos: AtomicU64,
+    /// Nanoseconds the device's cache thread spent in the directory: the writes it took from the
+    /// queue (`writes_queued`), and the scans and removals that bound the directory. None of it
+    /// is on a creation's path. Reported as `WorkCounts::shader_cache_off_thread_nanos`.
+    pub(crate) off_thread_nanos: AtomicU64,
+}
+
+/// The kinds of artifact a lookup asks the directory for, which [`Counters::hits_by`] and
+/// [`Counters::misses_by`] count apart: one entry kind each, and the three a pipeline state's
+/// creation looks up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Looked {
+    /// A translated function ([`EntryKind::Function`]).
+    Function = 0,
+    /// A compiled compute pipeline ([`EntryKind::ComputePipeline`]).
+    ComputePipeline = 1,
+    /// A compiled render pipeline ([`EntryKind::RenderPipeline`]).
+    RenderPipeline = 2,
+}
+
+impl Looked {
+    /// How many there are.
+    pub(crate) const COUNT: usize = 3;
+
+    /// The kind of entry it is looked up as.
+    pub(crate) fn kind(self) -> EntryKind {
+        match self {
+            Looked::Function => EntryKind::Function,
+            Looked::ComputePipeline => EntryKind::ComputePipeline,
+            Looked::RenderPipeline => EntryKind::RenderPipeline,
+        }
+    }
 }
 
 impl Counters {
@@ -227,6 +281,17 @@ impl Counters {
             super::driver::Refusal::Mismatched => &self.driver_data_mismatched,
         });
     }
+}
+
+/// Run `f`, the directory's calls and nothing else, with the nanoseconds they took on this thread
+/// added to `counter` ([`Counters::read_nanos`] and its two fellows). Two clock reads, 27 ns
+/// together on an M3 Max, against the microseconds of the filesystem call they bracket.
+fn timed<R>(counter: &AtomicU64, f: impl FnOnce() -> R) -> R {
+    let entered = crate::gpu_time::host_nanos();
+    let done = f();
+    let taken = crate::gpu_time::host_nanos().saturating_sub(entered);
+    counter.fetch_add(taken, Ordering::Relaxed);
+    done
 }
 
 /// Add one to `counter`.
@@ -354,14 +419,16 @@ impl Store {
 
     /// Whether the entry named `name` is there to be read: its file is in place and of a length
     /// this directory takes, or its write is queued for the cache thread, whose rename has not
-    /// happened yet. Reads no contents and counts nothing -- it is a question about the
-    /// directory, not a lookup of an entry.
+    /// happened yet. Reads no contents and counts in no hit or miss -- it is a question about the
+    /// directory, not a lookup of an entry -- but its `stat` is in [`Counters::read_nanos`].
     pub(crate) fn holds(&self, name: &str) -> bool {
         let path = self.directory.entry_path(name);
         if self.asked.as_ref().is_some_and(|asked| asked.holds(&path)) {
             return true;
         }
-        fs::metadata(&path).is_ok_and(|metadata| metadata.len() <= self.entry_limit())
+        timed(&self.counters.read_nanos, || {
+            fs::metadata(&path).is_ok_and(|metadata| metadata.len() <= self.entry_limit())
+        })
     }
 
     /// The entry named `name`, as `decode` accepts it. A hit refreshes the entry's access
@@ -431,7 +498,7 @@ impl Store {
     /// a hit from the queue (no file) is counted as one the directory had not written yet.
     fn accepted(&self, file: Option<&fs::File>) {
         match file {
-            Some(file) => touch(file),
+            Some(file) => timed(&self.counters.read_nanos, || touch(file)),
             None => count(&self.counters.queued_hits),
         }
     }
@@ -442,13 +509,14 @@ impl Store {
         if let Some(asked) = &self.asked {
             asked.discard(path);
         }
-        remove(path);
+        timed(&self.counters.read_nanos, || remove(path));
         count(&self.counters.rejected);
     }
 
     /// Write `bytes` as the record named `name` in the content directory, as
     /// [`Store::write_soon`] writes an entry: on the cache thread, counted in no statistic but
-    /// the bytes the directory holds.
+    /// the bytes the directory holds and, where this thread writes it itself, the time
+    /// ([`Counters::write_nanos`]).
     pub(crate) fn write_record_soon(&self, name: &str, bytes: Vec<u8>) -> io::Result<u64> {
         self.write_soon_at(self.directory.record_path(name), name, bytes)
     }
@@ -460,28 +528,30 @@ impl Store {
         if let Some(bytes) = self.asked.as_ref().and_then(|asked| asked.pending(path)) {
             return Found::Queued(bytes);
         }
-        let file = match fs::File::open(path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Found::Absent,
-            Err(_) => return Found::Failed,
-        };
-        let Ok(length) = file.metadata().map(|metadata| metadata.len()) else {
-            return Found::Failed;
-        };
-        let limit = self.entry_limit();
-        if length > limit {
-            remove(path);
-            return Found::Absent;
-        }
-        let mut bytes = Vec::with_capacity(usize::try_from(length).unwrap_or(0));
-        match (&file).take(limit + 1).read_to_end(&mut bytes) {
-            Ok(_) if bytes.len() as u64 <= limit => Found::Bytes(bytes, file),
-            Ok(_) => {
+        timed(&self.counters.read_nanos, || {
+            let file = match fs::File::open(path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Found::Absent,
+                Err(_) => return Found::Failed,
+            };
+            let Ok(length) = file.metadata().map(|metadata| metadata.len()) else {
+                return Found::Failed;
+            };
+            let limit = self.entry_limit();
+            if length > limit {
                 remove(path);
-                Found::Absent
+                return Found::Absent;
             }
-            Err(_) => Found::Failed,
-        }
+            let mut bytes = Vec::with_capacity(usize::try_from(length).unwrap_or(0));
+            match (&file).take(limit + 1).read_to_end(&mut bytes) {
+                Ok(_) if bytes.len() as u64 <= limit => Found::Bytes(bytes, file),
+                Ok(_) => {
+                    remove(path);
+                    Found::Absent
+                }
+                Err(_) => Found::Failed,
+            }
+        })
     }
 
     /// Give `bytes` to the cache thread to write as the entry named `name` (`worker.rs`): the
@@ -499,7 +569,9 @@ impl Store {
         let takeable = length <= QUEUED_BYTES && length <= self.entry_limit();
         let Some(asked) = self.asked.as_ref().filter(|_| takeable) else {
             count(&self.counters.writes_on_thread);
-            return self.write_at(&path, name, &bytes);
+            return timed(&self.counters.write_nanos, || {
+                self.write_at(&path, name, &bytes)
+            });
         };
         match asked.queue(Queued::new(path, bytes)) {
             None => {
@@ -508,19 +580,25 @@ impl Store {
             }
             Some(write) => {
                 count(&self.counters.writes_on_thread);
-                self.write_at(&write.path, name, &write.bytes)
+                timed(&self.counters.write_nanos, || {
+                    self.write_at(&write.path, name, &write.bytes)
+                })
             }
         }
     }
 
     /// Write the entry at `path` that the cache thread took, counting a failure as the calling
-    /// thread's would be counted (`ShaderCacheStatistics::write_failures`).
+    /// thread's would be counted (`ShaderCacheStatistics::write_failures`) and its time as the
+    /// cache thread's ([`Counters::off_thread_nanos`]).
     pub(crate) fn write_queued(&self, path: &Path, bytes: &[u8]) {
         let name = path
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("entry");
-        if self.write_at(path, name, bytes).is_err() {
+        let written = timed(&self.counters.off_thread_nanos, || {
+            self.write_at(path, name, bytes)
+        });
+        if written.is_err() {
             self.write_failed();
         }
     }
@@ -565,15 +643,16 @@ impl Store {
 
     /// The scan at device creation: remove other builds' directories nothing used for
     /// [`UNUSED_BUILD`] and stale temporary files, count what remains, and remove the least
-    /// recently used entries if that is past the cap. Stops early when `stop` is set.
+    /// recently used entries if that is past the cap. Stops early when `stop` is set. The cache
+    /// thread's time ([`Counters::off_thread_nanos`]).
     pub(crate) fn sweep(&self, stop: &AtomicBool) {
-        self.scan(stop, true);
+        timed(&self.counters.off_thread_nanos, || self.scan(stop, true));
     }
 
     /// Bring the directory under its cap: count every build's entries again and remove the
     /// least recently used past it. Stops early when `stop` is set.
     pub(crate) fn evict(&self, stop: &AtomicBool) {
-        self.scan(stop, false);
+        timed(&self.counters.off_thread_nanos, || self.scan(stop, false));
     }
 
     /// [`Store::sweep`] (with `unused_builds`) or [`Store::evict`].

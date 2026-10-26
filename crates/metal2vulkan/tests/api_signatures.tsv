@@ -2381,6 +2381,8 @@ field	metal2vulkan-runtime::ShaderCacheError.path	pub path: Option<PathBuf>
 field	metal2vulkan-runtime::ShaderCacheOptions.capacity	pub capacity: u64
 field	metal2vulkan-runtime::ShaderCacheOptions.directory	pub directory: Option<PathBuf>
 field	metal2vulkan-runtime::ShaderCacheOptions.memory_capacity	pub memory_capacity: u64
+field	metal2vulkan-runtime::ShaderCacheStatistics.compute_pipeline_hits	pub compute_pipeline_hits: u64
+field	metal2vulkan-runtime::ShaderCacheStatistics.compute_pipeline_misses	pub compute_pipeline_misses: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.driver_data_found	pub driver_data_found: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.driver_data_mismatched	pub driver_data_mismatched: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.driver_data_truncated	pub driver_data_truncated: u64
@@ -2390,11 +2392,15 @@ field	metal2vulkan-runtime::ShaderCacheStatistics.driver_pipeline_hits	pub drive
 field	metal2vulkan-runtime::ShaderCacheStatistics.driver_pipeline_misses	pub driver_pipeline_misses: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.driver_saves	pub driver_saves: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.evictions	pub evictions: u64
+field	metal2vulkan-runtime::ShaderCacheStatistics.function_hits	pub function_hits: u64
+field	metal2vulkan-runtime::ShaderCacheStatistics.function_misses	pub function_misses: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.hits	pub hits: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.misses	pub misses: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.queued_hits	pub queued_hits: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.read_failures	pub read_failures: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.rejected	pub rejected: u64
+field	metal2vulkan-runtime::ShaderCacheStatistics.render_pipeline_hits	pub render_pipeline_hits: u64
+field	metal2vulkan-runtime::ShaderCacheStatistics.render_pipeline_misses	pub render_pipeline_misses: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.write_failures	pub write_failures: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.writes	pub writes: u64
 field	metal2vulkan-runtime::ShaderCacheStatistics.writes_on_thread	pub writes_on_thread: u64
@@ -2554,6 +2560,7 @@ field	metal2vulkan-runtime::WorkCounts.completion_arms	pub completion_arms: u64
 field	metal2vulkan-runtime::WorkCounts.completion_arms_after_a_wake	pub completion_arms_after_a_wake: u64
 field	metal2vulkan-runtime::WorkCounts.completion_reads_ran_ahead	pub completion_reads_ran_ahead: u64
 field	metal2vulkan-runtime::WorkCounts.compressed_rows_rewritten	pub compressed_rows_rewritten: u64
+field	metal2vulkan-runtime::WorkCounts.compute_pipeline_create_nanos	pub compute_pipeline_create_nanos: u64
 field	metal2vulkan-runtime::WorkCounts.copy_regions_split	pub copy_regions_split: u64
 field	metal2vulkan-runtime::WorkCounts.copy_sites	pub copy_sites: [CopySite; 32]
 field	metal2vulkan-runtime::WorkCounts.cpu_block_decodes	pub cpu_block_decodes: u64
@@ -2771,6 +2778,7 @@ field	metal2vulkan-runtime::WorkCounts.render_passes_begun_inline_splits	pub ren
 field	metal2vulkan-runtime::WorkCounts.render_passes_begun_instances	pub render_passes_begun_instances: u64
 field	metal2vulkan-runtime::WorkCounts.render_passes_begun_resolves	pub render_passes_begun_resolves: u64
 field	metal2vulkan-runtime::WorkCounts.render_passes_made	pub render_passes_made: u64
+field	metal2vulkan-runtime::WorkCounts.render_pipeline_create_nanos	pub render_pipeline_create_nanos: u64
 field	metal2vulkan-runtime::WorkCounts.replay_log_bytes	pub replay_log_bytes: u64
 field	metal2vulkan-runtime::WorkCounts.replay_logs_kept	pub replay_logs_kept: u64
 field	metal2vulkan-runtime::WorkCounts.replay_tables_pointed	pub replay_tables_pointed: u64
@@ -2804,6 +2812,10 @@ field	metal2vulkan-runtime::WorkCounts.set_zero_sets_reused	pub set_zero_sets_re
 field	metal2vulkan-runtime::WorkCounts.set_zero_writes_if_shapes_shared	pub set_zero_writes_if_shapes_shared: u64
 field	metal2vulkan-runtime::WorkCounts.set_zero_writes_on_equal_shape_switches	pub set_zero_writes_on_equal_shape_switches: u64
 field	metal2vulkan-runtime::WorkCounts.set_zero_writes_pushed	pub set_zero_writes_pushed: u64
+field	metal2vulkan-runtime::WorkCounts.shader_cache_off_thread_nanos	pub shader_cache_off_thread_nanos: u64
+field	metal2vulkan-runtime::WorkCounts.shader_cache_read_nanos	pub shader_cache_read_nanos: u64
+field	metal2vulkan-runtime::WorkCounts.shader_cache_write_nanos	pub shader_cache_write_nanos: u64
+field	metal2vulkan-runtime::WorkCounts.shader_cache_writes_on_thread	pub shader_cache_writes_on_thread: u64
 field	metal2vulkan-runtime::WorkCounts.shader_modules_made	pub shader_modules_made: u64
 field	metal2vulkan-runtime::WorkCounts.shader_modules_shared	pub shader_modules_shared: u64
 field	metal2vulkan-runtime::WorkCounts.shadow_attachment_clears	pub shadow_attachment_clears: u64
