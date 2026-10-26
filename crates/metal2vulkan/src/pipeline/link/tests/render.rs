@@ -621,7 +621,7 @@ fn limits_pull_attributes_and_a_foreign_projection_is_refused() {
         }
     );
     let d = descriptor();
-    p.fields.limits.max_vertex_input_attributes = 2;
+    p.edit(|x| x.limits.max_vertex_input_attributes = 2);
     let proj = vertex::vertex_fetch_projection(Some(&d), &used, &p).expect("projection");
     assert!(matches!(proj.attributes[&4], VertexFetch::Pulled { .. }));
     assert!(matches!(
@@ -631,7 +631,7 @@ fn limits_pull_attributes_and_a_foreign_projection_is_refused() {
         }
     ));
     let mut p = profile("moltenvk-m3");
-    p.fields.limits.max_vertex_input_bindings = 1;
+    p.edit(|x| x.limits.max_vertex_input_bindings = 1);
     let proj = vertex::vertex_fetch_projection(Some(&d), &used, &p).expect("projection");
     assert!(matches!(proj.attributes[&4], VertexFetch::Pulled { .. }));
     assert!(matches!(
@@ -900,7 +900,7 @@ fn portability_stride_alignment_pulls_static_strides() {
     assert_eq!(fetch(&mvk, 5), fixed);
     assert_ne!(fetch(&mvk, 0), fixed);
     let mut four = mvk.clone();
-    four.fields.limits.min_vertex_input_binding_stride_alignment = Some(4);
+    four.edit(|x| x.limits.min_vertex_input_binding_stride_alignment = Some(4));
     assert_eq!(fetch(&four, 8), fixed);
     assert_ne!(fetch(&four, 6), fixed);
     assert_ne!(fetch(&four, 2), fixed);
@@ -937,7 +937,9 @@ fn the_portability_subset_can_pull_attributes_past_their_stride() {
     assert!(mvk.fields().enabled.features.contains(&beyond));
     assert_eq!(fetch(&mvk, 16), fixed);
     let mut withheld = mvk.clone();
-    withheld.fields.enabled.features.remove(&beyond);
+    withheld.edit(|x| {
+        x.enabled.features.remove(&beyond);
+    });
     assert_ne!(fetch(&withheld, 16), fixed);
     assert_eq!(fetch(&withheld, 24), fixed);
     assert_eq!(fetch(&profile("lavapipe"), 16), fixed);
@@ -970,7 +972,9 @@ fn the_portability_subset_can_withhold_constant_alpha_color_factors() {
     let mvk = profile("moltenvk-m3");
     assert!(mvk.fields().enabled.features.contains(&constant_alpha));
     let mut withheld = mvk.clone();
-    withheld.fields.enabled.features.remove(&constant_alpha);
+    withheld.edit(|x| {
+        x.enabled.features.remove(&constant_alpha);
+    });
     for factor in [BlendFactor::BlendAlpha, BlendFactor::OneMinusBlendAlpha] {
         for p in [&mvk, &profile("lavapipe")] {
             assert!(
@@ -1045,7 +1049,9 @@ fn the_constant_alpha_drop_follows_the_descriptor_checks() {
     let mvk = profile("moltenvk-m3");
     assert!(mvk.fields().fragment.dual_src_blend);
     let mut withheld = mvk.clone();
-    withheld.fields.enabled.features.remove(&constant_alpha);
+    withheld.edit(|x| {
+        x.enabled.features.remove(&constant_alpha);
+    });
     let invalid = Error::InvalidDescriptor(DescriptorError::ColorAttachment { index: 0 });
     for (output, mask) in [
         (color(0, 1, f4), ColorWriteMask::ALL),
@@ -1103,7 +1109,7 @@ fn static_strides_under_dynamic_strides_cover_their_attributes() {
     );
     assert_eq!(fixed(&project(&lavapipe, 4)), [2], "both end past 4");
     let mut static_only = lavapipe.clone();
-    static_only.fields.dynamic_vertex_stride = false;
+    static_only.edit(|x| x.dynamic_vertex_stride = false);
     assert_eq!(fixed(&project(&static_only, 4)), [0, 1, 2]);
 }
 
@@ -1945,7 +1951,7 @@ fn a_dual_source_blend_needs_dual_src_blend() {
 fn color_attachments_beyond_the_limit_are_refused() {
     use crate::pipeline::descriptor::ColorAttachmentDescriptor;
     let mut p = profile("moltenvk-m3");
-    p.fields.limits.max_color_attachments = 4;
+    p.edit(|x| x.limits.max_color_attachments = 4);
     let mut r = RenderLinkInputs::new();
     r.color_attachments[5] = Some(ColorAttachmentDescriptor::new(PixelFormat::RGBA8Unorm));
     let va = artifact(iface(Stage::Vertex, vec![], vec![]), None);
@@ -2302,7 +2308,9 @@ fn the_raster_sample_count_needs_the_framebuffer_sample_counts() {
         for &missing in &want {
             let mut p = base.clone();
             for alternative in alternatives(missing) {
-                p.fields.enabled.properties.remove(&alternative);
+                p.edit(|x| {
+                    x.enabled.properties.remove(&alternative);
+                });
             }
             assert_eq!(
                 link_on(&p, &colors, depth, stencil, 4, true).unwrap_err(),
@@ -2317,7 +2325,9 @@ fn the_raster_sample_count_needs_the_framebuffer_sample_counts() {
         ));
         // One sample, or no rasterization, needs nothing.
         let mut bare = base.clone();
-        bare.fields.enabled.properties.clear();
+        bare.edit(|x| {
+            x.enabled.properties.clear();
+        });
         let none = &bare.fields().enabled.properties;
         let g = link_on(&bare, &colors, depth, stencil, 1, true).expect("one sample");
         assert_eq!(g.sample_count_properties(none), Ok(BTreeSet::new()));
@@ -2329,15 +2339,21 @@ fn the_raster_sample_count_needs_the_framebuffer_sample_counts() {
     let integer = P::FramebufferIntegerColorSampleCount(4);
     let own = P::ColorAttachmentSampleCount(vk::Format::R32G32B32A32_UINT, 4);
     let mut p = base.clone();
-    p.fields.enabled.properties.remove(&integer);
-    p.fields.enabled.properties.insert(own);
+    p.edit(|x| {
+        x.enabled.properties.remove(&integer);
+    });
+    p.edit(|x| {
+        x.enabled.properties.insert(own);
+    });
     let g = link_on(&p, &[uint], None, None, 4, true).expect("the format's own count");
     assert_eq!(
         g.sample_count_properties(&p.fields().enabled.properties),
         Ok(set(&[own]))
     );
     let mut both = base.clone();
-    both.fields.enabled.properties.insert(own);
+    both.edit(|x| {
+        x.enabled.properties.insert(own);
+    });
     let g = link_on(&both, &[uint], None, None, 4, true).expect("the kind's count");
     assert_eq!(
         g.sample_count_properties(&both.fields().enabled.properties),

@@ -120,7 +120,7 @@ impl Device {
         }
         let deviations = accepted(deviations, &policy);
         let fields = derive_fields(&desc, &policy, &deviations);
-        let profile = DeviceProfile { fields };
+        let profile = DeviceProfile::of(fields);
         let metal = MetalDeviceProperties::derive(&profile, &desc.allocation);
         Ok(Device(Arc::new(DeviceInner {
             fingerprint: profile.fingerprint(),
@@ -139,9 +139,9 @@ impl Device {
         &self.0.profile
     }
 
-    /// The profile's fingerprint ([`DeviceProfile::fingerprint`]), computed once when the device
-    /// was made: every compile key, descriptor key and artifact check takes it, and computing it
-    /// renders the whole profile.
+    /// The profile's fingerprint ([`DeviceProfile::fingerprint`]), which the profile holds: every
+    /// compile key, descriptor key and artifact check takes it, and deriving it renders the whole
+    /// profile, so it is derived once where the profile is built.
     pub fn profile_fingerprint(&self) -> crate::cache::Hash256 {
         self.0.fingerprint
     }

@@ -179,11 +179,11 @@ fn what_a_geometry_stage_cannot_carry_is_refused() {
     not_implemented(run(&tess, &f, Class::Triangle, 1, false, &p).unwrap_err());
     // Multiview.
     let mut lacking = p.clone();
-    lacking
-        .fields
-        .enabled
-        .features
-        .remove(&VkFeature::MultiviewGeometryShader);
+    lacking.edit(|x| {
+        x.enabled
+            .features
+            .remove(&VkFeature::MultiviewGeometryShader);
+    });
     let views = p.fields().limits.max_multiview_view_count;
     assert!(views > 1);
     let b = run(&v, &f, Class::Triangle, 2, false, &p).unwrap().unwrap();
@@ -201,11 +201,11 @@ fn what_a_geometry_stage_cannot_carry_is_refused() {
         .builtins
         .push(StageBuiltin::PointSize { default: false });
     let mut no_size = p.clone();
-    no_size
-        .fields
-        .enabled
-        .features
-        .remove(&VkFeature::ShaderTessellationAndGeometryPointSize);
+    no_size.edit(|x| {
+        x.enabled
+            .features
+            .remove(&VkFeature::ShaderTessellationAndGeometryPointSize);
+    });
     for class in [Class::Point, Class::Unspecified] {
         refused_needing(
             run(&sized, &f, class, 1, false, &no_size).unwrap_err(),
@@ -226,7 +226,7 @@ fn what_a_geometry_stage_cannot_carry_is_refused() {
         .is_none());
     // The limits, in whole locations.
     let mut narrow = p.clone();
-    narrow.fields.limits.max_geometry_output_components = 8;
+    narrow.edit(|x| x.limits.max_geometry_output_components = 8);
     let linked = link(&[&v, &f], &render(), &narrow).unwrap_err();
     refused_needing(
         linked,
@@ -308,7 +308,9 @@ fn a_selected_slice_and_viewport_take_the_stages() {
         VkFeature::ShaderOutputLayer,
         VkFeature::ShaderOutputViewportIndex,
     ] {
-        p.fields.enabled.features.remove(&f);
+        p.edit(|x| {
+            x.enabled.features.remove(&f);
+        });
     }
     let (mut v, f) = pipeline();
     v.interface.io.outputs.push(selected(IoRole::SelectedLayer));
@@ -393,11 +395,11 @@ fn what_the_stages_cannot_carry_for_an_index_is_refused() {
     );
     assert!(planned(&slice, &f, 1, true, &p).unwrap().is_none());
     let mut lacking = p.clone();
-    lacking
-        .fields
-        .enabled
-        .features
-        .remove(&VkFeature::MultiviewGeometryShader);
+    lacking.edit(|x| {
+        x.enabled
+            .features
+            .remove(&VkFeature::MultiviewGeometryShader);
+    });
     let b = planned(&slice, &f, 2, false, &lacking).unwrap().unwrap();
     assert!(!b.multiview);
     let mut viewport = v.clone();

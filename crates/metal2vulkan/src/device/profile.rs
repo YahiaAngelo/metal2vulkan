@@ -52,10 +52,41 @@ const SPIRV_VAL_RELAXATIONS: [(VkFeature, &str); 5] = [
 /// The normalized, translation-relevant device projection. Opaque; built only by `Device::new`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceProfile {
-    pub(crate) fields: ProfileFields,
+    fields: ProfileFields,
+    /// [`DeviceProfile::fingerprint`], derived once here, where the fields are fixed.
+    ///
+    /// Deriving it renders every field of the profile -- a format table alone is tens of
+    /// kilobytes -- and SHA-256s the rendering, and a stage's compile takes it twice: once for the
+    /// compiled function's key and once to stamp the artifact with the profile it was compiled
+    /// for. Those two are inside the lowering, which holds the profile and not the device, so
+    /// neither could reach `Device::profile_fingerprint`'s memo. The profile is immutable once
+    /// built, so the derivation belongs here; a clone carries the same fields and so the same
+    /// fingerprint.
+    fingerprint: Hash256,
 }
 
 impl DeviceProfile {
+    /// The profile of `fields`, with its fingerprint derived (the only way to build one): the
+    /// fingerprint is a function of the fields, so holding them together is what keeps it true of
+    /// them. An edit goes through [`edit`](Self::edit).
+    pub(crate) fn of(fields: ProfileFields) -> DeviceProfile {
+        let fingerprint = fingerprint_of(&fields);
+        DeviceProfile {
+            fields,
+            fingerprint,
+        }
+    }
+
+    /// Apply `change` to this profile's fields and derive its fingerprint again: the only way to
+    /// move a field, so no profile can carry a fingerprint of fields it no longer holds. The
+    /// crate's own tests build the profiles a venue does not ship.
+    #[cfg(test)]
+    pub(crate) fn edit<T>(&mut self, change: impl FnOnce(&mut ProfileFields) -> T) -> T {
+        let answer = change(&mut self.fields);
+        self.fingerprint = fingerprint_of(&self.fields);
+        answer
+    }
+
     /// The profile's fields: internal; the profile is opaque to consumers, who compare
     /// [`DeviceProfile::fingerprint`] and read its facts through the accessors.
     pub(crate) fn fields(&self) -> &ProfileFields {
@@ -420,26 +451,55 @@ impl DeviceProfile {
     /// unambiguous for these types (no free-form strings). Formatting changes across toolchains
     /// can only change fingerprints, which costs cache misses, never a false hit.
     ///
-    /// The rendering streams into the hash: every compile takes the fingerprint for its key, and a
-    /// materialized rendering of a profile with a format table is tens of kilobytes that no
-    /// input-scaled ledger charge accounts for.
+    /// Read here, not derived: the profile derived it when it was built, because rendering a
+    /// profile with a format table is tens of kilobytes of `Debug` and every stage's compile
+    /// takes the fingerprint twice.
     pub fn fingerprint(&self) -> Hash256 {
-        use sha2::{Digest, Sha256};
-        use std::fmt::Write as _;
-        struct Hashing(Sha256);
-        impl std::fmt::Write for Hashing {
-            fn write_str(&mut self, s: &str) -> std::fmt::Result {
-                self.0.update(s.as_bytes());
-                Ok(())
-            }
-        }
-        let mut h = Hashing(Sha256::new());
-        h.0.update(b"metal2vulkan/device-profile/v1\0");
-        // `Hashing` never fails, and `Debug` of these plain-data types only fails when the
-        // writer does.
-        let _ = write!(h, "{:?}", self.fields);
-        h.0.finalize().into()
+        self.fingerprint
     }
+}
+
+/// Count one derivation ([`FINGERPRINTS_DERIVED`]).
+#[cfg(test)]
+fn note_fingerprint_derived() {
+    FINGERPRINTS_DERIVED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Count one derivation; nothing outside the crate's own tests.
+#[cfg(not(test))]
+fn note_fingerprint_derived() {}
+
+/// The profile fingerprints derived in this process, which `tests::profile`'s count reads: a
+/// device's compiles must add none to what its own making derived.
+#[cfg(test)]
+static FINGERPRINTS_DERIVED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// [`FINGERPRINTS_DERIVED`].
+#[cfg(test)]
+pub(crate) fn fingerprints_derived() -> u64 {
+    FINGERPRINTS_DERIVED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The fingerprint of `fields` ([`DeviceProfile::fingerprint`]): the rendering streams into the
+/// hash, because a materialized rendering of a profile with a format table is tens of kilobytes
+/// that no input-scaled ledger charge accounts for.
+fn fingerprint_of(fields: &ProfileFields) -> Hash256 {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    struct Hashing(Sha256);
+    impl std::fmt::Write for Hashing {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            self.0.update(s.as_bytes());
+            Ok(())
+        }
+    }
+    note_fingerprint_derived();
+    let mut h = Hashing(Sha256::new());
+    h.0.update(b"metal2vulkan/device-profile/v1\0");
+    // `Hashing` never fails, and `Debug` of these plain-data types only fails when the
+    // writer does.
+    let _ = write!(h, "{:?}", fields);
+    h.0.finalize().into()
 }
 
 /// Every field of a profile, policy included. The fingerprint hashes all of them.

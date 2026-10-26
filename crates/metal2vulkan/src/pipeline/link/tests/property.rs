@@ -176,8 +176,10 @@ fn random_pipelines_link_and_relocate_only_their_literals() {
         // Every other round, limits tight enough that some pipelines need packing.
         let mut q = p.clone();
         if round % 2 == 0 {
-            q.fields.limits.max_vertex_output_components = 16;
-            q.fields.limits.max_fragment_input_components = 8;
+            q.edit(|x| {
+                x.limits.max_vertex_output_components = 16;
+                x.limits.max_fragment_input_components = 8;
+            });
         }
         let l = match link(&[&v, &f], &render(), &q) {
             Ok(l) => l,

@@ -778,8 +778,10 @@ fn push_descriptor_eligibility_follows_the_profile() {
             })
             .collect::<Vec<_>>()
     };
-    p.fields.descriptors.push_descriptor = true;
-    p.fields.limits.max_push_descriptors = 4;
+    p.edit(|x| {
+        x.descriptors.push_descriptor = true;
+        x.limits.max_push_descriptors = 4;
+    });
     for (n, eligible) in [(0, true), (4, true), (5, false)] {
         let a = artifact(iface(k, descs(n), vec![]), None);
         let l = link(&[&a], &LinkInputs::compute(), &p).expect("link");
@@ -787,7 +789,7 @@ fn push_descriptor_eligibility_follows_the_profile() {
         assert_eq!(l.layout.sets.len(), 1);
         assert_eq!(l.layout.sets[0].bindings.len(), n as usize);
     }
-    p.fields.descriptors.push_descriptor = false;
+    p.edit(|x| x.descriptors.push_descriptor = false);
     let a = artifact(iface(k, descs(1), vec![]), None);
     let l = link(&[&a], &LinkInputs::compute(), &p).expect("link");
     assert!(!l.layout.push_descriptor_eligible);
@@ -827,10 +829,7 @@ fn acceleration_structures_bind_at_their_buffer_slot() {
         }
     );
     let mut small = p.clone();
-    small
-        .fields
-        .limits
-        .max_descriptor_set_acceleration_structures = 2;
+    small.edit(|x| x.limits.max_descriptor_set_acceleration_structures = 2);
     let a = artifact(iface(k, descs(3), vec![]), None);
     let e = link(&[&a], &LinkInputs::compute(), &small).expect_err("over the set limit");
     let crate::error::Error::Unsupported(u) = e else {
@@ -997,14 +996,16 @@ fn the_heap_capacity_follows_the_update_after_bind_limits() {
         artifact(iface(k, d, vec![]), None)
     };
     let mut p = profile("moltenvk-m3");
-    p.fields
-        .limits
-        .max_per_stage_descriptor_update_after_bind_sampled_images = 10;
+    p.edit(|x| {
+        x.limits
+            .max_per_stage_descriptor_update_after_bind_sampled_images = 10
+    });
     let l = link(&[&heap_iface(3)], &LinkInputs::compute(), &p).expect("link");
     assert_eq!(l.layout.sets[1].bindings[0].count, 7);
-    p.fields
-        .limits
-        .max_per_stage_descriptor_update_after_bind_sampled_images = 3;
+    p.edit(|x| {
+        x.limits
+            .max_per_stage_descriptor_update_after_bind_sampled_images = 3
+    });
     assert!(matches!(
         link(&[&heap_iface(3)], &LinkInputs::compute(), &p),
         Err(Error::Unsupported(Unsupported {
@@ -1014,7 +1015,7 @@ fn the_heap_capacity_follows_the_update_after_bind_limits() {
         }))
     ));
     let mut p = profile("moltenvk-m3");
-    p.fields.descriptors.update_after_bind_sampled_image = false;
+    p.edit(|x| x.descriptors.update_after_bind_sampled_image = false);
     match link(&[&heap_iface(0)], &LinkInputs::compute(), &p) {
         Err(Error::Unsupported(u)) => {
             assert_eq!(u.feature, Feature::ArgumentBufferTextures);
@@ -1302,14 +1303,18 @@ fn varyings_pack_into_components_when_the_limits_need_it() {
     ];
     let fs = io_stage(Stage::Fragment, stage_io(inputs, vec![]));
     // Dense: six locations out, fragment reads up to location 5.
-    p.fields.limits.max_vertex_output_components = 6 * 4;
-    p.fields.limits.max_fragment_input_components = 6 * 4;
+    p.edit(|x| {
+        x.limits.max_vertex_output_components = 6 * 4;
+        x.limits.max_fragment_input_components = 6 * 4;
+    });
     let dense = link(&[&vs, &fs], &render(), &p).expect("dense");
     assert!(dense.table.locations.values().all(|l| l.1 == 0));
     // Four locations: packed. Reads first by decreasing width: d(3) a(1) | f(2) c(1) (uint,
     // flat); then b(2) e(1) as unread float.
-    p.fields.limits.max_vertex_output_components = 4 * 4;
-    p.fields.limits.max_fragment_input_components = 2 * 4;
+    p.edit(|x| {
+        x.limits.max_vertex_output_components = 4 * 4;
+        x.limits.max_fragment_input_components = 2 * 4;
+    });
     let l = link(&[&vs, &fs], &render(), &p).expect("packed");
     assert_eq!(
         l.table.locations,
@@ -1333,7 +1338,7 @@ fn varyings_pack_into_components_when_the_limits_need_it() {
         .unwrap_or_else(|e| panic!("packed spirv-val: {e}"));
     }
     // Even packed, three locations are needed out.
-    p.fields.limits.max_vertex_output_components = 2 * 4;
+    p.edit(|x| x.limits.max_vertex_output_components = 2 * 4);
     match link(&[&vs, &fs], &render(), &p) {
         Err(Error::Unsupported(u)) => {
             assert_eq!(u.feature, Feature::InterfaceComponents);
@@ -1363,7 +1368,7 @@ fn varyings_pack_into_components_when_the_limits_need_it() {
             vec![varying("x", f(1), None), varying("y", f(1), None)],
         ),
     );
-    p.fields.limits.max_vertex_output_components = 4;
+    p.edit(|x| x.limits.max_vertex_output_components = 4);
     match link(&[&unpackable], &LinkInputs::standalone(), &p) {
         Err(Error::Unsupported(u)) => assert_eq!(
             u.needs,
@@ -1397,8 +1402,10 @@ fn unread_outputs_pack_before_read_varyings() {
     let inputs = vec![varying("a", f(1), SMOOTH), varying("g", f(3), SMOOTH)];
     let fs = io_stage(Stage::Fragment, stage_io(inputs.clone(), vec![]));
     // Dense needs six locations out.
-    p.fields.limits.max_vertex_output_components = 4 * 4;
-    p.fields.limits.max_fragment_input_components = 4 * 4;
+    p.edit(|x| {
+        x.limits.max_vertex_output_components = 4 * 4;
+        x.limits.max_fragment_input_components = 4 * 4;
+    });
     let l = link(&[&vs, &fs], &render(), &p).expect("unread outputs packed");
     // Reads first, whole, in output order: a(0) g(1); then the unread by decreasing width,
     // first fit per numeric class: c(2) b d | e (uint).
@@ -1441,7 +1448,7 @@ fn unread_outputs_pack_before_read_varyings() {
     assert_eq!(l2.table.locations, l.table.locations);
     // Without room for the reads' whole locations, everything packs (the fragment module must
     // then relocate its components too).
-    p.fields.limits.max_vertex_output_components = 3 * 4;
+    p.edit(|x| x.limits.max_vertex_output_components = 3 * 4);
     let l3 = link(&[&vs, &fs], &render(), &p).expect("everything packed");
     assert_eq!(l3.table.locations[&key("g")], (0, 0));
     assert_eq!(l3.table.locations[&key("a")], (0, 3));
@@ -1465,7 +1472,7 @@ fn stage_io_roles_and_attribute_limits_are_checked() {
             Err(Error::Internal(_))
         ));
     }
-    p.fields.limits.max_vertex_input_attributes = 1;
+    p.edit(|x| x.limits.max_vertex_input_attributes = 1);
     let mut v = iface(Stage::Vertex, vec![], vec![]);
     v.io = stage_io(vec![attr(0, f4), attr(5, f4)], vec![]);
     let a = artifact(v, None);

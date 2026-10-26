@@ -183,6 +183,7 @@ mod fuzz_interp;
 mod fuzz_soak;
 mod golden_hashes;
 mod owned_divisions;
+mod profile_fingerprint_derived;
 mod public_fixtures_engine;
 mod stage_in_unread_key;
 mod stage_input_siblings;

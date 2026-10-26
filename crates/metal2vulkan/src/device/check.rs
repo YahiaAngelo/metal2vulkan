@@ -34,7 +34,7 @@ impl DeviceProfile {
     /// by the formats' own bits (`DeviceProfile::without_format_by_format_bits`), and missing as
     /// its feature.
     pub fn check(&self, req: &Requirements) -> Result<(), Capability> {
-        let f = &self.fields;
+        let f = self.fields();
         if let Some(v) = req.api_version {
             if v > f.api_version {
                 return Err(Capability::ApiVersion(v));
@@ -117,7 +117,7 @@ impl DeviceProfile {
 
     /// Whether `format` supports `usage` on this profile.
     pub fn supports_format(&self, format: vk::Format, usage: FormatUsage) -> bool {
-        let f = &self.fields;
+        let f = self.fields();
         let table = match usage_class(usage) {
             UsageClass::Vertex => &f.vertex_formats,
             UsageClass::Storage => &f.storage_formats,
@@ -137,7 +137,7 @@ impl DeviceProfile {
     /// slot naming these, the binder lists an `R64_UINT` storage neutral on the same condition, and
     /// the runtime answers a `RG32Uint` texture's atomics by it.
     pub fn ulong_atomic_gaps(&self, buffer: bool) -> Vec<Capability> {
-        let leaf = &self.fields.leaf;
+        let leaf = &self.fields().leaf;
         let mut gaps = Vec::new();
         if !leaf.image_int64_atomics {
             gaps.push(Capability::Feature(VkFeature::ShaderImageInt64Atomics));
@@ -164,8 +164,8 @@ impl DeviceProfile {
     /// "offsets down to -8"); float limits are reported rounded down to an integer.
     fn limit(&self, limit: VkLimit) -> (u64, Direction) {
         use Direction::{AtLeast, AtMost};
-        let l = &self.fields.limits;
-        let sg = &self.fields.subgroup;
+        let l = &self.fields().limits;
+        let sg = &self.fields().subgroup;
         let up = |v: u32| (u64::from(v), AtLeast);
         let float = |bits: u32| {
             let v = f32::from_bits(bits);
@@ -307,7 +307,7 @@ impl DeviceProfile {
             VkLimit::MaxGeometryOutputComponents => up(l.max_geometry_output_components),
             VkLimit::MaxGeometryTotalOutputComponents => up(l.max_geometry_total_output_components),
             VkLimit::FunctionStorageBytesPerThread => {
-                (self.fields.function_storage.bytes(), AtLeast)
+                (self.fields().function_storage.bytes(), AtLeast)
             }
             VkLimit::MaxMeshOutputVertices => up(l.mesh.max_mesh_output_vertices),
             VkLimit::MaxMeshOutputPrimitives => up(l.mesh.max_mesh_output_primitives),
