@@ -144,9 +144,19 @@ impl From<AddressPlacement> for Place {
 /// Metal counterpart): `BufferDescriptor::range_token`, `Device::new_heap_with_range_token`,
 /// `Device::new_heap_with_bytes_no_copy_and_range_token`, and
 /// `Device::new_texture_with_range_token` and `Device::new_shared_texture_with_range_token`. The
-/// runtime drops it right after it frees the resource, as Metal frees a released resource's range:
-/// after the completed handlers of the last command buffer that held it, before that command
-/// buffer's waiters wake (measured on an Apple M3 Max). It drops with no runtime lock held, so a
+/// runtime drops it right after it frees the resource, at or before the point Metal frees a
+/// released resource's range. Metal never frees that range inside a completed handler of the last
+/// command buffer that held it, which is a guarantee: 4,800 of 4,800 ICBs and 4,800 of 4,800
+/// buffers held their ID and `gpuAddress` there (the consumer's probe on an Apple M3 Max, macOS
+/// 27.0.1). After those handlers it USUALLY frees before that command buffer's waiters wake, but
+/// that is its usual order and not a rule: 10 of 8,400 ICBs were still held under load, coming back
+/// up to 884 us later, against 0 of 6,000 unloaded, and a dispatch-bound buffer's `gpuAddress` was
+/// still held in 16 of 3,000 unloaded and 19 of 8,400 loaded runs, up to 3.9 ms after the wait. So
+/// the runtime's own order -- status, the completed handlers, the releases, then the gate that
+/// wakes the waiters (`CommandBufferShared::complete`) -- is the deterministic side of a race Metal
+/// leaves open, and is within Metal's behaviour rather than a copy of a rule of Metal's. A caller
+/// that must see the range free waits for the handlers, which is what Metal guarantees, and not for
+/// a waiter to wake. It drops with no runtime lock held, so a
 /// creation at the range from its drop on succeeds; on the thread that drops the resource's last
 /// holder (the program's, or a runtime thread that runs a command buffer's completed handlers, as
 /// the program's code there, a panic in it caught, as a no-copy buffer's deallocator), an
