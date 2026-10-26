@@ -35,7 +35,7 @@ use crate::shader_cache::driver::Making;
 use ash::vk;
 use metal2vulkan::bind::{
     CompressedBlit, MipmapFilterKernel, RewritePhase, RewriteProgram, ShadowMergeRead,
-    ShadowTexelView, TessellationScanKernel, TexelWords, YCbCrOutput,
+    ShadowTexelView, TessellationScanKernel, TexelWords, YCbCrConversion,
 };
 use metal2vulkan::metal::format::ExtendedRange;
 use metal2vulkan::metal::PixelFormat;
@@ -139,12 +139,15 @@ pub(super) enum OwnedModule {
     /// `bind::rotate_texels_module`: a rotated texture's texels moved between its pass's frame
     /// and its bytes (`rotated.rs`).
     RotateTexels,
-    /// `bind::ycbcr_convert_module`: a YCbCr texture's texels converted from its surface's two
-    /// planes into its image (`ycbcr.rs`), which it binds as a storage image: converted values,
-    /// or (`YCbCrOutput::Codes`) the packed codes; or, with `true`,
+    /// `bind::ycbcr_convert_module` of one conversion (`YCbCrConversion`: the layout of a
+    /// texture's codes, their range and their matrix): a YCbCr texture's texels converted from
+    /// its surface's two planes into its image (`ycbcr.rs`), which it binds as a storage image:
+    /// converted values, or (`YCbCrOutput::Codes`) the packed codes; or, with `true`,
     /// `bind::ycbcr_convert_floats_module`: the texels as floats into a render pass's render
-    /// shadow of the texture, which the pass loads (`ycbcr.rs`).
-    YCbCrConvert(YCbCrOutput, bool),
+    /// shadow of the texture, which the pass loads (`ycbcr.rs`). One per conversion a texture of
+    /// the device reads through, within the two-plane formats' layouts and the ranges and
+    /// matrices they convert under.
+    YCbCrConvert(YCbCrConversion, bool),
     /// `bind::ycbcr_refresh_module`: a YCbCr texture's planes compared with the copy its last
     /// conversion read, the changed words stored over it, and the conversion's indirect group
     /// count written where any changed (`ycbcr.rs`).
@@ -410,11 +413,11 @@ impl OwnedModule {
                     .map_err(Error::Compile)?;
                 Ok((module.spirv.to_vec(), 5, 0))
             }
-            OwnedModule::YCbCrConvert(output, floats) => {
+            OwnedModule::YCbCrConvert(conversion, floats) => {
                 let device = device.compile_device();
                 let module = match floats {
-                    true => metal2vulkan::bind::ycbcr_convert_floats_module(device, output),
-                    false => metal2vulkan::bind::ycbcr_convert_module(device, output),
+                    true => metal2vulkan::bind::ycbcr_convert_floats_module(device, conversion),
+                    false => metal2vulkan::bind::ycbcr_convert_module(device, conversion),
                 }
                 .map_err(Error::Compile)?;
                 Ok((module.spirv.to_vec(), 2, 0))
@@ -576,7 +579,7 @@ pub(super) struct OwnedKernels {
     rotate_texels: Option<OwnedKernel>,
     rows_copy: Option<OwnedKernel>,
     ycbcr_refresh: Option<OwnedKernel>,
-    ycbcr_converts: HashMap<(YCbCrOutput, bool), OwnedKernel>,
+    ycbcr_converts: HashMap<(YCbCrConversion, bool), OwnedKernel>,
     two_plane_texels: Option<OwnedKernel>,
     plane_bytes_copy: Option<OwnedKernel>,
     ycbcr_write: Option<OwnedKernel>,
@@ -664,8 +667,8 @@ impl OwnedKernels {
                 self.index_rewrites.get(&(program, phase)).copied()
             }
             OwnedModule::IndexRewriteRun(program) => self.index_rewrite_runs.get(&program).copied(),
-            OwnedModule::YCbCrConvert(output, floats) => {
-                self.ycbcr_converts.get(&(output, floats)).copied()
+            OwnedModule::YCbCrConvert(conversion, floats) => {
+                self.ycbcr_converts.get(&(conversion, floats)).copied()
             }
             OwnedModule::UnusedBits(format, words) => {
                 self.unused_bits.get(&(format, words)).copied()
@@ -702,8 +705,8 @@ impl OwnedKernels {
             OwnedModule::IndexRewriteRun(program) => {
                 self.index_rewrite_runs.insert(program, kernel);
             }
-            OwnedModule::YCbCrConvert(output, floats) => {
-                self.ycbcr_converts.insert((output, floats), kernel);
+            OwnedModule::YCbCrConvert(conversion, floats) => {
+                self.ycbcr_converts.insert((conversion, floats), kernel);
             }
             OwnedModule::UnusedBits(format, words) => {
                 self.unused_bits.insert((format, words), kernel);

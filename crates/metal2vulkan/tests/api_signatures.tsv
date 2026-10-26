@@ -908,7 +908,7 @@ assoc-const-value	metal2vulkan::bind::YCbCrConvertModule::IMAGE_BINDING	0
 assoc-const-value	metal2vulkan::bind::YCbCrConvertModule::LOCAL_SIZE	8
 assoc-const-value	metal2vulkan::bind::YCbCrConvertModule::SET	0
 assoc-const-value	metal2vulkan::bind::YCbCrConvertModule::SHAPE_BINDING	1
-assoc-const-value	metal2vulkan::bind::YCbCrConvertModule::SHAPE_WORDS	22
+assoc-const-value	metal2vulkan::bind::YCbCrConvertModule::SHAPE_WORDS	6
 assoc-const-value	metal2vulkan::bind::YCbCrRefreshModule::COMPLETED	3
 assoc-const-value	metal2vulkan::bind::YCbCrRefreshModule::COPY_BINDING	1
 assoc-const-value	metal2vulkan::bind::YCbCrRefreshModule::LOCAL_SIZE	64
@@ -3553,6 +3553,9 @@ field	metal2vulkan::bind::YCbCrCodes.bytes	pub bytes: u32
 field	metal2vulkan::bind::YCbCrCodes.output	pub output: YCbCrOutput
 field	metal2vulkan::bind::YCbCrCodes.packed	pub packed: bool
 field	metal2vulkan::bind::YCbCrCodes.subsampling	pub subsampling: ChromaSubsampling
+field	metal2vulkan::bind::YCbCrConversion.codes	pub codes: YCbCrCodes
+field	metal2vulkan::bind::YCbCrConversion.matrix	pub matrix: YCbCrMatrix
+field	metal2vulkan::bind::YCbCrConversion.range	pub range: YCbCrRange
 field	metal2vulkan::bind::YCbCrConvertModule.requirements	pub requirements: Requirements
 field	metal2vulkan::bind::YCbCrConvertModule.spirv	pub spirv: Arc<[u32]>
 field	metal2vulkan::bind::YCbCrPlanes.chroma	pub chroma: [u32; 2]
@@ -4629,8 +4632,8 @@ fn	metal2vulkan::bind::two_plane_texels_module	pub fn two_plane_texels_module(de
 fn	metal2vulkan::bind::unused_bits_module	pub fn unused_bits_module(device: &Device, format: PixelFormat, words: TexelWords) -> Result<UnusedBitsModule, Error>
 fn	metal2vulkan::bind::visibility_combine_module	pub fn visibility_combine_module(device: &Device) -> Result<VisibilityCombineModule, Error>
 fn	metal2vulkan::bind::visibility_resolve_module	pub fn visibility_resolve_module(device: &Device) -> Result<VisibilityResolveModule, Error>
-fn	metal2vulkan::bind::ycbcr_convert_floats_module	pub fn ycbcr_convert_floats_module(device: &Device, output: YCbCrOutput) -> Result<YCbCrConvertModule, Error>
-fn	metal2vulkan::bind::ycbcr_convert_module	pub fn ycbcr_convert_module(device: &Device, output: YCbCrOutput) -> Result<YCbCrConvertModule, Error>
+fn	metal2vulkan::bind::ycbcr_convert_floats_module	pub fn ycbcr_convert_floats_module(device: &Device, conversion: YCbCrConversion) -> Result<YCbCrConvertModule, Error>
+fn	metal2vulkan::bind::ycbcr_convert_module	pub fn ycbcr_convert_module(device: &Device, conversion: YCbCrConversion) -> Result<YCbCrConvertModule, Error>
 fn	metal2vulkan::bind::ycbcr_read	pub fn ycbcr_read(codes: YCbCrCodes, (range, matrix): (YCbCrRange, YCbCrMatrix), [y, cb, cr]: [u16; 3]) -> [u16; 3]
 fn	metal2vulkan::bind::ycbcr_refresh_module	pub fn ycbcr_refresh_module(device: &Device) -> Result<YCbCrRefreshModule, Error>
 fn	metal2vulkan::bind::ycbcr_store	pub fn ycbcr_store(codes: YCbCrCodes, (range, matrix): (YCbCrRange, YCbCrMatrix), texels: &[[f32; 3]], size: [u32; 2]) -> Option<(Vec<u16>, Vec<[u16; 2]>)>
@@ -8667,8 +8670,10 @@ method	metal2vulkan::bind::VisibilityResolve::plan	pub fn plan(offsets: &[u64], 
 method	metal2vulkan::bind::VisibilityResolve::target_bytes	pub fn target_bytes(&self) -> Vec<u8>
 method	metal2vulkan::bind::YCbCrCodes::of	pub fn of(format: crate::metal::format::YCbCrFormat) -> Option<YCbCrCodes>
 method	metal2vulkan::bind::YCbCrCodes::units	pub fn units(&self, n: u64) -> u64
+method	metal2vulkan::bind::YCbCrConversion::of	pub fn of(codes: YCbCrCodes, (range, matrix): (YCbCrRange, YCbCrMatrix)) -> YCbCrConversion
 method	metal2vulkan::bind::YCbCrConvertModule::shape	pub fn shape(planes: &YCbCrPlanes) -> [u8; Self::SHAPE_WORDS as usize * 4]
 method	metal2vulkan::bind::YCbCrPlanes::chroma_size	pub fn chroma_size(&self) -> [u32; 2]
+method	metal2vulkan::bind::YCbCrPlanes::conversion	pub fn conversion(&self) -> YCbCrConversion
 method	metal2vulkan::bind::YCbCrPlanes::new	pub fn new(size: [u32; 2], luma: [u32; 2], chroma: [u32; 2], (range, matrix): (YCbCrRange, YCbCrMatrix), codes: YCbCrCodes) -> YCbCrPlanes
 method	metal2vulkan::bind::YCbCrRefreshModule::groups	pub fn groups(words: u32) -> [u32; 2]
 method	metal2vulkan::bind::YCbCrRefreshModule::shape	pub fn shape(firsts: [u32; 2], words: u32, groups: u32) -> [u8; 16]
@@ -9597,6 +9602,7 @@ struct	metal2vulkan::bind::VisibilityCombineModule	#[derive(Clone, Debug, Partia
 struct	metal2vulkan::bind::VisibilityResolve	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct VisibilityResolve
 struct	metal2vulkan::bind::VisibilityResolveModule	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct VisibilityResolveModule
 struct	metal2vulkan::bind::YCbCrCodes	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct YCbCrCodes
+struct	metal2vulkan::bind::YCbCrConversion	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct YCbCrConversion
 struct	metal2vulkan::bind::YCbCrConvertModule	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct YCbCrConvertModule
 struct	metal2vulkan::bind::YCbCrPlanes	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct YCbCrPlanes
 struct	metal2vulkan::bind::YCbCrRefreshModule	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct YCbCrRefreshModule

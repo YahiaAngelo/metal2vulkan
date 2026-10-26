@@ -576,7 +576,7 @@ impl YCbCrConversion {
         let (raw, start) = staging.at(0);
         let (identity, range) = staging.tracked(0..BYTES_AT + held);
         let shape = YCbCrConvertModule::shape(planes);
-        let kernel = device.owned_kernel(OwnedModule::YCbCrConvert(planes.codes.output, false))?;
+        let kernel = device.owned_kernel(OwnedModule::YCbCrConvert(planes.conversion(), false))?;
         let set = OwnedSet {
             images: Vec::new(),
             storage_images: vec![view],
@@ -1118,7 +1118,7 @@ impl YCbCrLoad {
         view: vk::ImageView,
     ) -> Result<YCbCrLoad, Error> {
         let shape = YCbCrConvertModule::shape(planes);
-        let kernel = device.owned_kernel(OwnedModule::YCbCrConvert(planes.codes.output, true))?;
+        let kernel = device.owned_kernel(OwnedModule::YCbCrConvert(planes.conversion(), true))?;
         let set = OwnedSet {
             images: Vec::new(),
             storage_images: vec![view],

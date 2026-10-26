@@ -735,6 +735,7 @@ surface! {
         fn ycbcr_read;
         struct YCbCrConvertModule N;
         struct YCbCrPlanes N;
+        struct YCbCrConversion N;
         struct YCbCrCodes N;
         enum YCbCrOutput N;
         enum YCbCrRange N;

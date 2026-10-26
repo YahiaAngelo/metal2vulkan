@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::bind::{
     self, BlockDecode, CompressedBlit, DepthStandInForm, PlanesCopy, RewritePhase, RewriteProgram,
-    TessellationScanKernel, TexelWords, YCbCrOutput,
+    TessellationScanKernel, TexelWords,
 };
 use crate::device::{Device, DevicePolicy};
 use crate::error::{Error, Feature};
@@ -167,18 +167,14 @@ fn modules() -> Vec<Build> {
             Box::new(move |d| Ok(bind::shadow_merge_image_module(d, read)?.spirv)),
         );
     }
-    for output in [
-        YCbCrOutput::Converted,
-        YCbCrOutput::Codes,
-        YCbCrOutput::Srgb,
-    ] {
+    for conversion in crate::bind::ycbcr_convert::conversions() {
         push(
-            format!("ycbcr_convert_module({output:?})"),
-            Box::new(move |d| Ok(bind::ycbcr_convert_module(d, output)?.spirv)),
+            format!("ycbcr_convert_module({conversion:?})"),
+            Box::new(move |d| Ok(bind::ycbcr_convert_module(d, conversion)?.spirv)),
         );
         push(
-            format!("ycbcr_convert_floats_module({output:?})"),
-            Box::new(move |d| Ok(bind::ycbcr_convert_floats_module(d, output)?.spirv)),
+            format!("ycbcr_convert_floats_module({conversion:?})"),
+            Box::new(move |d| Ok(bind::ycbcr_convert_floats_module(d, conversion)?.spirv)),
         );
     }
     for copy in PlanesCopy::ALL {

@@ -350,7 +350,7 @@ pub use visibility_resolve::{
 };
 pub use ycbcr_convert::{
     ycbcr_convert_floats_module, ycbcr_convert_module, ycbcr_read, ycbcr_texel, YCbCrCodes,
-    YCbCrConvertModule, YCbCrMatrix, YCbCrOutput, YCbCrPlanes, YCbCrRange,
+    YCbCrConversion, YCbCrConvertModule, YCbCrMatrix, YCbCrOutput, YCbCrPlanes, YCbCrRange,
 };
 pub use ycbcr_refresh::{ycbcr_refresh_module, YCbCrRefreshModule};
 pub use ycbcr_write::{ycbcr_store, ycbcr_write, ycbcr_write_module, YCbCrWriteModule};
