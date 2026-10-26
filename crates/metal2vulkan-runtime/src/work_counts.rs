@@ -185,6 +185,7 @@ pub(crate) struct Counters {
     slot_wait_nanos: AtomicU64,
     completed_waits: AtomicU64,
     event_waits_met: AtomicU64,
+    shared_event_waits_held: AtomicU64,
     bare_starts: AtomicU64,
     prefixed_starts: AtomicU64,
     command_barriers: AtomicU64,
@@ -1327,6 +1328,14 @@ impl Counters {
     /// (`scheduler/mod.rs`).
     pub(crate) fn event_waits_met(&self, waits: usize) {
         self.event_waits_met
+            .fetch_add(waits as u64, Ordering::Relaxed);
+    }
+
+    /// A batch became a line's head holding `waits` of its event waits for values the host may
+    /// set that a submitted GPU signal reaches: each one chained on the `VkQueue` before, and
+    /// costs a hold and a `vkQueueSubmit` now (`scheduler/mod.rs`). Counted once per batch.
+    pub(crate) fn shared_event_waits_held(&self, waits: usize) {
+        self.shared_event_waits_held
             .fetch_add(waits as u64, Ordering::Relaxed);
     }
 
@@ -3230,6 +3239,18 @@ pub struct WorkCounts {
     /// (`CompletionPolicy::Grouped`) as a batch with no wait does; the others' waits make it lead
     /// one or go alone (`group_ends_wait`).
     pub event_waits_met: u64,
+    /// Event waits (`encode_wait_for_event`) for a shared event's value (`MTLSharedEvent`, whose
+    /// value the host may set) that a GPU signal submitted before the batch reaches, held on the
+    /// host as their batch led its line rather than handed to its `VkQueue`: Metal's
+    /// `setSignaledValue:` releases such a wait as soon as the value is reached, and a Vulkan wait
+    /// a batch was submitted with cannot be released by the host, so the batch waits for the value
+    /// to be reached and goes with no Vulkan wait (`event_timeline.rs`). Each one chained on the
+    /// `VkQueue` before and costs a hold and a `vkQueueSubmit` now: these are the waits whose cost
+    /// moved, apart from the `event_waits_met` that were always free. Counted once per batch,
+    /// whatever reaches the value (the host's set, or a completion turn seeing the GPU signal).
+    /// A plain event's wait (`MTLEvent`, which no host call signals) is never among them: it
+    /// chains on the `VkQueue`, where that is exact.
+    pub shared_event_waits_held: u64,
     /// Batches with work submitted with no command buffer of barriers before their first
     /// encoder: nothing planned before it, and no start timestamp to write there (none, or one
     /// its first encoder wrote, `WorkCounts::prefixed_starts`).
@@ -4464,6 +4485,7 @@ impl Device {
             queues_sharing_a_vk_queue: counters.queues_sharing_a_vk_queue.load(Ordering::Relaxed),
             completed_waits: counters.completed_waits.load(Ordering::Relaxed),
             event_waits_met: counters.event_waits_met.load(Ordering::Relaxed),
+            shared_event_waits_held: counters.shared_event_waits_held.load(Ordering::Relaxed),
             bare_starts: counters.bare_starts.load(Ordering::Relaxed),
             prefixed_starts: counters.prefixed_starts.load(Ordering::Relaxed),
             command_barriers: counters.command_barriers.load(Ordering::Relaxed),

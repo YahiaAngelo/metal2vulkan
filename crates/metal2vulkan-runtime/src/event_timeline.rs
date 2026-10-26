@@ -165,6 +165,17 @@ impl<Q: Copy + Eq> EventTimeline<Q> {
             .map(|pending| WaitFor::Index(pending.index))
     }
 
+    /// Whether a wait for `value` is held on the host where a Vulkan wait for a submitted GPU
+    /// signal's index would have served: the host may set the value, it is not reached, and a
+    /// signal submitted before the waiting batch reaches it. Exactly the waits that chained on
+    /// the `VkQueue` before, which cost a hold and a `vkQueueSubmit` now
+    /// (`WorkCounts::shared_event_waits_held`).
+    pub(super) fn held_for_the_host(&self, value: u64) -> bool {
+        self.settable
+            && value > self.value()
+            && (self.pending.iter()).any(|pending| pending.value >= value)
+    }
+
     /// What a GPU signal of `value` by a batch submitted now on `queue` becomes. Nothing changes
     /// until [`EventTimeline::keep`].
     pub(super) fn signal(&self, value: u64, queue: Q) -> Signal {

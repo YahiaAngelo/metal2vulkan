@@ -490,6 +490,9 @@ struct Held {
     /// The makings of the pipelines its host step records were raised to a queue's first held
     /// batch's ([`hasten_heads`]).
     hastened: bool,
+    /// Its waits held on the host where a Vulkan wait would have served were counted
+    /// ([`count_waits_held`]): once per batch.
+    counted_held: bool,
 }
 
 /// What a batch's host step waits for (`CommandBufferShared::step_waits`).
@@ -1034,6 +1037,7 @@ fn take_in(state: &mut State, commits: &mut Vec<Committed>, spent: &mut Spent) {
             gate: None,
             checked: batch.checked,
             hastened: false,
+            counted_held: false,
         });
         order.push(queue, held);
         spent.push(buffer);
@@ -1638,6 +1642,7 @@ fn check_heads(state: &mut State, behind: &[u64], left: &mut Left<Work>, awaits:
             }
             return true;
         }
+        count_waits_held(held);
         if !held.checked || !otherwise_ready || !due {
             return !due && goes(held);
         }
@@ -1657,6 +1662,24 @@ fn check_heads(state: &mut State, behind: &[u64], left: &mut Left<Work>, awaits:
         goes(held)
     });
     landing
+}
+
+/// The waits of `held`, a line's head, for a shared event's value that a submitted GPU signal
+/// reaches: each chained on the `VkQueue` before and is held on the host now, so each cost moved
+/// (`WorkCounts::shared_event_waits_held`, `event_timeline.rs`). Counted once per batch, at the
+/// pass that first finds it leading its line: a batch behind another waits for that one, not for
+/// its own events.
+fn count_waits_held(held: &mut Held) {
+    if held.counted_held {
+        return;
+    }
+    let held_for_the_host = (held.waits.iter())
+        .filter(|(event, value)| event.held_for_the_host(*value))
+        .count();
+    if held_for_the_host > 0 {
+        held.counted_held = true;
+        (held.buffer.device().shared().counts).shared_event_waits_held(held_for_the_host);
+    }
 }
 
 /// Raise the makings of the pipelines each command queue's first held batch's host step records

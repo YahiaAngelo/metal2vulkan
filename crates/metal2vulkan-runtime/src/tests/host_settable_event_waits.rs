@@ -98,3 +98,51 @@ fn the_signals_of_either_kind_take_the_same_indices() {
         );
     }
 }
+
+/// The waits whose cost moved are exactly the ones a plain event would have chained on the
+/// `VkQueue`: `held_for_the_host` answers for a shared event's timeline exactly where the same
+/// state of a plain one answers `WaitFor::Index` (`WorkCounts::shared_event_waits_held`).
+#[test]
+fn the_waits_counted_as_held_are_the_ones_that_chained_on_the_vk_queue() {
+    let mut shared: EventTimeline<usize> = EventTimeline::new(true);
+    let mut plain: EventTimeline<usize> = EventTimeline::new(false);
+    let steps: [(u64, Option<u64>, Option<u64>); 5] = [
+        // (a GPU signal submitted, an index observed, a host set)
+        (3, None, None),
+        (8, None, None),
+        (0, None, Some(2)),
+        (0, Some(1), None),
+        (12, None, Some(9)),
+    ];
+    for (signal, observe, set) in steps {
+        for timeline in [&mut shared, &mut plain] {
+            if signal > 0 {
+                submit(timeline, signal, 0);
+            }
+            if let Some(index) = observe {
+                timeline.observe(index);
+            }
+        }
+        // Only a shared event's value is ever set; the plain one's floor stands in for it, so
+        // both timelines hold the same signals, indices and values throughout.
+        if let Some(value) = set {
+            assert!(shared.set(value));
+            assert!(plain.set(value));
+        }
+        assert_eq!(shared.value(), plain.value());
+        for value in 0..16 {
+            let chained = matches!(plain.wait(value), Some(WaitFor::Index(_)));
+            assert_eq!(
+                shared.held_for_the_host(value),
+                chained,
+                "value {value} at {steps:?} up to ({signal}, {observe:?}, {set:?})"
+            );
+            // A wait counted as held is one the shared event does not hand to Vulkan, and one
+            // it answers for needs no wait at all.
+            assert_eq!(
+                shared.wait(value).is_none(),
+                chained || plain.wait(value).is_none()
+            );
+        }
+    }
+}

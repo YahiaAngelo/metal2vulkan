@@ -194,6 +194,12 @@ impl EventShared {
         lock(&self.state).timeline.wait(value)
     }
 
+    /// Whether a wait for `value` is held on the host where a Vulkan wait for a submitted GPU
+    /// signal's index would have served (`event_timeline.rs`).
+    pub(super) fn held_for_the_host(&self, value: u64) -> bool {
+        lock(&self.state).timeline.held_for_the_host(value)
+    }
+
     /// What a signal of `value` by a batch submitted now on `VkQueue` `queue` becomes.
     pub(super) fn signal(&self, value: u64, queue: usize) -> Signal {
         lock(&self.state).timeline.signal(value, queue)
