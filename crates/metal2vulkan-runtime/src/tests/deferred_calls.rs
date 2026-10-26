@@ -6,11 +6,12 @@
 //! error; a notice announced while a call is lowered names it, and a kind the device refuses while
 //! lowering (`DeviceOptions::lowering_refuses`) refuses it; the bytes a call was lent are copied at
 //! the call, and the objects it names are held from the call until its command buffer completed;
-//! a buffer detached after the call refuses nothing of it; a program that outruns the device's
-//! lowering thread waits for it at the cap of its encoder's batches, and goes on; an end and a
-//! commit return before the lowering thread lowered the end, the commit's own work waiting for it,
-//! and the commits after it waiting behind it, and one whose own work fails completing with the
-//! refusal.
+//! an offset at an index with no buffer bound is taken at the call under both policies, as plain
+//! Metal takes it; a buffer detached after the call refuses nothing of it; a program that outruns
+//! the device's lowering thread waits for it at the cap of its encoder's batches, and goes on; an
+//! end and a commit return before the lowering thread lowered the end, the commit's own work
+//! waiting for it, and the commits after it waiting behind it, and one whose own work fails
+//! completing with the refusal.
 //!
 //! Device tests: compiled only under the validation crate's GPU safety cfgs (`m2v_gpu`,
 //! `m2v_cpu_icd`), on the kind of device the cfg selects. The functions are the owned fixture
@@ -159,9 +160,6 @@ const REFUSED: &[(&str, Refused)] = &[
     ("buffers and offsets of different lengths", |f, e| {
         e.set_vertex_buffers(&[Some(&f.buffer)], &[0, 0], 0)
     }),
-    ("an offset where no buffer is bound", |_, e| {
-        e.set_vertex_buffer_offset(0, 3)
-    }),
     ("an offset past the buffer bound", |f, e| {
         e.set_fragment_buffer(Some(&f.buffer), 0, 2)?;
         e.set_fragment_buffer_offset(f.buffer.length() + 4, 2)
@@ -276,6 +274,54 @@ fn each_refusal_checked_at_the_call_returns_from_it_under_both_policies() {
     for (((what, _), at_call), worker) in REFUSED.iter().zip(&answers[0]).zip(&answers[1]) {
         assert_eq!(at_call, worker, "{what}");
     }
+}
+
+/// An offset at an index with no buffer bound is taken at the call under both policies, with the
+/// same answer, and the draw after it runs: plain Metal keeps no offset there, so refusing it
+/// would refuse what Metal takes (`ArgumentTable::take_buffer_offset`, whose doc holds the
+/// measurement, and `metal2vulkan-conformance`'s `probes/buffer_offset_at_an_unbound_index.m`).
+/// The index past the table is refused in the same call, so the test reads a real check and not a
+/// call that answers `Ok` to everything.
+#[test]
+fn an_offset_at_an_unbound_index_is_taken_at_the_call_under_both_policies() {
+    let scratch = Scratch::new("deferred-unbound-offset");
+    let mut outcomes = Vec::new();
+    for policy in POLICIES {
+        let device = device(&scratch.0, policy, &[], &Heard::default());
+        let state = rectangle_state(&device);
+        let queue = device.new_command_queue().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        let target = target(&device);
+        let mut encoder = command_buffer
+            .render_command_encoder(&pass(&target))
+            .unwrap();
+        // Nothing is bound at vertex index 3, and nothing in this encoder ever binds it.
+        let taken = encoder.set_vertex_buffer_offset(0, 3);
+        let past_the_table = encoder.set_vertex_buffer_offset(0, 31).is_err();
+        rectangle(&state, &mut encoder);
+        let color = bytes_of(&COLOR, f32::to_le_bytes);
+        encoder.set_fragment_bytes(&color, 0).unwrap();
+        encoder
+            .draw_primitives(PrimitiveType::Triangle, 0, 6, 1, 0)
+            .unwrap();
+        assert_eq!(encoder.end_encoding(), Ok(()), "{policy:?}");
+        let back = copy_back(&device, &command_buffer, &target);
+        let words = committed(&command_buffer, &back);
+        outcomes.push((
+            taken,
+            past_the_table,
+            command_buffer.status(),
+            command_buffer.refusal(),
+            words.iter().all(|&word| word == PACKED),
+        ));
+    }
+    assert_eq!(
+        outcomes[0],
+        (Ok(()), true, CommandBufferStatus::Completed, None, true),
+        "{:?}",
+        POLICIES[0]
+    );
+    assert_eq!(outcomes[0], outcomes[1]);
 }
 
 /// A draw of points under a state whose vertex function writes no point size, of no point class:

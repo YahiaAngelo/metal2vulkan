@@ -721,6 +721,19 @@ impl ArgumentTable {
     /// `Vertex Function(vread): missing Buffer binding at index 0 for src[0].` for the draw, which
     /// the never-bound run raises on its own.
     ///
+    /// `metal2vulkan-conformance`'s `probes/buffer_offset_at_an_unbound_index.m` reads the same
+    /// answer for an offset of 0, at an index that never held a buffer, on the same device and
+    /// release: three runs a shape, one shape a process, API validation out of the environment.
+    /// `setVertexBufferOffset:0 atIndex:3` with nothing bound at 3 returned, `endEncoding` and
+    /// `commit` returned, the command buffer completed with no error, and the stages counted 3
+    /// vertices and 256 fragments, having read `0x00000000` from `src[0]` -- the same word the
+    /// never-bound control read, where a buffer bound at 3 read `0x11111111` at offset 0 and
+    /// `0x22222222` after `setVertexBufferOffset:64`, so the setter demonstrably moves a bound
+    /// buffer's offset. Under `MTL_DEBUG_LAYER=1` the layer alone objects, the command buffer
+    /// still completing: `Set Vertex Buffer Offset Validation` /
+    /// `index(3) must have an existing buffer.`, then the draw message the never-bound control
+    /// raises on its own; `MTL_DEBUG_LAYER_ERROR_MODE=assert` ends the program there.
+    ///
     /// Refused: an offset past a bound buffer's length in a render stage's table, which a compute
     /// one holds (the module docs).
     pub(super) fn take_buffer_offset(

@@ -10100,7 +10100,10 @@ impl RenderCommandEncoder {
     /// the index again, as plain Metal reads it. At an index holding inline bytes
     /// ([`set_vertex_bytes`](Self::set_vertex_bytes)), they then read as zeros at any offset until
     /// the index is bound again, as plain Metal reads them (an M4; its debug layer asserts there is
-    /// no buffer). Refused: nothing bound at the index, an offset past the buffer's length.
+    /// no buffer). At an index with nothing bound it keeps no offset, as plain Metal keeps none
+    /// there: the index stays unbound and the draw reads zeros, byte for byte as it reads an index
+    /// never bound (`ArgumentTable::take_buffer_offset`). Refused: an index past the table, an
+    /// offset past the length of a buffer bound at the index.
     pub fn set_vertex_buffer_offset(&mut self, offset: u64, index: u32) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_vertex_buffer_offset(offset, index)),
