@@ -2835,6 +2835,7 @@ field	metal2vulkan-runtime::WorkCounts.shadowed_textures	pub shadowed_textures: 
 field	metal2vulkan-runtime::WorkCounts.shadows_over_fresh_pages	pub shadows_over_fresh_pages: u64
 field	metal2vulkan-runtime::WorkCounts.shadows_sharing_truth	pub shadows_sharing_truth: u64
 field	metal2vulkan-runtime::WorkCounts.shadows_zeroed	pub shadows_zeroed: u64
+field	metal2vulkan-runtime::WorkCounts.shared_event_waits_held	pub shared_event_waits_held: u64
 field	metal2vulkan-runtime::WorkCounts.sign_strips	pub sign_strips: u64
 field	metal2vulkan-runtime::WorkCounts.signed_depth_switch_ons	pub signed_depth_switch_ons: u64
 field	metal2vulkan-runtime::WorkCounts.slot_return_nanos	pub slot_return_nanos: u64

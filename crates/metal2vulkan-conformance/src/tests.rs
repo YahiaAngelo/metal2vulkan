@@ -6695,23 +6695,11 @@ fn every_case_carries_a_cost_recording() {
     /// produces a record, so a case is covered only where a later whole-set run includes it, and
     /// the next one empties the list again.
     ///
-    /// Four, and all four are sparse mapping moves read off the texels -- one with both sides
-    /// inside the level and three past an edge
-    /// ([`crate::cases::sparse_mappings::move_inside_the_level`] and its three siblings). They
-    /// landed from a concurrent branch *while* the whole-set run that paid the rest was in flight,
-    /// so that run's tree did not hold them.
+    /// Empty. A whole-set run has covered every case this tree holds.
     ///
-    /// The fourteen names that stood here before were paid by one whole-set `cost --runs 8 --write`
-    /// and one `cost --runs 8 --alone --write`, each over all 1,117 cases of its own tree in one
-    /// process, which is the only shape that measures either: a case's counts depend on what ran
-    /// before it in the same process, so a selection cannot pay a record however many cases it
-    /// names. The next whole-set run empties these four lines too.
-    const AFTER_THE_LAST_RUN: [&str; 4] = [
-        "sparse-mapping-move-inside-the-level",
-        "sparse-mapping-move-of-a-clipped-source",
-        "sparse-mapping-move-of-a-source-past-the-level",
-        "sparse-mapping-move-past-the-destinations-row",
-    ];
+    /// A whole-set run is the only shape that pays a record: a case's counts depend on what ran
+    /// before it in the same process, so a selection cannot pay one however many cases it names.
+    const AFTER_THE_LAST_RUN: [&str; 0] = [];
 
     /// Cases a whole-set run did not cover although they were committed before it ran.
     ///

@@ -740,7 +740,7 @@ const TRANSLATION: [&str; 19] = [
 
 /// The name prefixes that put a count in [`Region::Submission`]: the commit path, our own other
 /// threads and the GPU.
-const SUBMISSION: [&str; 47] = [
+const SUBMISSION: [&str; 48] = [
     "commands_replayed.",
     "command_buffers_",
     "command_pools_made",
@@ -763,6 +763,7 @@ const SUBMISSION: [&str; 47] = [
     "slot_waits",
     "completed_waits",
     "event_waits_met",
+    "shared_event_waits_held",
     "timeline_waits",
     // The sites one wait for a completion is made of, which the runtime counts one counter a
     // site. Each is a wait, so each belongs here beside `completed_waits` and `timeline_waits`
