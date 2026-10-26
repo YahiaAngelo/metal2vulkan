@@ -35,8 +35,9 @@
 //!   its regions' unwritten bytes, at most its chunks' bytes and in practice far less: a command
 //!   whose tables are as long as their data clears nothing, where a clear of each chunk wrote
 //!   4 KiB for the first region of a command buffer whatever it held (clearing 64 KiB took 11.5 us
-//!   of an RTX 3090's host-visible memory and 2.6 us of a Radeon 780M's). Counted:
-//!   `WorkCounts::new_buffer_bytes_cleared`, the same count a buffer's own clear moves.
+//!   of an RTX 3090's host-visible memory and 2.6 us of a Radeon 780M's). A chunk long enough to
+//!   lie in fresh pages reads zero unwritten, and a region of one writes nothing past its data.
+//!   Counted: `WorkCounts::new_buffer_bytes_cleared`, the same count a buffer's own clear moves.
 //! - **Alignment.** Every region starts at a multiple of the device's upload alignment (16 bytes,
 //!   and the storage and uniform buffer offset alignments), so it can be bound at its offset and
 //!   its device address is 16-aligned. A root table and the resident set it searches start at a
@@ -44,7 +45,7 @@
 //!   are zero: [`Uploads::upload`] sets them, since the chunk holds no value as it is made. The
 //!   bytes an alignment leaves between two regions belong to no region, and nothing reads them.
 
-use super::buffer::Buffer;
+use super::buffer::{Buffer, NewBytes};
 use super::device::lock;
 use super::error::{Error, MemoryKind};
 use super::values::{CpuCacheMode, HazardTrackingMode, ResourceOptions, StorageMode};
@@ -76,6 +77,9 @@ struct Chunk {
     buffer: Buffer,
     /// Bytes from the chunk's start that regions took.
     used: u64,
+    /// Whether every byte of it nothing wrote reads zero: it was made in fresh pages
+    /// (`fresh_pages.rs`), so a region of it needs no zeros written past its data.
+    zero_unwritten: bool,
 }
 
 /// A region of the arena: `len` bytes of `buffer` from `offset`.
@@ -186,7 +190,7 @@ impl Uploads {
                 // what its own data does not cover as it is handed out, and nothing reads a byte
                 // of the chunk outside a region, so a clear of the whole chunk would write bytes
                 // no reader can reach (the module docs' "Sizes").
-                let buffer = device.unzeroed_buffer_with(
+                let (buffer, new_bytes) = device.unzeroed_buffer_with(
                     size,
                     ResourceOptions::new(
                         StorageMode::Shared,
@@ -208,7 +212,11 @@ impl Uploads {
                 if !dedicated {
                     self.opened += 1;
                 }
-                let chunk = Chunk { buffer, used: 0 };
+                let chunk = Chunk {
+                    buffer,
+                    used: 0,
+                    zero_unwritten: new_bytes == NewBytes::Zero,
+                };
                 let offset = aligned(&chunk, 0).ok_or(Error::OutOfMemory(MemoryKind::Device))?;
                 self.chunks.insert(at, chunk);
                 (at, offset, offset + len)
@@ -232,9 +240,12 @@ impl Uploads {
         // The region's bytes past the data are zero (the module docs' "Alignment"), and the chunk
         // holds no value as it is made, so the region sets them: at most the chunk's bytes over
         // all its regions, where a clear of the chunk wrote every byte of it whether a region took
-        // it or not.
+        // it or not. A chunk made in fresh pages already reads zero where nothing wrote, and no
+        // region writes another's bytes, so a region of one writes none of them: else a replay
+        // scratch of tens of MiB, whose head alone is uploaded and whose rest the GPU writes,
+        // would pay a memset its creation never paid (`fresh_pages.rs`).
         let tail = len - bytes.len() as u64;
-        if tail > 0 {
+        if tail > 0 && !chunk.zero_unwritten {
             let at = offset + bytes.len() as u64;
             // SAFETY: `[at, at + tail)` is the rest of the region, inside the chunk's mapping as
             // above, and no region overlaps it.

@@ -1985,39 +1985,40 @@ impl Device {
         length: u64,
         tracking: HazardTrackingMode,
     ) -> Result<Buffer, Error> {
-        self.unzeroed_buffer_with(
-            length,
-            ResourceOptions::new(StorageMode::Private, CpuCacheMode::DefaultCache, tracking),
-        )
+        let options =
+            ResourceOptions::new(StorageMode::Private, CpuCacheMode::DefaultCache, tracking);
+        Ok(self.unzeroed_buffer_with(length, options)?.0)
     }
 
     /// [`unzeroed_buffer`](Device::unzeroed_buffer) with `options`: a buffer of `length` bytes
     /// that the runtime makes for its own use, whose bytes hold no value before its owner writes
-    /// them, in memory `options` asks for. The upload arena's chunks are such a buffer
-    /// (`upload.rs`): nothing reads a byte of a chunk outside a region it handed out, and it sets
-    /// every byte of a region that the region's data does not cover to zero as it hands it out,
-    /// so what a chunk would pay a creation-time clear for is paid by the region, for the region's
-    /// bytes alone.
+    /// them, in memory `options` asks for, and what its bytes hold as it is made.
+    ///
+    /// The upload arena's chunks are such a buffer (`upload.rs`): nothing reads a byte of a chunk
+    /// outside a region it handed out, and it sets every byte of a region that the region's data
+    /// does not cover to zero as it hands it out, so what a chunk would pay a creation-time clear
+    /// for is paid by the region, for the region's bytes alone. A chunk made in fresh pages reads
+    /// zero unwritten ([`NewBytes::Zero`], `fresh_pages.rs`), so a region of one writes nothing
+    /// past its data: that is what the second half of the answer is for.
     pub(super) fn unzeroed_buffer_with(
         &self,
         length: u64,
         options: ResourceOptions,
-    ) -> Result<Buffer, Error> {
+    ) -> Result<(Buffer, NewBytes), Error> {
         const CALL: &str = "new_buffer";
         let modes = Modes::of(options)?;
         let class = buffer_class(CALL, modes)?;
         if length == 0 || length > self.properties().max_buffer_length {
             return Err(nil(CALL, Problem::BufferLength { length }));
         }
-        let (buffer, _) = self.placed_new_buffer(
+        self.placed_new_buffer(
             CALL,
             length,
             modes,
             class,
             false,
             AddressPlacement::Outside.into(),
-        )?;
-        Ok(buffer)
+        )
     }
 
     /// [`zeroed_buffer`](Device::zeroed_buffer)'s buffer before its bytes are set to zero, and
@@ -2593,7 +2594,7 @@ impl Device {
 
 /// What a new buffer's bytes hold as [`Device::placed_new_buffer`] makes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NewBytes {
+pub(super) enum NewBytes {
     /// Its memory's bytes as placed: undefined, or a parked buffer's last owner's.
     AsPlaced,
     /// Zero: fresh pages it imported (`fresh_pages.rs`).
