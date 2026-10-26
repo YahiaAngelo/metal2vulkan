@@ -4,6 +4,14 @@
 //! - **One Vulkan object.** An event is a timeline semaphore. Its counter is a signal index that
 //!   [`EventTimeline`] maps to Metal's values: only the GPU signals the scheduler keeps raise it,
 //!   and a host set is a floor that never touches it.
+//! - **A shared event's wait is never handed to Vulkan.** The host may set a shared event's value
+//!   (`MTLSharedEvent`), and Metal's set releases a command buffer's wait as soon as the value is
+//!   reached. No Vulkan wait a batch was submitted with can be released by the host, so a wait for
+//!   such a value is held by the scheduler until the value is reached, and goes with no Vulkan
+//!   wait (`event_timeline.rs`). Whatever reaches the value wakes the scheduler for it: the set,
+//!   and the observation of a GPU signal ([`EventShared::reached`], [`EventShared::value`]). A
+//!   plain event's (`MTLEvent`) wait, which no host call can satisfy, still chains on the
+//!   `VkQueue`.
 //! - **Who observes.** A completion turn sees each batch complete, and with it the event
 //!   signals of the batch; reading the value reads the semaphore's counter too. Either one wakes
 //!   the host's waits and posts the listeners' notifications that came due.
@@ -143,7 +151,8 @@ impl Drop for EventShared {
 }
 
 impl EventShared {
-    fn new(device: &Device) -> Result<Arc<EventShared>, Error> {
+    /// `settable` for a shared event (`MTLSharedEvent`), whose value the host may set.
+    fn new(device: &Device, settable: bool) -> Result<Arc<EventShared>, Error> {
         if device.is_lost() {
             return Err(Error::DeviceLost);
         }
@@ -160,7 +169,7 @@ impl EventShared {
             device: device.clone(),
             semaphore,
             state: Mutex::new(EventState {
-                timeline: EventTimeline::default(),
+                timeline: EventTimeline::new(settable),
                 notifications: Vec::new(),
                 parked: 0,
             }),
@@ -207,6 +216,7 @@ impl EventShared {
             due(&mut state)
         };
         self.post(due);
+        self.woke();
     }
 
     /// The value now, from the semaphore's counter and the host's floor. A counter the read
@@ -236,18 +246,21 @@ impl EventShared {
                         error => Err(error),
                     })
                 };
-                let due = {
+                let (rose, due) = {
                     let mut state = lock(&self.state);
                     match state.timeline.observe_read(read, reaches) {
                         Ok(true) => {
                             self.rose(&state);
-                            due(&mut state)
+                            (true, due(&mut state))
                         }
-                        Ok(false) | Err(_) => Vec::new(),
+                        Ok(false) | Err(_) => (false, Vec::new()),
                     }
                 };
                 drop(busy);
                 self.post(due);
+                if rose {
+                    self.woke();
+                }
             }
         }
         lock(&self.state).timeline.value()
@@ -265,8 +278,7 @@ impl EventShared {
             due(&mut state)
         };
         self.post(due);
-        // A batch held for this value may go now.
-        self.device.shared().scheduler.wake();
+        self.woke();
     }
 
     /// Wait until the value reaches `value`, at most `timeout`; a timeout past what the host's
@@ -331,6 +343,13 @@ impl EventShared {
         self.device.shared().counts.event_wake(parked);
     }
 
+    /// The value rose: a batch held for it may go now, so the scheduler looks again (its waits
+    /// for a value the host may set are held, never handed to Vulkan: the module docs). Called
+    /// without the event's lock, which the scheduler's thread takes under its own.
+    fn woke(&self) {
+        self.device.shared().scheduler.wake();
+    }
+
     /// Post `due` notifications to their listeners.
     fn post(self: &Arc<Self>, due: Vec<Notification>) {
         for notification in due {
@@ -364,12 +383,12 @@ fn due(state: &mut EventState) -> Vec<Notification> {
 impl Device {
     /// `newEvent`.
     pub fn new_event(&self) -> Result<Event, Error> {
-        Ok(Event(EventShared::new(self)?))
+        Ok(Event(EventShared::new(self, false)?))
     }
 
     /// `newSharedEvent`.
     pub fn new_shared_event(&self) -> Result<SharedEvent, Error> {
-        Ok(SharedEvent(EventShared::new(self)?))
+        Ok(SharedEvent(EventShared::new(self, true)?))
     }
 
     /// `newSharedEventWithHandle:`: the event of `handle`, made by this device. Two calls of

@@ -1,6 +1,8 @@
 //! An event's signal indices and Metal's values (`event_timeline.rs`): monotone values, dropped
 //! signals, the order of kept signals across `VkQueue`s, the host's floor, the waits a batch is
-//! submitted with, and a counter read observed only once a host wait returned for it.
+//! submitted with, and a counter read observed only once a host wait returned for it. A timeline
+//! of a plain event (`MTLEvent`) is `new(false)`, one whose value the host may set
+//! (`MTLSharedEvent`) `new(true)`; `host_settable_event_waits` holds the difference.
 
 use crate::event_timeline::{EventTimeline, Signal, WaitFor};
 
@@ -15,7 +17,7 @@ fn submit(timeline: &mut EventTimeline<usize>, value: u64, queue: usize) -> Sign
 
 #[test]
 fn kept_signals_take_rising_indices() {
-    let mut timeline = EventTimeline::default();
+    let mut timeline = EventTimeline::new(false);
     assert_eq!(
         submit(&mut timeline, 3, 0),
         Signal::Kept {
@@ -50,7 +52,7 @@ fn kept_signals_take_rising_indices() {
 
 #[test]
 fn a_signal_not_above_what_is_known_is_dropped() {
-    let mut timeline = EventTimeline::default();
+    let mut timeline = EventTimeline::new(false);
     submit(&mut timeline, 7, 0);
     // Lower and equal: Metal's maximum makes them no-ops (measured).
     assert_eq!(submit(&mut timeline, 4, 1), Signal::Dropped);
@@ -63,13 +65,13 @@ fn a_signal_not_above_what_is_known_is_dropped() {
 #[test]
 fn either_submission_order_of_seven_and_four_ends_at_seven() {
     // Seven first: the four is dropped.
-    let mut first = EventTimeline::default();
+    let mut first = EventTimeline::new(false);
     submit(&mut first, 7, 0);
     assert_eq!(submit(&mut first, 4, 1), Signal::Dropped);
     first.observe(1);
     assert_eq!(first.value(), 7);
     // Four first: the seven is kept after it, and waits for it on another queue.
-    let mut second = EventTimeline::default();
+    let mut second = EventTimeline::new(false);
     submit(&mut second, 4, 1);
     assert_eq!(
         submit(&mut second, 7, 0),
@@ -86,7 +88,7 @@ fn either_submission_order_of_seven_and_four_ends_at_seven() {
 
 #[test]
 fn a_kept_signal_waits_only_for_one_pending_on_another_queue() {
-    let mut timeline = EventTimeline::default();
+    let mut timeline = EventTimeline::new(false);
     submit(&mut timeline, 1, 0);
     // Same queue: Vulkan's signal operation order keeps them in order.
     assert_eq!(
@@ -117,7 +119,7 @@ fn a_kept_signal_waits_only_for_one_pending_on_another_queue() {
 
 #[test]
 fn waits_map_to_the_first_index_that_reaches_the_value() {
-    let mut timeline = EventTimeline::default();
+    let mut timeline = EventTimeline::new(false);
     submit(&mut timeline, 3, 0);
     submit(&mut timeline, 8, 0);
     assert_eq!(timeline.wait(0), Some(WaitFor::Reached));
@@ -133,7 +135,8 @@ fn waits_map_to_the_first_index_that_reaches_the_value() {
 
 #[test]
 fn the_host_floor_takes_effect_at_once_and_never_on_the_semaphore() {
-    let mut timeline = EventTimeline::default();
+    // A shared event: only its value may be set.
+    let mut timeline = EventTimeline::new(true);
     submit(&mut timeline, 7, 0);
     // A host set below the pending GPU signal: the value is 5 now.
     assert!(timeline.set(5));
@@ -143,7 +146,8 @@ fn the_host_floor_takes_effect_at_once_and_never_on_the_semaphore() {
     assert!(!timeline.set(5));
     // A wait the floor reached needs no Vulkan wait, though a GPU signal above it is pending.
     assert_eq!(timeline.wait(5), Some(WaitFor::Reached));
-    assert_eq!(timeline.wait(6), Some(WaitFor::Index(1)));
+    // One above it is held: a set the host makes next must release it, which no Vulkan wait would.
+    assert_eq!(timeline.wait(6), None);
     // The GPU's seven lands above the floor.
     assert!(timeline.observe(1));
     assert_eq!(timeline.value(), 7);
@@ -151,7 +155,7 @@ fn the_host_floor_takes_effect_at_once_and_never_on_the_semaphore() {
 
 #[test]
 fn a_wait_only_the_host_floor_satisfies_is_never_a_vulkan_wait() {
-    let mut timeline = EventTimeline::default();
+    let mut timeline = EventTimeline::new(true);
     assert_eq!(timeline.wait(9), None);
     timeline.set(9);
     assert_eq!(timeline.known(), 9);
@@ -169,20 +173,19 @@ fn a_wait_only_the_host_floor_satisfies_is_never_a_vulkan_wait() {
         }
     );
     assert_eq!(timeline.wait(9), Some(WaitFor::Reached));
-    assert_eq!(timeline.wait(10), Some(WaitFor::Index(1)));
+    // The twelve is pending, but the host may set ten: the batch is held, not handed a wait.
+    assert_eq!(timeline.wait(10), None);
 }
 
 #[test]
-fn a_host_set_above_a_pending_signal_leaves_its_waits_on_that_signal() {
-    // The residual: a wait handed to Vulkan before the host set still waits for the GPU signal,
-    // which was submitted before it.
-    let mut timeline = EventTimeline::default();
+fn a_host_set_above_a_pending_signal_reaches_every_wait_below_it() {
+    let mut timeline = EventTimeline::new(true);
     submit(&mut timeline, 7, 0);
-    let handed = timeline.wait(5);
-    assert_eq!(handed, Some(WaitFor::Index(1)));
+    // Held, never handed to Vulkan: the host may set five, and a Vulkan wait for the seven's
+    // index would hold the batch until the seven's GPU work ran (`host_settable_event_waits`).
+    assert_eq!(timeline.wait(5), None);
     timeline.set(9);
     assert_eq!(timeline.value(), 9);
-    // A wait submitted now needs nothing.
     assert_eq!(timeline.wait(5), Some(WaitFor::Reached));
     // The GPU's seven reaches index 1, and the value stays at the floor.
     assert!(!timeline.observe(1));
@@ -191,7 +194,7 @@ fn a_host_set_above_a_pending_signal_leaves_its_waits_on_that_signal() {
 
 #[test]
 fn the_largest_value_is_kept() {
-    let mut timeline = EventTimeline::default();
+    let mut timeline = EventTimeline::new(true);
     assert_eq!(
         submit(&mut timeline, u64::MAX, 0),
         Signal::Kept {
@@ -210,7 +213,7 @@ fn the_largest_value_is_kept() {
 /// last seen covers asks for no wait, and a failed wait observes nothing.
 #[test]
 fn a_counter_read_is_observed_only_once_a_host_wait_returned_for_it() {
-    let mut timeline = EventTimeline::default();
+    let mut timeline = EventTimeline::new(false);
     submit(&mut timeline, 3, 0);
     submit(&mut timeline, 5, 0);
     let mut asked = Vec::new();

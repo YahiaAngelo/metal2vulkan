@@ -3,6 +3,13 @@
 //! `VkQueue` never deadlock, signals of one event from several queues end at the highest value,
 //! and host sets racing pending GPU signals never deadlock.
 //!
+//! An event the program's host sets is a shared event ([`Model::sharing`]), whose waits are held
+//! until the value is reached rather than handed to Vulkan (`host_settable_event_waits`); the
+//! rest are plain events, whose waits chain on the `VkQueue`. A batch held for either reason goes
+//! once what it waits for arrives, which in the runtime wakes the scheduler ([`EventShared::set`]
+//! and [`EventShared::reached`], `event.rs`) and here makes a pass again ([`Model::host_set`],
+//! [`Model::step`]).
+//!
 //! [`Order::take_first`], which a thread about to block submits with
 //! (`scheduler::submit_plain_ready`), is tested here too: it takes the head committed first of
 //! all and stops at it, so it passes no head over and needs no answer of
@@ -73,7 +80,7 @@ impl Model {
     fn new(events: usize, vk_queue_of: &[usize]) -> Model {
         let vk_queues = vk_queue_of.iter().max().map_or(0, |&last| last + 1);
         Model {
-            events: (0..events).map(|_| EventTimeline::default()).collect(),
+            events: (0..events).map(|_| EventTimeline::new(false)).collect(),
             counters: vec![0; events],
             kept: vec![0; events],
             order: Order::default(),
@@ -84,6 +91,15 @@ impl Model {
             submitted_waits: Vec::new(),
             executed: Vec::new(),
         }
+    }
+
+    /// The events the program's host sets are shared events (`MTLSharedEvent`): only their value
+    /// may be set.
+    fn sharing(mut self, shared: &[usize]) -> Model {
+        for &event in shared {
+            self.events[event] = EventTimeline::new(true);
+        }
+        self
     }
 
     /// Commit a command buffer of `batches` on logical queue `queue`, then schedule: the batches'
@@ -97,8 +113,13 @@ impl Model {
         (first..self.next).collect()
     }
 
-    /// The host sets `event` to `value`, then the scheduler looks again.
+    /// The host sets `event` to `value`, then the scheduler looks again. Only a shared event's
+    /// value is set ([`Model::sharing`]).
     fn host_set(&mut self, event: usize, value: u64) {
+        assert!(
+            self.events[event].settable(),
+            "event {event} is a plain one"
+        );
         self.events[event].set(value);
         self.schedule();
     }
@@ -170,6 +191,9 @@ impl Model {
             self.events[event].observe(index);
         }
         self.executed.push(head.id);
+        // The signals seen let a batch held for one of their values go, as a completion turn
+        // wakes the scheduler for it (`event.rs`).
+        self.schedule();
         true
     }
 
@@ -315,7 +339,7 @@ fn a_wait_before_its_signal_on_one_vk_queue_never_deadlocks() {
 fn a_held_batch_holds_back_only_its_own_queue() {
     // As measured on Metal: a command buffer waiting for an event stays committed, holds the
     // later command buffers of its queue, and lets other queues run.
-    let mut model = Model::new(1, &[0, 0]);
+    let mut model = Model::new(1, &[0, 0]).sharing(&[0]);
     let held = model.commit(0, vec![waits(&[(0, 1)])]);
     let behind = model.commit(0, vec![Spec::default()]);
     let other = model.commit(1, vec![Spec::default()]);
@@ -391,7 +415,7 @@ fn a_host_set_racing_a_pending_signal_never_deadlocks() {
     // Event 0's seven is submitted on VkQueue 0 but waits there for event 1, which queue 1
     // signals on VkQueue 1. The host sets event 0 to 9 meanwhile.
     for run_first in [0, 1] {
-        let mut model = Model::new(2, &[0, 1, 0, 1]);
+        let mut model = Model::new(2, &[0, 1, 0, 1]).sharing(&[0]);
         model.commit(1, vec![signals(&[(1, 1)])]);
         model.commit(
             0,
@@ -400,7 +424,8 @@ fn a_host_set_racing_a_pending_signal_never_deadlocks() {
                 signals: vec![(0, 7)],
             }],
         );
-        // Submitted before the host set: waits for the seven's index (the residual).
+        // Event 0 is shared, so this one is held rather than handed a wait for the seven's
+        // index: the host set must release it, which no Vulkan wait would.
         let early = model.commit(3, vec![waits(&[(0, 5)])]);
         if run_first == 1 {
             model.run(&mut |_| 0);
@@ -414,7 +439,7 @@ fn a_host_set_racing_a_pending_signal_never_deadlocks() {
             assert_eq!(waits, &[], "a wait only the host's floor satisfies");
         }
         let (_, waits) = &model.submitted_waits[model.position(early[0])];
-        assert_eq!(waits, &[(0, 1)]);
+        assert_eq!(waits, &[], "a wait the host's set may satisfy");
         model.run(&mut |count| count - 1);
         assert!(model.finished(), "{:?}", model.vk_queues);
         assert_eq!(model.events[0].value(), 9);
@@ -486,7 +511,8 @@ fn random_programs_complete_on_one_to_four_vk_queues() {
             sets,
             highest,
         } = program(&mut rng, queues, events);
-        let mut model = Model::new(events, &vk_queue_of);
+        let shared: Vec<usize> = sets.iter().map(|&(event, _)| event).collect();
+        let mut model = Model::new(events, &vk_queue_of).sharing(&shared);
         // Commit in a random interleaving of the queues (each queue's own order kept), with
         // the host sets at random points and the device running at random points.
         let mut lines: Vec<VecDeque<Vec<Spec>>> = (0..queues).map(|_| VecDeque::new()).collect();

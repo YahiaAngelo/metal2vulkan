@@ -19,9 +19,21 @@
 //!   ([`EventTimeline::known`]). A wait for a known value is satisfied by work already submitted,
 //!   or by the host: the scheduler submits only such waits.
 //!
-//! **The residual.** A wait already handed to Vulkan for a GPU signal's index is not released
-//! early by a later host set above its value: it waits for that GPU signal, which was submitted
-//! before it and so comes. Metal releases it at the host set.
+//! **A wait the host may satisfy is never handed to Vulkan** ([`EventTimeline::settable`]). An
+//! `MTLSharedEvent`'s value is one thing the host and the device both see, so `setSignaledValue:`
+//! releases an `encodeWaitForEvent:` as soon as the value is reached, whatever the device is
+//! running. A Vulkan wait a batch was submitted with cannot be released by the host: the semaphore
+//! value it waits for is the signal index of a GPU signal submitted before it, and signalling that
+//! index from the host would make that signal's own `vkQueueSubmit` illegal, since a timeline
+//! semaphore signal operation's "value must have a value greater than the current value of the
+//! semaphore when the semaphore signal operation is executed"
+//! (`VUID-vkQueueSubmit-pSignalSemaphores-03242`). So a wait for a value the host may set is held
+//! until the value is reached, by the GPU signal or by the set, and goes with no Vulkan wait at
+//! all: [`EventTimeline::wait`] answers `None` while it is not reached. Only an `MTLEvent`, whose
+//! value no host call sets, chains on the `VkQueue`.
+//!
+//! The held batch goes once the value is reached: a host set wakes the scheduler, and so does a
+//! completion turn that observes the GPU signal (`event.rs`).
 
 use crate::command_buffer::completion::seen;
 use std::collections::VecDeque;
@@ -65,16 +77,28 @@ pub(super) struct EventTimeline<Q> {
     pending: VecDeque<Pending<Q>>,
     /// The highest value the host set.
     floor: u64,
+    /// Whether the host may set the value: a shared event's (`MTLSharedEvent`), whose set must
+    /// release a wait at once, which no Vulkan wait can do (the module docs).
+    settable: bool,
 }
 
-impl<Q> Default for EventTimeline<Q> {
-    fn default() -> EventTimeline<Q> {
+impl<Q> EventTimeline<Q> {
+    /// An event's timeline; `settable` for a shared event (`MTLSharedEvent`), whose value the host
+    /// may set, and `false` for a plain one (`MTLEvent`).
+    pub(super) fn new(settable: bool) -> EventTimeline<Q> {
         EventTimeline {
             reached: 0,
             reached_value: 0,
             pending: VecDeque::new(),
             floor: 0,
+            settable,
         }
+    }
+
+    /// Whether the host may set the value.
+    #[cfg(test)]
+    pub(super) fn settable(&self) -> bool {
+        self.settable
     }
 }
 
@@ -125,11 +149,15 @@ impl<Q: Copy + Eq> EventTimeline<Q> {
         self.value() > before
     }
 
-    /// How a batch submitted now waits for `value`; `None` when no submitted signal and no host
-    /// set reaches it yet, and the batch must be held.
+    /// How a batch submitted now waits for `value`; `None` while the batch must be held: no
+    /// submitted signal and no host set reaches it yet, or the host may set it and it is not
+    /// reached, which no Vulkan wait would answer to (the module docs).
     pub(super) fn wait(&self, value: u64) -> Option<WaitFor> {
         if value <= self.value() {
             return Some(WaitFor::Reached);
+        }
+        if self.settable {
+            return None;
         }
         self.pending
             .iter()
