@@ -12,17 +12,12 @@ use super::device::lock;
 use super::memory::FreeCause;
 use super::recorder::{CommandsReplayed, ReplayCounts};
 use super::scheduler::HeldFor;
-use super::shadow::{Backing, CopyCause, Lost, ShadowCopy, ShadowSource};
+use super::shadow::{Backing, CarryTally, CopyCause, Lost, ShadowCopy, ShadowSource};
 use super::Device;
 use ash::vk;
 use std::panic::Location;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-
-/// The texels of a texture over an IOSurface's plane from which its shadow's copies in count
-/// apart (`WorkCounts::shadow_texels_first_copied_in_large_surfaces`,
-/// `shadow_texels_recopied_in_large_surfaces`): 2^20, which a 1920x1080 framebuffer's exceed.
-const LARGE_SURFACE_TEXELS: u64 = 1 << 20;
 
 /// Which of the two predictions a `VkPipeline` a state's creation made belongs to
 /// (`WorkCounts::creation_render_pipelines_made`, `creation_dispatch_pipelines_made`): the render
@@ -311,6 +306,10 @@ pub(crate) struct Counters {
     shadow_texels_first_copied_in_aliased_host_pages: AtomicU64,
     shadow_texels_first_copied_in_surfaces: AtomicU64,
     shadow_texels_first_copied_in_large_surfaces: AtomicU64,
+    shadow_texels_first_copy_in_carried: AtomicU64,
+    shadow_texels_first_copy_in_carried_large_surfaces: AtomicU64,
+    shadow_texels_first_copied_in_large_surfaces_stood_earlier: AtomicU64,
+    shadow_texels_first_copied_in_large_surfaces_unstood: AtomicU64,
     shadow_texels_first_copied_in_again: AtomicU64,
     shadow_texels_copied_in_images: AtomicU64,
     shadow_texels_recopied_beyond_held: AtomicU64,
@@ -2051,7 +2050,7 @@ impl Counters {
         if matches!(copies.source, ShadowSource::Image { .. }) {
             add(&self.shadow_texels_copied_in_images);
         }
-        let large = copies.backing == Backing::Surface && copies.texels() >= LARGE_SURFACE_TEXELS;
+        let large = copies.large_surface();
         let first = cause == CopyCause::First;
         match cause {
             CopyCause::First => add(&self.shadow_texels_first_copied_in),
@@ -2220,6 +2219,34 @@ impl Counters {
             .fetch_add(covered, Ordering::Relaxed);
         self.shadow_attachment_tiles_bounded
             .fetch_add(bounded, Ordering::Relaxed);
+    }
+
+    /// How an encoder's first copies in of shadowed textures stood against their images' last
+    /// standing (`shadow::CarryTally`): the texels the carry took off, and, of large IOSurface
+    /// planes, the texels a first copy in moved behind an earlier command buffer's standing or
+    /// behind none at all. The three large-surface figures size the carry on a run without a
+    /// timing: where the carried one is 0 and the other two hold every texel, each large-surface
+    /// copy in the run makes is the first in its own command buffer, or of an image that never
+    /// held a standing, and the carry takes nothing off it.
+    pub(crate) fn shadow_first_copies_in_tallied(&self, tally: CarryTally) {
+        let add = |counter: &AtomicU64, texels: u64| {
+            if texels > 0 {
+                counter.fetch_add(texels, Ordering::Relaxed);
+            }
+        };
+        add(&self.shadow_texels_first_copy_in_carried, tally.carried);
+        add(
+            &self.shadow_texels_first_copy_in_carried_large_surfaces,
+            tally.carried_large,
+        );
+        add(
+            &self.shadow_texels_first_copied_in_large_surfaces_stood_earlier,
+            tally.stood_earlier_large,
+        );
+        add(
+            &self.shadow_texels_first_copied_in_large_surfaces_unstood,
+            tally.unstood_large,
+        );
     }
 
     /// An ended encoder's first copies in of shadowed textures moved `texels` texels of textures
@@ -4081,10 +4108,28 @@ pub struct WorkCounts {
     /// Of `shadow_texels_first_copied_in_surfaces`, those under a texture of 2^20 texels or more
     /// (a 1920x1080 framebuffer's among them).
     pub shadow_texels_first_copied_in_large_surfaces: u64,
+    /// The texels no copy in moved because the encoder's first use of a shadowed texture found
+    /// its command buffer already holding that image's truth (`shadow::ShadowCarry`): exactly
+    /// what carrying the image across the command buffer's encoders takes off the run. 0 means
+    /// every copy in the run makes is the first in its own command buffer, which Metal requires,
+    /// and the carry takes nothing off it.
+    pub shadow_texels_first_copy_in_carried: u64,
+    /// Of those, the ones of a texture over an IOSurface's plane of at least 2^20 texels
+    /// (`shadow::ShadowCopies::large_surface`): the first of the three figures that divide such
+    /// a plane's first copies in.
+    pub shadow_texels_first_copy_in_carried_large_surfaces: u64,
+    /// The second: the texels an encoder's first copy in of such a plane moved where the image's
+    /// last standing was an earlier command buffer's. Metal shows a later command buffer a CPU
+    /// write made since the commit, so it requires these and no rule removes them.
+    pub shadow_texels_first_copied_in_large_surfaces_stood_earlier: u64,
+    /// The third: the texels an encoder's first copy in of such a plane moved where the image
+    /// never held a standing of any command buffer. Unavoidable under any rule.
+    pub shadow_texels_first_copied_in_large_surfaces_unstood: u64,
     /// Of `shadow_texels_first_copied_in`, those of a texture an earlier encoder of the same
     /// command buffer copied in too, counted as each encoder ends (not an indirect command
-    /// buffer's segment): the copies in a shadow kept across a command buffer's encoders could
-    /// leave out, at most.
+    /// buffer's segment). The carry leaves those copies in out, so this counts only the ones it
+    /// could not: a texture an encoder of the command buffer wrote the truth of another way, or
+    /// that something let another writer in between.
     pub shadow_texels_first_copied_in_again: u64,
     /// The texels later copies in move (not an encoder's first) before a command that needs
     /// texels outside the rectangle the shadow's last copy in moved (a pass's read at its own
@@ -4920,6 +4965,18 @@ impl Device {
                 .load(Ordering::Relaxed),
             shadow_texels_first_copied_in_large_surfaces: counters
                 .shadow_texels_first_copied_in_large_surfaces
+                .load(Ordering::Relaxed),
+            shadow_texels_first_copy_in_carried: counters
+                .shadow_texels_first_copy_in_carried
+                .load(Ordering::Relaxed),
+            shadow_texels_first_copy_in_carried_large_surfaces: counters
+                .shadow_texels_first_copy_in_carried_large_surfaces
+                .load(Ordering::Relaxed),
+            shadow_texels_first_copied_in_large_surfaces_stood_earlier: counters
+                .shadow_texels_first_copied_in_large_surfaces_stood_earlier
+                .load(Ordering::Relaxed),
+            shadow_texels_first_copied_in_large_surfaces_unstood: counters
+                .shadow_texels_first_copied_in_large_surfaces_unstood
                 .load(Ordering::Relaxed),
             shadow_texels_first_copied_in_again: counters
                 .shadow_texels_first_copied_in_again

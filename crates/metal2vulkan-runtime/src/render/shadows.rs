@@ -618,7 +618,8 @@ fn color_take(
     // its pixel (a tile dispatch reads the whole tile; a resolve reads every sample, and is
     // excluded below). So only those texels are copied in (`ShadowUse::loads`); a draw that
     // takes the texture another way (bound, or made resident) joins a use that reads
-    // anywhere, and each encoder copies in again before its first use.
+    // anywhere, and a later command that needs the texels outside the rectangle copies them in,
+    // in this encoder or a later one of the command buffer (`shadow::ShadowCarry`).
     let loaded = drawn.filter(|(_, loaded)| loaded.get(index) == Some(&true));
     let area = loaded
         .map(|(area, _)| area)

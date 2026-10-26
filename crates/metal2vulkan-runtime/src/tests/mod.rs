@@ -240,6 +240,8 @@ mod shader_cache_off_thread;
 mod shader_cache_queue;
 mod shadow;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod shadow_carried_read;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod shadow_host_writes;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod shadow_merge_read;

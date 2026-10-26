@@ -39,6 +39,7 @@ use metal2vulkan::vk::{
     ImageUsageFlags, ImageViewType,
 };
 use std::ops::Range;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 /// The formats of a texture's image and of the view the conversion writes it through, by what
@@ -268,6 +269,8 @@ impl Device {
             drops_writes: true,
             backing: texels.backing(),
             merge_scratch: ScratchSpares::default(),
+            touched: AtomicU64::new(0),
+            stood: AtomicU64::new(0),
         };
         Ok(Storage::Shadow {
             image: image.shared(),
@@ -530,6 +533,8 @@ impl Texture {
             drops_writes: false,
             backing: texels.backing(),
             merge_scratch: ScratchSpares::default(),
+            touched: AtomicU64::new(0),
+            stood: AtomicU64::new(0),
         };
         Ok((image, copies))
     }
@@ -696,6 +701,8 @@ impl Texture {
             drops_writes: false,
             backing: texels.backing(),
             merge_scratch: ScratchSpares::default(),
+            touched: AtomicU64::new(0),
+            stood: AtomicU64::new(0),
         };
         let storage = Storage::Shadow {
             image: image.shared(),

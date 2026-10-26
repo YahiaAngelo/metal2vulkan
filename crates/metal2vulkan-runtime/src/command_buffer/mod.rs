@@ -94,6 +94,7 @@ use super::replay::Replay;
 use super::residency::Residency;
 use super::resource::{ObjectId, ResourceKey};
 use super::scheduler::{BatchSync, StepWaits};
+use super::shadow::ShadowCarry;
 use super::spares::CommandPool;
 use super::sparse::encoder::SparseUpdate;
 use super::sparse::indirect;
@@ -609,6 +610,13 @@ pub(super) struct State {
     shadow_attachments: Vec<ResourceKey>,
     /// The shadowed textures its ended encoders copied in first (`shadow.rs`), each once.
     shadows_copied_in: Vec<ResourceKey>,
+    /// The shadowed textures its ended encoders left holding their truth, which its later
+    /// encoders take instead of copying it in again (`shadow::ShadowCarry`): handed to each
+    /// encoder as it opens and taken back as it ends, so it is `None` while an encoder is open.
+    /// An event or semaphore wait drops it, after which Metal shows the work encoded next
+    /// another writer's bytes; Metal refuses such a wait while an encoder is open, so one never
+    /// finds it lent out.
+    shadow_carry: Option<ShadowCarry>,
     /// The pools of its commands' set 0 (`descriptor_arena.rs`), given back or released with
     /// the uploads.
     pub(super) descriptors: DescriptorArena,
@@ -1252,6 +1260,29 @@ impl State {
         again
     }
 
+    /// What its ended encoders left shadowed textures' images holding, for the encoder opening
+    /// now (`shadow::ShadowCarry`): the command buffer carries nothing until it is handed back
+    /// by [`shadows_carried`](Self::shadows_carried), so an encoder abandoned without ending
+    /// leaves it carrying none and every texture copies in again.
+    pub(super) fn shadows_to_carry(&mut self) -> ShadowCarry {
+        self.shadow_carry.take().unwrap_or_default()
+    }
+
+    /// Take back what an ended encoder leaves its command buffer's later encoders
+    /// (`shadow::ShadowSync::ended`).
+    pub(super) fn shadows_carried(&mut self, carry: ShadowCarry) {
+        self.shadow_carry = Some(carry);
+    }
+
+    /// Carry no shadowed texture's image on: the work encoded next reads what another writer the
+    /// wait orders before it left in the truth, which every texture copies in again to hold
+    /// (`shadow::ShadowCarry`).
+    pub(super) fn shadows_not_carried(&mut self) {
+        if let Some(carry) = &mut self.shadow_carry {
+            carry.clear();
+        }
+    }
+
     /// Metal's GPU faults ended encoder `encoder`, failing the command buffer with `error` from
     /// it on (`faulted`, `Failure::with_faults`); where nothing failed it from an earlier encoder
     /// and no earlier encoder faulted, the work before the encoder signals the fault's hold and
@@ -1761,6 +1792,7 @@ impl CommandBuffer {
                 behind_hang: None,
                 shadow_attachments: Vec::new(),
                 shadows_copied_in: Vec::new(),
+                shadow_carry: Some(ShadowCarry::default()),
                 descriptors: DescriptorArena::default(),
                 status_words: None,
                 mesh_grid_past: false,
@@ -2175,6 +2207,7 @@ impl CommandBuffer {
         self.event_command("encode_wait_for_event", event, |batches, event| {
             batches.wait(event, value);
         })
+        .inspect(|()| self.state().shadows_not_carried())
     }
 
     /// Wait for the caller's binary semaphore `semaphore` before the work encoded after it: the
@@ -2204,6 +2237,7 @@ impl CommandBuffer {
         self.binary_command("encode_wait_for_vk_semaphore", semaphore, |batches| {
             batches.binary_wait(semaphore);
         })
+        .inspect(|()| self.state().shadows_not_carried())
     }
 
     /// Signal the caller's binary semaphore `semaphore` once the work encoded before it

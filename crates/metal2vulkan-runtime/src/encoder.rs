@@ -446,6 +446,10 @@ impl EncoderCore {
         state.encoder_open = true;
         // Made under the protection options set now (`command_buffer/protection.rs`).
         state.protected_made();
+        // What the command buffer's earlier encoders left shadowed textures' images holding,
+        // which this one's first uses of them take instead of copying the truth in again
+        // (`shadow::ShadowCarry`).
+        let carry = state.shadows_to_carry();
         drop(state);
         command_buffer
             .device()
@@ -466,7 +470,7 @@ impl EncoderCore {
             uses: EncoderUses::new(ordered),
             retained: Retained::default(),
             executions: Vec::new(),
-            shadows: ShadowSync::default(),
+            shadows: ShadowSync::carrying(carry),
             keys: BTreeSet::new(),
             touched: Vec::new(),
             resident_unheld: Vec::new(),
@@ -1099,6 +1103,9 @@ impl EncoderCore {
         // held are the uses' own.
         let aliased = self.aliased(uses);
         let tracked = aliased.as_deref().unwrap_or(uses);
+        // A write of a carried shadowed texture's truth another way leaves its image stale: the
+        // texture is no longer carried, whatever this encoder uses (`shadow::ShadowCarry`).
+        self.shadows.wrote(tracked);
         let barrier = self.uses.barrier(tracked, reach);
         self.uses.record_reaching(stages, tracked, barrier, reach);
         if barrier.is_some() {
@@ -1399,6 +1406,10 @@ impl EncoderCore {
         };
         let copies = self.sample_moves(copies);
         self.count_shadow_copies(&copies);
+        // How this command's first copies in stood against their images' last standing, which
+        // sizes the carry on a run without a timing (`shadow::CarryTally`).
+        let tally = self.shadows.tally();
+        (device.shared().counts).shadow_first_copies_in_tallied(tally);
         let by = match Location::caller().file() {
             file if file.ends_with("compute.rs") => KeepBy::Compute,
             file if file.ends_with("blit.rs") => KeepBy::Blit,
@@ -1505,6 +1516,14 @@ impl EncoderCore {
         if kept > 0 {
             counts.shadow_texels_kept(kept);
         }
+    }
+
+    /// Note that the encoder's work from here on waits for another writer the program ordered
+    /// before it (a fence's update, `fence.rs`): Metal shows it that writer's bytes, so no
+    /// shadowed texture's image is carried on and each copies its truth in again at its next use
+    /// (`shadow::ShadowCarry`).
+    pub(super) fn ordered_other_work(&mut self) {
+        self.shadows.not_carried();
     }
 
     /// Whether the encoder used a shadowed texture so far: where it did not, a command that uses
@@ -2011,6 +2030,7 @@ impl EncoderCore {
             uses,
             retained,
             executions,
+            mut shadows,
             keys,
             attachment_shadows,
             first_copies,
@@ -2036,6 +2056,8 @@ impl EncoderCore {
             (open.command_buffer.device().shared().counts)
                 .shadow_attachments(attachment_shadows.len(), first);
         }
+        // What the encoder leaves the command buffer's later encoders (`shadow::ShadowCarry`).
+        state.shadows_carried(shadows.ended());
         if !first_copies.is_empty() {
             let again = state.shadows_copied_in(&first_copies);
             if again > 0 {
@@ -2289,6 +2311,10 @@ impl EncoderCore {
     /// back are copied back, then a barrier to everything recorded after it.
     pub(super) fn end_segment(mut self) -> Result<RecordedSegment, Error> {
         let copies = self.shadows.finish();
+        // Its commands wrote the images of the shadowed textures it used, so no command buffer
+        // carries one of them on (`shadow::ShadowCarry`): a segment's work lies where the encoder
+        // left it, which carries nothing past it either (`shadow::ShadowSync::leave`).
+        drop(self.shadows.ended());
         let copies = self.sample_moves(copies);
         self.count_shadow_copies(&copies);
         self.shadow_copies(&copies);

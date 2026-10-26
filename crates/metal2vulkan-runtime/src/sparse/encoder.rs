@@ -390,6 +390,9 @@ impl ResourceStateCommandEncoder {
         if !self.waits.contains(&key) {
             self.waits.push(key);
         }
+        // As any encoder's wait: the command buffer carries no shadowed texture's image past it
+        // (`shadow::ShadowCarry`, `EncoderCore::ordered_other_work`).
+        self.open.command_buffer.state().shadows_not_carried();
         Ok(())
     }
 

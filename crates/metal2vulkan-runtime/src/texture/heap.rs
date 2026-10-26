@@ -251,7 +251,7 @@ use metal2vulkan::vk::{
     Format, FormatFeatureFlags2, ImageAspectFlags, ImageUsageFlags, SampleCountFlags,
 };
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// The alignment of a heap's memory: a heap texture an image of binds into that memory
@@ -3501,6 +3501,8 @@ impl Device {
                 drops_writes: false,
                 backing: Backing::of(bytes, false),
                 merge_scratch: ScratchSpares::default(),
+                touched: AtomicU64::new(0),
+                stood: AtomicU64::new(0),
             };
             Owner::HeapShadow(Box::new(HeapShadow {
                 placement,
@@ -3599,6 +3601,8 @@ impl Device {
                 drops_writes: false,
                 backing: Backing::of(bytes, false),
                 merge_scratch: ScratchSpares::default(),
+                touched: AtomicU64::new(0),
+                stood: AtomicU64::new(0),
             };
             Owner::HeapShadow(Box::new(HeapShadow {
                 placement,
@@ -3674,6 +3678,8 @@ impl Device {
                 drops_writes: false,
                 backing: Backing::of(bytes, false),
                 merge_scratch: ScratchSpares::default(),
+                touched: AtomicU64::new(0),
+                stood: AtomicU64::new(0),
             };
             Owner::HeapShadow(Box::new(HeapShadow {
                 placement,

@@ -5,14 +5,15 @@ use super::super::host_aliases::{self, Alias};
 use super::super::key_hash::KeyMap;
 use super::super::resource::ResourceKey;
 use super::super::shadow::{
-    self, Backing, CopyCause, KeptArea, Lost, ShadowBuffer, ShadowCopies, ShadowCopy, ShadowSource,
-    ShadowSync, ShadowTarget, ShadowUse, Step, Within,
+    self, Backing, CopyCause, KeptArea, Lost, ShadowBuffer, ShadowCarry, ShadowCopies, ShadowCopy,
+    ShadowSource, ShadowSync, ShadowTarget, ShadowUse, Step, Within,
 };
 use super::super::shadow_merge::ScratchSpares;
 use super::super::tracker::{Access, Use, UseRange};
 use ash::vk;
 use metal2vulkan::error::Feature;
 use std::ops::Range;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 /// A merge's scratch, numbered, keeping every texel.
@@ -95,6 +96,8 @@ fn shadow_in(
         drops_writes: false,
         backing: Backing::MappedBuffer,
         merge_scratch: ScratchSpares::default(),
+        touched: AtomicU64::new(0),
+        stood: AtomicU64::new(0),
     })
 }
 
@@ -1425,6 +1428,8 @@ fn view_of(image: ResourceKey, levels: Range<u32>, layers: Range<u32>) -> Arc<Sh
         drops_writes: false,
         backing: Backing::Image,
         merge_scratch: ScratchSpares::default(),
+        touched: AtomicU64::new(0),
+        stood: AtomicU64::new(0),
     })
 }
 
@@ -1851,4 +1856,410 @@ fn a_copy_of_an_image_takes_the_regions_of_its_direction() {
     // The two sets differ, so taking the wrong one is visible: the copy-in set reads the shared
     // head of all four rows, the copy-back set writes row 0's alone.
     assert_ne!(shape(&into), shape(&back));
+}
+
+/// The texels of a 3840x2160 surface.
+const SURFACE_TEXELS: u64 = 3840 * 2160;
+
+/// A shadowed texture over a 4K IOSurface plane's bytes in `plane`: one region of 3840x2160
+/// texels of 4 bytes, its rows 4096 texels apart (a padded plane, which no linear image of the
+/// device aliases, so its texture is shadowed). Its copies are cut to rectangles
+/// (`ShadowCopies::cuts`) and it merges back, as a surface's does.
+fn surface_shadow(plane: ResourceKey) -> Arc<ShadowCopies> {
+    let bytes = 0..4 * 4096 * SURFACE_TEXELS / 3840;
+    let mut copies = Arc::into_inner(shadow_in(
+        ShadowBuffer::Fixed(vk::Buffer::null(), 0),
+        plane,
+        None,
+        bytes,
+    ))
+    .expect("one holder");
+    copies.backing = Backing::Surface;
+    if let ShadowSource::Bytes {
+        target: ShadowTarget::Image { regions, .. },
+        ..
+    } = &mut copies.source
+    {
+        regions.push(vk::BufferImageCopy {
+            buffer_offset: 0,
+            buffer_row_length: 4096,
+            buffer_image_height: 0,
+            image_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            image_offset: vk::Offset3D::default(),
+            image_extent: vk::Extent3D {
+                width: 3840,
+                height: 2160,
+                depth: 1,
+            },
+        });
+    }
+    assert!(copies.cuts());
+    Arc::new(copies)
+}
+
+/// The texels the copies in among `copies` move (`WorkCounts::shadow_texels_copied_in`).
+fn texels_in(copies: &[ShadowCopy<u32>]) -> u64 {
+    copies.iter().map(ShadowCopy::texels_copied_in).sum()
+}
+
+/// One command buffer's encoders in turn, each carrying what the one before left shadowed
+/// textures' images holding (`ShadowCarry`), and the texels their copies in moved. A fresh one is
+/// another command buffer, which carries nothing.
+struct Frame {
+    /// `None` while an encoder of it holds what it carries.
+    carry: Option<ShadowCarry>,
+    made: u32,
+    texels: u64,
+    /// How its encoders' first copies in stood against their images' last standing: the texels
+    /// the carry took off, those of them of large planes, and the large planes' texels a first
+    /// copy in moved behind an earlier command buffer's standing or behind none.
+    tally: (u64, u64, u64, u64),
+}
+
+impl Frame {
+    fn new() -> Frame {
+        Frame {
+            carry: Some(ShadowCarry::default()),
+            made: 0,
+            texels: 0,
+            tally: (0, 0, 0, 0),
+        }
+    }
+
+    /// Open an encoder on what the command buffer carries, which it holds until it ends.
+    fn encoder(&mut self) -> ShadowSync<u32> {
+        ShadowSync::carrying(self.carry.take().unwrap_or_default())
+    }
+
+    /// End `sync`, its copies back counted and what it leaves carried taken back.
+    fn end(&mut self, mut sync: ShadowSync<u32>) {
+        self.texels += texels_in(&sync.finish());
+        self.take_tally(&mut sync);
+        self.carry = Some(sync.ended());
+    }
+
+    /// Add how `sync`'s first copies in so far stood: the large planes' texels the carry took
+    /// off, those a first copy in moved behind an earlier command buffer's standing, and those
+    /// it moved behind none.
+    fn take_tally(&mut self, sync: &mut ShadowSync<u32>) {
+        let tally = sync.tally();
+        self.tally.0 += tally.carried;
+        self.tally.1 += tally.carried_large;
+        self.tally.2 += tally.stood_earlier_large;
+        self.tally.3 += tally.unstood_large;
+    }
+
+    /// One encoder that samples `texture` in each of `commands` commands. A binding bounds
+    /// nothing it reads (`ShadowUse::loads` is `None` for every use but a pass's attachment), so
+    /// a copy in of a sampled texture moves every texel.
+    fn sampling(&mut self, texture: &Arc<ShadowCopies>, commands: usize) -> &mut Frame {
+        let mut sync = self.encoder();
+        for _ in 0..commands {
+            let copies = planned(&mut sync, &mut self.made, &[(texture, false)], &[]);
+            self.texels += texels_in(&copies);
+        }
+        self.end(sync);
+        self
+    }
+
+    /// The texels its encoders' first copies in stood behind: carried in all, carried of large
+    /// planes, and large planes' behind an earlier command buffer's standing or behind none.
+    fn stood(&self) -> (u64, u64, u64, u64) {
+        self.tally
+    }
+
+    /// One encoder whose render pass renders a color attachment of `texture` that it loads, its
+    /// draws inside `area`: such a use bounds both what it reads and what it writes
+    /// (`ShadowUse::loads`, `ShadowUse::area`), so its copy in moves only those texels.
+    fn rendering(&mut self, texture: &Arc<ShadowCopies>, area: [u32; 4]) -> &mut Frame {
+        let mut sync = self.encoder();
+        let shadows = [ShadowUse {
+            area: Some(area),
+            loads: Some(area),
+            ..through(texture, true).0
+        }];
+        let uses = [through(texture, true).1];
+        let made = &mut self.made;
+        let copies = sync
+            .before(&shadows, &uses, |_, _, _| {
+                *made += 1;
+                Ok(*made)
+            })
+            .unwrap();
+        sync.after(&shadows, &uses, &[]);
+        self.texels += texels_in(&copies);
+        self.end(sync);
+        self
+    }
+
+    /// One encoder that writes `bytes` of the buffer `buffer` and meets no shadowed texture: a
+    /// blit's fill of an IOSurface's plane. Its command's uses reach the encoder whatever it
+    /// meets (`EncoderCore::track`).
+    fn writing(&mut self, buffer: ResourceKey, written: Range<u64>) -> &mut Frame {
+        let mut sync = self.encoder();
+        sync.wrote(&[bytes(buffer, written, true)]);
+        self.end(sync);
+        self
+    }
+
+    /// The command buffer waits for an event or a binary semaphore
+    /// (`CommandBuffer::encode_wait_for_event`).
+    fn waits(&mut self) -> &mut Frame {
+        if let Some(carry) = &mut self.carry {
+            carry.clear();
+        }
+        self
+    }
+}
+
+/// A large surface's shadowed texture is copied in whole once for a command buffer that samples
+/// it, however many of its encoders do: Metal shows every encoder of a command buffer the bytes
+/// as of its commit (`shadow.rs`'s copy-in rule), so an encoder takes the image its command
+/// buffer's earlier encoder left holding the truth (`ShadowCarry`). A second command buffer that
+/// samples the same plane pays it again, whether through the same texture or another over the
+/// same bytes: Metal shows a later command buffer a CPU write made since the commit.
+///
+/// The counts are this state machine's, taken by this test; they are no measurement of any
+/// program.
+#[test]
+fn a_large_surface_is_copied_in_whole_once_for_a_command_buffer_that_samples_it() {
+    let plane = ResourceKey::new();
+    let s = surface_shadow(plane);
+    assert_eq!(s.texels(), SURFACE_TEXELS);
+    assert_eq!(s.backing, Backing::Surface);
+    assert!(s.merges_back(), "a surface's bytes have another writer");
+    // One encoder: its first command's copy in is whole, and every later command of it takes
+    // none, the image holding the plane as the encoder's commands left it.
+    let mut frame = Frame::new();
+    frame.sampling(&s, 1);
+    assert_eq!(frame.texels, SURFACE_TEXELS);
+    let mut frame = Frame::new();
+    frame.sampling(&s, 4);
+    assert_eq!(frame.texels, SURFACE_TEXELS);
+    // Three encoders of one command buffer, each sampling the plane: one whole copy in.
+    let mut frame = Frame::new();
+    frame.sampling(&s, 1).sampling(&s, 1).sampling(&s, 1);
+    assert_eq!(frame.texels, SURFACE_TEXELS);
+    // A second command buffer that samples it, through the same texture or through another over
+    // the same bytes: one whole copy in each.
+    let mut next = Frame::new();
+    next.sampling(&s, 1);
+    assert_eq!(next.texels, SURFACE_TEXELS);
+    let other = surface_shadow(plane);
+    assert_ne!(other.shadow_key, s.shadow_key);
+    let mut next = Frame::new();
+    next.sampling(&other, 1);
+    assert_eq!(next.texels, SURFACE_TEXELS);
+}
+
+/// A command buffer carries a shadowed texture's image on only while nothing lets another writer
+/// of its truth in: a command of any of its encoders that writes the bytes another way, an
+/// encoder of another command buffer that ended with the texture in between, a wait for an event
+/// or a fence, work the encoder records apart, and an encoder that did not end holding the truth
+/// each leave the next encoder to copy the plane in again.
+#[test]
+fn a_carried_surface_is_dropped_by_anything_that_lets_another_writer_in() {
+    let plane = ResourceKey::new();
+    let s = surface_shadow(plane);
+    let twice = 2 * SURFACE_TEXELS;
+    // Nothing in between: carried.
+    let mut frame = Frame::new();
+    frame.sampling(&s, 1).sampling(&s, 1);
+    assert_eq!(frame.texels, SURFACE_TEXELS);
+    // A command of an encoder that meets no shadowed texture writes the plane's bytes.
+    let mut frame = Frame::new();
+    frame
+        .sampling(&s, 1)
+        .writing(plane, 0..4096)
+        .sampling(&s, 1);
+    assert_eq!(frame.texels, twice, "the bytes written another way");
+    // A write of other bytes of the same buffer that the texture does not lie in leaves it
+    // carried; the plane's are 0..33 177 600.
+    let mut frame = Frame::new();
+    frame
+        .sampling(&s, 1)
+        .writing(plane, 1 << 26..1 << 27)
+        .sampling(&s, 1);
+    assert_eq!(frame.texels, SURFACE_TEXELS, "other bytes");
+    // An encoder of another command buffer ended with the texture between this command buffer's
+    // two: what this one carries is no longer what the image holds.
+    let mut frame = Frame::new();
+    frame.sampling(&s, 1);
+    let mut other = Frame::new();
+    other.sampling(&s, 1);
+    frame.sampling(&s, 1);
+    assert_eq!(
+        frame.texels, twice,
+        "another command buffer's encoder between"
+    );
+    // One that ended with the texture while this command buffer's encoder was still open: its
+    // own end carries nothing either, as the image is no longer the one it left.
+    let mut frame = Frame::new();
+    let mut sync = frame.encoder();
+    let mut made = 0;
+    frame.texels += texels_in(&planned(&mut sync, &mut made, &[(&s, false)], &[]));
+    let mut other = Frame::new();
+    other.sampling(&s, 1);
+    frame.end(sync);
+    frame.sampling(&s, 1);
+    assert_eq!(
+        frame.texels, twice,
+        "another command buffer's encoder while open"
+    );
+    // The command buffer waits for an event or a binary semaphore; an encoder's wait for a
+    // fence is `ShadowSync::not_carried`, below.
+    let mut frame = Frame::new();
+    frame.sampling(&s, 1).waits().sampling(&s, 1);
+    assert_eq!(frame.texels, twice, "an event wait");
+    // An encoder's wait for a fence: its own commands after the wait copy the plane in again,
+    // the truth now holding what the update's writer left; the image holds it again from there,
+    // so the next encoder of the command buffer carries it.
+    let mut frame = Frame::new();
+    let mut sync = frame.encoder();
+    let mut made = 0;
+    frame.texels += texels_in(&planned(&mut sync, &mut made, &[(&s, false)], &[]));
+    sync.not_carried();
+    frame.texels += texels_in(&planned(&mut sync, &mut made, &[(&s, false)], &[]));
+    frame.end(sync);
+    frame.sampling(&s, 1);
+    assert_eq!(frame.texels, twice, "a fence wait");
+    // Work the encoder records apart stands between its commands and the next encoder's, and may
+    // write any truth: it leaves the encoder's own textures to copy in again.
+    let mut frame = Frame::new();
+    let mut sync = frame.encoder();
+    let mut made = 0;
+    frame.texels += texels_in(&planned(&mut sync, &mut made, &[(&s, false)], &[]));
+    frame.texels += texels_in(&sync.leave());
+    frame.texels += texels_in(&planned(&mut sync, &mut made, &[(&s, false)], &[]));
+    frame.end(sync);
+    assert_eq!(
+        frame.texels, twice,
+        "work recorded apart, the encoder's own"
+    );
+    // And what the command buffer carried into an encoder that records work apart without ever
+    // meeting the texture.
+    let mut frame = Frame::new();
+    frame.sampling(&s, 1);
+    let mut sync = frame.encoder();
+    frame.texels += texels_in(&sync.leave());
+    frame.end(sync);
+    frame.sampling(&s, 1);
+    assert_eq!(frame.texels, twice, "work recorded apart, carried");
+    // An encoder that did not end holding the truth: one that wrote through a texture whose
+    // writes Metal drops.
+    let mut dropped = Arc::into_inner(surface_shadow(plane)).expect("one holder");
+    dropped.drops_writes = true;
+    let dropped = Arc::new(dropped);
+    let mut frame = Frame::new();
+    let mut sync = frame.encoder();
+    let mut made = 0;
+    frame.texels += texels_in(&planned(&mut sync, &mut made, &[(&dropped, true)], &[]));
+    frame.end(sync);
+    frame.sampling(&dropped, 1);
+    assert_eq!(frame.texels, twice, "writes Metal drops");
+}
+
+/// A render pass that renders a large surface's texture as a color attachment it loads pays only
+/// the texels inside its draws' scissors, where it bounds them, and the image then holds the
+/// plane inside that rectangle alone: anything that samples the plane afterwards pays every texel
+/// of it, bounded by nothing, in that command buffer or a later one. So a present that draws the
+/// plane into a window costs a whole plane a frame however small the damage the guest's own pass
+/// repainted, and no carry covers it.
+///
+/// The counts are this state machine's, taken by this test; they are no measurement of any
+/// program.
+#[test]
+fn sampling_a_large_surface_costs_every_texel_whatever_its_pass_repainted() {
+    let plane = ResourceKey::new();
+    let s = surface_shadow(plane);
+    let damage = [0, 0, 256, 128];
+    let repainted = 256 * 128;
+    let mut frame = Frame::new();
+    frame.rendering(&s, damage);
+    assert_eq!(frame.texels, repainted);
+    // The same command buffer: the image holds the damage rectangle alone, so a sample of the
+    // plane takes every texel beyond it.
+    let mut frame = Frame::new();
+    frame.rendering(&s, damage).sampling(&s, 1);
+    assert_eq!(frame.texels, repainted + SURFACE_TEXELS);
+    // A command buffer of its own, as a window's present is.
+    let mut frame = Frame::new();
+    frame.rendering(&s, damage);
+    assert_eq!(frame.texels, repainted);
+    let mut present = Frame::new();
+    present.sampling(&s, 1);
+    assert_eq!(present.texels, SURFACE_TEXELS);
+}
+
+/// An encoder's first copy in of a large IOSurface plane falls in one of three places, which
+/// divide them and say what carrying the image across a command buffer's encoders is worth: the
+/// carry took it off, an earlier command buffer's standing stands behind it and Metal requires it
+/// (the module's copy-in rule), or the image never held a standing and no rule avoids it.
+/// A standing of the command buffer's own that something let a writer past falls in none of the
+/// three: `WorkCounts::shadow_texels_first_copied_in_again` counts those.
+///
+/// The counts are this state machine's, taken by this test; they are no measurement of any
+/// program.
+#[test]
+fn a_large_surfaces_first_copies_in_divide_into_carried_stood_earlier_and_unstood() {
+    let plane = ResourceKey::new();
+    let s = surface_shadow(plane);
+    assert!(s.large_surface());
+    let one = SURFACE_TEXELS;
+    // The first command buffer: its first encoder finds no standing anywhere, its second takes
+    // the image the first left.
+    let mut first = Frame::new();
+    first.sampling(&s, 1).sampling(&s, 1);
+    assert_eq!(
+        first.stood(),
+        (one, one, 0, one),
+        "the first command buffer"
+    );
+    assert_eq!(first.texels, one);
+    // A second command buffer: the image's last standing is the first's, which Metal requires it
+    // to copy in again; its own second encoder then carries.
+    let mut next = Frame::new();
+    next.sampling(&s, 1).sampling(&s, 1);
+    assert_eq!(next.stood(), (one, one, one, 0), "a second command buffer");
+    assert_eq!(next.texels, one);
+    // Three command buffers of one encoder each, as a compositor's frame is: every copy in is
+    // the first of its own command buffer, and the carry takes nothing off.
+    let frames: Vec<(u64, u64, u64, u64)> = (0..3)
+        .map(|_| {
+            let mut frame = Frame::new();
+            frame.sampling(&s, 1);
+            frame.stood()
+        })
+        .collect();
+    assert_eq!(
+        frames,
+        [(0, 0, one, 0); 3],
+        "one encoder per command buffer"
+    );
+    // A standing of the command buffer's own that a write of the bytes another way let a writer
+    // past: in none of the three.
+    let mut frame = Frame::new();
+    frame
+        .sampling(&s, 1)
+        .writing(plane, 0..4096)
+        .sampling(&s, 1);
+    assert_eq!(frame.stood(), (0, 0, one, 0), "the standing was let past");
+    assert_eq!(frame.texels, 2 * one);
+    // A texture no command buffer ever stood behind is unstood, however many stood behind others.
+    let other = surface_shadow(plane);
+    let mut frame = Frame::new();
+    frame.sampling(&other, 1);
+    assert_eq!(frame.stood(), (0, 0, 0, one), "a texture of its own");
+    // A shadow of no IOSurface plane, or of one under 2^20 texels, moves none of the three: it
+    // is carried as any other is, and counted among the carried texels alone.
+    let small = cut_shadow(ResourceKey::new(), 0..8192);
+    assert!(!small.large_surface());
+    let mut frame = Frame::new();
+    frame.sampling(&small, 1).sampling(&small, 1);
+    assert_eq!(frame.stood(), (64 * 32, 0, 0, 0), "a small mapped buffer's");
 }

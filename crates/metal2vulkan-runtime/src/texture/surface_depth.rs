@@ -42,6 +42,7 @@ use metal2vulkan::metal::format::aspects;
 use metal2vulkan::metal::TextureType;
 use metal2vulkan::vk::{ImageAspectFlags, ImageUsageFlags};
 use std::ops::Range;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 /// Metal's passes store the tiles from the plane's offset rounded down to this.
@@ -168,6 +169,8 @@ impl Texture {
                 drops_writes: false,
                 backing: texels.backing(),
                 merge_scratch: ScratchSpares::default(),
+                touched: AtomicU64::new(0),
+                stood: AtomicU64::new(0),
             };
             let storage = Storage::Shadow {
                 image: image.shared(),

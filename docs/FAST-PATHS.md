@@ -299,21 +299,24 @@ recorded here.
 Open differences from Metal that no note announces yet, and runtime costs still above the
 driver's. Each is open work.
 
-- **A shadowed texture's copy in is an encoder's, so every encoder that samples one copies every
-  texel in.** One 3840x2160 IOSurface plane is 8,294,400 texels, and three encoders of one command
-  buffer cost three whole planes. `ShadowSync` is a field of `EncoderCore`, so a new encoder starts
-  every entry at `Standing::Unread` and its first use pays the whole plane again, with nothing above
-  the encoder remembering that the image already holds the truth; the repeats are counted
-  (`WorkCounts::shadow_texels_first_copied_in_again`). Probed on Metal's own API on an Apple M3 Max,
-  an encoder reads the bytes as of its command buffer's commit except where the program ordered
-  another writer in -- a CPU write part way through a command buffer reached neither a later
-  dispatch of the running encoder nor a later encoder of it, while the next command buffer and an
-  encoder after an event wait both saw one. So the copies in after the first move texels the image
-  holds already, wherever no command of that command buffer wrote the bytes and nothing ordered a
-  writer in between. A later command buffer's copy in is not such a case. Only a pass's loaded
-  colour attachment copies less than everything (`ShadowUse::loads`, its damage rectangle); a
-  sampler's reach is unknowable, so the whole-texel copy for a sampled use is not slack. Not
-  announced.
+- **A shadowed texture over an IOSurface plane's bytes is copied in whole for every command
+  buffer that samples it.** A binding bounds nothing it reads -- only a pass's color attachment
+  does (`ShadowUse::loads`, its damage rectangle) -- so a copy in for a sampled texture moves
+  every texel: 8,294,400 for one 3840x2160 plane. A sampler's reach is unknowable, so that is not
+  slack. Within one command buffer that is paid once, its later encoders taking the
+  image the first left holding the truth (`shadow::ShadowCarry`), because Metal shows every
+  encoder of a command buffer the bytes as of its commit. Across command buffers it is not: Metal
+  shows a later command buffer a CPU write made since the commit, so each one that samples the
+  plane copies it in again, and nothing short of knowing which of its pages changed could tell
+  that from a plane nobody wrote (a present's own copy in is one Metal requires, under **Costs of
+  matching Metal**). Three figures divide such a plane's first copies in on a run and say what the
+  carry is worth there: the texels it took off, those a copy in moved behind an earlier command
+  buffer's standing, and those it moved behind none at all
+  (`WorkCounts::shadow_texels_first_copy_in_carried_large_surfaces`,
+  `shadow_texels_first_copied_in_large_surfaces_stood_earlier`,
+  `shadow_texels_first_copied_in_large_surfaces_unstood`). A compositor that submits one command
+  buffer per use of the plane has the whole of it in the second: the carry takes nothing off it.
+  Not announced.
 
 - **Command queues past the device's `VkQueue`s share one, so one's command buffers wait behind
   another's whole command buffer where Metal's wait only inside one command.** Measured on Metal's

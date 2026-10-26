@@ -165,6 +165,9 @@ impl EncoderCore {
     ) -> Result<(), Error> {
         self.check_device(call, fence.device())?;
         self.uses().wait_for_fence(fence.0.key, draws);
+        // Metal shows the work the wait orders after it the bytes the update's writer left, so
+        // no shadowed texture's image is carried on (`shadow::ShadowCarry`).
+        self.ordered_other_work();
         Ok(())
     }
 }

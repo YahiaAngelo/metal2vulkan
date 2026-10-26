@@ -74,6 +74,7 @@ use metal2vulkan::error::{Feature, Unsupported};
 use metal2vulkan::metal::format::{direct_format, swizzle_over};
 use metal2vulkan::metal::{PixelFormat, TextureSwizzleChannels, TextureType, TextureUsage};
 use metal2vulkan::vk::ImageUsageFlags;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 /// What a shadowed view's image keeps beside itself (the module docs): its memory, the image whose
@@ -481,6 +482,8 @@ impl Device {
                     drops_writes: false,
                     backing: Backing::Image,
                     merge_scratch: ScratchSpares::default(),
+                    touched: AtomicU64::new(0),
+                    stood: AtomicU64::new(0),
                 };
                 Owner::ViewShadow(Box::new(ViewShadow {
                     placement,

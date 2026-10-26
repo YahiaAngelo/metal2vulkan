@@ -69,6 +69,7 @@ use ash::vk;
 use metal2vulkan::error::{DiagName, Feature, Unsupported};
 use metal2vulkan::metal::PixelFormat;
 use metal2vulkan::vk::{ImageUsageFlags, SampleCountFlags};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 /// The OSType of the surfaces Metal's answers were measured over: `'b3a8'`.
@@ -237,6 +238,8 @@ impl Device {
             drops_writes: false,
             backing: texels.backing(),
             merge_scratch: ScratchSpares::default(),
+            touched: AtomicU64::new(0),
+            stood: AtomicU64::new(0),
         };
         self.degrade(Degradation::ShadowedTexture, || {
             let [width, height, _] = layout.extent;

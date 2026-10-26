@@ -65,6 +65,7 @@ use metal2vulkan::metal::format::{byte_format, ycbcr, ycbcr_format};
 use metal2vulkan::metal::{PixelFormat, TextureSwizzleChannels, TextureType, TextureUsage};
 use metal2vulkan::vk::{Format, ImageAspectFlags};
 use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
 /// A texture's texels in a buffer's bytes, where Metal lays them out.
@@ -1135,6 +1136,8 @@ impl Texels {
             drops_writes: false,
             backing: self.backing(),
             merge_scratch: ScratchSpares::default(),
+            touched: AtomicU64::new(0),
+            stood: AtomicU64::new(0),
         })
     }
 
@@ -1303,6 +1306,8 @@ impl Texels {
             drops_writes: false,
             backing: texels.backing(),
             merge_scratch: ScratchSpares::default(),
+            touched: AtomicU64::new(0),
+            stood: AtomicU64::new(0),
         };
         texels.staged = Some(Arc::new(copies));
         let (offset, alignment) = (
@@ -1413,6 +1418,8 @@ impl Texels {
             drops_writes: false,
             backing: self.backing(),
             merge_scratch: ScratchSpares::default(),
+            touched: AtomicU64::new(0),
+            stood: AtomicU64::new(0),
         })
     }
 
