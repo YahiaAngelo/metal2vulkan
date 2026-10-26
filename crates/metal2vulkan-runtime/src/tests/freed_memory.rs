@@ -88,7 +88,7 @@ impl Drop for Host {
 
 /// The device the cfg selects: a CPU device under `m2v_cpu_icd`, else a GPU, its shader cache in
 /// `cache`.
-fn device(cache: &Path) -> Device {
+pub(super) fn device(cache: &Path) -> Device {
     let options = DeviceOptions {
         kinds: match cfg!(m2v_cpu_icd) {
             true => vec![DeviceKind::Cpu],

@@ -9,6 +9,7 @@ use super::buffer::{KeptBecause, ReadApart};
 use super::command_buffer::GroupEnd;
 use super::degradation::Degradation;
 use super::device::lock;
+use super::memory::FreeCause;
 use super::recorder::{CommandsReplayed, ReplayCounts};
 use super::shadow::{Backing, CopyCause, Lost, ShadowCopy, ShadowSource};
 use super::Device;
@@ -2464,9 +2465,11 @@ pub(crate) const COPY_SITES: usize = 32;
 
 /// The places in the runtime that recorded copy commands through a device's functions
 /// (`device/functions.rs`), each with what it recorded: the first [`COPY_SITES`] they met; a
-/// place past them goes uncounted. With the `vkCmdCopyBuffer` regions those functions split.
+/// place past them has its calls counted in [`CopySites::dropped`] alone, so a reader can tell
+/// a complete attribution from a truncated one. With the `vkCmdCopyBuffer` regions those
+/// functions split.
 #[derive(Default)]
-pub(crate) struct CopySites(Mutex<Vec<CopySite>>, AtomicU64);
+pub(crate) struct CopySites(Mutex<Vec<CopySite>>, AtomicU64, AtomicU64);
 
 impl CopySites {
     /// Count a call of `command` of `regions` regions made at `at`.
@@ -2491,8 +2494,19 @@ impl CopySites {
                 regions,
                 most: regions,
             }),
-            None => {}
+            // Past [`COPY_SITES`] places: no slot is left for this one, so the call is counted
+            // only as dropped. Without this a reader cannot tell the places' calls summing to
+            // less than the total from a total the places account for.
+            None => {
+                self.2.fetch_add(1, Ordering::Relaxed);
+            }
         }
+    }
+
+    /// The calls made at places past [`COPY_SITES`], which no slot holds: 0 while the places
+    /// read account for every call counted here.
+    pub(crate) fn dropped(&self) -> u64 {
+        self.2.load(Ordering::Relaxed)
     }
 
     /// Count `regions` regions split in two (`device/functions.rs`).
@@ -2533,6 +2547,50 @@ pub struct CopySite {
     pub regions: u64,
     /// The most regions one of them had.
     pub most: u64,
+}
+
+/// Every `VkDeviceMemory` block the runtime's own allocator freed, by what made it go
+/// (`memory.rs`'s `FreeCause`), counted where the block went: one `vkFreeMemory` each, whether
+/// the call ran there or once the batches in flight completed (`freed_memory.rs`). A driver that
+/// unmaps a buffer object's pages as it frees it charges that page-table update to the free, so
+/// these are the frees such a driver charges the runtime for, and the cause says which of them a
+/// change could remove. A field of `WorkCounts`, for the lanes: no Metal counterpart, not part of
+/// the API.
+///
+/// Every block the allocator frees falls under exactly one cause, so `blocks` is its whole share
+/// of `ObjectChurn::vk_memory_freed`. What that total holds beyond `blocks` was freed outside
+/// the allocator: a dma-buf import, a GPU pool's block (`gpu_pools.rs`), a neutral, a spare, or
+/// the rollback of a block or an import that failed to be made.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MemoryFrees {
+    /// Blocks freed as the one resource placed in them went: a placement larger than half a
+    /// block, or an image bound while work was queued. One guest or runtime object going away,
+    /// each with memory of its own, so nothing but a shorter lifetime removes these.
+    pub dedicated: u64,
+    /// Pooled blocks freed as their last placement left them, their pool already keeping as many
+    /// empty ones as it keeps (`memory.rs`'s `KEPT_EMPTY_BLOCKS`). The allocator's own churn: a
+    /// working set that dips below its blocks and comes back frees and makes a block each time.
+    pub pooled_emptied: u64,
+    /// Kept empty pooled blocks freed after their quiet period without a placement
+    /// (`memory.rs`'s `KEPT_EMPTY_FOR`): a working set that shrank for good.
+    pub kept_stale: u64,
+    /// Kept empty pooled blocks freed so that a block of their memory type could be made, as one
+    /// failed to be made: the allocator giving memory back under pressure.
+    pub kept_for_room: u64,
+    /// Imports of the caller's host memory, a dedicated block each, freed as their placement went
+    /// (`Memory::import_host`).
+    pub host_import: u64,
+    /// Imports of a buffer's fresh pages, a dedicated block each, freed as their placement went
+    /// (`fresh_pages.rs`).
+    pub own_pages: u64,
+    /// Blocks freed as the device was destroyed, its queues idle, whatever they held: once each,
+    /// at the end of the process's use of the device. 0 in every snapshot a caller can take,
+    /// since reading the counts needs the device these run as it goes; the cause exists so that
+    /// no block of the allocator's is freed without naming one, and so `blocks` stays its whole
+    /// share of `vk_memory_freed` over the device's whole life.
+    pub teardown: u64,
+    /// The blocks counted above: the allocator's whole share of `vk_memory_freed`.
+    pub blocks: u64,
 }
 
 /// What a device's commit path did so far (`Device::work_counts`), for the lanes: not part of the
@@ -2890,6 +2948,10 @@ pub struct WorkCounts {
     pub pooled_memory_blocks_freed: u64,
     /// Its live dedicated blocks: a placement larger than half a block, or one placed apart.
     pub dedicated_memory_blocks_live: u64,
+    /// Every block its allocator freed so far, by what made it go (`MemoryFrees`): one
+    /// `vkFreeMemory` each, and the allocator's whole share of
+    /// `object_churn.vk_memory_freed`.
+    pub memory_frees: MemoryFrees,
     /// Its live imports of the caller's host memory, a block each (`Memory::import_host`).
     pub host_imports_live: u64,
     /// Its blocks that went while batches submitted before were in flight, on a device whose
@@ -4265,7 +4327,7 @@ impl Device {
         let command_buffer_spared = counters.command_buffer_wakes_spared.load(Ordering::Relaxed);
         let event_wakes = counters.event_wakes.load(Ordering::Relaxed);
         let event_spared = counters.event_wakes_spared.load(Ordering::Relaxed);
-        let (allocated, census, (parked, waiting), (made, freed)) = {
+        let (allocated, census, (parked, waiting), (made, freed), frees) = {
             let memory = lock(&self.shared().memory);
             let turnover = memory.turnover();
             (
@@ -4273,6 +4335,7 @@ impl Device {
                 memory.census(),
                 memory.parked(),
                 turnover,
+                memory.frees(),
             )
         };
         let replays = (self.shared().recorder())
@@ -4392,6 +4455,16 @@ impl Device {
             pooled_memory_blocks_made: made,
             pooled_memory_blocks_freed: freed,
             dedicated_memory_blocks_live: census.dedicated,
+            memory_frees: MemoryFrees {
+                dedicated: frees[FreeCause::Dedicated as usize],
+                pooled_emptied: frees[FreeCause::PooledEmptied as usize],
+                kept_stale: frees[FreeCause::KeptStale as usize],
+                kept_for_room: frees[FreeCause::KeptForRoom as usize],
+                host_import: frees[FreeCause::HostImport as usize],
+                own_pages: frees[FreeCause::OwnPages as usize],
+                teardown: frees[FreeCause::Teardown as usize],
+                blocks: frees.iter().sum(),
+            },
             host_imports_live: census.imported,
             freed_memory_parked: parked,
             freed_memory_waiting: waiting,

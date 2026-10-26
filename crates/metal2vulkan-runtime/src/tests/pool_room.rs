@@ -208,7 +208,7 @@ fn the_held_room_is_the_room_derived_now() {
     check(&mut pool, "a second block added");
     let dedicated = pool.add(1 << 20, true, 2, 1 << 20);
     check(&mut pool, "a dedicated block added");
-    assert_eq!(pool.release(dedicated, 0, 1 << 20, now), Some(2));
+    assert_eq!(pool.release(dedicated, 0, 1 << 20, now), Some((2, true)));
     check(&mut pool, "the dedicated block freed");
     assert_eq!(pool.place(8 * UNIT, 1), Some((second, 0)));
     check(&mut pool, "the second block filled");

@@ -518,15 +518,16 @@ impl<T> Pool<T> {
     }
 
     /// Return `[offset, offset + size)` of block `index`, at `now`. The block's payload when the
-    /// block must now be freed: a dedicated block, or a pooled block that emptied while
-    /// [`KEPT_EMPTY_BLOCKS`] other empty pooled blocks are kept.
+    /// block must now be freed, with whether it was a dedicated block rather than a pooled one
+    /// that emptied while [`KEPT_EMPTY_BLOCKS`] other empty pooled blocks are kept: the two
+    /// reasons a release frees a block, which its caller counts apart ([`FreeCause`]).
     pub(super) fn release(
         &mut self,
         index: usize,
         offset: u64,
         size: u64,
         now: Instant,
-    ) -> Option<T> {
+    ) -> Option<(T, bool)> {
         let block = self.blocks.get_mut(index)?.as_mut()?;
         block.ranges.free(offset, size);
         block.longest = None;
@@ -545,7 +546,7 @@ impl<T> Pool<T> {
             }
             return None;
         }
-        self.take(index)
+        Some((self.take(index)?, dedicated))
     }
 
     /// At `now`, the payload of the kept empty pooled block that emptied earliest, where it
@@ -619,6 +620,40 @@ impl<T> Pool<T> {
     }
 }
 
+/// Why a block of this allocator's memory was freed ([`Memory::let_go`],
+/// [`Memory::destroy`]): one `vkFreeMemory` each, counted where the block went, before any wait
+/// for the batches in flight delays the call (`freed_memory.rs`). A driver that unmaps a buffer
+/// object's pages as it frees it charges the page-table update to the free, so what a workload
+/// frees, and why, is what sets that cost; `WorkCounts::memory_frees` reports these.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FreeCause {
+    /// A block of its own, freed as the one resource placed in it went: a placement larger than
+    /// half a block, or an image bound while work was queued ([`allocate_image_while_queued`]).
+    Dedicated = 0,
+    /// A pooled block freed as its last placement left it, with [`KEPT_EMPTY_BLOCKS`] other
+    /// empty pooled blocks already kept.
+    PooledEmptied = 1,
+    /// A kept empty pooled block freed after [`KEPT_EMPTY_FOR`] without a placement
+    /// ([`Pool::stale`]).
+    KeptStale = 2,
+    /// A kept empty pooled block freed so that a block of its memory type can be made
+    /// ([`Memory::release_kept`]).
+    KeptForRoom = 3,
+    /// The caller's host memory, imported as a dedicated block ([`Memory::import_host`]) and
+    /// freed as its placement went.
+    HostImport = 4,
+    /// A buffer's fresh pages, imported as a dedicated block ([`import_own_pages`],
+    /// `fresh_pages.rs`) and freed as its placement went.
+    OwnPages = 5,
+    /// Freed as the device was destroyed, its queues idle ([`Memory::destroy`]).
+    Teardown = 6,
+}
+
+impl FreeCause {
+    /// How many causes there are: every block this allocator frees is counted under exactly one.
+    pub(super) const COUNT: usize = 7;
+}
+
 /// A device's live `VkDeviceMemory` blocks, by kind ([`Memory::census`]): each one buffer
 /// object the driver lists in every submission where it lists every allocation (ANV on i915).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -686,6 +721,19 @@ struct BlockAddresses {
 }
 
 impl Block {
+    /// The cause its `vkFreeMemory` is counted under. A block freed as the one placement in it
+    /// went ([`FreeCause::Dedicated`]) that is an import of its own is counted as that import
+    /// instead: the caller's host memory ([`Memory::import_host`]) or a buffer's fresh pages
+    /// ([`import_own_pages`]), each a dedicated block of one placement. Any other cause stands:
+    /// a block freed at the device's teardown is counted there whatever it held.
+    fn cause(&self, given: FreeCause) -> FreeCause {
+        match (given, self.imported, self.pages.is_some()) {
+            (FreeCause::Dedicated, true, _) => FreeCause::HostImport,
+            (FreeCause::Dedicated, false, true) => FreeCause::OwnPages,
+            _ => given,
+        }
+    }
+
     /// Free the block's memory, its buffer of addresses first.
     ///
     /// # Safety
@@ -963,6 +1011,8 @@ pub(super) struct Memory {
     parked: Vec<Parked>,
     /// The blocks that waited so far ([`Memory::parked`]).
     parked_count: u64,
+    /// The blocks freed so far by [`FreeCause`]: one `vkFreeMemory` each ([`Memory::frees`]).
+    freed_by: [u64; FreeCause::COUNT],
     /// The memory log, where `METAL2VULKAN_LOG_MEMORY` is set (`memory_log.rs`).
     log: Option<MemoryLog>,
     /// A bind into memory that queued work uses waits for that work on the device's driver
@@ -1001,6 +1051,7 @@ impl Memory {
             parking,
             parked: Vec::new(),
             parked_count: 0,
+            freed_by: [0; FreeCause::COUNT],
             log: None,
             binds_wait: binds_wait(driver),
         }
@@ -1048,6 +1099,15 @@ impl Memory {
     /// wait now (`freed_memory.rs`).
     pub(super) fn parked(&self) -> (u64, u64) {
         (self.parked_count, self.parked.len() as u64)
+    }
+
+    /// The blocks this allocator freed so far, by [`FreeCause`]: one `vkFreeMemory` each,
+    /// counted where the block went. Every block it frees falls under exactly one cause, so
+    /// their sum is its whole share of the process's `vkFreeMemory` calls
+    /// (`WorkCounts::object_churn`'s `vk_memory_freed`); what is left of that total was freed
+    /// outside it (a dma-buf import, a GPU pool's block, a neutral or a spare).
+    pub(super) fn frees(&self) -> [u64; FreeCause::COUNT] {
+        self.freed_by
     }
 
     /// Let the blocks that go from now on wait by `parking` (`freed_memory.rs`), as where the
@@ -1327,11 +1387,17 @@ impl Memory {
         let (freed, stale) = (pool.release(block, offset, size, now), pool.stale(now));
         if let Some(stale) = stale {
             // SAFETY: nothing is placed in a kept empty block, and no command reads it.
-            drop(unsafe { self.let_go(device, stale, None) });
+            drop(unsafe { self.let_go(device, stale, FreeCause::KeptStale, None) });
         }
         match freed {
-            // SAFETY: no resource is placed in the block any more.
-            Some(block) => unsafe { self.let_go(device, block, after) },
+            Some((block, dedicated)) => {
+                let cause = match dedicated {
+                    true => FreeCause::Dedicated,
+                    false => FreeCause::PooledEmptied,
+                };
+                // SAFETY: no resource is placed in the block any more.
+                unsafe { self.let_go(device, block, cause, after) }
+            }
             None => after,
         }
     }
@@ -1346,7 +1412,7 @@ impl Memory {
         let count = blocks.len();
         for block in blocks {
             // SAFETY: nothing is placed in a kept empty block, and no command reads it.
-            drop(unsafe { self.let_go(device, block, None) });
+            drop(unsafe { self.let_go(device, block, FreeCause::KeptForRoom, None) });
         }
         count
     }
@@ -1373,6 +1439,10 @@ impl Memory {
     /// buffer of addresses and let its memory wait, with `after`, for the batches submitted
     /// before now, unless they completed. `after`, given back where the memory was freed here.
     ///
+    /// The block's `vkFreeMemory` is counted under `cause`, or, where the block is an import of
+    /// its own, under the import's cause instead: counted here, where the block goes, whether
+    /// the call runs now or once the batches in flight complete ([`Memory::frees`]).
+    ///
     /// # Safety
     ///
     /// Nothing is placed in the block any more, and no command that reads it is pending.
@@ -1380,8 +1450,10 @@ impl Memory {
         &mut self,
         device: &ash::Device,
         block: Block,
+        cause: FreeCause,
         after: Option<Box<dyn Send>>,
     ) -> Option<Box<dyn Send>> {
+        self.freed_by[block.cause(cause) as usize] += 1;
         let Some(parking) = &self.parking else {
             self.say_block("freed a block", &block);
             // SAFETY: the caller's.
@@ -1630,6 +1702,7 @@ impl Memory {
             .collect();
         for block in blocks {
             self.say_block("freed a block as the device is destroyed", &block);
+            self.freed_by[block.cause(FreeCause::Teardown) as usize] += 1;
             // SAFETY: no resource is left, and the device is idle.
             unsafe { block.release(device) };
         }

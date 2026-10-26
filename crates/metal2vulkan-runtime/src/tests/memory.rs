@@ -284,8 +284,8 @@ fn pooled_blocks_place_until_full_and_two_empty_blocks_are_kept() {
     assert_eq!(pool.release(first, 128, 100, now), None);
     assert_eq!(pool.release(second, 0, 200, now), None);
     assert_eq!(pool.blocks(), 3);
-    // Emptying the third while two are kept frees it.
-    assert_eq!(pool.release(third, 0, 256, now), Some("third"));
+    // Emptying the third while two are kept frees it, as a pooled block that emptied.
+    assert_eq!(pool.release(third, 0, 256, now), Some(("third", false)));
     assert_eq!(pool.blocks(), 2);
     // The kept blocks serve the next requests, the first-made first; the freed slot is reused.
     assert_eq!(pool.place(256, 1), Some((first, 0)));
@@ -355,7 +355,11 @@ fn dedicated_blocks_take_no_other_placement_and_free_with_their_resource() {
     let mut pool: Pool<u32> = Pool::default();
     let dedicated = pool.add(1000, true, 7, 1000);
     assert_eq!(pool.place(1, 1), None, "a dedicated block is never shared");
-    assert_eq!(pool.release(dedicated, 0, 1000, Instant::now()), Some(7));
+    // Freed as dedicated, which its caller counts apart from a pooled block that emptied.
+    assert_eq!(
+        pool.release(dedicated, 0, 1000, Instant::now()),
+        Some((7, true))
+    );
     assert_eq!(pool.blocks(), 0);
 }
 

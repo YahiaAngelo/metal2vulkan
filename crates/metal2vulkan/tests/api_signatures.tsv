@@ -2210,6 +2210,14 @@ field	metal2vulkan-runtime::LayerSetting.layer	pub layer: CString
 field	metal2vulkan-runtime::LayerSetting.name	pub name: CString
 field	metal2vulkan-runtime::LayerSetting.value	pub value: LayerSettingValue
 field	metal2vulkan-runtime::LoaderNotFound.tried	pub tried: Vec<PathBuf>
+field	metal2vulkan-runtime::MemoryFrees.blocks	pub blocks: u64
+field	metal2vulkan-runtime::MemoryFrees.dedicated	pub dedicated: u64
+field	metal2vulkan-runtime::MemoryFrees.host_import	pub host_import: u64
+field	metal2vulkan-runtime::MemoryFrees.kept_for_room	pub kept_for_room: u64
+field	metal2vulkan-runtime::MemoryFrees.kept_stale	pub kept_stale: u64
+field	metal2vulkan-runtime::MemoryFrees.own_pages	pub own_pages: u64
+field	metal2vulkan-runtime::MemoryFrees.pooled_emptied	pub pooled_emptied: u64
+field	metal2vulkan-runtime::MemoryFrees.teardown	pub teardown: u64
 field	metal2vulkan-runtime::MeshRecordsOverflow.budget	pub budget: u64
 field	metal2vulkan-runtime::MeshRecordsOverflow.draw	pub draw: u32
 field	metal2vulkan-runtime::MeshRecordsOverflow.mesh_threadgroups	pub mesh_threadgroups: u32
@@ -2238,7 +2246,9 @@ field	metal2vulkan-runtime::ObjectChurn.images_parked	pub images_parked: u64
 field	metal2vulkan-runtime::ObjectChurn.images_recycled	pub images_recycled: u64
 field	metal2vulkan-runtime::ObjectChurn.imports_inside_live	pub imports_inside_live: u64
 field	metal2vulkan-runtime::ObjectChurn.making_sites	pub making_sites: [CopySite; COPY_SITES]
+field	metal2vulkan-runtime::ObjectChurn.making_sites_dropped	pub making_sites_dropped: u64
 field	metal2vulkan-runtime::ObjectChurn.release_sites	pub release_sites: [CopySite; COPY_SITES]
+field	metal2vulkan-runtime::ObjectChurn.release_sites_dropped	pub release_sites_dropped: u64
 field	metal2vulkan-runtime::ObjectChurn.textures_alias	pub textures_alias: u64
 field	metal2vulkan-runtime::ObjectChurn.textures_image	pub textures_image: u64
 field	metal2vulkan-runtime::ObjectChurn.textures_in_heaps	pub textures_in_heaps: u64
@@ -2687,6 +2697,7 @@ field	metal2vulkan-runtime::WorkCounts.live_tables_uploaded	pub live_tables_uplo
 field	metal2vulkan-runtime::WorkCounts.magnitude_stand_in_passes	pub magnitude_stand_in_passes: u64
 field	metal2vulkan-runtime::WorkCounts.magnitude_write_backs	pub magnitude_write_backs: u64
 field	metal2vulkan-runtime::WorkCounts.memory_blocks_live	pub memory_blocks_live: u64
+field	metal2vulkan-runtime::WorkCounts.memory_frees	pub memory_frees: MemoryFrees
 field	metal2vulkan-runtime::WorkCounts.merged_draw_commands	pub merged_draw_commands: u64
 field	metal2vulkan-runtime::WorkCounts.mipmap_first_levels_fetched	pub mipmap_first_levels_fetched: u64
 field	metal2vulkan-runtime::WorkCounts.missed_completion_wakes	pub missed_completion_wakes: u64
@@ -9334,6 +9345,7 @@ struct	metal2vulkan-runtime::IoSurfaceYCbCr	#[derive(Clone, Copy, Debug, Partial
 struct	metal2vulkan-runtime::LayerSetting	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct LayerSetting
 struct	metal2vulkan-runtime::Library	#[derive(Clone, Debug)] pub struct Library
 struct	metal2vulkan-runtime::LoaderNotFound	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct LoaderNotFound
+struct	metal2vulkan-runtime::MemoryFrees	#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)] pub struct MemoryFrees
 struct	metal2vulkan-runtime::MeshRecordsOverflow	#[derive(Clone, Copy, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct MeshRecordsOverflow
 struct	metal2vulkan-runtime::MessageKind	#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct MessageKind
 struct	metal2vulkan-runtime::MessageSink	#[derive(Clone)] pub struct MessageSink

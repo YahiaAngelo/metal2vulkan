@@ -150,6 +150,8 @@ mod making;
 mod managed;
 mod memo;
 mod memory;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod memory_frees;
 mod memory_reads;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod mesh_reflection_derived;

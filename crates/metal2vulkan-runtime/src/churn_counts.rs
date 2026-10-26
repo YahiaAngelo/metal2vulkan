@@ -196,6 +196,7 @@ impl ChurnCounters {
                 vk_image_bindings: made(VkMaking::ImageBinding),
                 vk_buffer_bindings: made(VkMaking::BufferBinding),
                 making_sites: MAKING_SITES.read(),
+                making_sites_dropped: MAKING_SITES.dropped(),
                 images_own_memory: owned(Owned::ImageOwnMemory),
                 images_in_buffers: owned(Owned::ImageInBuffer),
                 images_in_heaps: owned(Owned::ImageInHeap),
@@ -213,6 +214,7 @@ impl ChurnCounters {
                 buffers_evicted: recycled(Recycled::Buffer, 2),
                 imports_inside_live: self.imports_inside_live.load(Ordering::Relaxed),
                 release_sites: RELEASE_SITES.read(),
+                release_sites_dropped: RELEASE_SITES.dropped(),
             },
             ShadowKeeps {
                 render_cut: keep(KeepBy::Render, 0),
@@ -298,10 +300,18 @@ pub struct ObjectChurn {
     /// The places that released the images, buffers, buffer views and memory counted above, each
     /// with its calls (`regions` unused): the first 32 the process met.
     pub release_sites: [CopySite; COPY_SITES],
+    /// The releases counted above made at places past those 32, which no slot holds: while this
+    /// is 0 the places account for every release counted here, and past it they do not, so a
+    /// breakdown read from `release_sites` alone is short by this many. The runtime calls these
+    /// entry points from far more than 32 places, so a long run reaches it.
+    pub release_sites_dropped: u64,
     /// The places that made the images, buffers, views, memory and bindings counted above, each
     /// with its calls (`regions` unused): the first 32 the process met. What a creation call of
     /// the API made the driver do, and the line of the runtime that asked for it.
     pub making_sites: [CopySite; COPY_SITES],
+    /// The makings counted above made at places past those 32, as `release_sites_dropped` is for
+    /// the releases: while it is 0 `making_sites` accounts for every making counted here.
+    pub making_sites_dropped: u64,
 }
 
 /// The keeps of merged-back shadows by who planned them, cut to a rectangle or of every texel

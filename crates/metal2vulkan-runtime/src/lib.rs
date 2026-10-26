@@ -347,6 +347,6 @@ pub use values::{
 };
 pub use view_plan::ViewProblem;
 pub use visibility::{VisibilityProblem, VisibilityResultMode};
-pub use work_counts::{CopySite, WorkCounts};
+pub use work_counts::{CopySite, MemoryFrees, WorkCounts};
 pub use wrapped_buffer::{VkBufferMemory, WrappedBufferProblem};
 pub use ycbcr::{IoSurfaceYCbCr, SurfaceYCbCrMatrix};
