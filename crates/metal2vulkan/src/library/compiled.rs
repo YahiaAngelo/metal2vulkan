@@ -48,14 +48,88 @@ impl fmt::Debug for FunctionCompileKey {
 
 /// A compiled function: opaque, `Send + Sync`, cheap to clone. Pass it to a pipeline descriptor as
 /// `StageSource::Compiled` to link without decoding or lowering again.
+///
+/// A clone shares both the artifact and the relocation slot, so every pipeline a consumer's memo
+/// hands this function to relocates against the same slot: a sweep of pipeline states over one
+/// function relocates its module once rather than once a state.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CompiledFunction(Arc<FunctionArtifact>);
+#[derive(Clone)]
+pub struct CompiledFunction(Arc<FunctionArtifact>, Arc<LastRelocation>);
+
+/// The last relocation of one compiled function's module, kept beside it: **one slot,
+/// last-wins**.
+///
+/// Relocation writes only the literals the serializer reserved, so the final words are a pure
+/// function of the module and the value link assigned to each reserved slot
+/// (`pipeline::relocate`). A pipeline whose link assigns the same values therefore wants the same
+/// words, and a sweep of pipeline states over one function pair -- a blend sweep, where the state
+/// reaches no relocation slot -- assigns the same values on every creation. Without the slot each
+/// creation clones and patches the whole module again and everything keyed on its content hashes
+/// the result afresh, over words that are byte-identical to the previous creation's.
+///
+/// **The bound is the slot.** One entry per compiled function, replaced rather than accumulated,
+/// so the extra retention is one relocated word array per live function: at most what the
+/// function's own `RelocatableModule` already holds, and it cannot grow with the creations, the
+/// pipelines, or the distinct links a run makes. A run that varies something a relocation slot
+/// does carry never hits, and still holds one entry. The slot dies with the function, so nothing
+/// evicts it.
+#[derive(Default)]
+pub(crate) struct LastRelocation(std::sync::Mutex<Option<Relocated>>);
+
+/// One relocation: what link assigned, and the words that came out.
+struct Relocated {
+    /// The value link assigned to each of the module's relocation slots, in `relocs` order: the
+    /// whole of what the words depend on besides the module itself.
+    assigned: Vec<u32>,
+    words: Arc<[u32]>,
+}
+
+impl LastRelocation {
+    /// The words of the relocation that assigned `assigned`, if that is the one the slot holds.
+    pub(crate) fn words_for(&self, assigned: &[u32]) -> Option<Arc<[u32]>> {
+        let slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let kept = slot.as_ref()?;
+        (kept.assigned == assigned).then(|| Arc::clone(&kept.words))
+    }
+
+    /// Keep `words` as the relocation that assigned `assigned`, replacing what the slot held.
+    pub(crate) fn keep(&self, assigned: Vec<u32>, words: &Arc<[u32]>) {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = Some(Relocated {
+            assigned,
+            words: Arc::clone(words),
+        });
+    }
+}
+
+/// A clone of a compiled function shares its slot, so the `Debug`, equality and hashing of a
+/// compiled function are its artifact's alone: the slot is a memo of a value the artifact and the
+/// link already determine, never a fact about the function.
+impl fmt::Debug for CompiledFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("CompiledFunction").field(&self.0).finish()
+    }
+}
+
+impl PartialEq for CompiledFunction {
+    fn eq(&self, other: &CompiledFunction) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Eq for CompiledFunction {}
 
 impl CompiledFunction {
-    /// Wrap a finished per-function compile (`pipeline::compile`, or a cache load).
+    /// Wrap a finished per-function compile (`pipeline::compile`, or a cache load), with an empty
+    /// relocation slot.
     pub(crate) fn new(artifact: Arc<FunctionArtifact>) -> CompiledFunction {
-        CompiledFunction(artifact)
+        CompiledFunction(artifact, Arc::new(LastRelocation::default()))
+    }
+
+    /// The function's relocation slot ([`LastRelocation`]), which `pipeline::relocate` reads and
+    /// fills.
+    pub(crate) fn last_relocation(&self) -> &LastRelocation {
+        &self.1
     }
 
     /// The key the function was compiled under.

@@ -55,7 +55,6 @@ use crate::pipeline::link::mesh::synthesized_stage as mesh_vertex_stage;
 use crate::pipeline::link::tessellation::{note_evaluation_stage, synthesized_stages};
 use crate::pipeline::link::{link, LinkInputs, Linked, RenderLinkInputs};
 use crate::pipeline::lower_inputs::LoweringInputs;
-use crate::pipeline::relocate::relocate;
 use crate::pipeline::stage_io::{IoRole, StageBuiltin, StageInFetch};
 use crate::pipeline::sym::{Stage, VaryingKey};
 use crate::spirv::serialize::ENTRY_NAME;
@@ -604,9 +603,9 @@ impl Device {
         }
         let artifacts: Vec<&FunctionArtifact> = compiled.iter().map(|c| c.artifact()).collect();
         let mut linked = link(&artifacts, &LinkInputs::mesh(d), p)?;
-        let mut stages = Vec::with_capacity(artifacts.len());
-        for (i, a) in artifacts.iter().enumerate() {
-            stages.push(stage_module(a, &linked, i)?);
+        let mut stages = Vec::with_capacity(compiled.len());
+        for (i, c) in compiled.iter().enumerate() {
+            stages.push(stage_module(c, &linked, i)?);
         }
         note_sample_position(d.into(), &artifacts, &mut stages);
         let keys: Vec<FunctionCompileKey> = artifacts.iter().map(|a| a.key).collect();
@@ -733,7 +732,7 @@ impl Device {
         check_stage_in(a, d)?;
         check_call_stack(a, d.max_call_stack_depth)?;
         let linked = link(&[a], &LinkInputs::compute(), p)?;
-        let stage = stage_module(a, &linked, 0)?;
+        let stage = stage_module(&kernel, &linked, 0)?;
         let profile = self.profile_fingerprint();
         let key = pipeline_key(b"compute", &profile, &[a.key], &compute_fields(d));
         let metal_info = self.metal_info(
@@ -778,7 +777,7 @@ impl Device {
         check_tile_threadgroup(a, d)?;
         check_call_stack(a, d.max_call_stack_depth)?;
         let linked = link(&[a], &LinkInputs::compute(), p)?;
-        let stage = stage_module(a, &linked, 0)?;
+        let stage = stage_module(&kernel, &linked, 0)?;
         let profile = self.profile_fingerprint();
         let key = pipeline_key(b"tile", &profile, &[a.key], &tile_fields(d));
         let max_threads = d
@@ -909,9 +908,9 @@ impl Device {
             &LinkInputs::render_variant(d, v, group.clone()),
             p,
         )?;
-        let mut stages = Vec::with_capacity(artifacts.len());
-        for (i, a) in artifacts.iter().enumerate() {
-            stages.push(stage_module(a, &linked, i)?);
+        let mut stages = Vec::with_capacity(compiled.len());
+        for (i, c) in compiled.iter().enumerate() {
+            stages.push(stage_module(c, &linked, i)?);
         }
         note_sample_position(pass(), &artifacts, &mut stages);
         let keys: Vec<FunctionCompileKey> = artifacts.iter().map(|a| a.key).collect();
@@ -1566,8 +1565,9 @@ fn render_fields(d: &RenderPipelineDescriptor) -> String {
 }
 
 /// Stage `i` of a linked pipeline as its final module.
-fn stage_module(a: &FunctionArtifact, linked: &Linked, i: usize) -> Result<StageModule, Error> {
-    let words = relocate(a, linked)?;
+fn stage_module(c: &CompiledFunction, linked: &Linked, i: usize) -> Result<StageModule, Error> {
+    let a = c.artifact();
+    let words = crate::pipeline::relocate::relocated(c, linked)?;
     let specialization = linked
         .specialization
         .get(i)
@@ -1604,7 +1604,7 @@ fn stage_module(a: &FunctionArtifact, linked: &Linked, i: usize) -> Result<Stage
     Ok(StageModule {
         stage: a.interface.vk_stage(),
         entry_point: ENTRY_NAME.to_owned(),
-        spirv: words.into(),
+        spirv: words,
         specialization,
         required_subgroup_size: a.subgroup.size,
         stage_flags,

@@ -9636,7 +9636,7 @@ struct	metal2vulkan::error::InputError	#[derive(Clone, Debug, PartialEq, Eq)] #[
 struct	metal2vulkan::error::InternalError	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct InternalError
 struct	metal2vulkan::error::Location	#[derive(Clone, PartialEq, Eq, Hash)] pub struct Location
 struct	metal2vulkan::error::Unsupported	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct Unsupported
-struct	metal2vulkan::library::CompiledFunction	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct CompiledFunction(Arc<FunctionArtifact>)
+struct	metal2vulkan::library::CompiledFunction	#[derive(Clone)] #[non_exhaustive] pub struct CompiledFunction(Arc<FunctionArtifact>, Arc<LastRelocation>)
 struct	metal2vulkan::library::DynamicLibrary	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct DynamicLibrary
 struct	metal2vulkan::library::Function	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct Function
 struct	metal2vulkan::library::FunctionCompileKey	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)] #[non_exhaustive] pub struct FunctionCompileKey(pub Hash256)
@@ -9948,6 +9948,9 @@ trait-impl	metal2vulkan::error::VerifyError impl From<Violation>	impl From<Viola
 trait-impl	metal2vulkan::error::VerifyError impl From<crate::air::error::Error>	impl From<crate::air::error::Error> for VerifyError
 trait-impl	metal2vulkan::error::VerifyError impl fmt::Display	impl fmt::Display for VerifyError
 trait-impl	metal2vulkan::error::VerifyError impl std::error::Error	impl std::error::Error for VerifyError
+trait-impl	metal2vulkan::library::CompiledFunction impl Eq	impl Eq for CompiledFunction
+trait-impl	metal2vulkan::library::CompiledFunction impl PartialEq	impl PartialEq for CompiledFunction
+trait-impl	metal2vulkan::library::CompiledFunction impl fmt::Debug	impl fmt::Debug for CompiledFunction
 trait-impl	metal2vulkan::library::FunctionCompileKey impl fmt::Debug	impl fmt::Debug for FunctionCompileKey
 trait-impl	metal2vulkan::metal::TextureSwizzleChannels impl Default	impl Default for TextureSwizzleChannels
 trait-impl	metal2vulkan::metal::sampler::AddressModeMap impl Default	impl Default for AddressModeMap
