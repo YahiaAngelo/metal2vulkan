@@ -28,13 +28,36 @@
 //!
 //! The shape's words, in order: `origin`, the region's first texel `x0` in its low 16 bits and
 //! `y0` in its high 16; `width`, its texels a row; `row_words`, the buffer's rows apart in words;
-//! and `first_word`, the word of the region's first texel in the storage binding. Invocation
-//! `(x, y)` with `x` below `width` fetches texel `(x0 + x, y0 + y)` of level 0 and stores its
-//! `n` words (`n` the module's texel width) at words `first_word + y · row_words + x · n` onward;
-//! one at `x` past `width` does nothing. A dispatch takes `ceil(width / LOCAL_SIZE)` by the
-//! region's height workgroups ([`ShadowCopyBackModule::groups`]): a workgroup stores consecutive
-//! words of one row. Nothing reads the storage binding, and no word between the region's rows or
-//! past its texels is written.
+//! and `first_word`, the word of the region's first texel in the storage binding. A dispatch takes
+//! `ceil(width / LOCAL_SIZE)` by the region's height workgroups
+//! ([`ShadowCopyBackModule::groups`]), whatever the texel's width `n` (the module's, in 4-byte
+//! words). Nothing reads the storage binding, and no word between the region's rows or past its
+//! texels is written. How the invocations divide a row depends on `n`:
+//!
+//! - **A one-word texel** (`R32_UINT`, `R8G8B8A8_UINT`). Invocation `(x, y)` with `x` below
+//!   `width` fetches texel `(x0 + x, y0 + y)` of level 0 and stores its word at
+//!   `first_word + y · row_words + x`; one at `x` past `width` does nothing.
+//! - **A texel of two or four words** (`R32G32_UINT`, `R32G32B32A32_UINT`). A row is `width · n`
+//!   words, and invocation `l` of workgroup `(g, y)` takes the row's words `w = nNg + Nk + l` for
+//!   `k` from 0 to `n - 1` (`N` [`ShadowCopyBackModule::LOCAL_SIZE`]), one after the other. Each
+//!   `w` below `width · n` fetches texel `(x0 + w / n, y0 + y)`, takes its word `w % n`, and
+//!   stores it at `first_word + y · row_words + w`; a `w` past the row's words does nothing. One
+//!   workgroup's `N` invocations still cover `nN` words of the row, which is why the workgroups
+//!   are the same as above; a texel is fetched once per word of it, `n` invocations fetching the
+//!   one texel.
+//!
+//! Either way the `k`th store of consecutive invocations falls on consecutive words. A workgroup
+//! covers the same words under either form, and each word is read from one texel and stored to one
+//! address no other word is stored to, so which invocation takes which word does not change a
+//! byte; but `nNg + Nk + l` puts one store's lanes on consecutive words where `n(Ng + l) + k`
+//! leaves `n - 1` words between them. On an RTX 5080 Laptop GPU (NVIDIA 615.71.09), a store of
+//! 8 MiB of imported host memory that leaves words between the lanes of a warp takes hundreds of
+//! times the time of the same bytes stored without gaps: 0.32 ms at one word an invocation in
+//! order and at four a workgroup apart, against 383 ms at one word per 8 bytes and 140 ms at one
+//! per 16 (`n` = 2 and `n` = 4 under the old form), with loads of every shape at 0.32 ms. On an
+//! RX 7900 XTX (RADV) and a Radeon 780M the shapes are within measurement of each other. The
+//! one-word form was already a store a word an invocation in order, the first of those readings,
+//! so it is left exactly as it was.
 //!
 //! **Synchronization** (consumer): the shadow's last writes → `SHADER_SAMPLED_READ` in
 //! `COMPUTE_SHADER`, and the buffer's earlier accesses → `SHADER_STORAGE_WRITE` there, before the
@@ -231,6 +254,42 @@ pub(super) fn stored_texel(
     f.composite_construct(uvec4, &components)
 }
 
+/// How a dispatch's invocations divide a row of the region (the module docs): by the texel's
+/// width, so that the `k`th store of consecutive invocations falls on consecutive words.
+enum Spread {
+    /// A one-word texel: invocation `x` takes texel `x`, which already stores a word an
+    /// invocation in order. Its `GlobalInvocationId`.
+    Texel(GlobalId),
+    /// A texel of two or four words: the words of a row spread across the invocations, each
+    /// taking `n` of them `LOCAL_SIZE` apart. Its `WorkgroupId` and `LocalInvocationId`.
+    Words { group: GlobalId, local: GlobalId },
+}
+
+/// Where one invocation sits, read from its builtins ([`Spread`]).
+enum Place {
+    /// Its texel `x` of row `y` of the region.
+    Texel { x: Value, y: Value },
+    /// Its workgroup `g` along the row `y` of the region, and its own index `l` in it.
+    Words { g: Value, l: Value, y: Value },
+}
+
+/// The word a row word took of its texel's `words`: the one `lane` names, by a chain of selects
+/// over the texel's words (`lanes` holding each word's index). Only a texel of more than one word
+/// reaches here.
+fn one_word(
+    f: &mut FunctionBuilder<'_>,
+    words: &[Value],
+    lane: Value,
+    lanes: &[Value],
+) -> BResult<Value> {
+    let mut chosen = words[0];
+    for (&word, &index) in words.iter().zip(lanes).skip(1) {
+        let is = f.binary(BinOp::IEqual, lane, index)?;
+        chosen = f.select(is, word, chosen)?;
+    }
+    Ok(chosen)
+}
+
 /// The copy-back module of `view` as a typed module, before serialization: the module
 /// [`shadow_copy_back_module`] serializes, which the CPU interpreter runs. Its bindings are the
 /// symbols `IMAGE` and `BYTES`, and its push field the shape, a `uvec4` (the module docs).
@@ -257,7 +316,17 @@ fn typed_module(view: ShadowTexelView) -> BResult<TypedModule> {
     }))?;
     let image = b.resource(IMAGE, StorageClass::UniformConstant, image_type)?;
     let bytes = words_buffer(&mut b, BYTES, u32_)?;
-    let invocation = b.builtin(crate::spv::BuiltIn::GlobalInvocationId, IoDir::Input, uvec3)?;
+    let spread = match words {
+        1 => Spread::Texel(b.builtin(
+            crate::spv::BuiltIn::GlobalInvocationId,
+            IoDir::Input,
+            uvec3,
+        )?),
+        _ => Spread::Words {
+            group: b.builtin(crate::spv::BuiltIn::WorkgroupId, IoDir::Input, uvec3)?,
+            local: b.builtin(crate::spv::BuiltIn::LocalInvocationId, IoDir::Input, uvec3)?,
+        },
+    };
     let void = b.ty(Type::Void)?;
     let mut f = b.function(void)?;
     let zero = u32_value(&mut f, 0)?;
@@ -268,10 +337,28 @@ fn typed_module(view: ShadowTexelView) -> BResult<TypedModule> {
     for lane in 0..words {
         lanes.push(u32_value(&mut f, lane)?);
     }
-    let invocation = f.module().global_value(invocation)?;
-    let invocation = f.load(invocation, MemAccess::default())?;
-    let x = f.composite_extract(invocation, &[0])?;
-    let y = f.composite_extract(invocation, &[1])?;
+    // The invocation's place: its texel of the row and the row, or, the words spread, its
+    // workgroup and its own index in it.
+    let divide = match spread {
+        Spread::Texel(invocation) => {
+            let invocation = f.module().global_value(invocation)?;
+            let invocation = f.load(invocation, MemAccess::default())?;
+            let x = f.composite_extract(invocation, &[0])?;
+            let y = f.composite_extract(invocation, &[1])?;
+            Place::Texel { x, y }
+        }
+        Spread::Words { group, local } => {
+            let group = f.module().global_value(group)?;
+            let group = f.load(group, MemAccess::default())?;
+            let g = f.composite_extract(group, &[0])?;
+            // The region's row: the workgroup's y, the local size along y being 1.
+            let y = f.composite_extract(group, &[1])?;
+            let local = f.module().global_value(local)?;
+            let local = f.load(local, MemAccess::default())?;
+            let l = f.composite_extract(local, &[0])?;
+            Place::Words { g, l, y }
+        }
+    };
     let image = f.module().global_value(image)?;
     let bytes = f.module().global_value(bytes)?;
     let push = f.module().global_value(push)?;
@@ -282,32 +369,89 @@ fn typed_module(view: ShadowTexelView) -> BResult<TypedModule> {
     let width = f.composite_extract(shape, &[1])?;
     let row_words = f.composite_extract(shape, &[2])?;
     let first_word = f.composite_extract(shape, &[3])?;
-    let inside = f.binary(BinOp::ULessThan, x, width)?;
-    let copy: ArmFn<'_, ()> = Box::new(move |f, _| {
-        let x0 = f.binary(BinOp::BitwiseAnd, origin, low)?;
-        let y0 = f.binary(BinOp::ShiftRightLogical, origin, sixteen)?;
-        let tx = f.binary(BinOp::IAdd, x0, x)?;
-        let ty = f.binary(BinOp::IAdd, y0, y)?;
-        let coord = f.composite_construct(uvec2, &[tx, ty])?;
-        let image = f.load(image, MemAccess::default())?;
-        let ops = ImageOperands {
-            lod: Some(zero),
-            ..ImageOperands::default()
-        };
-        let texel = f.fetch(image, coord, &ops)?;
-        let texel = fetched_words(f, texel, view)?;
-        let row = f.binary(BinOp::IMul, y, row_words)?;
-        let column = f.binary(BinOp::IMul, x, n)?;
-        let at = f.binary(BinOp::IAdd, first_word, row)?;
-        let at = f.binary(BinOp::IAdd, at, column)?;
-        for (&word, &index) in texel.iter().zip(&lanes) {
-            let place = f.binary(BinOp::IAdd, at, index)?;
-            let to = f.access_chain(bytes, &[zero, place])?;
-            f.store(to, word, MemAccess::default())?;
+    match divide {
+        // One word a texel, left as it was (the module docs).
+        Place::Texel { x, y } => {
+            let inside = f.binary(BinOp::ULessThan, x, width)?;
+            let copy: ArmFn<'_, ()> = Box::new(move |f, _| {
+                let x0 = f.binary(BinOp::BitwiseAnd, origin, low)?;
+                let y0 = f.binary(BinOp::ShiftRightLogical, origin, sixteen)?;
+                let tx = f.binary(BinOp::IAdd, x0, x)?;
+                let ty = f.binary(BinOp::IAdd, y0, y)?;
+                let coord = f.composite_construct(uvec2, &[tx, ty])?;
+                let image = f.load(image, MemAccess::default())?;
+                let ops = ImageOperands {
+                    lod: Some(zero),
+                    ..ImageOperands::default()
+                };
+                let texel = f.fetch(image, coord, &ops)?;
+                let texel = fetched_words(f, texel, view)?;
+                let row = f.binary(BinOp::IMul, y, row_words)?;
+                let column = f.binary(BinOp::IMul, x, n)?;
+                let at = f.binary(BinOp::IAdd, first_word, row)?;
+                let at = f.binary(BinOp::IAdd, at, column)?;
+                for (&word, &index) in texel.iter().zip(&lanes) {
+                    let place = f.binary(BinOp::IAdd, at, index)?;
+                    let to = f.access_chain(bytes, &[zero, place])?;
+                    f.store(to, word, MemAccess::default())?;
+                }
+                Ok(ArmEnd::FallThrough(Vec::new()))
+            });
+            f.if_(&mut (), inside, copy, None)?;
         }
-        Ok(ArmEnd::FallThrough(Vec::new()))
-    });
-    f.if_(&mut (), inside, copy, None)?;
+        // A texel of two or four words: the row's words across the invocations.
+        Place::Words { g, l, y } => {
+            let x0 = f.binary(BinOp::BitwiseAnd, origin, low)?;
+            let y0 = f.binary(BinOp::ShiftRightLogical, origin, sixteen)?;
+            let ty = f.binary(BinOp::IAdd, y0, y)?;
+            // The row's words, and its first word in the storage binding.
+            let row_count = f.binary(BinOp::IMul, width, n)?;
+            let row = f.binary(BinOp::IMul, y, row_words)?;
+            let at_row = f.binary(BinOp::IAdd, first_word, row)?;
+            // A row word's texel and its word of that texel: the texel's width being 2 or 4, a
+            // shift and a mask.
+            let shift = u32_value(&mut f, words.trailing_zeros())?;
+            let mask = u32_value(&mut f, words - 1)?;
+            // The workgroup's first word of the row, plus the invocation's index in it: its
+            // words lie `LOCAL_SIZE` apart from there, so each of the stores below falls on
+            // consecutive words across consecutive invocations (the module docs).
+            let span = u32_value(&mut f, words * ShadowCopyBackModule::LOCAL_SIZE)?;
+            let base = f.binary(BinOp::IMul, g, span)?;
+            let base = f.binary(BinOp::IAdd, base, l)?;
+            // The invocation's words, one after the other, each as one invocation took it alone.
+            for k in 0..words {
+                let w = match k {
+                    0 => base,
+                    k => {
+                        let step = k * ShadowCopyBackModule::LOCAL_SIZE;
+                        let step = u32_value(&mut f, step)?;
+                        f.binary(BinOp::IAdd, base, step)?
+                    }
+                };
+                let inside = f.binary(BinOp::ULessThan, w, row_count)?;
+                let lanes = lanes.clone();
+                let copy: ArmFn<'_, ()> = Box::new(move |f, _| {
+                    let x = f.binary(BinOp::ShiftRightLogical, w, shift)?;
+                    let lane = f.binary(BinOp::BitwiseAnd, w, mask)?;
+                    let tx = f.binary(BinOp::IAdd, x0, x)?;
+                    let coord = f.composite_construct(uvec2, &[tx, ty])?;
+                    let image = f.load(image, MemAccess::default())?;
+                    let ops = ImageOperands {
+                        lod: Some(zero),
+                        ..ImageOperands::default()
+                    };
+                    let texel = f.fetch(image, coord, &ops)?;
+                    let texel = fetched_words(f, texel, view)?;
+                    let word = one_word(f, &texel, lane, &lanes)?;
+                    let place = f.binary(BinOp::IAdd, at_row, w)?;
+                    let to = f.access_chain(bytes, &[zero, place])?;
+                    f.store(to, word, MemAccess::default())?;
+                    Ok(ArmEnd::FallThrough(Vec::new()))
+                });
+                f.if_(&mut (), inside, copy, None)?;
+            }
+        }
+    }
     f.ret(None)?;
     let id = f.finish()?;
     b.entry(
@@ -469,6 +613,57 @@ mod tests {
                 }
             }
             assert_eq!(got, want, "{view:?}");
+        }
+    }
+
+    /// Every word of a region whose row is not a whole number of workgroup spans lands at its
+    /// place, and no other word changes. A row is `width · n` words and one workgroup covers
+    /// `LOCAL_SIZE · n` of them, so a `width` that is not a multiple of `LOCAL_SIZE` leaves the
+    /// last workgroup's invocations past the row, each of which must store nothing. The copy is
+    /// unconditional, every word of the region being stored whatever it held, so the whole claim
+    /// is that the indexing is a permutation of the same write set: the words the dispatch stores
+    /// to are distinct, which makes the order between them free, and the buffer is filled with
+    /// words no texel of the test image can hold, so a word stored twice, missed, or stored at
+    /// another address shows as a difference. Through every view.
+    #[test]
+    fn a_row_that_is_not_whole_workgroups_stores_its_words_and_no_others() {
+        for view in ShadowTexelView::ALL {
+            let words = view.words();
+            let local = ShadowCopyBackModule::LOCAL_SIZE;
+            let (width, height) = (150, 5);
+            assert_ne!(
+                (width * words) % (local * words),
+                0,
+                "the row's words leave a tail in its last workgroup",
+            );
+            let (x0, y0) = (7, 1);
+            let extent = [x0 + width + 5, y0 + height + 2];
+            // The rows 9 words apart past their own, from word 6, and 4 spare words past the last.
+            let row_words = width * words + 9;
+            let first_word = 6;
+            let len = first_word + (height - 1) * row_words + width * words + 4;
+            let filled: Vec<u32> = (0..len).map(|i| 0xa5a5_0000 | i).collect();
+            let got = copied_back(
+                extent,
+                view,
+                [x0, y0, width, height],
+                (row_words, first_word),
+                &filled,
+            );
+            let mut want = filled.clone();
+            for y in 0..height {
+                for x in 0..width {
+                    for i in 0..words {
+                        let at = first_word + y * row_words + x * words + i;
+                        let (tx, ty) = (x0 + x, y0 + y);
+                        want[at as usize] = 0x0100_0000 * (i + 1) + 0x1000 * ty + tx;
+                    }
+                }
+            }
+            assert_eq!(got, want, "{view:?}");
+            // Exactly the region's words differ from what the buffer held.
+            let changed = (got.iter().zip(&filled)).filter(|(a, b)| a != b).count();
+            assert_eq!(changed as u32, width * height * words, "{view:?}");
         }
     }
 
