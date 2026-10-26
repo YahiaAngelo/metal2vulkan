@@ -198,6 +198,8 @@ mod reader_sizes;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod rebind_behind_a_wait;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod rebind_descriptor_slip;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod rebind_making_wait;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod recycle;

@@ -2691,6 +2691,16 @@ impl CommandBuffer {
                 state.retained.push(Box::new(ticket));
             }
             state.status = CommandBufferStatus::Committed;
+            // Its set-0 cache is shut here, before anything records again: from the commit on it
+            // holds what its commands took only weakly (below), so no handle a kept set holds is
+            // held against another object taking it -- which is the cache's own precondition
+            // (`binding::SetCache`). A rebind frees the import a kept set was written for and
+            // records the commands over the new one in the same call (`reencode.rs`), and the new
+            // import's `VkBuffer` may take the freed one's handle, all the cache compares; so
+            // every command recorded from here -- an encoder encoded again, a host step's --
+            // allocates and writes its own set. The commands recorded before the commit keep the
+            // sets they bound.
+            state.descriptors.shut();
             state.queued_commit = false;
             if let Some(hang) = state.hang.take() {
                 match hangs {

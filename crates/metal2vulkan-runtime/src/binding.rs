@@ -1178,10 +1178,15 @@ const SETS_ROOM: usize = 8;
 ///
 /// - **A set holds what was written.** Written once, as it is allocated; nothing writes it again.
 /// - **No handle it holds names another object.** A set is kept only once its command records,
-///   so every object its writes name is held until the command buffer completes: by the command
-///   (its buffers, textures, views and samplers), the command buffer's arena (uploads) or the
-///   device (neutrals). No such object goes, nor can another take its handle, while its sets are
-///   kept; a refused command's set is never kept.
+///   and only while the command buffer holds what its commands took strongly, which is until it
+///   is committed (`command_buffer/mod.rs`): every object a kept set's writes name is held by the
+///   command (its buffers, textures, views and samplers), the command buffer's arena (uploads) or
+///   the device (neutrals), so no such object goes, nor can another take its handle, while its
+///   sets are kept. A refused command's set is never kept. At the commit the holds go weak, so a
+///   rebind may let the pages go, and the cache is shut there and keeps and serves nothing again
+///   (`DescriptorArena::shut`): every command recorded from the commit on -- an encoder encoded
+///   again at a rebind (`command_buffer/reencode.rs`), a host step's -- allocates and writes its
+///   own set.
 /// - **The writes compare by value** ([`SetWrite::same`], in order), behind a hash of them
 ///   ([`set_key`]), so a set is bound again only where every descriptor written is the one the
 ///   command writes.

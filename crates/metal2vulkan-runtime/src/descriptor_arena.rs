@@ -178,6 +178,10 @@ pub(crate) struct DescriptorArena {
     /// (`binding::SetCache`), from its first command that looks one up: forgotten as the pools
     /// go. Boxed, so a fitted arena, which keeps none, stays small.
     sets: Option<Box<SetCache>>,
+    /// Whether its command buffer is committed, from which point it keeps and serves no set of
+    /// its own ([`shut`](Self::shut)): the cache's exactness rests on a hold the commit lets go
+    /// of.
+    shut: bool,
     /// The arena of a predicated loop's check, lent while it records a run again
     /// (`command_buffer/rerun.rs`): every set is allocated from it, and kept there, meanwhile,
     /// and its pools are reset once that run completed ([`reset`](Self::reset)).
@@ -194,6 +198,7 @@ impl DescriptorArena {
             device: None,
             fitted: true,
             sets: None,
+            shut: false,
             lent: None,
         }
     }
@@ -262,13 +267,16 @@ impl DescriptorArena {
 
     /// The set 0 of `layout` holding `writes` that one of the command buffer's recorded commands
     /// wrote (`binding::SetCache::find`): of its own pools, or of the arena lent, which its own
-    /// outlive.
+    /// outlive. None of its own once it is [`shut`](Self::shut).
     pub(crate) fn find(
         &mut self,
         layout: vk::DescriptorSetLayout,
         writes: &[Write],
     ) -> Option<vk::DescriptorSet> {
-        let own = (self.sets.as_mut()).and_then(|sets| sets.find(layout, writes));
+        let own = match self.shut {
+            true => None,
+            false => (self.sets.as_mut()).and_then(|sets| sets.find(layout, writes)),
+        };
         match &self.lent {
             Some(lent) if own.is_none() => lock(lent).find(layout, writes),
             _ => own,
@@ -277,16 +285,35 @@ impl DescriptorArena {
 
     /// Keep `set`, of `layout`, written with `writes`, once its command recorded
     /// (`binding::SetCache::keep`): in the arena lent where one is, whose pools it came from.
+    /// Kept in none of its own once it is [`shut`](Self::shut).
     pub(crate) fn keep(
         &mut self,
         layout: vk::DescriptorSetLayout,
         set: vk::DescriptorSet,
         writes: &[Write],
     ) {
-        match &self.lent {
-            Some(lent) => lock(lent).keep(layout, set, writes),
-            None => self.sets.get_or_insert_default().keep(layout, set, writes),
+        match (&self.lent, self.shut) {
+            (Some(lent), _) => lock(lent).keep(layout, set, writes),
+            (None, false) => self.sets.get_or_insert_default().keep(layout, set, writes),
+            (None, true) => {}
         }
+    }
+
+    /// Forget the sets 0 its command buffer's commands wrote, and keep and serve none of its own
+    /// again: its command buffer is committed, so from here it holds what its commands took only
+    /// weakly (`command_buffer/mod.rs`) and the cache's second invariant -- no object a kept
+    /// set's handles name can go, nor another take its handle (`binding::SetCache`) -- no longer
+    /// holds. A rebind frees the import a kept set was written for and then records the commands
+    /// over the new one in the same call (`buffer_descriptor.rs`, `command_buffer/reencode.rs`),
+    /// and the new import's `VkBuffer` may take the freed one's handle, which with its offset and
+    /// range is all the cache compares; so every command recorded from the commit on -- an
+    /// encoder encoded again, a host step's -- allocates and writes its own set. Shut for good:
+    /// a command recorded again keeps no set either, or the next rebind would find that one
+    /// stale. Its pools are untouched; the sets already bound by commands recorded before the
+    /// commit stay theirs.
+    pub(crate) fn shut(&mut self) {
+        self.shut = true;
+        self.sets = None;
     }
 
     /// How many pools it holds (a device test's measure).
@@ -331,6 +358,7 @@ impl DescriptorArena {
             device: self.device.clone(),
             fitted: self.fitted,
             sets: None,
+            shut: self.shut,
             lent: None,
         }
     }
