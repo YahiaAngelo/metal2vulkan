@@ -2016,7 +2016,9 @@ impl Counters {
         (self.fresh_page_bytes).fetch_add(bytes, Ordering::Relaxed);
     }
 
-    /// The host set `bytes` of a new buffer to zero as it was made (`Buffer::clear_first`).
+    /// The host set `bytes` of a new buffer to zero so that bytes nothing wrote read zero: a new
+    /// buffer's own, as it was made (`Buffer::clear_first`), and an upload region's past its data,
+    /// as the arena hands the region out of a chunk made without a clear (`upload.rs`).
     pub(crate) fn new_buffer_cleared(&self, bytes: u64) {
         (self.new_buffer_bytes_cleared).fetch_add(bytes, Ordering::Relaxed);
     }
@@ -4128,9 +4130,11 @@ pub struct WorkCounts {
     pub fresh_page_buffers_made: u64,
     /// Their pages' bytes: whole units of the host page and the import alignment.
     pub fresh_page_bytes: u64,
-    /// The bytes of new buffers the host set to zero as they were made: the `Shared` and
-    /// `Managed` ones' (a `Managed` buffer's host copy too, without unified memory), but those
-    /// made in fresh pages.
+    /// The bytes the host set to zero so that bytes nothing wrote read zero: of new buffers as
+    /// they were made, the `Shared` and `Managed` ones' (a `Managed` buffer's host copy too,
+    /// without unified memory) but those made in fresh pages; and of an upload region past its
+    /// data, since a command buffer's arena chunks are made without a clear and each region zeroes
+    /// what its data does not cover (`upload.rs`).
     pub new_buffer_bytes_cleared: u64,
     /// Copies between a shadowed texture's truth and its shadow that encoders planned
     /// (`shadow.rs`): copies in before a command, copies back after one or as the encoder ends,

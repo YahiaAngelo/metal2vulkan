@@ -28,7 +28,8 @@
 //!   maker sets its bytes to zero as it does a new buffer's, on the host or by the device's next
 //!   submission (`Buffer::clear_first`), at the same cost, fresh pages it imported among them
 //!   (`fresh_pages.rs`), which hold the last owner's bytes; a scratch buffer's bytes hold no value
-//!   before the GPU writes them, recycled or new. A buffer takes a range of the Metal address
+//!   before the GPU writes them, recycled or new, and an upload arena's chunk none before a region
+//!   it hands out is written or zeroed (`upload.rs`). A buffer takes a range of the Metal address
 //!   space as a new one does (`address.rs`): its Vulkan device address, which the recycled
 //!   `VkBuffer` keeps, is never shown. An image made to start as its memory lies starts as the
 //!   parked image's bytes lie, which are memory's as any placement's are.

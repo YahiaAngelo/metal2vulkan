@@ -29,14 +29,20 @@
 //!   the arena when it completes.
 //! - **Sizes.** A command buffer's first chunk holds [`FIRST_CHUNK_BYTES`], and each next one
 //!   twice as many, up to [`CHUNK_BYTES`]; a region of more than half of that takes a chunk of its
-//!   own. A new chunk is cleared whole (a new buffer reads zero), so a command buffer of a few
-//!   commands clears a few KiB, not 64 (clearing 64 KiB took 11.5 us of an RTX 3090's host-visible
-//!   memory and 2.6 us of a Radeon 780M's).
+//!   own. A chunk's bytes hold no value as it is made (`Device::unzeroed_buffer_with`): what must
+//!   read zero is the part of a region its data does not cover, which the region zeroes as it is
+//!   handed out, and nothing reads a byte of a chunk outside a region. So a command buffer clears
+//!   its regions' unwritten bytes, at most its chunks' bytes and in practice far less: a command
+//!   whose tables are as long as their data clears nothing, where a clear of each chunk wrote
+//!   4 KiB for the first region of a command buffer whatever it held (clearing 64 KiB took 11.5 us
+//!   of an RTX 3090's host-visible memory and 2.6 us of a Radeon 780M's). Counted:
+//!   `WorkCounts::new_buffer_bytes_cleared`, the same count a buffer's own clear moves.
 //! - **Alignment.** Every region starts at a multiple of the device's upload alignment (16 bytes,
 //!   and the storage and uniform buffer offset alignments), so it can be bound at its offset and
 //!   its device address is 16-aligned. A root table and the resident set it searches start at a
 //!   device address that is a multiple of 32 too (`upload_aligned`). A region's bytes past the data
-//!   are zero (a new buffer reads zero).
+//!   are zero: [`Uploads::upload`] sets them, since the chunk holds no value as it is made. The
+//!   bytes an alignment leaves between two regions belong to no region, and nothing reads them.
 
 use super::buffer::Buffer;
 use super::device::lock;
@@ -47,7 +53,7 @@ use ash::vk;
 use std::sync::{Arc, Mutex};
 
 /// The size of a command buffer's first ordinary chunk.
-const FIRST_CHUNK_BYTES: u64 = 4 * 1024;
+pub(super) const FIRST_CHUNK_BYTES: u64 = 4 * 1024;
 
 /// The size of the largest ordinary chunk; a region of more than half of it gets a chunk of its
 /// own.
@@ -176,8 +182,11 @@ impl Uploads {
                     (FIRST_CHUNK_BYTES << self.opened.min(4)).max(need.next_power_of_two())
                 };
                 // The encoding thread writes the chunk: host-cached memory where the device has
-                // such (the module docs).
-                let buffer = device.own_buffer(
+                // such (the module docs). Its bytes hold no value as it is made: a region zeroes
+                // what its own data does not cover as it is handed out, and nothing reads a byte
+                // of the chunk outside a region, so a clear of the whole chunk would write bytes
+                // no reader can reach (the module docs' "Sizes").
+                let buffer = device.unzeroed_buffer_with(
                     size,
                     ResourceOptions::new(
                         StorageMode::Shared,
@@ -219,6 +228,18 @@ impl Uploads {
                 mapped.as_ptr().add(offset as usize),
                 bytes.len(),
             );
+        }
+        // The region's bytes past the data are zero (the module docs' "Alignment"), and the chunk
+        // holds no value as it is made, so the region sets them: at most the chunk's bytes over
+        // all its regions, where a clear of the chunk wrote every byte of it whether a region took
+        // it or not.
+        let tail = len - bytes.len() as u64;
+        if tail > 0 {
+            let at = offset + bytes.len() as u64;
+            // SAFETY: `[at, at + tail)` is the rest of the region, inside the chunk's mapping as
+            // above, and no region overlaps it.
+            unsafe { std::ptr::write_bytes(mapped.as_ptr().add(at as usize), 0, tail as usize) };
+            device.shared().counts.new_buffer_cleared(tail);
         }
         chunk.used = end;
         Ok(Upload {

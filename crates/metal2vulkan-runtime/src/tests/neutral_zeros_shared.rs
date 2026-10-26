@@ -41,21 +41,24 @@
 //! and the test requires it to, so a later change cannot quietly start sharing one buffer between
 //! commands that may store through the binding.
 //!
-//! # A dispatch count's own fixed cost
+//! # A dispatch count's own cost
 //!
 //! The two dispatch checks read `new_buffer_bytes_cleared` as the difference between **two
-//! dispatch counts**, not as an absolute, because a command buffer of this kernel pays a fixed
-//! cost that is not its neutral's and does not grow with its dispatches: `scale_and_offset`
-//! stores through a buffer slot's descriptor view, so its plan binds a write-only store sink
-//! (`NeutralResource::Sink`, one storage descriptor of the stage) at every dispatch, and the
-//! first region any command of the command buffer takes opens the upload arena's first chunk,
-//! which is a new buffer cleared whole (`upload.rs`'s `FIRST_CHUNK_BYTES`). Measured on this M3
-//! Max: that chunk is the whole of what a read-only neutral's dispatches clear, and the same one
-//! chunk at every dispatch count these checks run, so the difference between two counts cancels
-//! it and leaves exactly the per-dispatch cost each check is about. An absolute of zero was what the
-//! read-only check asked for before the store sink existed, and it is not a claim this kernel can
-//! carry: the only way to reach it would be to share a region a shader stores through, which is
-//! the fault the writable check is here to catch.
+//! dispatch counts**, not as an absolute, because a command buffer of this kernel clears bytes
+//! that are not its read-only neutral's: `scale_and_offset` stores through a buffer slot's
+//! descriptor view, so its plan binds a write-only store sink (`NeutralResource::Sink`, one
+//! storage descriptor of the stage) at every dispatch, and a region of the upload arena clears the
+//! bytes its own data does not cover as it is handed out (`upload.rs`). A sink's region holds no
+//! data at all, so each dispatch clears its length. An absolute of zero was what the read-only
+//! check asked for before the store sink existed, and it is not a claim this kernel can carry: the
+//! only way to reach it would be to share a region a shader stores through, which is the fault the
+//! writable check is here to catch. So the read-only check reads its step against the same
+//! kernel's all-bound shape, whose dispatches take the same sink and no read-only neutral.
+//!
+//! The fixed cost a command buffer pays whatever its dispatch count used to be a chunk: the first
+//! region any command took opened the arena's first chunk, 4 KiB, which was a new buffer cleared
+//! whole. It is gone -- a chunk is made without a clear -- and `tests::upload_chunk_zeros` is
+//! where that is held.
 //!
 //! # The store sink's own cost
 //!
@@ -65,9 +68,10 @@
 //! memory model forbids whether or not anything reads them, and ordering them would take a barrier
 //! between every pair of commands that bind a sink (`binding::descriptor`'s `WriteSource::Neutral`
 //! arm). So each command keeps a sink region of its own, and what that costs a dispatch is one
-//! region of the arena and nothing else -- no `VkBuffer`, no new buffer written to zero and no
-//! descriptor set, since the binding is dynamic and the region's offset is bound with the set
-//! (`a_store_sinks_region_is_a_dispatchs_whole_cost`).
+//! region of the arena and nothing else -- no `VkBuffer`, no chunk cleared, and no descriptor set,
+//! since the binding is dynamic and the region's offset is bound with the set
+//! (`a_store_sinks_region_is_a_dispatchs_whole_cost`). The region's own bytes are written to zero,
+//! since nothing is stored in it before the dispatch and a region's unwritten bytes read zero.
 //!
 //! What none of it covers: a draw or dispatch whose read-only slot is unbound **and** whose
 //! length differs from `zero_buffer_bytes` on this device, since one device offers one length; and
@@ -272,22 +276,28 @@ fn dispatched(dispatches: usize, unbound: u64) -> (u64, u64, crate::WorkCounts, 
 }
 
 /// A kernel's unbound `constant` slot is a read-only binding: the dispatches share the device's
-/// one zero buffer, so twice as many of them cost nothing more -- no second zero buffer, not a
-/// further `VkBuffer` and not a byte more of a new buffer written to zero. Read as the difference
-/// between two dispatch counts, which cancels the command buffer's own fixed cost (the module
-/// docs).
+/// one zero buffer, so twice as many of them cost nothing more -- no second zero buffer, no
+/// further `VkBuffer`, and not a byte more written to zero than the same dispatches cost with
+/// every slot bound.
+///
+/// The bytes are read as a per-dispatch step against the **all-bound** shape rather than as a step
+/// of zero, because this kernel's dispatches each take a store-sink region whether or not a slot
+/// is unbound, and a region clears the bytes its data does not cover (`upload.rs`). So the
+/// question this check asks is the one it is about: does the read-only neutral add anything to
+/// what a dispatch already clears? Zero would be the answer only for a kernel that binds no
+/// neutral at all.
 #[test]
 fn dispatches_share_the_devices_one_zero_buffer() {
-    let run = |dispatches| {
-        let (made, _, before, after) = dispatched(dispatches, 2);
+    let run = |dispatches, unbound| {
+        let (made, _, before, after) = dispatched(dispatches, unbound);
         (
             made,
             after.new_buffer_bytes_cleared - before.new_buffer_bytes_cleared,
             after.object_churn.vk_buffers_made - before.object_churn.vk_buffers_made,
         )
     };
-    let (made_8, cleared_8, buffers_8) = run(8);
-    let (made_16, cleared_16, buffers_16) = run(16);
+    let (made_8, cleared_8, buffers_8) = run(8, 2);
+    let (made_16, cleared_16, buffers_16) = run(16, 2);
     assert_eq!(
         (made_8, made_16),
         (1, 1),
@@ -298,11 +308,20 @@ fn dispatches_share_the_devices_one_zero_buffer() {
     // The per-dispatch allocate-and-zero this guards: a fresh dedicated 64 KiB `VkBuffer` a
     // dispatch, bound to memory and written to zero, and destroyed or parked after.
     assert_eq!(
-        (cleared_16, buffers_16),
-        (cleared_8, buffers_8),
-        "8 dispatches wrote {cleared_8} bytes of new buffers to zero and made {buffers_8} of \
-         them, 16 wrote {cleared_16} and made {buffers_16}: eight more dispatches must cost \
-         nothing for a read-only neutral they share"
+        buffers_16, buffers_8,
+        "8 dispatches made {buffers_8} new `VkBuffer`(s) and 16 made {buffers_16}: eight more \
+         dispatches must make none for a read-only neutral they share"
+    );
+    let (_, bound_8, _) = run(8, 3);
+    let (_, bound_16, _) = run(16, 3);
+    assert_eq!(
+        cleared_16 - cleared_8,
+        bound_16 - bound_8,
+        "eight further dispatches wrote {} bytes to zero with the `constant` slot unbound and {} \
+         with every slot bound: a read-only neutral they share must add nothing to what a \
+         dispatch clears",
+        cleared_16 - cleared_8,
+        bound_16 - bound_8
     );
 }
 
@@ -405,14 +424,27 @@ fn a_store_sinks_region_is_a_dispatchs_whole_cost() {
         arena_16 - arena_8
     );
     // And nothing else: the region is small enough to come out of a chunk the command buffer
-    // opened already, so no further `VkBuffer` is made and no further new buffer is written to
-    // zero. The chunk the first region opens is the command buffer's own fixed cost, which both
-    // counts pay once and the step cancels (the module docs).
+    // opened already, so no further `VkBuffer` is made, and what a dispatch writes to zero is its
+    // own region's unwritten bytes -- at most the bytes the region took, and never a chunk
+    // (`upload.rs`, `tests::upload_chunk_zeros`).
     assert_eq!(
-        (cleared_16, buffers_16),
-        (cleared_8, buffers_8),
-        "8 dispatches wrote {cleared_8} bytes of new buffers to zero and made {buffers_8} of \
-         them, 16 wrote {cleared_16} and made {buffers_16}: a sink's region must cost neither"
+        buffers_16, buffers_8,
+        "8 dispatches made {buffers_8} new `VkBuffer`(s) and 16 made {buffers_16}: a sink's \
+         region must make none"
+    );
+    let cleared_one = (cleared_16 - cleared_8) / 8;
+    assert_eq!(
+        cleared_16 - cleared_8,
+        cleared_one * 8,
+        "one further dispatch wrote {cleared_one} bytes to zero and eight wrote {}, which is not \
+         one region each",
+        cleared_16 - cleared_8
+    );
+    assert!(
+        cleared_one > 0 && cleared_one <= one,
+        "a dispatch wrote {cleared_one} bytes to zero of the {one} arena bytes its sink region \
+         took: a region clears the bytes its data does not cover and no others, so the figure is \
+         neither nothing nor more than the region"
     );
     // And no descriptor set: the sink's binding is dynamic, so the set is written once and bound
     // again with each region's offset.

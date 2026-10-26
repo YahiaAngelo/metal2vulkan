@@ -1985,12 +1985,26 @@ impl Device {
         length: u64,
         tracking: HazardTrackingMode,
     ) -> Result<Buffer, Error> {
+        self.unzeroed_buffer_with(
+            length,
+            ResourceOptions::new(StorageMode::Private, CpuCacheMode::DefaultCache, tracking),
+        )
+    }
+
+    /// [`unzeroed_buffer`](Device::unzeroed_buffer) with `options`: a buffer of `length` bytes
+    /// that the runtime makes for its own use, whose bytes hold no value before its owner writes
+    /// them, in memory `options` asks for. The upload arena's chunks are such a buffer
+    /// (`upload.rs`): nothing reads a byte of a chunk outside a region it handed out, and it sets
+    /// every byte of a region that the region's data does not cover to zero as it hands it out,
+    /// so what a chunk would pay a creation-time clear for is paid by the region, for the region's
+    /// bytes alone.
+    pub(super) fn unzeroed_buffer_with(
+        &self,
+        length: u64,
+        options: ResourceOptions,
+    ) -> Result<Buffer, Error> {
         const CALL: &str = "new_buffer";
-        let modes = Modes::of(ResourceOptions::new(
-            StorageMode::Private,
-            CpuCacheMode::DefaultCache,
-            tracking,
-        ))?;
+        let modes = Modes::of(options)?;
         let class = buffer_class(CALL, modes)?;
         if length == 0 || length > self.properties().max_buffer_length {
             return Err(nil(CALL, Problem::BufferLength { length }));
