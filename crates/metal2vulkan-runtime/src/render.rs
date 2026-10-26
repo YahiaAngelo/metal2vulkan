@@ -5536,6 +5536,7 @@ impl RenderLowering {
                 },
                 (layout.clone(), bare.clone()),
                 pass_shadows,
+                core.command_buffer().state().open_encoder_place(),
             ));
             // The steps' objects, held with the pass until the command buffer completes.
             deferred = Some(Arc::clone(&pass));

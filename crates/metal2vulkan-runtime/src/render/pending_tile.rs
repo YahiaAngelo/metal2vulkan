@@ -23,7 +23,11 @@
 //!   encoder's tile dispatch calls, the tile state, its variant and specialization, and the
 //!   driver's error.
 //! - **Encoded again** (`replay.rs`): an encoder encoded again waits for its tile dispatches'
-//!   makings in the rebind's call, as a compute encoder waits for its dispatches'.
+//!   makings no more than its first encoding did, and leaves its pass to record later in the
+//!   first encoding's place (`command_buffer/reencode.rs`), prepared as the commit prepared that
+//!   one: the submission or the host step records it once the makings land, so no Metal compile
+//!   runs or is waited for on the program's thread inside the rebind's call. Its makings get the
+//!   scheduler's waker there, as the commit gives the first encoding's.
 
 use super::pass_steps::PassSteps;
 use crate::command_buffer::CommandBuffer;

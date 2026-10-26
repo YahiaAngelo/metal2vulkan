@@ -19,8 +19,9 @@
 //!   encoder's place: its recordings, uses, executions, keys and what its commands took (held
 //!   weakly, as the commit holds them). The first recording is never submitted. No GPU work is
 //!   waited for, and no pipeline's making: a dispatch whose pipelines are being made leaves a
-//!   segment of its own, as the first encoding left one (`pending_dispatch.rs`), which the
-//!   submission or the host step records once they are made, so no Metal compile runs or is
+//!   segment of its own, as the first encoding left one (`pending_dispatch.rs`), and so does a
+//!   render pass of a draw's or a tile dispatch's being made (`render/pending_tile.rs`), which
+//!   the submission or the host step records once they are made, so no Metal compile runs or is
 //!   waited for on the program's thread inside the rebind's call.
 //!   Rebinds on two threads take turns (`reencoding`); a rebind during another's
 //!   turn marks the command buffer again, and its own turn encodes what moved since. A host step
@@ -203,7 +204,7 @@ impl CommandBufferShared {
                 }
             }
         }
-        // Each making a spliced dispatch's segment now waits for wakes the scheduler as it
+        // Each making a spliced segment now waits for wakes the scheduler as it
         // finishes, with no lock held, registered before the scheduler looks at the batches again
         // (the wake at the end of this turn): a making that finished between that look and a
         // later registration would leave the batch held with nothing to wake the scheduler. Its
@@ -311,8 +312,9 @@ impl State {
     /// and so does what its first segments recorded and what their host steps needed; its
     /// `VkCommandBuffer`s go with the pool unsubmitted. Refused, changing nothing and giving
     /// `replayed` back, where its place holds other parts than the encoding again's, or a segment
-    /// but a pending dispatch's (which goes, the encoding again having left one of its own in its
-    /// place) or work its commit recorded on the GPU alone, or its group was submitted, or the
+    /// but one whose pipelines are being made (which goes, the encoding again having left one of
+    /// its own in its place) or work its commit recorded on the GPU alone, or its group was
+    /// submitted, or the
     /// command buffer completed. Its replays hold what its commands took with `device`, the
     /// device's functions (`Replays::hold`).
     pub(super) fn splice_replay(
@@ -329,7 +331,8 @@ impl State {
         let replaces = |part: &usize| {
             let recorded = &self.recorded[*part];
             recorded.sparse.is_empty()
-                && (recorded.segments.iter()).all(|segment| segment.pends() || segment.gpu_alone)
+                && (recorded.segments.iter())
+                    .all(|segment| segment.keeps_pipelines() || segment.gpu_alone)
         };
         let unjudged = self.unjudged_parts();
         let fits = !self.finished()

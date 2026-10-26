@@ -64,10 +64,14 @@ impl Page {
 
     /// Whether the kernel wrote it: its words are zero until it does.
     pub(super) fn written(&self) -> bool {
+        self.words().iter().any(|&word| word != 0)
+    }
+
+    /// Its words, for a leg that reads back what a shader recorded in it.
+    pub(super) fn words(&self) -> &[u32] {
         // SAFETY: `BYTES` bytes, allocated in `new` aligned past a word, which no command writes
         // any more (its command buffer completed).
-        let words = unsafe { std::slice::from_raw_parts(self.0.as_ptr().cast::<u32>(), BYTES / 4) };
-        words.iter().any(|&word| word != 0)
+        unsafe { std::slice::from_raw_parts(self.0.as_ptr().cast::<u32>(), BYTES / 4) }
     }
 
     /// Its pages, for a no-copy buffer or a rebind.

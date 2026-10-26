@@ -2626,6 +2626,10 @@ pub(crate) struct DeferredPass {
     /// Its draws whose pipelines were being made as they were encoded, each recorded once made
     /// (`render/pending.rs`).
     pending: Vec<PendingDraw>,
+    /// Its encoder's place among the command buffer's ended encoders: whether a rebind since the
+    /// commit moved a buffer one of its commands named, which its recording must not then record
+    /// ([`record_forms`](Self::record_forms), as `pending_dispatch.rs` has it).
+    encoder: usize,
     /// The pass's storage where the encoder's draws or tile dispatches made it: its buffer of
     /// every tile's threadgroup memory (`render/tile_memory.rs`), its fragment imageblock storage
     /// (`fragment_imageblock.rs`) and its shader-side stencil's shadow (`shadow_stencil.rs`);
@@ -2696,7 +2700,8 @@ impl DeferredPass {
     /// where the encoder made it, and its `layout` as the encoder ended it with that layout
     /// without its hidden depth and stencil (`bare`); `held` the command buffer of its leading
     /// instances where the encoder recorded those inline, and their count, and `instances` the
-    /// later ones (the field's docs).
+    /// later ones (the field's docs); `encoder` its encoder's place among the command buffer's
+    /// ended encoders.
     pub(super) fn new(
         (instances, held): (Vec<PassInstance>, Option<(vk::CommandBuffer, usize)>),
         steps: PassSteps,
@@ -2705,6 +2710,7 @@ impl DeferredPass {
         storage: PassStorage,
         (layout, bare): (PassLayout, Option<PassLayout>),
         shadows: Vec<Arc<ShadowCopies>>,
+        encoder: usize,
     ) -> DeferredPass {
         DeferredPass {
             instances,
@@ -2714,6 +2720,7 @@ impl DeferredPass {
             uses,
             executions,
             pending,
+            encoder,
             storage,
             layout,
             bare,
@@ -2757,6 +2764,12 @@ impl DeferredPass {
     pub(crate) fn failed(&self) -> bool {
         self.pending.iter().any(PendingDraw::failed)
             || self.steps.tile_pipelines().any(TilePipelines::failed)
+    }
+
+    /// Whether it executes render commands, whose records its recording reads: everything else it
+    /// records its calls resolved (`Deferred::resolved_at_its_calls`).
+    pub(crate) fn executes(&self) -> bool {
+        !self.executions.is_empty()
     }
 
     /// Whether it executes render commands whose records the CPU writes, which its recording
@@ -2940,6 +2953,19 @@ impl DeferredPass {
         step: bool,
         forms: &[Option<GpuForm>],
     ) -> Result<RecordedSegment, Error> {
+        // A rebind since the commit moved a buffer one of its commands named, and no encoding
+        // again reached this encoder (`CommandBuffer::encoder_rebound`): its instances'
+        // secondaries and its pending draws' and tile dispatches' recordings resolved that buffer
+        // where it lay as they were encoded, so recording them now would bind a `VkBuffer` the
+        // rebind freed. The Vulkan specification has a descriptor's contents consumed as its
+        // command is recorded, and the pages stay mapped, so a driver that reads one writes into
+        // pages the program handed back with nothing said. Its submission then runs nothing and
+        // the command buffer fails `CommandBufferError::EncodedUseRebound`
+        // (`first_submission.rs`), as for a dispatch whose pipelines were being made
+        // (`pending_dispatch.rs`).
+        if command_buffer.encoder_rebound(self.encoder) {
+            return Ok(EncoderCore::unrecorded_segment());
+        }
         if step {
             // The host step records what a GPU form left to it, for good: a route outgrew the
             // decision where one was made.

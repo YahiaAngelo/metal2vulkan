@@ -32,7 +32,11 @@
 //!   (`Invalid`, [`RebindProblem::EncodedUses`]): its commands took the old pages, and committing
 //!   them after the rebind would be neither order. A command buffer committed with commands the
 //!   runtime records only once earlier work completed (executions of an indirect command buffer
-//!   the GPU writes) counts as uncommitted until it completed.
+//!   the GPU writes) counts as uncommitted until it completed. One committed with commands left
+//!   for a `VkPipeline` still being made does not: a dispatch whose pipelines were being made
+//!   (`pending_dispatch.rs`) and a render pass left for its draws' and tile dispatches'
+//!   (`render/pending_tile.rs`) record what their calls resolved, so the rebind encodes their
+//!   encoder again as it does any other, and Metal's replace fails for neither.
 //! - **The new pages' import.** New memory that is the bytes a live no-copy buffer was made over,
 //!   of its memory class, lies in that buffer's import, as a buffer made over them does
 //!   (`host_aliases.rs`): the rebind imports nothing, pins no page and asks the kernel about no

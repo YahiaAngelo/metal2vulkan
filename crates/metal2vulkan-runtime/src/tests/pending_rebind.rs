@@ -48,7 +48,7 @@ const SCALE: f32 = 2.0;
 
 /// The device the cfg selects, its shader cache in `cache`, asking for the validation layer and
 /// reporting to `watched`.
-fn device(watched: &Watched, cache: &Path) -> Device {
+pub(super) fn device(watched: &Watched, cache: &Path) -> Device {
     let options = DeviceOptions {
         kinds: match cfg!(m2v_cpu_icd) {
             true => vec![DeviceKind::Cpu],

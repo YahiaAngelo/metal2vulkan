@@ -2641,12 +2641,16 @@ impl CommandBuffer {
         // A host step may record commands after the commit (a segment not recorded for good).
         let stepped = prepared.iter().any(|prepared| !prepared.for_good);
         // Until the command buffer completes, the buffers its host steps' commands use keep their
-        // pages, where a step resolves what it records as it records it. A dispatch whose
-        // pipelines were being made records what its encoding resolved (`pending_dispatch.rs`),
-        // and an encoder encoded again at a rebind records it at once (`replay.rs`): it holds
-        // nothing past the commit.
+        // pages, where a step resolves what it records as it records it, and a rebind of one is
+        // refused meanwhile (`RebindProblem::EncodedUses`). Work whose step records only what its
+        // calls resolved holds nothing past the commit (`Deferred::resolved_at_its_calls`): a
+        // dispatch whose pipelines were being made (`pending_dispatch.rs`), and a render pass left
+        // for the pipelines its draws and tile dispatches record
+        // (`render/pending_tile.rs`). Metal's replace fails for neither, and a rebind encodes
+        // their encoder again instead (`command_buffer/reencode.rs`); where it cannot, their
+        // recording records nothing of the encoder (`DeferredPass::record_forms`).
         let steps_hold = (segments.iter().zip(&prepared)).any(|((work, _), prepared)| {
-            !prepared.for_good && !matches!(work, Deferred::Pending(_))
+            !prepared.for_good && !work.resolved_at_its_calls(prepared.pipelines)
         });
         // The segments a host step records once the pipelines they record are made.
         let made_later: Vec<Deferred> = segments
@@ -2775,11 +2779,21 @@ impl CommandBuffer {
                     waits: batch.waits.clone(),
                     binary_waits: batch.binary_waits.clone(),
                     binary_signals: batch.binary_signals.clone(),
+                    // A batch holds segments, or may come to: a rebind before its submission
+                    // encodes an encoder of it again from its log, and the encoding again leaves
+                    // a segment of its own where a pipeline it records is being made, though the
+                    // first encoding left none (`command_buffer/reencode.rs`,
+                    // `render/pending_tile.rs`). The scheduler reads this as a gate alone and
+                    // asks the command buffer itself whether a step is due
+                    // ([`needs_host_step`](Self::needs_host_step)), so a batch that gains none
+                    // waits for nothing.
                     segments: state.recorded[state.batch_range(index)]
                         .iter()
                         .any(|encoder| {
                             !encoder.segments.is_empty()
                                 || encoder.sparse.iter().any(SparseUpdate::needs_step)
+                                || (state.ended.get(encoder.encoder))
+                                    .is_some_and(|record| record.replay.is_some())
                         }),
                     checked: state.checks.is_some(),
                 })

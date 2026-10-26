@@ -168,6 +168,17 @@ impl Segment {
         matches!(self.work, Deferred::Pending(_))
     }
 
+    /// Whether an encoder encoded again (`replay.rs`) leaves it as a segment of its own, prepared
+    /// as the commit prepared the first encoding's ([`Deferred::prepare`]), rather than recording
+    /// it on the GPU alone: a dispatch whose pipelines were being made ([`pends`](Self::pends)),
+    /// and a render pass of a draw's or a tile dispatch's pipeline still being made, or whose
+    /// making failed (`render/pending.rs`, `render/pending_tile.rs`), which recording on the GPU
+    /// alone would wait for, and make itself, on the program's thread
+    /// (`DeferredPass::record_on_gpu`).
+    pub(super) fn keeps_pipelines(&self) -> bool {
+        self.pends() || self.work.making() || self.work.failed()
+    }
+
     /// Whether an encoder encoded again (`replay.rs`) records its place: a dispatch whose
     /// pipelines were being made ([`pends`](Self::pends)), left as a segment again, or work a
     /// commit may record on the GPU alone, recorded there again (`Deferred::record_on_gpu`). Its
@@ -1680,14 +1691,6 @@ impl EncoderCore {
         }
     }
 
-    /// Whether it encodes an ended encoder's calls again ([`replaying`](Self::replaying)): its
-    /// tile dispatches wait for their pipelines, leaving no segment (`render/pending_tile.rs`).
-    /// Its compute dispatches wait for none, and leave the segment the first encoding left
-    /// (`pending_dispatch.rs`).
-    pub(super) fn encodes_again(&self) -> bool {
-        self.replaying
-    }
-
     /// The encoder's uses, for its fence waits and updates.
     pub(super) fn uses(&mut self) -> &mut EncoderUses<ResourceKey> {
         &mut self.uses
@@ -2134,7 +2137,8 @@ impl EncoderCore {
     /// End a core made by [`replaying`](Self::replaying): its shadowed textures written since
     /// their last copy back are copied back, and what it recorded comes back for its encoder's
     /// place (`State::splice_replay`), in its parts, each segment it left recorded at once on the
-    /// GPU alone. Refused (internal) where the encoder, encoded again, failed or faulted its
+    /// GPU alone but one whose pipelines are being made or failed to make, left as the first
+    /// encoding left it ([`Segment::keeps_pipelines`]). Refused (internal) where the encoder, encoded again, failed or faulted its
     /// command buffer, or met a detached buffer, which its first encoding kept none of, or left
     /// work that no longer runs on the GPU alone: its place stays as it was.
     pub(super) fn finish_replay(mut self) -> Result<Replayed, Error> {
@@ -2177,15 +2181,16 @@ impl EncoderCore {
         }
         // Its segments recorded at once on the GPU alone, as its commit recorded the first
         // encoding's (`command_buffer/reencode.rs`): work that no longer runs there refuses the
-        // encoding again.
+        // encoding again, but work whose pipelines are being made, which keeps its segment.
         let mut parts = Vec::with_capacity(split.len());
         for ((raws, mut segments), summary) in split.into_iter().zip(summaries) {
             for segment in &mut segments {
-                // A dispatch whose pipelines are being made is left as the first encoding left
-                // it, prepared as its commit prepared that one (`Deferred::prepare`): recorded
-                // here where they are made, else by the host step once they are
-                // (`pending_dispatch.rs`). The rebind's call waits for no making.
-                if segment.pends() {
+                // Work whose pipelines are being made, or whose making failed, is left as the
+                // first encoding left it, prepared as its commit prepared that one
+                // (`Deferred::prepare`): recorded here where they are made, else by the host step
+                // once they are (`pending_dispatch.rs`, `render/pending_tile.rs`). The rebind's
+                // call waits for no making, and makes none itself.
+                if segment.keeps_pipelines() {
                     let prepared = segment.work.prepare(&open.command_buffer, false)?;
                     segment.recorded = prepared.recorded;
                     segment.inputs = Some(prepared.inputs);

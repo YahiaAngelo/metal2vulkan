@@ -1134,37 +1134,30 @@ impl RenderLowering {
             regions.push((push, region.group_count));
         }
         // Each region's `VkPipeline`: made, or handed to the device's pool while the dispatch goes
-        // on, its pass recording once it is made (`render/pending_tile.rs`); an encoder encoded
-        // again waits for it (`replay.rs`), as a compute encoder does.
+        // on, its pass recording once it is made (`render/pending_tile.rs`). An encoder encoded
+        // again (`replay.rs`) waits for no making either, and leaves the same pass to record
+        // later: the making is its submission's to wait for, as the first encoding left it, never
+        // the rebind's call on the program's thread, as for a compute dispatch.
         let formats: BoundFormats<'_> = &|slot| tables.bound_format(slot);
         let creation = self
             .core
             .records_executions()
             .then(|| Arc::new(OnceLock::new()));
-        let pipelines = match self.core.encodes_again() {
-            true => {
-                let mut made = Vec::with_capacity(commands.regions.len());
-                for region in &commands.regions {
-                    made.push(variant.region_pipeline(region, formats)?);
-                }
-                TilePipelines::Made(made)
-            }
-            false => {
-                let call = TileCall {
-                    state: (self.pipeline.clone())
-                        .ok_or_else(|| internal("a tile dispatch without its pipeline state"))?,
-                    encoder: self.core.command_buffer().state().open_encoder_place(),
-                    dispatch: self.tile_dispatch_calls,
-                };
-                let regions = &commands.regions;
-                TilePipelines::begin(
-                    (&kernel, &variant),
-                    regions,
-                    formats,
-                    call,
-                    creation.clone(),
-                )
-            }
+        let pipelines = {
+            let call = TileCall {
+                state: (self.pipeline.clone())
+                    .ok_or_else(|| internal("a tile dispatch without its pipeline state"))?,
+                encoder: self.core.command_buffer().state().open_encoder_place(),
+                dispatch: self.tile_dispatch_calls,
+            };
+            let regions = &commands.regions;
+            TilePipelines::begin(
+                (&kernel, &variant),
+                regions,
+                formats,
+                call,
+                creation.clone(),
+            )
         };
         let objects = Arc::clone(variant.objects());
         // Set 0 per dispatch; set 1 the device's (written below, once nothing refuses).

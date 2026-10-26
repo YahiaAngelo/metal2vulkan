@@ -443,6 +443,41 @@ impl Deferred {
         }
     }
 
+    /// Whether a host step records it from what its calls resolved alone, nothing of the buffers
+    /// it names read again then: the buffers over host pages its commands used let their pages go
+    /// at the commit instead of keeping them until it completes (`CommandBuffer::commit`'s
+    /// `steps_hold`, `rebind.rs`), so a rebind of one is not refused but encodes its encoder
+    /// again (`command_buffer/reencode.rs`). A dispatch whose pipelines were being made records
+    /// what its encoding resolved (`pending_dispatch.rs`), and so does a render pass `commit`
+    /// left for the pipelines its draws and tile dispatches record (`pipelines`) that executes no
+    /// render commands, whose instances' commands its calls recorded
+    /// (`render/pending_tile.rs`). Everything else its step resolves as it records: a rebind
+    /// meanwhile is refused.
+    pub(super) fn resolved_at_its_calls(&self, pipelines: bool) -> bool {
+        match self {
+            Deferred::Pending(_) => true,
+            Deferred::RenderPass(pass) => pipelines && !pass.executes(),
+            Deferred::Execute(_)
+            | Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::Loop(_) => false,
+        }
+    }
+
+    /// Whether the making of a pipeline the work records failed, which its recording makes again,
+    /// on the thread that records it (`DeferredPass::failed`, `PendingDispatch::failed`): where
+    /// that fails too the command buffer completes with `CommandBufferError::PipelineCreation`.
+    pub(super) fn failed(&self) -> bool {
+        match self {
+            Deferred::RenderPass(pass) => pass.failed(),
+            Deferred::Pending(dispatch) => dispatch.failed(),
+            Deferred::Execute(_)
+            | Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::Loop(_) => false,
+        }
+    }
+
     /// What its recording uses, on `device`, where that is known before it records
     /// (`DeferredPass::known_summary`): a render pass's that executes no render commands. `None`
     /// for the rest, whose uses their recording finds: an execution's or an indirect dispatch's
