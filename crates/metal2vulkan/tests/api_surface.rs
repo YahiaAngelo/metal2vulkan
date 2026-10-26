@@ -653,6 +653,8 @@ surface! {
         struct ShadowCopyInModule N;
         fn rows_copy_module;
         struct RowsCopyModule N;
+        fn dynamic_views_module;
+        struct DynamicViewsModule N;
         fn shadow_merge_module;
         struct ShadowMergeModule N;
         fn shadow_merge_image_module;

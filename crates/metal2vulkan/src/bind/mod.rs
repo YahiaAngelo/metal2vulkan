@@ -148,6 +148,7 @@ pub(crate) mod depth_magnitude;
 pub(crate) mod depth_stencil_copy;
 pub(crate) mod depth_stencil_resolve;
 pub(crate) mod dispatch;
+pub(crate) mod dynamic_views;
 pub(crate) mod etc_decode;
 pub(crate) mod extended_shadow;
 pub(crate) mod graphics;
@@ -307,6 +308,7 @@ pub use state::{
 };
 // How `BindState::shape` classes a buffer: the crate reads it from `state`, and a consumer takes
 // shapes from `BindState::shape`; only the crate's tests and validation reach it here.
+pub use dynamic_views::{dynamic_views_module, DynamicViewsModule};
 pub use plane_bytes_copy::{
     plane_bytes_copy_module, PlaneBytes, PlaneBytesCopyModule, PlaneSource,
 };

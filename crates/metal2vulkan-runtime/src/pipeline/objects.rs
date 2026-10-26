@@ -32,7 +32,7 @@ use crate::release;
 use crate::shader_cache::driver::Making;
 use crate::Device;
 use ash::vk;
-use metal2vulkan::bind::DispatchRegion;
+use metal2vulkan::bind::{DispatchRegion, DynamicViewsModule};
 use metal2vulkan::cache::{Hash256, SpecializationKey};
 use metal2vulkan::error::{Feature, RuntimeDriverDefect, Unsupported};
 use metal2vulkan::pipeline::{
@@ -1274,26 +1274,45 @@ fn needs_of(
 /// (`DescriptorBinding::variables`) and no stage the pipeline adds reads (a tessellation control
 /// or geometry stage, whose variables the layout does not count), in binding order while the
 /// device's `maxDescriptorSetUniformBuffersDynamic` and `maxDescriptorSetStorageBuffersDynamic`
-/// take them; every other binding stays of its own type. A binding of several variables stays
-/// static: MoltenVK 1.4.1's SPIRV-Cross writes Metal that does not compile for a dynamic buffer an
-/// entry point uses through more than one (it declares one variable's local alone).
+/// take them; every other binding stays of its own type.
+///
+/// A binding each stage using it uses through **several** variables (a slot or store sink reached
+/// through its word view and its narrow or `uvec4` unit views) stays static where the device does
+/// not take such a binding dynamically, which the device answers itself
+/// ([`takes_multi_variable_dynamic`]): it is one driver's shader-translation defect, not a limit
+/// of Vulkan, which bounds the variables at a binding nowhere.
 fn dynamic_bindings(device: &Device, layout: &PipelineLayout, push_set_zero: bool) -> Vec<u32> {
     let Some(set) = layout.sets.first().filter(|_| !push_set_zero) else {
         return Vec::new();
     };
+    // Asked of the device only where a binding needs the answer, so a layout of one variable a
+    // binding -- every layout but the few with a narrow-unit store sink or a slot read through
+    // several types -- compiles nothing.
+    let several =
+        set.bindings.iter().any(|b| b.variables > 1) && takes_multi_variable_dynamic(device);
+    dynamic_numbers(set, device.shared().dynamic_buffers, several)
+}
+
+/// [`dynamic_bindings`]' choice over `set`, with `[uniform, storage]` dynamic buffers left of the
+/// device's limits and `several` whether a binding of more than one variable may be dynamic.
+fn dynamic_numbers(
+    set: &DescriptorSetLayout,
+    [mut uniform, mut storage]: [u32; 2],
+    several: bool,
+) -> Vec<u32> {
     let added = vk::ShaderStageFlags::TESSELLATION_CONTROL
         | vk::ShaderStageFlags::TESSELLATION_EVALUATION
         | vk::ShaderStageFlags::GEOMETRY;
-    let [mut uniform, mut storage] = device.shared().dynamic_buffers;
     let mut dynamic = Vec::new();
     for binding in &set.bindings {
         let stages: vk::ShaderStageFlags = binding.stages.into();
         let flags: vk::DescriptorBindingFlags = binding.flags.into();
-        if binding.count != 1
-            || binding.variables != 1
-            || stages.intersects(added)
-            || !flags.is_empty()
-        {
+        let variables = match binding.variables {
+            0 => false,
+            1 => true,
+            _ => several,
+        };
+        if binding.count != 1 || !variables || stages.intersects(added) || !flags.is_empty() {
             continue;
         }
         let left = match binding.ty.into() {
@@ -1307,6 +1326,106 @@ fn dynamic_bindings(device: &Device, layout: &PipelineLayout, push_set_zero: boo
         }
     }
     dynamic
+}
+
+/// Whether `device` takes a set-0 buffer binding whose entry point uses it through more than one
+/// variable as a dynamic descriptor: the device's own answer, asked once and kept
+/// (`DeviceShared::dynamic_multi_variable`).
+///
+/// Vulkan bounds the variables at a binding nowhere, dynamic or not, so this asks about the
+/// driver: MoltenVK's SPIRV-Cross writes Metal that does not compile for such a binding (it
+/// declares one variable's local alone). Read in 1.4.1's source, and measured on **1.4.2**
+/// (Homebrew's, `driverVersion` 10402) on an Apple M3 Max, where `vkCreateComputePipelines`
+/// answers `VK_ERROR_INITIALIZATION_FAILED` for a kernel of three and of four variables at one
+/// dynamic binding. A driver without the defect must not pay for it -- a descriptor set of its
+/// own per command -- so the device answers for itself rather than being named.
+///
+/// It answers by creating one compute pipeline of exactly that shape, the crate-owned self-check
+/// module with one variable per unit view the device's storage views can declare, so any plan's
+/// binding is a subset of it (`bind::DynamicViewsModule`), and destroying it. A creation that
+/// fails, for any reason, answers no, which is what every device answered before it was asked.
+///
+/// The check proves the driver **compiles** the shape. A driver that compiled it and then applied
+/// the dynamic offset to one of its variables alone would still be wrong, and none is measured to
+/// (`docs/FAST-PATHS.md`).
+fn takes_multi_variable_dynamic(device: &Device) -> bool {
+    if let Some(&answered) = device.shared().dynamic_multi_variable.get() {
+        return answered;
+    }
+    // A host step makes no object of its own and must not compile here (`exit_guard`): its
+    // variant takes the static form every device took before, and the answer stays unasked for a
+    // later variant outside a step.
+    if exit_guard::in_host_step() {
+        return false;
+    }
+    *device
+        .shared()
+        .dynamic_multi_variable
+        .get_or_init(|| multi_variable_dynamic_creates(device).unwrap_or(false))
+}
+
+/// Create the self-check pipeline of [`takes_multi_variable_dynamic`] and destroy it: whether the
+/// device made it.
+fn multi_variable_dynamic_creates(device: &Device) -> Result<bool, Error> {
+    let module = metal2vulkan::bind::dynamic_views_module(device.compile_device())
+        .map_err(Error::Compile)?;
+    let shared = device.shared();
+    let raw = shared.vk();
+    let mut shader = vk::ShaderModule::null();
+    let mut set_layout = vk::DescriptorSetLayout::null();
+    let mut layout = vk::PipelineLayout::null();
+    let mut pipeline = vk::Pipeline::null();
+    let made = (|| {
+        let info = vk::ShaderModuleCreateInfo::default().code(&module.spirv);
+        // SAFETY: the code is live SPIR-V words for the call.
+        shader = unsafe { raw.create_shader_module(&info, None) }.map_err(vulkan)?;
+        let bindings = [vk::DescriptorSetLayoutBinding::default()
+            .binding(DynamicViewsModule::BINDING)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER_DYNAMIC)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)];
+        let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
+        // SAFETY: `info` and its array are live for the call.
+        set_layout = unsafe { raw.create_descriptor_set_layout(&info, None) }.map_err(vulkan)?;
+        let set_layouts = [set_layout];
+        let info = vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts);
+        // SAFETY: as above.
+        layout = unsafe { raw.create_pipeline_layout(&info, None) }.map_err(vulkan)?;
+        let stage = vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::COMPUTE)
+            .module(shader)
+            .name(c"main");
+        let info = vk::ComputePipelineCreateInfo::default()
+            .stage(stage)
+            .layout(layout);
+        // SAFETY: every pointer in `info` outlives the call; no pipeline cache, since the
+        // self-check's pipeline is never made again.
+        let created =
+            unsafe { raw.create_compute_pipelines(vk::PipelineCache::null(), &[info], None) };
+        match created {
+            Ok(made) => {
+                pipeline = made.first().copied().unwrap_or(vk::Pipeline::null());
+                Ok(true)
+            }
+            Err(_) => Ok(false),
+        }
+    })();
+    // SAFETY: nothing uses the objects: no command recorded them, and the pipeline, where it was
+    // made, was never bound.
+    unsafe {
+        release::object(raw, pipeline);
+        release::object(raw, layout);
+        release::object(raw, set_layout);
+        release::object(raw, shader);
+    }
+    made
+}
+
+/// The device's answer of [`takes_multi_variable_dynamic`], for the check that the restriction is
+/// the device's and not every device's (`tests::dynamic_multi_variable`).
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+pub(crate) fn asks_multi_variable_dynamic(device: &Device) -> bool {
+    takes_multi_variable_dynamic(device)
 }
 
 /// The descriptor types a pushed set 0 takes: those a set-0 write (`binding::Info`) carries, but

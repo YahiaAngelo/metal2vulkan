@@ -366,6 +366,12 @@ pub(super) struct DeviceShared {
     /// commit is the only way a command of the program's reaches the device, so this one count
     /// stands for every route its GPU work could write a texture by.
     gpu_work: AtomicU64,
+    /// Whether the device takes a set-0 buffer binding whose entry point uses it through more
+    /// than one variable as a **dynamic** descriptor, asked of the device the first time a
+    /// variant has such a binding and kept for its lifetime
+    /// (`pipeline::objects::takes_multi_variable_dynamic`). `None` until then, and on a device no
+    /// variant has asked.
+    pub(super) dynamic_multi_variable: OnceLock<bool>,
     /// The crate-owned compute kernels the runtime dispatches for itself, made on first use
     /// (`owned_kernel.rs`).
     pub(super) owned_kernels: Mutex<OwnedKernels>,
@@ -1750,6 +1756,7 @@ impl Device {
             mutable_rate_map_called: AtomicBool::new(false),
             sparse_image_made: AtomicBool::new(false),
             gpu_work: AtomicU64::new(0),
+            dynamic_multi_variable: OnceLock::new(),
             owned_kernels: Mutex::new(OwnedKernels::default()),
             mipmap_scratch: Mutex::default(),
             planes: Mutex::new(PlanesObjects::default()),

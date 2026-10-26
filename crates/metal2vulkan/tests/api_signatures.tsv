@@ -116,6 +116,10 @@ assoc-const	metal2vulkan::bind::DrawReplayModule::PUSH_BYTES	pub const PUSH_BYTE
 assoc-const	metal2vulkan::bind::DrawReplayModule::RECORDS_PUSH	pub const RECORDS_PUSH: u32
 assoc-const	metal2vulkan::bind::DrawReplayModule::RESIDENT_PUSH	pub const RESIDENT_PUSH: u32
 assoc-const	metal2vulkan::bind::DrawReplayModule::STATUS_PUSH	pub const STATUS_PUSH: u32
+assoc-const	metal2vulkan::bind::DynamicViewsModule::BINDING	pub const BINDING: u32
+assoc-const	metal2vulkan::bind::DynamicViewsModule::BYTES	pub const BYTES: u64
+assoc-const	metal2vulkan::bind::DynamicViewsModule::LOCAL_SIZE	pub const LOCAL_SIZE: u32
+assoc-const	metal2vulkan::bind::DynamicViewsModule::SET	pub const SET: u32
 assoc-const	metal2vulkan::bind::EtcDecode::ALL	pub const ALL: [EtcDecode; 7]
 assoc-const	metal2vulkan::bind::ExecutionStatus::BYTES	pub const BYTES: usize
 assoc-const	metal2vulkan::bind::ExecutionStatus::WORDS	pub const WORDS: usize
@@ -614,6 +618,10 @@ assoc-const-value	metal2vulkan::bind::DrawReplayModule::PUSH_BYTES	24
 assoc-const-value	metal2vulkan::bind::DrawReplayModule::RECORDS_PUSH	16
 assoc-const-value	metal2vulkan::bind::DrawReplayModule::RESIDENT_PUSH	0
 assoc-const-value	metal2vulkan::bind::DrawReplayModule::STATUS_PUSH	8
+assoc-const-value	metal2vulkan::bind::DynamicViewsModule::BINDING	0
+assoc-const-value	metal2vulkan::bind::DynamicViewsModule::BYTES	64
+assoc-const-value	metal2vulkan::bind::DynamicViewsModule::LOCAL_SIZE	1
+assoc-const-value	metal2vulkan::bind::DynamicViewsModule::SET	0
 assoc-const-value	metal2vulkan::bind::EtcDecode::ALL	[EtcDecode::Rgb8, EtcDecode::Rgb8A1, EtcDecode::Rgba8, EtcDecode::R11Unorm, EtcDecode::R11Snorm, EtcDecode::Rg11Unorm, EtcDecode::Rg11Snorm]
 assoc-const-value	metal2vulkan::bind::ExecutionStatus::BYTES	32
 assoc-const-value	metal2vulkan::bind::ExecutionStatus::WORDS	8
@@ -3179,6 +3187,8 @@ field	metal2vulkan::bind::DrawReplayPreprocess.parent	pub parent: Vec<u8>
 field	metal2vulkan::bind::DrawReplayPreprocess.push_constants	pub push_constants: Vec<u8>
 field	metal2vulkan::bind::DrawReplayPreprocess.push_holes	pub push_holes: Vec<PushHole>
 field	metal2vulkan::bind::DrawReplayPreprocess.resident	pub resident: RootTable
+field	metal2vulkan::bind::DynamicViewsModule.requirements	pub requirements: Requirements
+field	metal2vulkan::bind::DynamicViewsModule.spirv	pub spirv: Arc<[u32]>
 field	metal2vulkan::bind::ExtendedShadowModule.requirements	pub requirements: Requirements
 field	metal2vulkan::bind::ExtendedShadowModule.spirv	pub spirv: Arc<[u32]>
 field	metal2vulkan::bind::FlatDispatchModule.layout	pub layout: PipelineLayout
@@ -4591,6 +4601,7 @@ fn	metal2vulkan::bind::draw_replay_preprocess	pub fn draw_replay_preprocess(devi
 fn	metal2vulkan::bind::draw_replay_primitive_type	pub fn draw_replay_primitive_type(command_types: IndirectCommandType, (inherit_pipeline_state, inherit_buffers): (bool, bool), written: CommandWrites) -> Result<PrimitiveType, DrawReplayRule>
 fn	metal2vulkan::bind::draw_replay_slots	pub fn draw_replay_slots(interface: &PipelineInterface) -> (u32, u32)
 fn	metal2vulkan::bind::draw_replay_state	pub fn draw_replay_state(graphics: &GraphicsState, merged: bool) -> Result<(), DrawReplayRule>
+fn	metal2vulkan::bind::dynamic_views_module	pub fn dynamic_views_module(device: &Device) -> Result<DynamicViewsModule, Error>
 fn	metal2vulkan::bind::etc_decode_module	pub fn etc_decode_module(device: &Device, decode: EtcDecode, texels: EtcTexels) -> Result<BlockDecodeModule, Error>
 fn	metal2vulkan::bind::extended_shadow_module	pub fn extended_shadow_module(device: &Device, form: ExtendedRange) -> Result<ExtendedShadowModule, Error>
 fn	metal2vulkan::bind::flat_dispatch_module	pub fn flat_dispatch_module(device: &Device) -> Result<FlatDispatchModule, Error>
@@ -9499,6 +9510,7 @@ struct	metal2vulkan::bind::DrawReplay	#[derive(Clone, Debug, PartialEq, Eq)] #[n
 struct	metal2vulkan::bind::DrawReplayLayout	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct DrawReplayLayout
 struct	metal2vulkan::bind::DrawReplayModule	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct DrawReplayModule
 struct	metal2vulkan::bind::DrawReplayPreprocess	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct DrawReplayPreprocess
+struct	metal2vulkan::bind::DynamicViewsModule	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct DynamicViewsModule
 struct	metal2vulkan::bind::ExecutionStatus	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct ExecutionStatus
 struct	metal2vulkan::bind::ExtendedShadowModule	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct ExtendedShadowModule
 struct	metal2vulkan::bind::FlatDispatchModule	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct FlatDispatchModule
