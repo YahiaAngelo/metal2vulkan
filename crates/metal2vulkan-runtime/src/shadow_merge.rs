@@ -89,13 +89,19 @@
 //!   the texture's rows, which no copy of the shadow writes, are the same in the kept and changed
 //!   parts (`WorkCounts::shadow_merge_scratches_zeroed`).
 //! - **The kernel** (`bind::shadow_merge_module`, one per device, `owned_kernel.rs`): four
-//!   4-byte words an invocation, the parts bound as its kept, changed and current storage
+//!   4-byte words an invocation, each a workgroup's invocations apart from the next, so one
+//!   store's words are consecutive across the invocations that run together (its module docs,
+//!   which name the device that charges hundreds of times for the gaps otherwise), the parts
+//!   bound as its kept, changed and current storage
 //!   buffers, in windows of at most `maxStorageBufferRange` bytes and
 //!   `maxComputeWorkGroupCount[0]` groups, one dispatch each; where it fetches
-//!   (`bind::shadow_merge_image_module`, one per read of a texel), four texels of a row an
-//!   invocation, the view, the kept part (or the kept image's view) and the bytes bound, in bands of rows each of
+//!   (`bind::shadow_merge_image_module`, one per read of a texel), four words of a row an
+//!   invocation, spread alike, the view, the kept part (or the kept image's view) and the bytes
+//!   bound, in bands of rows each of
 //!   whose bindings stays within `maxStorageBufferRange` and whose rows within
-//!   `maxComputeWorkGroupCount[1]`.
+//!   `maxComputeWorkGroupCount[1]`. The dispatches of a merge and the words they examine are
+//!   counted (`WorkCounts::shadow_merge_dispatches_planned`,
+//!   `WorkCounts::shadow_merge_words_examined`).
 //!
 //! A byte a command wrote both ways is the texture's where its value changed: Metal leaves such a
 //! race unordered. It costs the scratch (or a kept image), two copies of the shadow (one where the
@@ -331,7 +337,8 @@ impl ShadowMerge {
             .then(|| cut_of(copies, area))
             .flatten()
             .and_then(|(cut, geometry)| {
-                let view = fetch_view(copies).filter(|_| fetches(&cut, groups, groups_y));
+                let view =
+                    (fetch_view(copies)).filter(|&(_, read)| fetches(&cut, read, groups, groups_y));
                 let rows = match view {
                     Some(_) => groups_y,
                     None => groups * GROUP_BYTES / geometry.row_bytes,
@@ -483,6 +490,8 @@ impl ShadowMerge {
         };
         let mut sets = Vec::new();
         let mut dispatches = Vec::new();
+        // The words the dispatches examine (`WorkCounts::shadow_merge_words_examined`).
+        let mut examined = 0;
         // Each window's set: the shadow's view, where the merge fetches, and the kept image's,
         // where it keeps in one, then its buffers.
         let kept_view = match &held {
@@ -535,6 +544,7 @@ impl ShadowMerge {
                         );
                         let groups = ShadowMergeModule::groups(u32_of(total)?);
                         dispatches.push(([groups, 1], shape));
+                        examined += total;
                     }
                     (None, kept_in) => {
                         // The kept texels: the kept part's rows, or the kept image's, fetched at
@@ -546,8 +556,11 @@ impl ShadowMerge {
                         let origin = [x0, y0 + u32_of(start)?];
                         let shape =
                             ShadowMergeImageModule::shape(origin, width, row_words, first_word);
-                        let groups = ShadowMergeImageModule::groups([width, u32_of(count)?]);
+                        let read = (fetched.map(|(_, read)| read))
+                            .ok_or_else(|| internal("a fetching merge without its read"))?;
+                        let groups = ShadowMergeImageModule::groups(read, [width, u32_of(count)?]);
                         dispatches.push((groups, shape));
+                        examined += u64::from(width) * u64::from(read.words()) * count;
                     }
                 }
                 start += count;
@@ -594,9 +607,11 @@ impl ShadowMerge {
                 // The window's words, one row of them.
                 let shape = ShadowMergeModule::shape(words, words, 0, first_word);
                 dispatches.push(([ShadowMergeModule::groups(words), 1], shape));
+                examined += u64::from(words);
                 start += size;
             }
         }
+        counts.shadow_merge_planned(dispatches.len(), examined);
         let kernel = match (fetched, kept_in) {
             (Some(_), KeptIn::Image { texel, .. }) => {
                 device.owned_kernel(OwnedModule::ShadowMergeKeptImage(texel))?
@@ -1111,9 +1126,9 @@ fn kept_extent(copies: &ShadowCopies) -> Option<[u32; 2]> {
 /// coordinates and its last row's below 65536 (the shape's origin), and its row's workgroups
 /// within `groups` (`maxComputeWorkGroupCount[0]`); its rows go in bands of at most
 /// `groups_y` (`maxComputeWorkGroupCount[1]`).
-fn fetches(cut: &Cut, groups: u64, groups_y: u64) -> bool {
+fn fetches(cut: &Cut, read: ShadowMergeRead, groups: u64, groups_y: u64) -> bool {
     let (offset, extent) = (cut.region.image_offset, cut.region.image_extent);
-    let row_groups = u64::from(ShadowMergeImageModule::groups([extent.width, 1])[0]);
+    let row_groups = u64::from(ShadowMergeImageModule::groups(read, [extent.width, 1])[0]);
     let below = |o: i32, n: u32| u64::from(o as u32) + u64::from(n) <= 1 << 16;
     below(offset.x, 1) && below(offset.y, extent.height) && row_groups <= groups && groups_y > 0
 }

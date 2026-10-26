@@ -33,8 +33,9 @@
 //! The shape's words, in order: `width`, the words of one row of the region (at least 1);
 //! `count`, the region's words (`width` times its rows); `row_words`, the current buffer's rows
 //! apart in words; and `first_word`, the word of the region's first in the current binding.
-//! Invocation `g` takes words `i` from `4g` to `4g + 3` ([`ShadowMergeModule::WORDS`]), one
-//! after the other; a word `i` below `count` takes word `i` of the kept and changed buffers and,
+//! Invocation `l` of workgroup `g` takes the words `i = 4Ng + Nk + l` for `k` from 0 to 3
+//! ([`ShadowMergeModule::WORDS`], `N` [`ShadowMergeModule::LOCAL_SIZE`]), one after the other; a
+//! word `i` below `count` takes word `i` of the kept and changed buffers and,
 //! where they differ, word `first_word + (i / width) · row_words + i % width` of the current
 //! buffer: each of its bytes where the changed word's differs from the kept one's becomes the
 //! changed word's, and the others keep the current word's. Where the kept and changed words are
@@ -48,6 +49,18 @@
 //! invocations, not to memory. On an M3 Max under MoltenVK 1.4.1, one dispatch over a 1920x1080
 //! surface's words, in its own Metal encoder (about 17 us of it), took 99 us with no word changed
 //! and 107 us with every word changed at one word an invocation, and 46 us and 74 us at four.
+//!
+//! Each of the four a workgroup apart, not four in a row: workgroup `g` takes the same `4N`
+//! words either way, and every word's merge reads and writes that word alone, so which
+//! invocation takes which word is free; but `4Ng + Nk + l` puts the `k`th store of consecutive
+//! `l` at consecutive words, where `4(Ng + l) + k` leaves three words between them. On an
+//! RTX 5080 Laptop GPU (NVIDIA 615.71.09), a store of 8 MiB of imported host memory that leaves
+//! words between the lanes of a warp takes hundreds of times the time of the same bytes stored
+//! without gaps: 0.32 ms at one word an invocation in order and at four a workgroup apart, 590 ms
+//! at four in a row, and 383, 140 and 51 ms at one word per 8, 16 and 32 bytes; the merge's own
+//! shape (compare, store where changed) 0.85 ms a workgroup apart against 609 ms in a row, with
+//! loads of every shape at 0.32 ms. On an RX 7900 XTX (RADV) and a Radeon 780M the two shapes are
+//! within measurement of each other.
 //!
 //! **Synchronization** (consumer): the copies' `TRANSFER_WRITE` → `SHADER_STORAGE_READ` and
 //! `SHADER_STORAGE_WRITE` in `COMPUTE_SHADER` before the dispatch; its writes →
@@ -175,13 +188,17 @@ fn typed_module() -> BResult<TypedModule> {
     let kept = words_buffer(&mut b, KEPT, u32_)?;
     let changed = words_buffer(&mut b, CHANGED, u32_)?;
     let current = words_buffer(&mut b, CURRENT, u32_)?;
-    let invocation = b.builtin(crate::spv::BuiltIn::GlobalInvocationId, IoDir::Input, uvec3)?;
+    let group = b.builtin(crate::spv::BuiltIn::WorkgroupId, IoDir::Input, uvec3)?;
+    let local = b.builtin(crate::spv::BuiltIn::LocalInvocationId, IoDir::Input, uvec3)?;
     let void = b.ty(Type::Void)?;
     let mut f = b.function(void)?;
     let zero = u32_value(&mut f, 0)?;
-    let invocation = f.module().global_value(invocation)?;
-    let invocation = f.load(invocation, MemAccess::default())?;
-    let g = f.composite_extract(invocation, &[0])?;
+    let group = f.module().global_value(group)?;
+    let group = f.load(group, MemAccess::default())?;
+    let g = f.composite_extract(group, &[0])?;
+    let local = f.module().global_value(local)?;
+    let local = f.load(local, MemAccess::default())?;
+    let l = f.composite_extract(local, &[0])?;
     let kept = f.module().global_value(kept)?;
     let changed = f.module().global_value(changed)?;
     let current = f.module().global_value(current)?;
@@ -193,12 +210,24 @@ fn typed_module() -> BResult<TypedModule> {
     let count = f.composite_extract(shape, &[1])?;
     let row_words = f.composite_extract(shape, &[2])?;
     let first_word = f.composite_extract(shape, &[3])?;
-    let words = u32_value(&mut f, ShadowMergeModule::WORDS)?;
-    let first = f.binary(BinOp::IMul, g, words)?;
+    // The workgroup's first word, plus the invocation's place in it: its words lie `LOCAL_SIZE`
+    // apart from there, so each of the four stores below falls on consecutive words across
+    // consecutive invocations (the module docs).
+    let span = u32_value(
+        &mut f,
+        ShadowMergeModule::WORDS * ShadowMergeModule::LOCAL_SIZE,
+    )?;
+    let base = f.binary(BinOp::IMul, g, span)?;
+    let base = f.binary(BinOp::IAdd, base, l)?;
     // The invocation's words, one after the other, each as one invocation took it alone.
     for k in 0..ShadowMergeModule::WORDS {
-        let step = u32_value(&mut f, k)?;
-        let i = f.binary(BinOp::IAdd, first, step)?;
+        let i = match k {
+            0 => base,
+            k => {
+                let step = u32_value(&mut f, k * ShadowMergeModule::LOCAL_SIZE)?;
+                f.binary(BinOp::IAdd, base, step)?
+            }
+        };
         let inside = f.binary(BinOp::ULessThan, i, count)?;
         let merge: ArmFn<'_, ()> = Box::new(move |f, _| {
             let p = f.access_chain(kept, &[zero, i])?;
@@ -408,6 +437,62 @@ mod tests {
         want[33] = 0xb1;
         let shape = ShadowMergeModule::shape(3, 6, 5, 2);
         assert_eq!(merged_in(&kept, &changed, &current, &shape, 1), want);
+    }
+
+    /// The merge's rule word by word, over a region whose words are not a multiple of the
+    /// `WORDS * LOCAL_SIZE` a workgroup takes (so the last workgroup's invocations run past
+    /// them, each word of the tail guarded on its own) and over a mix of words the command left
+    /// as they were, words it changed whole and words of which it changed one byte: the current
+    /// buffer is what the rule gives, computed here without the kernel, and no word between the
+    /// region's rows, before its first or past its last changes. Which invocation takes which
+    /// word is the layout's own business: each word's merge reads and writes that word alone.
+    #[test]
+    fn a_tailed_region_of_rows_merges_word_for_word_by_the_rule() {
+        // 37 words a row, 19 rows: 703 words, 2 whole workgroups and 191 of a third.
+        let (width, rows, row_words, first_word) = (37u32, 19u32, 53u32, 11u32);
+        let count = width * rows;
+        assert_ne!(
+            count % (ShadowMergeModule::WORDS * ShadowMergeModule::LOCAL_SIZE),
+            0,
+            "the region's words leave a tail",
+        );
+        let byte = |i: u32, b: u32| (i.wrapping_mul(7).wrapping_add(b * 31) % 251) as u8;
+        let kept: Vec<u8> = (0..4 * count).map(|at| byte(at / 4, at % 4)).collect();
+        // Word i: unchanged where i % 3 == 0, changed whole where i % 3 == 1, and its byte
+        // i % 4 alone where i % 3 == 2.
+        let mut changed = kept.clone();
+        for i in 0..count {
+            match i % 3 {
+                0 => {}
+                1 => {
+                    for b in 0..4 {
+                        changed[(4 * i + b) as usize] ^= 0xff;
+                    }
+                }
+                _ => changed[(4 * i + i % 4) as usize] ^= 0x5a,
+            }
+        }
+        // The current buffer: the region's rows `row_words` apart from `first_word`, and two
+        // words past the last row, every byte another writer's.
+        let last = first_word + (rows - 1) * row_words + width;
+        let current: Vec<u8> = (0..4 * (last + 2))
+            .map(|at| byte(at / 4 + 1000, at % 4) ^ 0xa5)
+            .collect();
+        let mut want = current.clone();
+        for i in 0..count {
+            let word = first_word + (i / width) * row_words + i % width;
+            for b in 0..4 {
+                let (k, c) = (kept[(4 * i + b) as usize], changed[(4 * i + b) as usize]);
+                let equal = kept[(4 * i) as usize..][..4] == changed[(4 * i) as usize..][..4];
+                if !equal && k != c {
+                    want[(4 * word + b) as usize] = c;
+                }
+            }
+        }
+        let shape = ShadowMergeModule::shape(width, count, row_words, first_word);
+        let groups = ShadowMergeModule::groups(count);
+        assert_eq!(groups, 3, "three workgroups, the last one over the tail");
+        assert_eq!(merged_in(&kept, &changed, &current, &shape, groups), want);
     }
 
     /// Invocations past the words write nothing, and every word of several workgroups merges.

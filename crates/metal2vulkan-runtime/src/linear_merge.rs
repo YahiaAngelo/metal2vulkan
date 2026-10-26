@@ -26,6 +26,11 @@
 //!   before the first keep), so the merge keeps the surface's there. A word the pass changed is
 //!   read and written whole, as one whose texel's channels it changed in part: another writer's
 //!   write to its other bytes during the merge is a race the merge does not order.
+//! - **Words across the invocations.** The kernel gives an invocation four words a workgroup
+//!   apart, not four in a row, so one store's words are consecutive across the invocations that
+//!   run together (`bind::shadow_merge`'s module docs). Its dispatches and the words they examine
+//!   are counted (`WorkCounts::shadow_merge_dispatches_planned`,
+//!   `WorkCounts::shadow_merge_words_examined`).
 //! - **Windows.** The current buffer is bound from the box's first byte rounded down to 256 (the
 //!   largest `minStorageBufferOffsetAlignment`), its first word pushed; each layer's rows in bands
 //!   no binding of which passes `maxStorageBufferRange` and no dispatch of which passes
@@ -164,6 +169,8 @@ impl LinearMerge {
         let mut regions = Vec::with_capacity(layers as usize);
         let mut sets = Vec::new();
         let mut dispatches = Vec::new();
+        // The words the dispatches examine (`WorkCounts::shadow_merge_words_examined`).
+        let mut examined = 0;
         let u32_of = |value: u64| {
             u32::try_from(value).map_err(|_| internal("a linear merge past u32 words"))
         };
@@ -219,9 +226,11 @@ impl LinearMerge {
                         u32_of(skip / 4)?,
                     ),
                 });
+                examined += total;
                 start += count;
             }
         }
+        (device.shared().counts).shadow_merge_planned(dispatches.len(), examined);
         let kernel = device.owned_kernel(OwnedModule::ShadowMerge)?;
         let binds = OwnedBinds::new(device, &kernel, &sets)?;
         let levels = backing.level..backing.level + 1;

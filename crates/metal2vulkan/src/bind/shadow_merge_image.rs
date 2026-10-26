@@ -40,16 +40,26 @@
 //! The shape's words, in order: `origin`, the region's first texel `x0` in its low 16 bits and
 //! `y0` in its high 16; `width`, its texels a row; `row_words`, the current buffer's rows apart in
 //! words; and `first_word`, the word of the region's first texel in the current binding.
-//! Invocation `(g, y)` takes the texels `x` from `4g` to `4g + 3` of row `y`
-//! ([`ShadowMergeImageModule::TEXELS`]), one after the other. Each `x` below `width` fetches texel
-//! `(x0 + x, y0 + y)` of level 0 and, for each of its `n` words `k` (`n` the module's texel
-//! width), compares it with word `(y · width + x) · n + k` of the kept buffer; where they differ,
-//! word `first_word + y · row_words + x · n + k` of the current buffer takes, in each byte where
+//! A row of the region is `width · n` words, `n` the module's texel width in 4-byte words.
+//! Invocation `l` of workgroup `(g, y)` takes the row's words `w = 4Ng + Nk + l` for `k` from 0 to
+//! 3 ([`ShadowMergeImageModule::WORDS`], `N` [`ShadowMergeImageModule::LOCAL_SIZE`]), one after
+//! the other. Each `w` below `width · n` fetches texel `(x0 + w / n, y0 + y)` of level 0, takes
+//! its word `w % n`, and compares it with word `y · width · n + w` of the kept buffer; where they
+//! differ, word `first_word + y · row_words + w` of the current buffer takes, in each byte where
 //! they differ, the fetched word's byte, and keeps its own in the others. Where they are equal it
-//! reads and writes nothing of the current buffer; an `x` past `width` does nothing. A dispatch
-//! takes `ceil(width / (LOCAL_SIZE · TEXELS))` by the region's height workgroups
+//! reads and writes nothing of the current buffer; a `w` past the row's words does nothing. A
+//! dispatch takes `ceil(width · n / (LOCAL_SIZE · WORDS))` by the region's height workgroups
 //! ([`ShadowMergeImageModule::groups`]). No word between the region's rows or past its texels is
 //! read or written.
+//!
+//! Words across the invocations, not texels: as in
+//! [`shadow_merge_module`](super::shadow_merge_module) each word's merge
+//! reads and writes that word alone, so which invocation takes which word is free, and `4Ng + Nk
+//! + l` puts the `k`th store of consecutive invocations at consecutive words. Spreading texels
+//! instead would leave `4n - 1` words between one store's lanes, which on an RTX 5080 Laptop GPU
+//! costs hundreds of times the time over imported host memory (the measurements in that
+//! module's docs). A texel wider than a word is fetched once per word of it,
+//! `n` lanes fetching the one texel, where loads of every shape on that device cost the same.
 //!
 //! **Kept in an image** ([`shadow_merge_kept_image_module`]): the same module, but for its kept
 //! binding, a sampled image of the module's unsigned-integer format ([`ShadowTexelView`]) in the
@@ -139,10 +149,10 @@ impl ShadowMergeImageModule {
     pub const KEPT_BINDING: u32 = 1;
     /// The buffer's bytes after the command, a storage buffer the dispatch merges into.
     pub const CURRENT_BINDING: u32 = 2;
-    /// Invocations of one workgroup, along x: [`TEXELS`](Self::TEXELS) texels each, of one row.
+    /// Invocations of one workgroup, along x: [`WORDS`](Self::WORDS) words each, of one row.
     pub const LOCAL_SIZE: u32 = 64;
-    /// The texels one invocation merges, one after the other.
-    pub const TEXELS: u32 = 4;
+    /// The words one invocation merges, one after the other.
+    pub const WORDS: u32 = 4;
     /// Bytes of the `COMPUTE` push-constant range at offset 0: the region's shape.
     pub const PUSH_BYTES: u32 = 16;
 
@@ -158,9 +168,11 @@ impl ShadowMergeImageModule {
         bytes
     }
 
-    /// The workgroups of a dispatch over a region `[width, height]` texels.
-    pub fn groups([width, height]: [u32; 2]) -> [u32; 2] {
-        [width.div_ceil(Self::LOCAL_SIZE * Self::TEXELS), height]
+    /// The workgroups of a dispatch of `read`'s module over a region `[width, height]` texels:
+    /// its rows are `width` times `read`'s words each.
+    pub fn groups(read: ShadowMergeRead, [width, height]: [u32; 2]) -> [u32; 2] {
+        let words = width.saturating_mul(read.words());
+        [words.div_ceil(Self::LOCAL_SIZE * Self::WORDS), height]
     }
 }
 
@@ -308,13 +320,13 @@ fn typed_module(read: ShadowMergeRead, kept: Kept) -> BResult<TypedModule> {
         }
     };
     let current = words_buffer(&mut b, CURRENT, u32_)?;
-    let invocation = b.builtin(crate::spv::BuiltIn::GlobalInvocationId, IoDir::Input, uvec3)?;
+    let group = b.builtin(crate::spv::BuiltIn::WorkgroupId, IoDir::Input, uvec3)?;
+    let local = b.builtin(crate::spv::BuiltIn::LocalInvocationId, IoDir::Input, uvec3)?;
     let void = b.ty(Type::Void)?;
     let mut f = b.function(void)?;
     let zero = u32_value(&mut f, 0)?;
     let low = u32_value(&mut f, 0xffff)?;
     let sixteen = u32_value(&mut f, 16)?;
-    let n = u32_value(&mut f, words)?;
     let mut lanes = Vec::with_capacity(words as usize);
     for lane in 0..words {
         lanes.push(u32_value(&mut f, lane)?);
@@ -342,10 +354,14 @@ fn typed_module(read: ShadowMergeRead, kept: Kept) -> BResult<TypedModule> {
             }
         }
     };
-    let invocation = f.module().global_value(invocation)?;
-    let invocation = f.load(invocation, MemAccess::default())?;
-    let g = f.composite_extract(invocation, &[0])?;
-    let y = f.composite_extract(invocation, &[1])?;
+    let group = f.module().global_value(group)?;
+    let group = f.load(group, MemAccess::default())?;
+    let g = f.composite_extract(group, &[0])?;
+    // The region's row: the workgroup's y, the local size along y being 1.
+    let y = f.composite_extract(group, &[1])?;
+    let local = f.module().global_value(local)?;
+    let local = f.load(local, MemAccess::default())?;
+    let l = f.composite_extract(local, &[0])?;
     let image = f.module().global_value(image)?;
     let kept = match kept {
         KeptAt::Buffer(kept) => KeptAt::Buffer(f.module().global_value(kept)?),
@@ -363,18 +379,52 @@ fn typed_module(read: ShadowMergeRead, kept: Kept) -> BResult<TypedModule> {
     let x0 = f.binary(BinOp::BitwiseAnd, origin, low)?;
     let y0 = f.binary(BinOp::ShiftRightLogical, origin, sixteen)?;
     let ty = f.binary(BinOp::IAdd, y0, y)?;
-    // The row's first word in the current buffer.
+    // The row's first word in the current buffer, and the row's words: `width` texels of `words`
+    // words each.
     let row = f.binary(BinOp::IMul, y, row_words)?;
     let row = f.binary(BinOp::IAdd, first_word, row)?;
-    let texels = u32_value(&mut f, ShadowMergeImageModule::TEXELS)?;
-    let first = f.binary(BinOp::IMul, g, texels)?;
-    // The invocation's texels, one after the other, each as one invocation took it alone.
-    for step in 0..ShadowMergeImageModule::TEXELS {
-        let step = u32_value(&mut f, step)?;
-        let x = f.binary(BinOp::IAdd, first, step)?;
-        let inside = f.binary(BinOp::ULessThan, x, width)?;
+    let row_count = match words {
+        1 => width,
+        words => {
+            let n = u32_value(&mut f, words)?;
+            f.binary(BinOp::IMul, width, n)?
+        }
+    };
+    // A row word's texel and its word of that texel, where a texel is more than one word (1, 2
+    // or 4, so a shift and a mask).
+    let split = match words {
+        1 => None,
+        words => Some((
+            u32_value(&mut f, words.trailing_zeros())?,
+            u32_value(&mut f, words - 1)?,
+        )),
+    };
+    // The workgroup's first word of the row, plus the invocation's place in it: its words lie
+    // `LOCAL_SIZE` apart from there, so each of the four stores below falls on consecutive words
+    // across consecutive invocations (the module docs).
+    let span = ShadowMergeImageModule::WORDS * ShadowMergeImageModule::LOCAL_SIZE;
+    let span = u32_value(&mut f, span)?;
+    let base = f.binary(BinOp::IMul, g, span)?;
+    let base = f.binary(BinOp::IAdd, base, l)?;
+    // The invocation's words, one after the other, each as one invocation took it alone.
+    for k in 0..ShadowMergeImageModule::WORDS {
+        let w = match k {
+            0 => base,
+            k => {
+                let step = u32_value(&mut f, k * ShadowMergeImageModule::LOCAL_SIZE)?;
+                f.binary(BinOp::IAdd, base, step)?
+            }
+        };
+        let inside = f.binary(BinOp::ULessThan, w, row_count)?;
         let lanes = lanes.clone();
         let merge: ArmFn<'_, ()> = Box::new(move |f, _| {
+            let (x, lane) = match split {
+                None => (w, None),
+                Some((shift, mask)) => (
+                    f.binary(BinOp::ShiftRightLogical, w, shift)?,
+                    Some(f.binary(BinOp::BitwiseAnd, w, mask)?),
+                ),
+            };
             let tx = f.binary(BinOp::IAdd, x0, x)?;
             let coord = f.composite_construct(uvec2, &[tx, ty])?;
             let image = f.load(image, MemAccess::default())?;
@@ -384,42 +434,34 @@ fn typed_module(read: ShadowMergeRead, kept: Kept) -> BResult<TypedModule> {
             };
             let texel = f.fetch(image, coord, &ops)?;
             let texel = rebuild.words(f, texel)?;
-            // The texel's words before the command: in the kept image, at the texel's
-            // coordinates; in the kept buffer, from its first word, row after row.
+            let after = one_word(f, &texel, lane, &lanes)?;
+            // The word before the command: in the kept image, the texel's at its own
+            // coordinates; in the kept buffer, the row's word, row after row.
             let before = match kept {
                 KeptAt::Image(kept, view) => {
                     let kept = f.load(kept, MemAccess::default())?;
                     let texel = f.fetch(kept, coord, &ops)?;
-                    fetched_words(f, texel, view)?
+                    let words = fetched_words(f, texel, view)?;
+                    one_word(f, &words, lane, &lanes)?
                 }
                 KeptAt::Buffer(kept) => {
-                    let kept_row = f.binary(BinOp::IMul, y, width)?;
-                    let kept_texel = f.binary(BinOp::IAdd, kept_row, x)?;
-                    let kept_at = f.binary(BinOp::IMul, kept_texel, n)?;
-                    let mut words = Vec::with_capacity(lanes.len());
-                    for &index in &lanes {
-                        let place = f.binary(BinOp::IAdd, kept_at, index)?;
-                        let p = f.access_chain(kept, &[zero, place])?;
-                        words.push(f.load(p, MemAccess::default())?);
-                    }
-                    words
+                    let kept_row = f.binary(BinOp::IMul, y, row_count)?;
+                    let place = f.binary(BinOp::IAdd, kept_row, w)?;
+                    let p = f.access_chain(kept, &[zero, place])?;
+                    f.load(p, MemAccess::default())?
                 }
             };
-            // The texel's first word in the current buffer, at its row's place.
-            let column = f.binary(BinOp::IMul, x, n)?;
-            let at = f.binary(BinOp::IAdd, row, column)?;
-            for ((&after, &before), &index) in texel.iter().zip(&before).zip(&lanes) {
-                let differ = f.binary(BinOp::BitwiseXor, before, after)?;
-                let moved = f.binary(BinOp::INotEqual, differ, zero)?;
-                // A word the command left as it was is neither read nor written.
-                let write: ArmFn<'_, ()> = Box::new(move |f, _| {
-                    let place = f.binary(BinOp::IAdd, at, index)?;
-                    let to = f.access_chain(current, &[zero, place])?;
-                    merge_word(f, to, after, differ)?;
-                    Ok(ArmEnd::FallThrough(Vec::new()))
-                });
-                f.if_(&mut (), moved, write, None)?;
-            }
+            let differ = f.binary(BinOp::BitwiseXor, before, after)?;
+            let moved = f.binary(BinOp::INotEqual, differ, zero)?;
+            // A word the command left as it was is neither read nor written.
+            let write: ArmFn<'_, ()> = Box::new(move |f, _| {
+                // The word at its row's place in the current buffer.
+                let place = f.binary(BinOp::IAdd, row, w)?;
+                let to = f.access_chain(current, &[zero, place])?;
+                merge_word(f, to, after, differ)?;
+                Ok(ArmEnd::FallThrough(Vec::new()))
+            });
+            f.if_(&mut (), moved, write, None)?;
             Ok(ArmEnd::FallThrough(Vec::new()))
         });
         f.if_(&mut (), inside, merge, None)?;
@@ -436,6 +478,26 @@ fn typed_module(read: ShadowMergeRead, kept: Kept) -> BResult<TypedModule> {
         }],
     )?;
     b.finalize()
+}
+
+/// The word a row word took of its texel's `words`: the texel's only word where it is one word
+/// (`lane` `None`), else the one `lane` names, by a chain of selects over the texel's words
+/// (`lanes` holding each word's index).
+fn one_word(
+    f: &mut FunctionBuilder<'_>,
+    words: &[Value],
+    lane: Option<Value>,
+    lanes: &[Value],
+) -> BResult<Value> {
+    let Some(lane) = lane else {
+        return Ok(words[0]);
+    };
+    let mut chosen = words[0];
+    for (&word, &index) in words.iter().zip(lanes).skip(1) {
+        let is = f.binary(BinOp::IEqual, lane, index)?;
+        chosen = f.select(is, word, chosen)?;
+    }
+    Ok(chosen)
 }
 
 /// A kept binding: the buffer's or the image's global (or, inside the function, value), the
@@ -653,7 +715,7 @@ mod tests {
                 push: shape.to_vec(),
                 spec: Default::default(),
             };
-            let [gx, gy] = ShadowMergeImageModule::groups([width, height]);
+            let [gx, gy] = ShadowMergeImageModule::groups(read, [width, height]);
             let cfg = Config {
                 order,
                 workgroups: [gx, gy, 1],
@@ -677,14 +739,15 @@ mod tests {
     /// and fetched words are equal keeps the current buffer's (another writer's write there
     /// stays); a word with one byte changed takes that byte alone; and no word between the rows,
     /// before the first texel or past the last changes: through every read, across workgroups
-    /// and a last invocation of fewer than four texels, the kept words in a buffer or in an
-    /// image.
+    /// and over a row whose words are not a multiple of `WORDS * LOCAL_SIZE`, so the last
+    /// workgroup's invocations run past the row, the kept words in a buffer or in an image.
     #[test]
     fn the_bytes_the_texture_changed_merge_at_their_rows_alone() {
         for (read, form) in forms() {
             let words = read.words();
             let extent = [300, 7];
-            // 270 texels a row: two workgroups, the last invocation's two texels.
+            // 270 texels a row: 270, 540 or 1080 words of it, by the read's texel, none of them
+            // a multiple of the 256 words a workgroup takes.
             let region = [10, 2, 270, 4];
             let [x0, y0, width, height] = region;
             let row_words = 5 + width * words;

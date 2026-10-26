@@ -324,6 +324,8 @@ pub(crate) struct Counters {
     shadow_copies_back_dispatched: AtomicU64,
     shadow_copies_in_dispatched: AtomicU64,
     shadow_merge_copies_dispatched: AtomicU64,
+    shadow_merge_dispatches_planned: AtomicU64,
+    shadow_merge_words_examined: AtomicU64,
     shadow_merge_scratches_reused: AtomicU64,
     shadow_merge_scratches_zeroed: AtomicU64,
     row_copies: AtomicU64,
@@ -2093,6 +2095,15 @@ impl Counters {
     pub(crate) fn shadow_merge_copies_dispatched(&self, n: usize) {
         self.shadow_merge_copies_dispatched
             .fetch_add(n as u64, Ordering::Relaxed);
+    }
+
+    /// A merge planned `dispatches` dispatches of a merge kernel over `words` words in all
+    /// (`shadow_merge.rs`, `linear_merge.rs`).
+    pub(crate) fn shadow_merge_planned(&self, dispatches: usize, words: u64) {
+        self.shadow_merge_dispatches_planned
+            .fetch_add(dispatches as u64, Ordering::Relaxed);
+        self.shadow_merge_words_examined
+            .fetch_add(words, Ordering::Relaxed);
     }
 
     /// A merge of a shadowed texture took its scratch from its shadow's spares (`shadow_merge.rs`,
@@ -3974,6 +3985,18 @@ pub struct WorkCounts {
     /// the merge's scratch is the dispatch a copy back takes, where the device runs one faster
     /// than its copy (`DriverFact::ShadowCopyBackDispatchFaster`): the same bytes either way.
     pub shadow_merge_copies_dispatched: u64,
+    /// The dispatches of a merge kernel the runtime planned: a shadowed texture's writes merged
+    /// into its buffer's bytes (`shadow_merge.rs`), and a linear attachment's pass merged into
+    /// its surface's bytes (`linear_merge.rs`), each in windows or bands of at most
+    /// `maxStorageBufferRange` bytes and `maxComputeWorkGroupCount` workgroups, one dispatch
+    /// each. Planned, not measured on the GPU: a merge through a copy over detached bytes is
+    /// planned and never recorded, and a linear attachment's dispatches are recorded again at
+    /// each memory barrier inside its pass.
+    pub shadow_merge_dispatches_planned: u64,
+    /// The words those dispatches examine: each reads the word before the commands and the word
+    /// after them and stores into the buffer's bytes only where they differ, so the words stored
+    /// are at most these and are not counted (only the GPU knows them).
+    pub shadow_merge_words_examined: u64,
     /// The merges of shadowed textures whose scratch was a buffer their shadow kept from an
     /// earlier merge whose command buffers completed (`shadow_merge.rs`): no buffer made.
     pub shadow_merge_scratches_reused: u64,
@@ -4768,6 +4791,12 @@ impl Device {
                 .load(Ordering::Relaxed),
             shadow_merge_copies_dispatched: counters
                 .shadow_merge_copies_dispatched
+                .load(Ordering::Relaxed),
+            shadow_merge_dispatches_planned: counters
+                .shadow_merge_dispatches_planned
+                .load(Ordering::Relaxed),
+            shadow_merge_words_examined: counters
+                .shadow_merge_words_examined
                 .load(Ordering::Relaxed),
             shadow_merge_scratches_reused: counters
                 .shadow_merge_scratches_reused
