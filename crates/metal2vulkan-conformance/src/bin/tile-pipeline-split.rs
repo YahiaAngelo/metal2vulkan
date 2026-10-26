@@ -437,7 +437,7 @@ fn compiled_function_bytes(
 /// shader-cache directory each round**, the cache carried over between the cases of a round, and
 /// takes a figure as the median of the rounds' own medians. The recorded 203.3 us for
 /// `tile-state-thread-limits` is that figure. Nothing in the record says who wrote the pipeline
-/// artifacts, because `writes_on_thread` is a [`ShaderCacheStatistics`] field and a cost record
+/// artifacts, because `writes_on_thread` is a `ShaderCacheStatistics` field and a cost record
 /// carries `WorkCounts`; so this runs the same shape and prints it.
 ///
 /// `select` is a prefix: the empty string selects the whole set, which is the recorded shape, and
