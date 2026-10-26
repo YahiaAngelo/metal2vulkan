@@ -44,7 +44,8 @@
 //!   at most the bound, and each of them an entry the next process compiles again.
 //! - **In memory first.** Before the directory, every lookup asks the device's memo
 //!   (`pipeline/memo.rs`), which [`ShaderCacheOptions::memory_capacity`] bounds (256 MiB by
-//!   default). An entry read or written here is kept there, weighed at its encoded length.
+//!   default). An entry read or written here is kept there, weighed at its encoded length; one
+//!   kept without being encoded, at what it retains (`RenderPipeline::footprint`).
 
 mod creation;
 pub(crate) mod driver;
@@ -87,9 +88,9 @@ pub struct ShaderCacheOptions {
     /// [`DEFAULT_CAPACITY`] (25 GiB) by default. Not zero.
     pub capacity: u64,
     /// The most bytes of translated functions and compiled pipelines the device keeps in
-    /// memory, each counted at its encoded length; past it, or past 4096 of them, the least
-    /// recently used are dropped. A live pipeline state keeps what it uses whatever this says.
-    /// Not zero.
+    /// memory, each counted at its encoded length, or at what it retains where it was kept
+    /// without being encoded; past it, or past 4096 of them, the least recently used are
+    /// dropped. A live pipeline state keeps what it uses whatever this says. Not zero.
     pub memory_capacity: u64,
 }
 
@@ -465,6 +466,25 @@ impl ShaderCache {
         self.load(EntryKind::Function, key.digest(), compile, |bytes| {
             CompiledFunction::from_bytes_for_key(bytes, key, compile)
         })
+    }
+
+    /// Whether the directory holds the function of `key` for `compile`'s profile: its file is in
+    /// place, or its write is queued for the cache thread (`worker.rs`), whose rename has not
+    /// happened yet. A question about the directory, so it reads no contents, decodes nothing and
+    /// counts in no statistic: a hit here is not a lookup answered, and a miss is not a
+    /// translation.
+    pub(super) fn holds_function(
+        &self,
+        compile: &metal2vulkan::device::Device,
+        key: &FunctionCompileKey,
+    ) -> bool {
+        let name = entry_name(
+            self.store.directory().build(),
+            EntryKind::Function,
+            key.digest(),
+            &compile.profile_fingerprint(),
+        );
+        self.store.holds(&name)
     }
 
     /// Keep `function`, which `compile` compiled; its encoded length.

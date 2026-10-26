@@ -8870,6 +8870,7 @@ method	metal2vulkan::library::CompiledFunction::numbered_samplers	pub fn numbere
 method	metal2vulkan::library::CompiledFunction::precision_notes	pub fn precision_notes(&self) -> &[PrecisionNote]
 method	metal2vulkan::library::CompiledFunction::reads_resident_roots	pub fn reads_resident_roots(&self) -> bool
 method	metal2vulkan::library::CompiledFunction::reconvergence	pub fn reconvergence(&self) -> Reconvergence
+method	metal2vulkan::library::CompiledFunction::relocated_words_digest	pub fn relocated_words_digest(&self, words: &Arc<[u32]>, derive: fn(&[u32]) -> crate::cache::Hash256) -> Option<crate::cache::Hash256>
 method	metal2vulkan::library::CompiledFunction::required_subgroup_size	pub fn required_subgroup_size(&self) -> Option<u32>
 method	metal2vulkan::library::CompiledFunction::requirements	pub fn requirements(&self) -> &Requirements
 method	metal2vulkan::library::CompiledFunction::requires_full_subgroups	pub fn requires_full_subgroups(&self) -> bool
@@ -9027,6 +9028,7 @@ method	metal2vulkan::pipeline::PrecisionNote::of_float_operator	pub fn of_float_
 method	metal2vulkan::pipeline::PrecisionNote::of_math_call	pub fn of_math_call(call: Math, fmf: FastMath, p: &DeviceProfile, math: EntryMath) -> Option<BTreeSet<PrecisionNote>>
 method	metal2vulkan::pipeline::PrivateRenderState::new	pub const fn new() -> PrivateRenderState
 method	metal2vulkan::pipeline::RenderPipeline::content_digest	pub fn content_digest(&self) -> Hash256
+method	metal2vulkan::pipeline::RenderPipeline::footprint	pub fn footprint(&self) -> u64
 method	metal2vulkan::pipeline::RenderPipeline::plan	pub fn plan(&self, device: &Device, shape: &BindShape) -> Result<BindingPlan, BindError>
 method	metal2vulkan::pipeline::RenderPipeline::runs_stage	pub fn runs_stage(&self, at: usize, topology: vk::PrimitiveTopology) -> bool
 method	metal2vulkan::pipeline::RenderPipelineDescriptor::fragment_writes_depth_unattached	pub fn fragment_writes_depth_unattached(&self, budget: &crate::Budget, entries: &StageEntries) -> Result<bool, Error>

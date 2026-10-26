@@ -41,7 +41,7 @@ use super::kept::{Compiled, Place};
 use super::libraries::Linked;
 use super::making::{Begun, Making, Pending, Ticket};
 use super::memo::{At, Lru, Remembered};
-use super::objects::{RawPipeline, VariantObjects};
+use super::objects::{words_digest, RawPipeline, VariantObjects};
 use super::piece_holds::PieceHolds;
 use super::pool::Joined;
 use super::sources::Sources;
@@ -68,12 +68,13 @@ use crate::unique_identifier::UniqueIdentifier;
 use crate::values::Size;
 use crate::Device;
 use metal2vulkan::bind::{BindShape, BindState, BindingPlan, FragmentTests};
-use metal2vulkan::cache::{PipelineKey, SpecializationKey, VariantKey};
+use metal2vulkan::cache::{Hash256, PipelineKey, SpecializationKey, VariantKey};
+use metal2vulkan::library::{CompiledFunction, FunctionCompileKey};
 use metal2vulkan::metal::{BindingAccess, PixelFormat, PrimitiveTopologyClass, RenderStages};
 use metal2vulkan::pipeline::{
     CaptureForm, ColorAttachmentDescriptor, CommandWrites, MeshPipelineDescriptor,
     PipelineInterface, RenderPipeline, RenderPipelineDescriptor, RuntimeFact, SpecKey,
-    StageEntries, StageSource, TessellationDescriptor,
+    StageEntries, StageModule, StageSource, TessellationDescriptor,
 };
 use metal2vulkan::reflection::{LinkedUseAnswers, RenderPipelineReflection};
 use std::any::Any;
@@ -1486,7 +1487,7 @@ impl GraphicsState {
             descriptor.input_primitive_topology,
             PrimitiveTopologyClass::Line | PrimitiveTopologyClass::Triangle
         );
-        let graphics = match &found {
+        let graphics = match &found.remembered {
             Remembered::Live(variant) => &variant.pipeline.graphics,
             Remembered::Compiled(pipeline) => &pipeline.graphics,
         };
@@ -1683,7 +1684,11 @@ impl GraphicsState {
         })
         .map_err(|error| compile_error(device, error))?;
         let stand_in = !key.storage_images.is_empty();
-        let base = RenderVariant::of(device, key, Remembered::Compiled(Arc::new(pipeline)))?;
+        let base = RenderVariant::of(
+            device,
+            key,
+            CompiledVariant::found(Remembered::Compiled(Arc::new(pipeline))),
+        )?;
         let descriptor = StateDescriptor::Mesh(descriptor.clone());
         device.degrade_absent_reads(&base.shared_pipeline().dependencies, |stage| {
             descriptor.stage(stage).map_or("none".into(), stage_name)
@@ -2277,7 +2282,7 @@ impl GraphicsState {
                 None => return None,
                 Some(None) => Capture::Refused,
                 Some(Some(pipeline)) => {
-                    let found = Remembered::Compiled(Arc::clone(pipeline));
+                    let found = CompiledVariant::found(Remembered::Compiled(Arc::clone(pipeline)));
                     match RenderVariant::of(&self.0.device, key.clone(), found) {
                         Ok(variant) => Capture::Made(variant),
                         Err(_) => Capture::Refused,
@@ -2321,7 +2326,7 @@ impl GraphicsState {
                             &descriptor_key,
                         )
                         .ok()
-                        .map(|found| match found {
+                        .map(|found| match found.remembered {
                             Remembered::Live(variant) => Arc::clone(&variant.pipeline),
                             Remembered::Compiled(pipeline) => pipeline,
                         })
@@ -2370,7 +2375,7 @@ impl GraphicsState {
                 .device
                 .compile_device()
                 .compile_mesh_variant(descriptor, key, &sources.budget())
-                .map(|pipeline| Remembered::Compiled(Arc::new(pipeline))),
+                .map(|pipeline| CompiledVariant::found(Remembered::Compiled(Arc::new(pipeline)))),
         }
         .map_err(|error| compile_error(&self.0.device, error))?;
         let variant = RenderVariant::of(&self.0.device, key.clone(), found)?;
@@ -2519,6 +2524,48 @@ fn stage_name(source: &StageSource) -> String {
     }
 }
 
+/// What a render variant's compile gives back ([`RenderVariant::compiled`]): the pipeline, and
+/// the compiled functions the link was given where this creation did the linking.
+///
+/// The functions are what lets a creation name its stages' modules without hashing their words
+/// again ([`stage_words_digest`]). Empty for a pipeline the memo, a binary archive or the disk
+/// cache gave whole, and for a mesh pipeline or a capture form, none of which link from compiled
+/// functions here.
+struct CompiledVariant {
+    remembered: Remembered<RenderPipeline, RenderVariant>,
+    functions: Vec<CompiledFunction>,
+}
+
+impl CompiledVariant {
+    /// What the memo, an archive or the disk cache gave, with no compiled function to ask about
+    /// its stages.
+    fn found(remembered: Remembered<RenderPipeline, RenderVariant>) -> CompiledVariant {
+        CompiledVariant {
+            remembered,
+            functions: Vec::new(),
+        }
+    }
+}
+
+/// The digest of `stage`'s words ([`words_digest`]): the one a compiled function of the creation
+/// holds for the very words the stage took from it, else one taken here.
+///
+/// **A stage cannot be matched to a function by position.** A pipeline's stages carry the ones
+/// the link synthesizes -- a post-tessellation vertex function's vertex and tessellation control
+/// stages, the geometry stages a barycentric or layer-selecting function needs, one per topology
+/// class, a depth16 fragment stage -- spliced in among the compiled ones, so stage `i` is not
+/// function `i`. What matches them is the identity of the words: a compiled stage's words are
+/// the very allocation its function's relocation slot holds, which is what
+/// `CompiledFunction::relocated_words_digest` answers for and nothing else. A stage no function
+/// claims is a synthesized one, whose words no slot ever held, and it is hashed here as every
+/// stage was before.
+fn stage_words_digest(functions: &[CompiledFunction], stage: &StageModule) -> Hash256 {
+    functions
+        .iter()
+        .find_map(|function| function.relocated_words_digest(&stage.spirv, words_digest))
+        .unwrap_or_else(|| words_digest(&stage.spirv))
+}
+
 impl RenderVariant {
     /// `descriptor`'s pipeline under `key`: the variant of it the memo knows live, or the
     /// pipeline `sources` give, else each `Function` stage's translation (found, or compiled)
@@ -2535,7 +2582,7 @@ impl RenderVariant {
         key: &VariantKey,
         entries: &StageEntries,
         descriptor_key: &PipelineKey,
-    ) -> Result<Remembered<RenderPipeline, RenderVariant>, metal2vulkan::error::Error> {
+    ) -> Result<CompiledVariant, metal2vulkan::error::Error> {
         let compile = sources.device().compile_device();
         let budget = sources.budget();
         // The pipeline a creation of a descriptor of the same key learned for `key`, found
@@ -2543,13 +2590,13 @@ impl RenderVariant {
         let cache = &sources.device().shared().shader_cache;
         if let Some(pipeline) = cache.variant_pipeline(compile, descriptor_key, key) {
             if let Some(found) = sources.render(&pipeline) {
-                return Ok(found);
+                return Ok(CompiledVariant::found(found));
             }
         }
         let keys = compile.render_variant_key(descriptor, key, &budget, entries)?;
         cache.keep_variant_pipeline(compile, descriptor_key, key, &keys.pipeline);
         if let Some(found) = sources.render(&keys.pipeline) {
-            return Ok(found);
+            return Ok(CompiledVariant::found(found));
         }
         let mut linked = descriptor.clone();
         if let (StageSource::Function(function), Some(inputs)) =
@@ -2576,7 +2623,22 @@ impl RenderVariant {
         // Held to the driver's compiler word bound, translated again from the functions where its
         // largest stage passes it; it keeps its key, so the cache stores and finds it as compiled.
         let pipeline = compile.fit_render_variant(descriptor, key, &budget, pipeline)?;
-        Ok(Remembered::Compiled(sources.linked_render(pipeline)))
+        // The stages the link was given, whichever way they arrived: the ones this creation
+        // compiled, and the ones the descriptor already carried compiled.
+        let functions: Vec<CompiledFunction> = [Some(&linked.vertex), linked.fragment.as_ref()]
+            .into_iter()
+            .flatten()
+            .filter_map(|source| match source {
+                StageSource::Compiled(compiled) => Some(compiled.clone()),
+                StageSource::Function(_) => None,
+            })
+            .collect();
+        let stage_keys: Vec<FunctionCompileKey> =
+            std::iter::once(keys.vertex).chain(keys.fragment).collect();
+        Ok(CompiledVariant {
+            remembered: Remembered::Compiled(sources.linked_render(pipeline, &stage_keys)),
+            functions,
+        })
     }
 
     /// The variant of `key` of what the memo or a compile `found`: the live variant, or one made
@@ -2584,10 +2646,14 @@ impl RenderVariant {
     fn of(
         device: &Device,
         key: VariantKey,
-        found: Remembered<RenderPipeline, RenderVariant>,
+        compiled: CompiledVariant,
     ) -> Result<Arc<RenderVariant>, Error> {
+        let CompiledVariant {
+            remembered,
+            functions,
+        } = compiled;
         let logged_spirv = OnceLock::new();
-        let pipeline = match found {
+        let pipeline = match remembered {
             Remembered::Live(variant) if variant.key == key => return Ok(variant),
             Remembered::Live(variant) => {
                 if let Some(logged) = variant.logged_spirv.get() {
@@ -2599,6 +2665,18 @@ impl RenderVariant {
         };
         // Before the variant's shader modules, whose creation the layer reports.
         device.degrade_pipeline(CompiledPipeline::Render(&pipeline), Occurrence::Made);
+        // Each stage's words' digest, where this creation linked the pipeline itself: the
+        // digest its compiled function holds beside the very words the stage took, so a sweep of
+        // states over one function pair hashes those words once rather than once a creation
+        // ([`stage_words_digest`]). A pipeline the memo, an archive or the disk gave has no
+        // compiled function to ask, and its objects hash their stages as they always did.
+        let digests: Option<Vec<Hash256>> = (!functions.is_empty()).then(|| {
+            pipeline
+                .stages
+                .iter()
+                .map(|stage| stage_words_digest(&functions, stage))
+                .collect()
+        });
         // Where the creation log is on, the stages' SPIR-V it names hashed on a thread of its
         // own while the objects are made: the hash its first line reads, off the creation's path.
         let (objects, kept) = std::thread::scope(|scope| {
@@ -2618,6 +2696,7 @@ impl RenderVariant {
                 &pipeline.layout,
                 &pipeline.stages,
                 CompiledPipeline::Render(&pipeline),
+                digests.as_deref(),
             )
         })?;
         let stages = handle_stages(&pipeline.layout, every_render_stage());

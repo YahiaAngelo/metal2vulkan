@@ -123,6 +123,16 @@ impl Asked {
             .map(|write| write.bytes.clone())
     }
 
+    /// Whether an entry for `path` is queued or being written, without taking its bytes
+    /// ([`Asked::pending`] clones them, which a question about the queue has no use for).
+    pub(crate) fn holds(&self, path: &Path) -> bool {
+        let work = lock(&self.work);
+        work.queued
+            .iter()
+            .chain(work.writing.iter())
+            .any(|write| write.path == path)
+    }
+
     /// Drop the entry queued for `path`, where one is: its bytes are not the entry after all.
     /// The one being written is past recall, and its file is removed by the caller.
     pub(crate) fn discard(&self, path: &Path) {

@@ -1016,6 +1016,18 @@ assert_eq!(linked, pipeline);
   (with `serde`) everything a plan states. A cache of driver objects keyed on the digest survives a
   release that bumped `SEMANTICS_VERSION` without changing the output. A digest identifies
   content; it authenticates nothing.
+- A caller that names a stage's module by its words need not hash them twice. A compiled
+  function keeps its last relocation beside it, so a sweep of pipeline states over one function
+  pair takes the same `Arc<[u32]>` on every creation;
+  `compiled.relocated_words_digest(&stage.spirv, derive)` gives the digest `derive` produced over
+  those very words, or `None` where they are not the function's last relocation -- a miss costs no
+  call of `derive` at all, so it is safe to ask first in a creation's hot path. The digest a caller
+  gets is always one its own `derive` made, so nothing it names by the digest moves.
+- A memo that holds pipelines in memory and bounds itself by bytes can weigh one it never encoded.
+  `pipeline.footprint()` is the bytes a `RenderPipeline` keeps live -- every word of every stage,
+  each stage's constant blob and notes, and its own storage -- so a pipeline kept without
+  `to_bytes()` is weighed by what it costs rather than by the zero length of an encoding that was
+  not made.
 - Versions move independently: the crate's (the API), `SEMANTICS_VERSION` (the output),
   `ARTIFACT_FORMAT_VERSION` (the encoding) and `RUNTIME_VERSION` (what the runtime does with an
   unchanged artifact). `SOURCE_DIGEST` names the sources a build was compiled from, for caches kept

@@ -62,6 +62,7 @@ pub(super) fn record(
             &replay.pipeline_layout,
             std::slice::from_ref(&p.variant.pipeline().stage),
             CompiledPipeline::Kernel(p.variant.pipeline()),
+            None,
         )?);
         pipelines.push(made.indirect_bindable_pipeline(region)?);
         objects.push(made);

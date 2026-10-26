@@ -62,6 +62,10 @@ pub(super) mod reaper;
 mod render;
 pub(super) mod shared_layouts;
 mod sources;
+/// The render pipeline artifacts encoded for the directory, which `tests::render_stage_digests`'
+/// count reads (`sources.rs`).
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+pub(crate) use sources::render_artifacts_encoded;
 pub(super) mod stand_in;
 mod texture_access;
 mod tile;
@@ -1574,6 +1578,7 @@ impl Variant {
             &pipeline.layout,
             std::slice::from_ref(&pipeline.stage),
             CompiledPipeline::Kernel(&pipeline),
+            None,
         )?;
         let variant = Arc::new(Variant {
             key,

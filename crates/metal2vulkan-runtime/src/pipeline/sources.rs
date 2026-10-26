@@ -16,6 +16,25 @@ use metal2vulkan::pipeline::{
 use metal2vulkan::Budget;
 use std::sync::Arc;
 
+/// The render pipeline artifacts this process encoded for the directory, which
+/// `tests::render_stage_digests`' count reads: a sweep whose stage functions the directory holds
+/// must encode none. Carried only where that device test is compiled, since nothing else reads
+/// it.
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+static ARTIFACTS_ENCODED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// [`ARTIFACTS_ENCODED`].
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+pub(crate) fn render_artifacts_encoded() -> u64 {
+    ARTIFACTS_ENCODED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Count a render pipeline artifact encoded for the directory.
+fn note_render_artifact_encoded() {
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+    ARTIFACTS_ENCODED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Where one creation's (or one later variant's) compiles look, and its budget.
 pub(crate) struct Sources<'a> {
     device: &'a Device,
@@ -215,13 +234,45 @@ impl<'a> Sources<'a> {
         Some(found)
     }
 
-    /// Keep `pipeline`, linked now, in the memo and on disk.
-    pub(crate) fn linked_render(&self, pipeline: RenderPipeline) -> Arc<RenderPipeline> {
+    /// Keep `pipeline`, linked now from the stage functions of `stage_keys`, in the memo, and on
+    /// disk where the directory does not hold those functions.
+    ///
+    /// **The artifact is stored only where re-linking it would translate.** A later process that
+    /// does not find the pipeline looks its stages' functions up by these same keys and links
+    /// what it finds (`Sources::function`, then `compile_render_variant`), so where the
+    /// directory holds every one of them the pipeline's own entry spares a link and nothing more,
+    /// while writing it costs this creation an encoding of every word of every stage -- the
+    /// largest single piece of work a creation of a sweep over one function pair does, and one
+    /// whose result is byte-identical to the previous sibling's but for its fixed-function
+    /// state. A creation that translated or linked something the directory has no function for
+    /// stores the pipeline as every creation did: there the entry is what spares the
+    /// translation. So does one that names no stage key at all, which is no evidence about the
+    /// directory and must not read as every key being in it.
+    ///
+    /// The memo keeps it either way, weighed by what it retains rather than by what an encoding
+    /// would have been ([`RenderPipeline::footprint`]), so the memo's byte bound holds whichever
+    /// way the artifact was kept. Weighing a skipped entry at the zero bytes a skipped encoding
+    /// returns would let the memo hold its 4096 entries believing its bound untouched.
+    pub(crate) fn linked_render(
+        &self,
+        pipeline: RenderPipeline,
+        stage_keys: &[FunctionCompileKey],
+    ) -> Arc<RenderPipeline> {
         let compile = self.device.compile_device();
         let cache = &self.device.shared().shader_cache;
         let pipeline = Arc::new(pipeline);
-        let bytes = cache.store_render_pipeline(compile, &pipeline);
-        cache.memo.keep_render(&pipeline, bytes);
+        let functions_held = !stage_keys.is_empty()
+            && stage_keys
+                .iter()
+                .all(|key| cache.holds_function(compile, key));
+        let weight = match functions_held {
+            true => pipeline.footprint(),
+            false => {
+                note_render_artifact_encoded();
+                cache.store_render_pipeline(compile, &pipeline)
+            }
+        };
+        cache.memo.keep_render(&pipeline, weight);
         self.note(Artifact::Render(Arc::clone(&pipeline)));
         pipeline
     }

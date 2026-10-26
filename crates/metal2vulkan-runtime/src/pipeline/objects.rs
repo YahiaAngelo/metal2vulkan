@@ -215,8 +215,34 @@ pub(crate) type ShaderModules = ContentKeyed<Hash256, ShaderModule>;
 
 /// The SHA-256 of SPIR-V `words` (their length, then their bytes): what names a stage's module in
 /// the device's map and its words in its makings' records, taken once per stage of a variant.
+///
+/// The only derivation of such a digest there is. A creation that holds the compiled function a
+/// stage's words came from asks the function for the digest it already took with this very
+/// derivation (`render::stage_words_digest`), so a sweep of states over one function pair takes
+/// one hash a stage rather than one a creation; what the function gives back is what this
+/// returns, so nothing named by the digest moves.
 pub(crate) fn words_digest(words: &[u32]) -> Hash256 {
+    note_words_digested();
     Making::new("words").words(words).finish()
+}
+
+/// The digests of stage words this process derived through [`words_digest`], which
+/// `tests::render_stage_digests`' count reads: a run of sibling creations over one function pair
+/// must add none to what its first creation derived. Carried only where that device test is
+/// compiled, since nothing else reads it.
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+static WORDS_DIGESTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// [`WORDS_DIGESTED`].
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+pub(crate) fn words_digests_derived() -> u64 {
+    WORDS_DIGESTED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Count a digest of stage words derived rather than read from a compiled function.
+fn note_words_digested() {
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+    WORDS_DIGESTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The digest of what every `VkPipeline` of a variant of `layout` and `stages` reads besides its
@@ -540,6 +566,7 @@ impl VariantObjects {
         layout: &PipelineLayout,
         stages: &[StageModule],
         pipeline: CompiledPipeline<'_>,
+        digests: Option<&[Hash256]>,
     ) -> Result<VariantObjects, Error> {
         let push_set_zero = pushes_set_zero(device, layout, stages, pipeline);
         let dynamic = dynamic_bindings(device, layout, push_set_zero);
@@ -558,10 +585,20 @@ impl VariantObjects {
             // where the step runs (the open break).
             device.shared().counts.host_step_sampler_set_made();
         }
-        let words: Arc<[Hash256]> = stages
-            .iter()
-            .map(|stage| words_digest(&stage.spirv))
-            .collect();
+        // Each stage's words' digest: the caller's where it has them, which is where it holds
+        // the compiled functions the stages' words came from and they already carry the digest
+        // (`render::stage_words_digest`); else taken here, one hash over every word of every
+        // stage.
+        let words: Arc<[Hash256]> = match digests {
+            Some(digests) if digests.len() == stages.len() => Arc::from(digests),
+            // A caller that gives digests gives one per stage, in stage order. Anything else is
+            // a defect of its own, never a reason to name a module by another's content.
+            Some(_) => return Err(internal("a variant's stage digests are not its stages'")),
+            None => stages
+                .iter()
+                .map(|stage| words_digest(&stage.spirv))
+                .collect(),
+        };
         let shared_layout = shared_layout(device, layout, &samplers, (push_set_zero, &dynamic))?;
         let set_zero_shape = set_zero_shape(layout, push_set_zero, &dynamic);
         let mut objects = VariantObjects {
@@ -617,6 +654,7 @@ impl VariantObjects {
         layout: &PipelineLayout,
         stages: &[StageModule],
         pipeline: CompiledPipeline<'_>,
+        digests: Option<&[Hash256]>,
     ) -> Result<(VariantObjects, Vec<(Place, RawPipeline)>), Error> {
         let push_set_zero = pushes_set_zero(device, layout, stages, pipeline);
         let dynamic = dynamic_bindings(device, layout, push_set_zero);
@@ -633,7 +671,7 @@ impl VariantObjects {
         // And the device's graphics pipeline libraries nothing holds now.
         settle_libraries(device);
         let Some(back) = back else {
-            let mut objects = VariantObjects::create(device, layout, stages, pipeline)?;
+            let mut objects = VariantObjects::create(device, layout, stages, pipeline, digests)?;
             objects.keep = Some(Instance::new(compiled));
             return Ok((objects, Vec::new()));
         };

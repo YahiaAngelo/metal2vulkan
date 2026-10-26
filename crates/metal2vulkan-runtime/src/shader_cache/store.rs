@@ -352,6 +352,18 @@ impl Store {
         MAX_ENTRY.min(self.directory.capacity)
     }
 
+    /// Whether the entry named `name` is there to be read: its file is in place and of a length
+    /// this directory takes, or its write is queued for the cache thread, whose rename has not
+    /// happened yet. Reads no contents and counts nothing -- it is a question about the
+    /// directory, not a lookup of an entry.
+    pub(crate) fn holds(&self, name: &str) -> bool {
+        let path = self.directory.entry_path(name);
+        if self.asked.as_ref().is_some_and(|asked| asked.holds(&path)) {
+            return true;
+        }
+        fs::metadata(&path).is_ok_and(|metadata| metadata.len() <= self.entry_limit())
+    }
+
     /// The entry named `name`, as `decode` accepts it. A hit refreshes the entry's access
     /// time; contents `decode` refuses are removed. Counts unreadable and refused entries.
     pub(crate) fn load<T, E>(

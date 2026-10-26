@@ -69,6 +69,68 @@ impl RenderPipeline {
             .count();
         nth == class
     }
+
+    /// The bytes this pipeline keeps live: its own storage, its stages' and its dependencies',
+    /// and each stage's SPIR-V words, constant blob, entry point, specialization constants,
+    /// notes and attachment lists.
+    ///
+    /// This is what a bounded memo of compiled pipelines weighs an entry by where the entry is
+    /// held rather than encoded. A memo that also stores the pipeline on disk has the encoding's
+    /// length already and weighs by that; one that does not has this, which is the same quantity
+    /// measured on the live object, so an entry is weighed the same whichever way it was kept and
+    /// the memo's byte bound holds either way. Words a stage shares with another holder are
+    /// counted here, as its encoding counts them.
+    ///
+    /// A floor rather than an exact total. The SPIR-V spans three orders of magnitude between
+    /// pipelines and every word of it is counted; the layout, the vertex input, the graphics
+    /// state, the interface, the requirements and each stage's strategy census are counted at
+    /// their own sizes and their nested maps are not walked, so the figure is low by an amount
+    /// bounded by Metal's slot and attachment counts, which no module can grow.
+    pub fn footprint(&self) -> u64 {
+        let stages: u64 = self.stages.iter().map(stage_footprint).sum();
+        size_of::<RenderPipeline>() as u64
+            + vector_bytes::<StageModule>(self.stages.capacity())
+            + vector_bytes::<RuntimeDependency>(self.dependencies.capacity())
+            + stages
+    }
+}
+
+/// The heap bytes of a vector of `T` at `capacity`.
+fn vector_bytes<T>(capacity: usize) -> u64 {
+    capacity as u64 * size_of::<T>() as u64
+}
+
+/// The bytes `stage` keeps live beside its own storage, which its pipeline's `stages` vector
+/// holds ([`RenderPipeline::footprint`]).
+fn stage_footprint(stage: &StageModule) -> u64 {
+    let clauses: u64 = stage
+        .specialized_notes
+        .iter()
+        .map(|note| {
+            vector_bytes::<SpecClause>(note.when.capacity())
+                + note
+                    .when
+                    .iter()
+                    .map(|clause| vector_bytes::<SpecTest>(clause.all.capacity()))
+                    .sum::<u64>()
+        })
+        .sum();
+    stage.entry_point.capacity() as u64
+        + vector_bytes::<u32>(stage.spirv.len())
+        + stage
+            .constant_blob
+            .as_ref()
+            .map_or(0, |blob| blob.len() as u64)
+        + vector_bytes::<SpecConstant>(stage.specialization.constants.capacity())
+        + vector_bytes::<PrecisionNote>(stage.precision_notes.capacity())
+        + vector_bytes::<SpecializedNote>(stage.specialized_notes.capacity())
+        + clauses
+        + vector_bytes::<u32>(
+            stage.rounded_colors.capacity()
+                + stage.half_bit_colors.capacity()
+                + stage.own_pixel_textures.capacity()
+                + stage.snapshot_textures.capacity(),
+        )
 }
 
 /// A compiled compute pipeline.

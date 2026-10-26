@@ -76,12 +76,30 @@ pub struct CompiledFunction(Arc<FunctionArtifact>, Arc<LastRelocation>);
 #[derive(Default)]
 pub(crate) struct LastRelocation(std::sync::Mutex<Option<Relocated>>);
 
-/// One relocation: what link assigned, and the words that came out.
+/// One relocation: what link assigned, the words that came out, and a digest of those words a
+/// caller asked for.
 struct Relocated {
     /// The value link assigned to each of the module's relocation slots, in `relocs` order: the
     /// whole of what the words depend on besides the module itself.
     assigned: Vec<u32>,
     words: Arc<[u32]>,
+    /// The digest of `words`, with the function that derived it: a caller that hashes words some
+    /// other way derives again rather than reading a digest its own function did not make
+    /// ([`CompiledFunction::relocated_words_digest`]). Cleared with the words it describes, so
+    /// it can never name another relocation's.
+    digest: Option<(fn(&[u32]) -> Hash256, Hash256)>,
+}
+
+/// What a relocation slot can say about a digest of some words by some function
+/// ([`LastRelocation::digest_of`]).
+enum DigestOf {
+    /// It holds those very words and that function's digest of them.
+    Kept(Hash256),
+    /// It holds those very words and no digest of them by that function, so one derived now
+    /// belongs in it.
+    Wanted,
+    /// The words are not the ones it holds, so it has nothing to say about them.
+    Other,
 }
 
 impl LastRelocation {
@@ -92,13 +110,46 @@ impl LastRelocation {
         (kept.assigned == assigned).then(|| Arc::clone(&kept.words))
     }
 
-    /// Keep `words` as the relocation that assigned `assigned`, replacing what the slot held.
+    /// Keep `words` as the relocation that assigned `assigned`, replacing what the slot held
+    /// (and the digest of the words it held).
     pub(crate) fn keep(&self, assigned: Vec<u32>, words: &Arc<[u32]>) {
         let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
         *slot = Some(Relocated {
             assigned,
             words: Arc::clone(words),
+            digest: None,
         });
+    }
+
+    /// What the slot has for a digest of `words` by `derive` ([`DigestOf`]). The words are the
+    /// slot's only if they are the same allocation: a relocation hands back the very `Arc` it
+    /// kept, so an equal copy of the words is a different caller's and answers `Other`.
+    fn digest_of(&self, words: &Arc<[u32]>, derive: fn(&[u32]) -> Hash256) -> DigestOf {
+        let slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(kept) = slot.as_ref() else {
+            return DigestOf::Other;
+        };
+        if !Arc::ptr_eq(&kept.words, words) {
+            return DigestOf::Other;
+        }
+        match kept.digest {
+            Some((made_by, digest)) if std::ptr::fn_addr_eq(made_by, derive) => {
+                DigestOf::Kept(digest)
+            }
+            _ => DigestOf::Wanted,
+        }
+    }
+
+    /// Keep `digest`, which `derive` produced over `words`, if the slot still holds those very
+    /// words; drop it if the slot has moved on, since a digest only ever describes the words
+    /// beside it.
+    fn keep_digest(&self, words: &Arc<[u32]>, derive: fn(&[u32]) -> Hash256, digest: Hash256) {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(kept) = slot.as_mut() {
+            if Arc::ptr_eq(&kept.words, words) {
+                kept.digest = Some((derive, digest));
+            }
+        }
     }
 }
 
@@ -130,6 +181,56 @@ impl CompiledFunction {
     /// fills.
     pub(crate) fn last_relocation(&self) -> &LastRelocation {
         &self.1
+    }
+
+    /// The digest `derive` gives for `words`, where `words` are the final SPIR-V of this
+    /// function's last relocation -- the very `Arc` a pipeline's stage took from it -- and
+    /// `None` where they are not.
+    ///
+    /// A pipeline state that names a stage's module by a digest of its words asks here first: a
+    /// sweep of states over one function pair takes the same words on every creation (the
+    /// relocation slot gives back the same allocation), so without this each creation hashes
+    /// words byte-identical to the previous creation's. Pass the words a stage of the pipeline
+    /// holds and the function that would have hashed them.
+    ///
+    /// **A miss costs no `derive` call at all.** `None` is answered from the slot alone: no
+    /// hash is taken, and the caller is free to derive or not. That is what a caller in a hot
+    /// path needs to know, and it is also why the caller's own function stays the only
+    /// derivation of a stage's words that ever runs -- nothing here hashes words any other way,
+    /// so nothing keyed on such a digest can take a different value from this.
+    ///
+    /// **The digest a caller gets is always one its own `derive` produced.** The slot keeps the
+    /// function beside the digest and answers only where that function is this call's, so two
+    /// callers that hash differently never read each other's digest: a mismatch derives again
+    /// and replaces what the slot held.
+    ///
+    /// **On comparing `fn` pointers**, which is not guaranteed stable: identical-code folding
+    /// may merge two functions into one address, and one `fn` item may have several addresses
+    /// across codegen units. Both directions are harmless here. Two addresses for one function
+    /// make a mismatch, which costs a hash and gives the same digest. The dangerous direction --
+    /// two *different* hash functions reading as one -- cannot occur, because folding merges
+    /// only identical machine code and identical machine code cannot produce different digests.
+    ///
+    /// `derive` is the caller's, so it is **never called while the slot is locked**: one that
+    /// reached back into this compiled function would otherwise deadlock. The slot is locked and
+    /// read, released, `derive` is called, and the digest is stored only if the slot still holds
+    /// those words. Two threads deriving at once is benign -- the same words give the same
+    /// digest, and the last store wins.
+    pub fn relocated_words_digest(
+        &self,
+        words: &Arc<[u32]>,
+        derive: fn(&[u32]) -> crate::cache::Hash256,
+    ) -> Option<crate::cache::Hash256> {
+        match self.1.digest_of(words, derive) {
+            DigestOf::Kept(digest) => Some(digest),
+            DigestOf::Other => None,
+            // Derived with the slot released: `derive` is the caller's and may reach anywhere.
+            DigestOf::Wanted => {
+                let digest = derive(words);
+                self.1.keep_digest(words, derive, digest);
+                Some(digest)
+            }
+        }
     }
 
     /// The key the function was compiled under.

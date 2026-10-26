@@ -9,10 +9,14 @@
 //!   modules, layouts, plans and `VkPipeline`s), or makes the variant's objects again from the
 //!   memo's pipeline, and is a state of its own either way.
 //! - **Bounded.** The memo holds at most [`ShaderCacheOptions::memory_capacity`] bytes of
-//!   artifacts, each counted at its encoded length, and at most [`MEMO_ENTRIES`] entries; past
-//!   either, the least recently used go. It holds no Vulkan object, and no strong reference to a
-//!   variant: those live as long as a state or a pending command holds them. A variant's own
-//!   memos (its plans and `VkPipeline`s) and a state's other variants are [`Lru`]s too.
+//!   artifacts and at most [`MEMO_ENTRIES`] entries; past either, the least recently used go. An
+//!   entry is counted at its encoded length where it was encoded for the directory, and at what
+//!   it retains ([`RenderPipeline::footprint`]) where it was kept without being encoded
+//!   (`pipeline/sources.rs`) -- never at the zero bytes a skipped encoding returns, which would
+//!   let 4096 entries of a few hundred kilobytes each sit in a memo that believed its bound
+//!   untouched. It holds no Vulkan object, and no strong reference to a variant: those live as
+//!   long as a state or a pending command holds them. A variant's own memos (its plans and
+//!   `VkPipeline`s) and a state's other variants are [`Lru`]s too.
 //!
 //! [`ShaderCacheOptions::memory_capacity`]: crate::ShaderCacheOptions::memory_capacity
 
@@ -306,12 +310,14 @@ impl PipelineMemo {
         }
     }
 
-    /// Keep `pipeline`, whose encoding is `bytes` long.
-    pub(crate) fn keep_render(&self, pipeline: &Arc<RenderPipeline>, bytes: u64) {
+    /// Keep `pipeline` at `weight`: its encoding's length where its creation encoded it for the
+    /// directory, else what it retains (`RenderPipeline::footprint`). Never zero, whichever way
+    /// the creation kept it, or the memo's byte bound would stop bounding it.
+    pub(crate) fn keep_render(&self, pipeline: &Arc<RenderPipeline>, weight: u64) {
         lock(&self.pipelines).insert(
             MemoKey::Render(pipeline.key),
             MemoValue::Render(Arc::clone(pipeline), Weak::new()),
-            bytes,
+            weight,
         );
     }
 
