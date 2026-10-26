@@ -48,6 +48,8 @@ mod loops;
 mod scc;
 
 pub use cfg::Cfg;
+#[cfg(test)]
+pub(crate) use dom::trees_computed;
 pub use dom::{DomTree, PostDomTree};
 pub use loops::{LoopForest, LoopId};
 pub use scc::Sccs;

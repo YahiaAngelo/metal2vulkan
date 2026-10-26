@@ -737,13 +737,10 @@ pub fn specialize_dynamic(
             library: false,
         });
     }
-    let module = Module::new(pruned.parts, m)?;
-    let body = module
-        .func(pruned.func)
-        .and_then(|f| f.body.as_ref())
-        .ok_or_else(|| invariant("the entry lost its body"))?;
-    let cfg = Cfg::build(body, m)?;
-    let dom = DomTree::compute(&cfg, m)?;
+    // The verification of the pruned module builds the entry body's graph and dominator tree for
+    // its dominance check; it hands them over rather than have them computed again here.
+    let (module, graphs) = Module::new_with_graphs(pruned.parts, pruned.func, m)?;
+    let (cfg, dom) = graphs.ok_or_else(|| invariant("the entry lost its body"))?;
     Ok(Entry {
         func: pruned.func,
         ep,

@@ -30,11 +30,34 @@ pub struct DomTree<N> {
     node: PhantomData<fn() -> N>,
 }
 
+/// Count one dominator tree ([`trees_computed`]).
+#[cfg(test)]
+fn note_computed() {
+    TREES_COMPUTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Count one tree; nothing outside the crate's own tests.
+#[cfg(not(test))]
+fn note_computed() {}
+
+/// The dominator trees computed in this process, which the tests that hold a stage to one tree a
+/// body read: a specialization must compute no tree the verification of its own pruned module
+/// already built.
+#[cfg(test)]
+static TREES_COMPUTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// [`TREES_COMPUTED`].
+#[cfg(test)]
+pub(crate) fn trees_computed() -> u64 {
+    TREES_COMPUTED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 impl<N: NodeId> DomTree<N> {
     /// The dominators of `cfg`, rooted at its entry. O((n + e)·α) work in practice (Semi-NCA's
     /// NCA step is O(n²) only on contrived inputs); O(n) memory beyond the `Cfg`.
     /// On error nothing stays charged to `meter`'s ledger.
     pub fn compute(cfg: &Cfg<N>, meter: &mut Meter) -> Result<DomTree<N>, Error> {
+        note_computed();
         metered(meter, |meter, keep, scratch| {
             Self::compute_in(cfg, meter, keep, scratch)
         })

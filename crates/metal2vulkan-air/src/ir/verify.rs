@@ -49,8 +49,26 @@ pub struct Module {
 impl Module {
     /// Verify `parts` into a module.
     pub fn new(parts: ModuleParts, meter: &mut Meter) -> Result<Module, Error> {
-        Verifier::new(&parts).module(meter)?;
+        Verifier::new(&parts).module(None, meter)?;
         Ok(Module { parts })
+    }
+
+    /// [`Module::new`], also returning the control-flow graph and dominator tree of `keep`'s
+    /// body, or `None` where `keep` has none.
+    ///
+    /// The dominance check builds exactly those two structures for every body it verifies and
+    /// returns them to the ledger when the body passes, so a caller that needs the entry's pair
+    /// next ([`crate::canon::specialize_dynamic`]) would compute the same graph and the same tree
+    /// over the same body a second time. This hands the pair over instead, with its ledger charge
+    /// still held, which is what the caller's own `Cfg::build` and `DomTree::compute` would have
+    /// charged.
+    pub(crate) fn new_with_graphs(
+        parts: ModuleParts,
+        keep: FuncId,
+        meter: &mut Meter,
+    ) -> Result<(Module, Option<(Cfg<BlockId>, DomTree<BlockId>)>), Error> {
+        let kept = Verifier::new(&parts).module(Some(keep), meter)?;
+        Ok((Module { parts }, kept.map(|g| (g.cfg, g.dom))))
     }
 
     /// Take the module apart for a rewriting pass.
@@ -141,6 +159,21 @@ struct Verifier<'a> {
     p: &'a ModuleParts,
 }
 
+/// The graphs the dominance check of one body builds, kept for the caller that asked for them
+/// ([`Module::new_with_graphs`]); their ledger charge is still held.
+struct BodyGraphs {
+    cfg: Cfg<BlockId>,
+    dom: DomTree<BlockId>,
+}
+
+impl BodyGraphs {
+    /// Return what the pair holds to `meter`'s ledger.
+    fn release(self, meter: &mut Meter) {
+        meter.release(self.dom.ledger_bytes());
+        meter.release(self.cfg.ledger_bytes());
+    }
+}
+
 /// Typing context for one function body: where an error is reported and how operands type.
 struct FnCtx<'a> {
     name: DiagName,
@@ -198,7 +231,9 @@ impl<'a> Verifier<'a> {
         AddrSpace::from_raw(raw).ok()
     }
 
-    fn module(&self, meter: &mut Meter) -> Result<(), Error> {
+    /// Verify every part of the module, keeping the graphs the dominance check builds for `keep`'s
+    /// body ([`Module::new_with_graphs`]).
+    fn module(&self, keep: Option<FuncId>, meter: &mut Meter) -> Result<Option<BodyGraphs>, Error> {
         let module_err = |k| verify_error(k, Location::module());
         let syms = &self.p.symbols;
         let sym_ok = |s: Sym| syms.contains(s);
@@ -249,11 +284,24 @@ impl<'a> Verifier<'a> {
                 return Err(module_err(VerifyError::MalformedMetadata));
             }
         }
-        for (_, f) in self.p.funcs.iter() {
-            meter.tick(1)?;
-            self.function(f, meter)?;
+        let mut kept: Option<BodyGraphs> = None;
+        for (id, f) in self.p.funcs.iter() {
+            let step = meter
+                .tick(1)
+                .and_then(|()| self.function(f, keep == Some(id), meter));
+            match step {
+                Ok(Some(graphs)) => kept = Some(graphs),
+                Ok(None) => {}
+                // A later function's refusal gives the kept pair's bytes back.
+                Err(e) => {
+                    if let Some(graphs) = kept {
+                        graphs.release(meter);
+                    }
+                    return Err(e);
+                }
+            }
         }
-        Ok(())
+        Ok(kept)
     }
 
     fn section_ok(&self, s: Option<Section>) -> bool {
@@ -351,7 +399,12 @@ impl<'a> Verifier<'a> {
         }
     }
 
-    fn function(&self, f: &'a Function, meter: &mut Meter) -> Result<(), Error> {
+    fn function(
+        &self,
+        f: &'a Function,
+        keep: bool,
+        meter: &mut Meter,
+    ) -> Result<Option<BodyGraphs>, Error> {
         let name = self.diag(f.name);
         let fn_err = |k| verify_error(k, Location::function(name.clone(), None, None));
         let Some((ret, params, _)) = fn_sig(self.types(), f.ty) else {
@@ -375,7 +428,7 @@ impl<'a> Verifier<'a> {
             return Err(fn_err(VerifyError::MalformedFunction));
         }
         let Some(body) = &f.body else {
-            return Ok(());
+            return Ok(None);
         };
         // Everything charged here is returned once the body is checked, pass or fail.
         let mut block_of = Vec::new();
@@ -396,13 +449,26 @@ impl<'a> Verifier<'a> {
         let checked = self.layout(&mut cx, meter).and_then(|()| {
             self.branch_targets(&mut cx, meter)?;
             let cfg = Cfg::build(body, meter)?;
-            let checked = DomTree::compute(&cfg, meter).and_then(|dom| {
-                let checked = self.instructions(&mut cx, &cfg, &dom, meter);
-                meter.release(dom.ledger_bytes());
-                checked
-            });
-            meter.release(cfg.ledger_bytes());
-            checked
+            let dom = match DomTree::compute(&cfg, meter) {
+                Ok(dom) => dom,
+                Err(e) => {
+                    meter.release(cfg.ledger_bytes());
+                    return Err(e);
+                }
+            };
+            let graphs = BodyGraphs { cfg, dom };
+            match self.instructions(&mut cx, &graphs.cfg, &graphs.dom, meter) {
+                // The caller asked for this body's pair, so it stays charged and goes to it.
+                Ok(()) if keep => Ok(Some(graphs)),
+                Ok(()) => {
+                    graphs.release(meter);
+                    Ok(None)
+                }
+                Err(e) => {
+                    graphs.release(meter);
+                    Err(e)
+                }
+            }
         });
         meter.release(block_of_bytes);
         checked

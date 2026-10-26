@@ -241,6 +241,26 @@ fn a_supplied_constant_is_baked_and_its_gate_folds() {
     assert_eq!(e.dom.idom(BlockId::new(2)), Some(BlockId::new(1)));
 }
 
+/// The entry's control-flow graph and dominator tree are the pair the verification of the pruned
+/// module built for its own dominance check, not a second pair computed over the same body.
+///
+/// `gated_store`'s module holds one function with a body, so the whole specialization computes one
+/// dominator tree. Rebuilding the pair after the verification reads two.
+#[test]
+fn a_specialization_computes_the_entry_dominator_tree_once() {
+    let (module, abi) = gated_store();
+    let before = crate::graph::trees_computed();
+    let e = specialize(module, &abi, &request(&[(0, int(5))]), &mut meter()).unwrap();
+    let computed = crate::graph::trees_computed() - before;
+    // The pair is the entry's own and is usable: the same answers the folding test reads.
+    assert_eq!(e.cfg.reachable_count(), 3);
+    assert_eq!(e.dom.idom(BlockId::new(2)), Some(BlockId::new(1)));
+    assert_eq!(
+        computed, 1,
+        "the specialization computed {computed} dominator trees for one body"
+    );
+}
+
 #[test]
 fn an_unsupplied_constant_is_undefined_and_its_gate_folds_off() {
     let (module, abi) = gated_store();
