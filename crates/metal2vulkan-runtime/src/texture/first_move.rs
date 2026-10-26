@@ -117,6 +117,7 @@ use metal2vulkan::vk::Format;
 use std::any::Any;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError, Weak};
+use std::time::Instant;
 
 /// One `VkImage`'s first move: from `old` to `GENERAL`, then, where it reads zero, the copies of
 /// the device's zeros that write every texel, or a clear of them.
@@ -787,6 +788,13 @@ pub(crate) struct FirstMoves {
     /// The registrations that found a submission holding the order and waited for its place
     /// (`WorkCounts::registrations_waited`).
     waited: AtomicU64,
+    /// The submissions that found another holding the order and waited for their place, and the
+    /// nanoseconds they waited (`WorkCounts::first_work_order_waits`): a submission holds the
+    /// order from its take to its `vkQueueSubmit`, and an internal submission
+    /// (`device/submit.rs`) holds it while it waits for the GPU, so this is the scheduler's
+    /// thread blocking before its own `vkQueueSubmit`.
+    submissions_waited: AtomicU64,
+    submission_wait_nanos: AtomicU64,
     waiting: Mutex<Vec<Waiting>>,
     /// The point of the last batch on each `VkQueue` that did some, by queue.
     done_at: Mutex<Vec<Point>>,
@@ -944,13 +952,41 @@ impl FirstMoves {
         self.take_with(named, || (!self.ordered).then(hold))
     }
 
+    /// The submissions' order, for a submission: taken, and the wait counted where another
+    /// submission holds it ([`FirstMoves::submissions_waited`]). Nothing is read from the host's
+    /// clock where the order is free.
+    fn submission_place(&self) -> MutexGuard<'_, ()> {
+        match self.order.try_lock() {
+            Ok(order) => order,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                let waited = Instant::now();
+                let order = lock(&self.order);
+                let nanos = u64::try_from(waited.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                self.submissions_waited.fetch_add(1, Ordering::Relaxed);
+                self.submission_wait_nanos
+                    .fetch_add(nanos, Ordering::Relaxed);
+                order
+            }
+        }
+    }
+
+    /// The submissions that waited for another's place in the order so far, and the nanoseconds
+    /// they waited.
+    pub(crate) fn submissions_waited(&self) -> (u64, u64) {
+        (
+            self.submissions_waited.load(Ordering::Relaxed),
+            self.submission_wait_nanos.load(Ordering::Relaxed),
+        )
+    }
+
     /// As [`take`](Self::take), holding the slots `hold` gives once its place is taken.
     fn take_with(
         &self,
         named: impl Fn(ResourceKey) -> bool,
         hold: impl FnOnce() -> Option<HeldSlots>,
     ) -> Taken<'_> {
-        let order = lock(&self.order);
+        let order = self.submission_place();
         let slots = hold();
         let mut held = Vec::new();
         let mut left: Vec<Box<dyn Any + Send + Sync>> = Vec::new();
@@ -1737,6 +1773,43 @@ mod tests {
         })
         .unwrap();
         (got.recv_timeout(within).is_ok(), thread)
+    }
+
+    /// A submission that finds another holding its place in the submissions' order waits for it,
+    /// counted with the nanoseconds it waited (`WorkCounts::first_work_order_waits`): a
+    /// submission holds that place from its take of the first work to its `vkQueueSubmit`, and
+    /// one of the device's own (`device/submit.rs`) holds it while it waits for its work to
+    /// complete on the GPU, so a batch's submission waits here, on the scheduler's thread, before
+    /// its own `vkQueueSubmit`. A submission that finds the order free waits for nothing and is
+    /// not counted.
+    #[test]
+    fn a_submission_that_waits_for_another_s_place_is_counted_with_its_nanos() {
+        let moves = Arc::new(FirstMoves::default());
+        // One that finds the order free: not counted, and no clock read.
+        drop(moves.take(|_| false));
+        assert_eq!(moves.submissions_waited(), (0, 0));
+        let taken = moves.take(|_| false);
+        let (sent, got) = std::sync::mpsc::channel();
+        let beside = Arc::clone(&moves);
+        let thread = crate::exit_guard::spawn(std::thread::Builder::new(), move || {
+            drop(beside.take(|_| false));
+            // Received, or not where the wait for it ended first.
+            sent.send(()).ok();
+        })
+        .unwrap();
+        assert!(
+            got.recv_timeout(std::time::Duration::from_millis(200))
+                .is_err(),
+            "a submission took its place while another held it"
+        );
+        drop(taken);
+        thread.join().unwrap();
+        let (waits, nanos) = moves.submissions_waited();
+        assert_eq!(
+            waits, 1,
+            "the submission's wait for its place was not counted"
+        );
+        assert!(nanos > 0, "the wait was counted as taking no time");
     }
 
     /// Where a batch holds the texture slots' writes ([`FirstMoves::ordered`] false), a resource

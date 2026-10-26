@@ -11,6 +11,7 @@ use super::degradation::Degradation;
 use super::device::lock;
 use super::memory::FreeCause;
 use super::recorder::{CommandsReplayed, ReplayCounts};
+use super::scheduler::HeldFor;
 use super::shadow::{Backing, CopyCause, Lost, ShadowCopy, ShadowSource};
 use super::Device;
 use ash::vk;
@@ -173,6 +174,12 @@ pub(crate) struct Counters {
     batches_by_pending: [AtomicU64; 4],
     groups_kept_pending: AtomicU64,
     groups_sent_for_waits: AtomicU64,
+    /// By `HeldFor`, in its order: the looks that found a line's head held for each reason.
+    heads_held_for: [AtomicU64; HeldFor::COUNT],
+    heads_waiting_at_their_gate: AtomicU64,
+    heads_awaiting_check_signals: AtomicU64,
+    batches_held_past_a_look: AtomicU64,
+    batch_hold_nanos: AtomicU64,
     scheduler_passes_by_waiters: AtomicU64,
     batches_submitted_by_waiters: AtomicU64,
     command_buffer_wakes: AtomicU64,
@@ -1277,6 +1284,35 @@ impl Counters {
     /// Such a group went at once because a thread waits for one of its command buffers.
     pub(crate) fn group_sent_for_wait(&self) {
         self.groups_sent_for_waits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A look of the scheduler's for the next batch to submit found a line's head held for
+    /// `reason`, so it submitted no batch of that command buffer (`scheduler/mod.rs`): once per
+    /// head the look found held, so a head held through many looks is counted at each.
+    pub(crate) fn head_held_for(&self, reason: HeldFor) {
+        self.heads_held_for[reason as usize].fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Such a look left a head waiting at its host step's gate for the work submitted before it
+    /// to complete (`scheduler/mod.rs`'s `gate_heads`).
+    pub(crate) fn head_at_its_gate(&self) {
+        self.heads_waiting_at_their_gate
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Such a look left a head's submission checks waiting for a submitted GPU signal to land
+    /// (`scheduler/mod.rs`'s `check_heads`).
+    pub(crate) fn head_awaiting_check_signals(&self) {
+        self.heads_awaiting_check_signals
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A batch a look had found held went (submitted, or held in a group) `nanos` nanoseconds
+    /// after the first look that found it held (`scheduler/mod.rs`).
+    pub(crate) fn batch_hold_ended(&self, nanos: u64) {
+        self.batches_held_past_a_look
+            .fetch_add(1, Ordering::Relaxed);
+        self.batch_hold_nanos.fetch_add(nanos, Ordering::Relaxed);
     }
 
     /// A command buffer's change woke the threads sleeping on it where `parked`, else spared the
@@ -3219,6 +3255,57 @@ pub struct WorkCounts {
     /// Of those, the groups that went at once because a thread began to wait for one of their
     /// command buffers' completion (`CommandBuffer::wait_until_completed`).
     pub groups_sent_for_waits: u64,
+    /// Times the scheduler looked for the next batch to submit and found a logical queue's first
+    /// committed batch held for a binary semaphore it waits for whose signal is not submitted
+    /// (`encode_wait_for_vk_semaphore`). With the five fields after this one, every reason a look
+    /// of the scheduler's did not submit a head, each counted at every look that found it, so a
+    /// head held through many looks is counted at each: the spread says what holds a device's
+    /// submissions back. A head held for more than one reason is counted under each, so these do
+    /// not sum to the looks. `batch_hold_nanos` is the time those holds took.
+    pub heads_held_for_binary_semaphores: u64,
+    /// Heads found held while a rebind encodes their event group's encoders again, or while their
+    /// command buffer's first submission is not resolved (`command_buffer/reencode.rs`,
+    /// `command_buffer/first_submission.rs`).
+    pub heads_held_for_reencodes: u64,
+    /// Heads found held for a CPU decode queued into a decoded twin they may read
+    /// (`texture/twin_decode.rs`); every head while an untracked texture's is left.
+    pub heads_held_for_decodes: u64,
+    /// Heads found held because their host step has not been recorded: it waits for a pipeline it
+    /// records, or at its gate (`heads_waiting_at_their_gate`), or it is queued for the
+    /// scheduler's thread, which runs one at a time between its looks.
+    pub heads_held_for_host_steps: u64,
+    /// Heads found held because their command buffer's submission checks have not run
+    /// (`command_buffer/checks.rs`): the checks wait for an event value to be reached
+    /// (`heads_awaiting_check_signals`), or are queued for the scheduler's thread.
+    pub heads_held_for_checks: u64,
+    /// Heads found held for an event value (`encode_wait_for_event`) that neither a submitted
+    /// signal nor the host reaches.
+    pub heads_held_for_event_values: u64,
+    /// Heads found held behind a batch of an earlier commit on **another logical queue** that
+    /// keeps its place and whose footprint runs in commit order with the head's
+    /// (`scheduler/order.rs`): Metal tracks a resource across queues in the order it schedules
+    /// the command buffers, so a batch the runtime holds for a reason of its own (its host step,
+    /// its submission checks) must not let a later commit's conflicting batch go first. This is
+    /// the one hold that crosses logical queues and `VkQueue`s, and a batch whose uses are not
+    /// all known yet (work a host step or its submission records, `tracker::ordered`'s `None`)
+    /// conflicts with every batch that makes a tracked use or names a fence.
+    pub heads_held_for_earlier_commits: u64,
+    /// Times a look left a head that needs a host step waiting at its gate: the step reads what
+    /// the GPU may write, so it waits until every `VkQueue` completed what was submitted to it
+    /// when the batch was otherwise ready (a predicated loop's check waits for its own `VkQueue`
+    /// alone). Of `heads_held_for_host_steps`.
+    pub heads_waiting_at_their_gate: u64,
+    /// Times a look left a head's submission checks waiting for a submitted GPU signal to land:
+    /// Metal checks a submission only once the event values it waits for are reached, so a value
+    /// only a submitted GPU signal reaches is waited for. Of `heads_held_for_checks`.
+    pub heads_awaiting_check_signals: u64,
+    /// Batches that a look of the scheduler's had found held and that then went (submitted, or
+    /// held in a group): each counted once, at its own submission.
+    pub batches_held_past_a_look: u64,
+    /// Nanoseconds those batches spent held: from the first look that found each held to its
+    /// submission. The reasons above say what the time went on, and `scheduler_passes`,
+    /// `scheduler_sleeps` and kin whether the scheduler's thread was busy or asleep meanwhile.
+    pub batch_hold_nanos: u64,
     /// Registrations of a new resource's first work (as a texture or buffer is made) that found
     /// a submission holding its place in the submissions' order and waited until that submission
     /// was made: only on a device whose heap sets take no writes while a command buffer that binds
@@ -3227,6 +3314,16 @@ pub struct WorkCounts {
     /// buffers, to its `vkQueueSubmit` (`texture/first_move.rs`). Elsewhere a registration takes
     /// no place, and this stays 0.
     pub registrations_waited: u64,
+    /// Submissions (a batch's, or one of the device's own) that found another holding its place in
+    /// the new resources' first-work order and waited for it (`texture/first_move.rs`). A
+    /// submission holds that order from its take of the first work to its `vkQueueSubmit`, and one
+    /// of the device's own (`device/submit.rs`: a host copy into or out of a texture, an explicit
+    /// clear) holds it while it waits for its own work to complete on the GPU: a batch's
+    /// submission then waits here, on the scheduler's thread, before its own `vkQueueSubmit`. On
+    /// every device, not only those whose registrations wait (`registrations_waited`).
+    pub first_work_order_waits: u64,
+    /// Nanoseconds those submissions waited.
+    pub first_work_order_wait_nanos: u64,
     /// Times the scheduler's thread found no work and slept (`scheduler/mod.rs`), each until it
     /// was woken or [`scheduler_sleep_slices`](Self::scheduler_sleep_slices) says it timed out.
     pub scheduler_sleeps: u64,
@@ -4301,6 +4398,9 @@ impl Device {
         let counters = &self.shared().counts;
         let churn = counters.churn.snapshot();
         let group_end = |end: GroupEnd| counters.group_ends[end as usize].load(Ordering::Relaxed);
+        let first_work_order = self.shared().textures.first_moves.submissions_waited();
+        let held_for =
+            |reason: HeldFor| counters.heads_held_for[reason as usize].load(Ordering::Relaxed);
         let pending = |bucket: usize| counters.batches_by_pending[bucket].load(Ordering::Relaxed);
         let not_inline =
             |why: NotInline| counters.passes_not_inline[why.index()].load(Ordering::Relaxed);
@@ -4551,7 +4651,24 @@ impl Device {
             batches_with_four_or_more_pending: pending(3),
             groups_kept_pending: counters.groups_kept_pending.load(Ordering::Relaxed),
             groups_sent_for_waits: counters.groups_sent_for_waits.load(Ordering::Relaxed),
+            heads_held_for_binary_semaphores: held_for(HeldFor::BinarySemaphore),
+            heads_held_for_reencodes: held_for(HeldFor::Reencoding),
+            heads_held_for_decodes: held_for(HeldFor::Decode),
+            heads_held_for_host_steps: held_for(HeldFor::HostStep),
+            heads_held_for_checks: held_for(HeldFor::Check),
+            heads_held_for_event_values: held_for(HeldFor::EventValue),
+            heads_held_for_earlier_commits: held_for(HeldFor::EarlierCommit),
+            heads_waiting_at_their_gate: counters
+                .heads_waiting_at_their_gate
+                .load(Ordering::Relaxed),
+            heads_awaiting_check_signals: counters
+                .heads_awaiting_check_signals
+                .load(Ordering::Relaxed),
+            batches_held_past_a_look: counters.batches_held_past_a_look.load(Ordering::Relaxed),
+            batch_hold_nanos: counters.batch_hold_nanos.load(Ordering::Relaxed),
             registrations_waited: self.shared().textures.first_moves.registrations_waited(),
+            first_work_order_waits: first_work_order.0,
+            first_work_order_wait_nanos: first_work_order.1,
             scheduler_sleeps: sleeps,
             scheduler_wakes_commit: by_commit,
             scheduler_wakes_completion: by_completion,

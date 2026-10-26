@@ -117,6 +117,8 @@ mod heap_tiled;
 mod heap_tiled_blocks;
 mod heap_usage;
 mod held_depth;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod hold_sites;
 mod host_aliases;
 mod host_bytes;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]

@@ -218,10 +218,14 @@ impl<B> Order<B> {
     /// `behind` (asked of those, in commit order, until one goes), the one committed first, with
     /// its line's queue, its commit sequence number (for [`put_back`](Self::put_back)) and what
     /// `ready` made of it. `None` when no head is ready.
+    ///
+    /// `ready` takes each head it looks at mutably, so a caller may note on a head it holds back
+    /// why it did (`scheduler/mod.rs`'s [`HeldFor`](crate::scheduler::HeldFor)); it is asked of
+    /// each head in commit order until one is both ready and not `behind`.
     pub(crate) fn next<T>(
         &mut self,
         mut behind: impl FnMut(&Self, u64) -> bool,
-        mut ready: impl FnMut(&B) -> Option<T>,
+        mut ready: impl FnMut(&mut B) -> Option<T>,
     ) -> Option<(u64, u64, B, T)> {
         let Order { lines, heads, .. } = self;
         heads.clear();
@@ -230,12 +234,22 @@ impl<B> Order<B> {
                 .filter_map(|(at, (_, line))| line.front().map(|(sequence, _)| (*sequence, at))),
         );
         heads.sort_unstable();
-        let order: &Self = self;
-        let (at, prepared) = order.heads.iter().find_map(|&(sequence, at)| {
-            let (_, head) = order.lines[at].1.front()?;
-            let prepared = ready(head)?;
-            (!behind(order, sequence)).then_some((at, prepared))
-        })?;
+        let mut found = None;
+        for index in 0..self.heads.len() {
+            let (sequence, at) = self.heads[index];
+            let Some((_, head)) = self.lines[at].1.front_mut() else {
+                continue;
+            };
+            let Some(prepared) = ready(head) else {
+                continue;
+            };
+            if behind(self, sequence) {
+                continue;
+            }
+            found = Some((at, prepared));
+            break;
+        }
+        let (at, prepared) = found?;
         let queue = self.lines[at].0;
         let (sequence, batch) = self.lines[at].1.pop_front()?;
         if self.lines[at].1.is_empty() {
@@ -267,6 +281,16 @@ impl<B> Order<B> {
             self.remove_line(at);
         }
         Some((queue, sequence, batch, prepared))
+    }
+
+    /// The line head of commit sequence number `sequence`, to update in place; `None` where no
+    /// head has it ([`Behind`] holds the numbers one pass asked about).
+    pub(crate) fn head_mut_at(&mut self, sequence: u64) -> Option<&mut B> {
+        (self.lines.iter_mut()).find_map(|(_, line)| {
+            line.front_mut()
+                .filter(|(first, _)| *first == sequence)
+                .map(|(_, head)| head)
+        })
     }
 
     /// Each line's head not `behind`, to update in place.
@@ -355,6 +379,14 @@ pub(crate) struct Behind<F> {
     answers: BTreeMap<u64, bool>,
     kept: Vec<Kept>,
     footprints: BTreeMap<u64, F>,
+}
+
+impl<F> Behind<F> {
+    /// The commit sequence numbers this pass asked about and found waiting behind a batch
+    /// committed before them ([`Order::is_behind`]), for the caller to count the hold of.
+    pub(crate) fn behind(&self) -> impl Iterator<Item = u64> + '_ {
+        (self.answers.iter()).filter_map(|(&sequence, &behind)| behind.then_some(sequence))
+    }
 }
 
 impl<F> Default for Behind<F> {

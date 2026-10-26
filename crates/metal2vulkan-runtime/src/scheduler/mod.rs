@@ -149,6 +149,7 @@ use super::error::{CommandBufferError, Error, MemoryKind};
 use super::event::EventShared;
 use super::event_timeline::WaitFor;
 use super::exit_guard;
+use super::gpu_time;
 use super::recorder::RecorderShared;
 use super::replay::SpareLogs;
 use super::resource::ResourceKey;
@@ -222,6 +223,36 @@ enum Asleep {
     Nudged,
     /// On the GPU, for what the waker's completion turn saw land: its own wait returns for it.
     OnGpu,
+}
+
+/// Why a look of the scheduler's for the next batch to submit did not submit a line's head
+/// ([`Held::held_for`], `WorkCounts::heads_held_for_binary_semaphores` and kin). Every reason a
+/// head keeps its place for is one of these, so the counts say what holds a device's submissions
+/// back; what a batch waits for in its `vkQueueSubmit` is not a hold of the scheduler's and is
+/// none of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HeldFor {
+    /// A binary semaphore it waits for whose signal is not submitted.
+    BinarySemaphore,
+    /// A rebind is encoding its event group's encoders again, or its command buffer's first
+    /// submission is not resolved.
+    Reencoding,
+    /// A CPU decode queued into a decoded twin it may read.
+    Decode,
+    /// Its host step has not been recorded.
+    HostStep,
+    /// Its command buffer's submission checks have not run.
+    Check,
+    /// An event value it waits for that neither a submitted signal nor the host reaches.
+    EventValue,
+    /// A batch of an earlier commit on another logical queue that keeps its place and whose
+    /// footprint runs in commit order with its own ([`Order::is_behind`]).
+    EarlierCommit,
+}
+
+impl HeldFor {
+    /// How many there are, for the counters' array.
+    pub(crate) const COUNT: usize = 7;
 }
 
 /// The lists the thread's wait for the GPU fills, kept with their room.
@@ -493,6 +524,30 @@ struct Held {
     /// Its waits held on the host where a Vulkan wait would have served were counted
     /// ([`count_waits_held`]): once per batch.
     counted_held: bool,
+    /// The host nanoseconds at the first look of the scheduler's that found it held
+    /// ([`held_for`](Self::held_for)), until it goes ([`hold_ended`](Self::hold_ended)).
+    held_since: Option<u64>,
+}
+
+impl Held {
+    /// A look of the scheduler's found it held for `reason`: counted, and the host nanoseconds
+    /// noted at the first look that found it held at all, whatever the reason then. Nothing is
+    /// read from the host's clock while nothing waits.
+    fn held_for(&mut self, reason: HeldFor) {
+        (self.buffer.device().shared().counts).head_held_for(reason);
+        if self.held_since.is_none() {
+            self.held_since = Some(gpu_time::host_nanos());
+        }
+    }
+
+    /// It goes (submitted, or held in a group): where a look had found it held, the nanoseconds
+    /// from that look to now are counted with it. A batch no look found held costs no clock read.
+    fn hold_ended(&mut self) {
+        if let Some(since) = self.held_since.take() {
+            let nanos = gpu_time::host_nanos().saturating_sub(since);
+            (self.buffer.device().shared().counts).batch_hold_ended(nanos);
+        }
+    }
 }
 
 /// What a batch's host step waits for (`CommandBufferShared::step_waits`).
@@ -1038,6 +1093,7 @@ fn take_in(state: &mut State, commits: &mut Vec<Committed>, spent: &mut Spent) {
             checked: batch.checked,
             hastened: false,
             counted_held: false,
+            held_since: None,
         });
         order.push(queue, held);
         spent.push(buffer);
@@ -1144,29 +1200,47 @@ fn submit_ready(
         let behind = |order: &Order<Held>, sequence| is_behind(order, binary, &mut memo, sequence);
         let next = state.order.next(behind, |held| {
             if !binary.ready(&held.binary_needs) {
+                held.held_for(HeldFor::BinarySemaphore);
                 return None;
             }
             // The submission of its event group waits while a rebind encodes encoders of it again
             // (`command_buffer/reencode.rs`).
             if held.buffer.reencode_pending() {
+                held.held_for(HeldFor::Reencoding);
                 return None;
             }
             // Held for a decoded twin's CPU decode it may read: any batch, while an untracked
             // texture's is left.
             if untracked_decodes > 0 || (!decodes.is_empty() && reads_decoding(held, decodes)) {
+                held.held_for(HeldFor::Decode);
                 return None;
             }
             // Held for its host step.
             if held.segments && held.buffer.needs_host_step(held.index) {
+                held.held_for(HeldFor::HostStep);
                 return None;
             }
             // Held for its submission checks.
             if held.checked && held.buffer.needs_check(held.index) {
+                held.held_for(HeldFor::Check);
                 return None;
             }
-            event_waits(held)
+            let waits = event_waits(held);
+            if waits.is_none() {
+                held.held_for(HeldFor::EventValue);
+            }
+            waits
         });
-        let Some((queue, sequence, held, waits)) = next else {
+        // The heads this look found waiting behind a batch of an earlier commit on another logical
+        // queue ([`is_behind`]), counted on each: the one hold that crosses logical queues and
+        // `VkQueue`s. The memo holds every head the look asked about, those whose host step or
+        // checks it held back among them, so none is looked up that was not asked.
+        for sequence in memo.behind() {
+            if let Some(held) = state.order.head_mut_at(sequence) {
+                held.held_for(HeldFor::EarlierCommit);
+            }
+        }
+        let Some((queue, sequence, mut held, waits)) = next else {
             // The batches held go before the pass ends, unless they stay held while their
             // `VkQueue` runs two or more earlier submissions and no head waits for the GPU
             // (`Group::keeps`): a completion turn wakes the thread once one is left, a commit or
@@ -1199,6 +1273,7 @@ fn submit_ready(
             submitted,
             Ok(Submitting::Submitted(_) | Submitting::Grouped)
         ) {
+            held.hold_ended();
             let met = held.waits.len() - waits.len();
             if met > 0 {
                 held.buffer.device().shared().counts.event_waits_met(met);
@@ -1322,7 +1397,7 @@ fn submit_plain_ready(state: &mut State, spent: &mut Spent) -> usize {
             let (binary, decodes, untracked) = (&*binary, &*decodes, *untracked_decodes);
             order.take_first(|held| plain_ready(held, binary, decodes, untracked))
         };
-        let Some((queue, sequence, held, waits)) = taken else {
+        let Some((queue, sequence, mut held, waits)) = taken else {
             drop(busy);
             return submitted;
         };
@@ -1331,6 +1406,7 @@ fn submit_plain_ready(state: &mut State, spent: &mut Spent) -> usize {
             .submit_batch(held.index, held.last, &waits, state);
         // Its waits for values found reached go: it waits for none of them.
         if matches!(answer, Ok(Submitting::Submitted(_))) {
+            held.hold_ended();
             let met = held.waits.len() - waits.len();
             if met > 0 {
                 held.buffer.device().shared().counts.event_waits_met(met);
@@ -1652,6 +1728,7 @@ fn check_heads(state: &mut State, behind: &[u64], left: &mut Left<Work>, awaits:
                 awaits.events(&held.waits);
                 fence(Ordering::SeqCst);
                 if event_waits(held).is_some_and(|waits| !waits.is_empty()) {
+                    (held.buffer.device().shared().counts).head_awaiting_check_signals();
                     landing = true;
                     return false;
                 }
@@ -1753,6 +1830,7 @@ fn gate_heads(state: &mut State, behind: &[u64], left: &mut Left<Work>, awaits: 
         if reached {
             left.push(Kind::Step, (held.buffer.hold(), held.index));
         } else {
+            (shared.counts).head_at_its_gate();
             waiting = true;
         }
     }

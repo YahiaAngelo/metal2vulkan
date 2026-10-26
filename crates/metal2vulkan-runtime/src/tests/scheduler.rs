@@ -272,7 +272,7 @@ fn the_order_takes_the_ready_head_committed_first() {
     order.push(1, ['a', 'b']);
     order.push(2, ['c']);
     order.push(1, ['d']);
-    let ready = |held: &char| (*held != 'a').then_some(());
+    let ready = |held: &mut char| (*held != 'a').then_some(());
     // Queue 1's head is held: queue 2's goes, and queue 1's later batches wait behind its head.
     assert_eq!(order.next(|_, _| false, ready), Some((2, 2, 'c', ())));
     assert_eq!(order.next(|_, _| false, ready), None);
@@ -643,6 +643,63 @@ fn a_later_commit_that_conflicts_waits_behind_a_batch_held_for_its_step() {
     assert_eq!(take(&mut order), Some('a'));
     assert_eq!(take(&mut order), Some('b'));
     assert_eq!(take(&mut order), None);
+}
+
+/// The heads a look found waiting behind an earlier commit, as `submit_ready` counts them
+/// (`WorkCounts::heads_held_for_earlier_commits`): the numbers the look asked about and answered
+/// true for ([`Behind::behind`]), each looked up on its own line ([`Order::head_mut_at`]). The
+/// batch taken, then those names.
+fn take_and_behind(order: &mut Order<Work>) -> (Option<char>, Vec<char>) {
+    let meets = |a: &[u32], b: &[u32]| a.iter().any(|key| b.contains(key));
+    let mut memo = Behind::default();
+    let taken = {
+        let behind = |order: &Order<Work>, sequence| {
+            order.is_behind(
+                sequence,
+                &mut memo,
+                (
+                    &mut |work: &Work| !work.event,
+                    &mut |work: &Work| (work.reads, work.writes),
+                    &|&(reads, writes): &Uses, &(later_reads, later_writes): &Uses| {
+                        meets(writes, later_reads)
+                            || meets(writes, later_writes)
+                            || meets(reads, later_writes)
+                    },
+                ),
+            )
+        };
+        order
+            .next(behind, |work| (!work.step && !work.event).then_some(()))
+            .map(|(_, _, work, ())| work.name)
+    };
+    let mut held: Vec<char> = Vec::new();
+    for sequence in memo.behind() {
+        if let Some(head) = order.head_mut_at(sequence) {
+            held.push(head.name);
+        }
+    }
+    held.sort_unstable();
+    (taken, held)
+}
+
+/// What the scheduler counts as held behind an earlier commit is exactly the head it passed over
+/// for that reason, and nothing else: of three heads behind a batch held for its step, the one
+/// that reads what it writes is named and the two that touch nothing of it are not, whether a
+/// batch went in the look or none did. A head the look never asked about is never named.
+#[test]
+fn the_heads_counted_as_behind_are_the_ones_passed_over() {
+    let mut order = Order::default();
+    order.push(1, [stepping(work('a', &[3], &[1]))]);
+    order.push(2, [work('b', &[1], &[])]);
+    order.push(3, [work('c', &[2], &[])]);
+    order.push(4, [work('d', &[3], &[])]);
+    assert_eq!(take_and_behind(&mut order), (Some('c'), vec!['b']));
+    assert_eq!(take_and_behind(&mut order), (Some('d'), vec!['b']));
+    assert_eq!(take_and_behind(&mut order), (None, vec!['b']));
+    stepped(&mut order, 'a');
+    // Nothing is behind the head it was behind once that head may go.
+    assert_eq!(take_and_behind(&mut order), (Some('a'), vec![]));
+    assert_eq!(take_and_behind(&mut order), (Some('b'), vec![]));
 }
 
 /// A batch committed before the held one goes first, whatever it touches: only later commits

@@ -106,6 +106,12 @@ impl Buffers {
         }
     }
 
+    /// The buffer the dispatch writes, for a leg that commits a command buffer sharing it
+    /// (`hold_sites.rs`).
+    pub(super) fn output(&self) -> &Buffer {
+        &self.output
+    }
+
     /// Whether the output's first `n` words are `input[i] * SCALE + i`.
     fn written(&self, n: u64) -> bool {
         let contents = self.output.contents().unwrap();
