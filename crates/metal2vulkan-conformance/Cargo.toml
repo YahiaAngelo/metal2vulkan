@@ -57,6 +57,14 @@ name = "scratch-holder"
 path = "src/bin/scratch-holder.rs"
 test = false
 
+# A reading of which side holds a `compute_pipeline_with_stage_input` call's cost: our translation,
+# the driver's compile, or the rest of the call. A probe rather than a test -- it wants one process
+# per cache arrangement and prints a table -- so `test = false`.
+[[bin]]
+name = "stage-input-split"
+path = "src/bin/stage-input-split.rs"
+test = false
+
 # Device-executing tests are gated on non-default cfgs rather than features, because the ordinary
 # gate builds with `--all-features`: `--cfg m2v_gpu` (a real GPU) and `--cfg m2v_cpu_icd` (a CPU
 # Vulkan ICD such as lavapipe). See docs/VALIDATION.md.
