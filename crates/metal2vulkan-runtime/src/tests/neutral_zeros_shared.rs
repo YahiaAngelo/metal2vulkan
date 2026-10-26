@@ -57,6 +57,18 @@
 //! carry: the only way to reach it would be to share a region a shader stores through, which is
 //! the fault the writable check is here to catch.
 //!
+//! # The store sink's own cost
+//!
+//! The sink is write-only and nothing reads it, so one sink shared by every command of the device
+//! would hand no command another's bytes -- and sharing it is forbidden all the same: two commands
+//! with no memory dependency between them storing to the same bytes is a data race, which Vulkan's
+//! memory model forbids whether or not anything reads them, and ordering them would take a barrier
+//! between every pair of commands that bind a sink (`binding::descriptor`'s `WriteSource::Neutral`
+//! arm). So each command keeps a sink region of its own, and what that costs a dispatch is one
+//! region of the arena and nothing else -- no `VkBuffer`, no new buffer written to zero and no
+//! descriptor set, since the binding is dynamic and the region's offset is bound with the set
+//! (`a_store_sinks_region_is_a_dispatchs_whole_cost`).
+//!
 //! What none of it covers: a draw or dispatch whose read-only slot is unbound **and** whose
 //! length differs from `zero_buffer_bytes` on this device, since one device offers one length; and
 //! the fully-bound case, which binds no neutral at all and whose per-draw work was already one
@@ -214,8 +226,11 @@ fn draws_that_share_the_zero_buffer_bind_their_set_once() {
 
 /// `scale_and_offset` of the examples fixture, whose `input` and `output` are written `device`
 /// pointers (storage buffers) and whose `scale` is a `constant` (a read-only uniform buffer).
-/// `unbound` is the buffer index left unset, which the plan binds a neutral at.
-fn dispatched(dispatches: usize, unbound: u64) -> (u64, crate::WorkCounts, crate::WorkCounts) {
+/// `unbound` is the buffer index left unset, which the plan binds a neutral at; an `unbound` past
+/// the last slot (3) leaves every slot bound, so the store sink is the only neutral the plan
+/// binds. The bytes its command buffer's upload arena held once encoded come back with the
+/// counts.
+fn dispatched(dispatches: usize, unbound: u64) -> (u64, u64, crate::WorkCounts, crate::WorkCounts) {
     let scratch = Scratch::new();
     let device = device(&scratch.0);
     let queue = device.new_command_queue().unwrap();
@@ -246,13 +261,14 @@ fn dispatched(dispatches: usize, unbound: u64) -> (u64, crate::WorkCounts, crate
             .unwrap();
     }
     encoder.end_encoding().unwrap();
+    let arena = command_buffer.upload_bytes();
     command_buffer.commit().unwrap();
     command_buffer
         .wait_until_completed_for(std::time::Duration::from_secs(60))
         .unwrap();
     assert_eq!(command_buffer.error(), None, "the dispatches ran");
     let after = device.work_counts();
-    (device.neutral_zeros_made(), before, after)
+    (device.neutral_zeros_made(), arena, before, after)
 }
 
 /// A kernel's unbound `constant` slot is a read-only binding: the dispatches share the device's
@@ -263,7 +279,7 @@ fn dispatched(dispatches: usize, unbound: u64) -> (u64, crate::WorkCounts, crate
 #[test]
 fn dispatches_share_the_devices_one_zero_buffer() {
     let run = |dispatches| {
-        let (made, before, after) = dispatched(dispatches, 2);
+        let (made, _, before, after) = dispatched(dispatches, 2);
         (
             made,
             after.new_buffer_bytes_cleared - before.new_buffer_bytes_cleared,
@@ -309,7 +325,7 @@ fn dispatches_share_the_devices_one_zero_buffer() {
 #[test]
 fn a_written_slots_neutral_is_not_shared() {
     let cleared = |dispatches| {
-        let (_, before, after) = dispatched(dispatches, 1);
+        let (_, _, before, after) = dispatched(dispatches, 1);
         after.new_buffer_bytes_cleared - before.new_buffer_bytes_cleared
     };
     // One more dispatch's own region, past the command buffer's fixed cost, which both counts pay
@@ -327,5 +343,84 @@ fn a_written_slots_neutral_is_not_shared() {
         "one further dispatch cleared {one} bytes more and eight further dispatches cleared \
          {eight} more, which is not one region each: a written slot's neutral must not be shared \
          between commands"
+    );
+}
+
+/// A kernel that stores through a buffer slot's descriptor view binds a write-only store sink at
+/// **every** dispatch (`NeutralResource::Sink`, `lower::access::sink`), and nothing reads it. What
+/// that costs a dispatch is one region of the command buffer's upload arena and nothing else: no
+/// `VkBuffer` made, not a byte of a new buffer written to zero, and no descriptor set of its own.
+/// Every slot is bound here, so the sink is the only neutral the plan binds, and the step between
+/// two dispatch counts is the sink's own cost.
+///
+/// # Why it costs no set
+///
+/// The sink's binding is one storage buffer of one descriptor that the stage uses through one
+/// variable where its dropped stores need no narrow or 16-byte unit view, so the variant makes it
+/// dynamic (`pipeline::objects::dynamic_bindings`): each dispatch's region is given as its
+/// dynamic offset and the descriptors written are the same, so every dispatch after the first
+/// binds the set its predecessor allocated and wrote (`binding::LastSetZero`,
+/// `WorkCounts::set_zero_sets_reused`). A sink whose stores reach a narrow unit declares several
+/// variables at the binding, which stays static, and then every dispatch does allocate and write
+/// a set of its own; this check holds for the dynamic case alone, which is what this kernel is.
+///
+/// # Why the region is not shared
+///
+/// Sharing one sink between commands would cost zero regions and no rebind, and nothing a shader
+/// or the host can read would move -- but two commands with no memory dependency between them
+/// storing to the same bytes is a data race by Vulkan's memory model, whose rule asks for no
+/// reader ("Applications must ensure that no data races occur during the execution of their
+/// application"), and failing a normative requirement is undefined behaviour for the application.
+/// Ordering them instead would take a barrier between every pair of commands that bind a sink,
+/// which costs more than the region and orders dispatches Metal lets run concurrently
+/// (`binding::descriptor`'s `WriteSource::Neutral` arm).
+#[test]
+fn a_store_sinks_region_is_a_dispatchs_whole_cost() {
+    let run = |dispatches| {
+        let (_, arena, before, after) = dispatched(dispatches, 3);
+        (
+            arena,
+            after.new_buffer_bytes_cleared - before.new_buffer_bytes_cleared,
+            after.object_churn.vk_buffers_made - before.object_churn.vk_buffers_made,
+            after.set_zero_sets_reused - before.set_zero_sets_reused,
+        )
+    };
+    let (arena_1, _, _, _) = run(1);
+    let (arena_2, _, _, _) = run(2);
+    let (arena_8, cleared_8, buffers_8, reused_8) = run(8);
+    let (arena_16, cleared_16, buffers_16, reused_16) = run(16);
+    // One region a dispatch: whatever a region costs (a chunk's alignment, the module docs), eight
+    // further dispatches cost eight of them.
+    let one = arena_2 - arena_1;
+    assert!(
+        one > 0,
+        "a second dispatch took no arena bytes of its own, so the two shared a sink region, which \
+         the memory model forbids (this test's docs)"
+    );
+    assert_eq!(
+        arena_16 - arena_8,
+        one * 8,
+        "one further dispatch took {one} arena bytes and eight took {}, which is not one region \
+         each",
+        arena_16 - arena_8
+    );
+    // And nothing else: the region is small enough to come out of a chunk the command buffer
+    // opened already, so no further `VkBuffer` is made and no further new buffer is written to
+    // zero. The chunk the first region opens is the command buffer's own fixed cost, which both
+    // counts pay once and the step cancels (the module docs).
+    assert_eq!(
+        (cleared_16, buffers_16),
+        (cleared_8, buffers_8),
+        "8 dispatches wrote {cleared_8} bytes of new buffers to zero and made {buffers_8} of \
+         them, 16 wrote {cleared_16} and made {buffers_16}: a sink's region must cost neither"
+    );
+    // And no descriptor set: the sink's binding is dynamic, so the set is written once and bound
+    // again with each region's offset.
+    assert_eq!(
+        (reused_8, reused_16),
+        (7, 15),
+        "8 and 16 dispatches reused their predecessor's set 0 {reused_8} and {reused_16} times, \
+         not all but the first: a dispatch whose sink moved its descriptor allocates and writes a \
+         set of its own"
     );
 }
