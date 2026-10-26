@@ -1197,7 +1197,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   shadow's texels are kept in a scratch buffer of one to three times the texture's bytes (or an
   image of the texture's size) before the command, and after it a dispatch merges the bytes it changed through the texture into the
   buffer's, in place where the texture's bytes start and end in whole words of the buffer: one to
-  three copies and a dispatch in place of one copy back.
+  three copies and a dispatch in place of one copy back. The merge's dispatches are counted as the
+  runtime plans them, in windows of at most the device's storage-buffer range and workgroup count
+  (`WorkCounts::shadow_merge_dispatches_planned`), together with the words they examine
+  (`shadow_merge_words_examined`): a dispatch reads each word of the region before the commands and
+  after them and stores only where the two differ, so the words it stores are at most the words it
+  examined and only the GPU knows them.
 - `metal2vulkan-degrade-copied-draw-bytes` (performance). `CopiedDrawBytes`: A draw's index buffer
   or indirect arguments start where Vulkan reads neither. Cost: they are copied into a buffer of the
   command buffer before the pass, and the draw reads the copy.

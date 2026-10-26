@@ -325,7 +325,7 @@ assoc-const	metal2vulkan::bind::ShadowMergeImageModule::KEPT_BINDING	pub const K
 assoc-const	metal2vulkan::bind::ShadowMergeImageModule::LOCAL_SIZE	pub const LOCAL_SIZE: u32
 assoc-const	metal2vulkan::bind::ShadowMergeImageModule::PUSH_BYTES	pub const PUSH_BYTES: u32
 assoc-const	metal2vulkan::bind::ShadowMergeImageModule::SET	pub const SET: u32
-assoc-const	metal2vulkan::bind::ShadowMergeImageModule::TEXELS	pub const TEXELS: u32
+assoc-const	metal2vulkan::bind::ShadowMergeImageModule::WORDS	pub const WORDS: u32
 assoc-const	metal2vulkan::bind::ShadowMergeModule::CHANGED_BINDING	pub const CHANGED_BINDING: u32
 assoc-const	metal2vulkan::bind::ShadowMergeModule::CURRENT_BINDING	pub const CURRENT_BINDING: u32
 assoc-const	metal2vulkan::bind::ShadowMergeModule::KEPT_BINDING	pub const KEPT_BINDING: u32
@@ -823,7 +823,7 @@ assoc-const-value	metal2vulkan::bind::ShadowMergeImageModule::KEPT_BINDING	1
 assoc-const-value	metal2vulkan::bind::ShadowMergeImageModule::LOCAL_SIZE	64
 assoc-const-value	metal2vulkan::bind::ShadowMergeImageModule::PUSH_BYTES	16
 assoc-const-value	metal2vulkan::bind::ShadowMergeImageModule::SET	0
-assoc-const-value	metal2vulkan::bind::ShadowMergeImageModule::TEXELS	4
+assoc-const-value	metal2vulkan::bind::ShadowMergeImageModule::WORDS	4
 assoc-const-value	metal2vulkan::bind::ShadowMergeModule::CHANGED_BINDING	1
 assoc-const-value	metal2vulkan::bind::ShadowMergeModule::CURRENT_BINDING	2
 assoc-const-value	metal2vulkan::bind::ShadowMergeModule::KEPT_BINDING	0
@@ -2796,11 +2796,13 @@ field	metal2vulkan-runtime::WorkCounts.shadow_copies_back_dispatched	pub shadow_
 field	metal2vulkan-runtime::WorkCounts.shadow_copies_in_dispatched	pub shadow_copies_in_dispatched: u64
 field	metal2vulkan-runtime::WorkCounts.shadow_keeps	pub shadow_keeps: super::churn_counts::ShadowKeeps
 field	metal2vulkan-runtime::WorkCounts.shadow_merge_copies_dispatched	pub shadow_merge_copies_dispatched: u64
+field	metal2vulkan-runtime::WorkCounts.shadow_merge_dispatches_planned	pub shadow_merge_dispatches_planned: u64
 field	metal2vulkan-runtime::WorkCounts.shadow_merge_kept_images_followed	pub shadow_merge_kept_images_followed: u64
 field	metal2vulkan-runtime::WorkCounts.shadow_merge_kept_images_live	pub shadow_merge_kept_images_live: u64
 field	metal2vulkan-runtime::WorkCounts.shadow_merge_kept_images_made	pub shadow_merge_kept_images_made: u64
 field	metal2vulkan-runtime::WorkCounts.shadow_merge_scratches_reused	pub shadow_merge_scratches_reused: u64
 field	metal2vulkan-runtime::WorkCounts.shadow_merge_scratches_zeroed	pub shadow_merge_scratches_zeroed: u64
+field	metal2vulkan-runtime::WorkCounts.shadow_merge_words_examined	pub shadow_merge_words_examined: u64
 field	metal2vulkan-runtime::WorkCounts.shadow_merges_fetched	pub shadow_merges_fetched: u64
 field	metal2vulkan-runtime::WorkCounts.shadow_merges_kept_in_images	pub shadow_merges_kept_in_images: u64
 field	metal2vulkan-runtime::WorkCounts.shadow_texels_bounded_copied_in	pub shadow_texels_bounded_copied_in: u64
@@ -8580,7 +8582,7 @@ method	metal2vulkan::bind::ShadowCopyBackModule::groups	pub fn groups([width, he
 method	metal2vulkan::bind::ShadowCopyBackModule::shape	pub fn shape([x0, y0]: [u32; 2], width: u32, row_words: u32, first_word: u32) -> [u8; 16]
 method	metal2vulkan::bind::ShadowCopyInModule::groups	pub fn groups([width, height]: [u32; 2]) -> [u32; 2]
 method	metal2vulkan::bind::ShadowCopyInModule::shape	pub fn shape([x0, y0]: [u32; 2], width: u32, row_words: u32, first_word: u32) -> [u8; 16]
-method	metal2vulkan::bind::ShadowMergeImageModule::groups	pub fn groups([width, height]: [u32; 2]) -> [u32; 2]
+method	metal2vulkan::bind::ShadowMergeImageModule::groups	pub fn groups(read: ShadowMergeRead, [width, height]: [u32; 2]) -> [u32; 2]
 method	metal2vulkan::bind::ShadowMergeImageModule::shape	pub fn shape([x0, y0]: [u32; 2], width: u32, row_words: u32, first_word: u32) -> [u8; 16]
 method	metal2vulkan::bind::ShadowMergeModule::groups	pub fn groups(count: u32) -> u32
 method	metal2vulkan::bind::ShadowMergeModule::shape	pub fn shape(width: u32, count: u32, row_words: u32, first_word: u32) -> [u8; 16]
