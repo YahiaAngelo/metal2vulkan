@@ -46,6 +46,10 @@
 //!   (`pipeline/memo.rs`), which [`ShaderCacheOptions::memory_capacity`] bounds (256 MiB by
 //!   default). An entry read or written here is kept there, weighed at its encoded length; one
 //!   kept without being encoded, at what it retains (`RenderPipeline::footprint`).
+//! - **A question about the directory is kept too.** Whether the directory holds a stage's
+//!   compiled function is a fact of that function's key and the device's profile, which a render
+//!   variant's link asks once per stage; the answer is kept under exactly that key (`held.rs`),
+//!   so a sweep of pipeline states over one function pair asks it once rather than once a state.
 
 mod creation;
 /// The variant records this process gave the directory, which `tests::render_stage_digests`'
@@ -53,6 +57,7 @@ mod creation;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 pub(crate) use creation::variant_records_written;
 pub(crate) mod driver;
+mod held;
 pub(super) mod store;
 pub(super) mod worker;
 
@@ -369,6 +374,9 @@ pub(super) struct ShaderCache {
     /// What render creations worked out from their descriptors before their compiles, in
     /// memory (`creation.rs`).
     creation: CreationMemo,
+    /// What the directory answered about the stage functions this device asked about
+    /// (`held.rs`).
+    held: held::HeldFunctions,
     store: Arc<Store>,
     worker: Worker,
     /// What names the makings' records (`driver.rs`).
@@ -406,6 +414,7 @@ impl ShaderCache {
         Ok(ShaderCache {
             memo: PipelineMemo::new(memory_capacity),
             creation: CreationMemo::new(),
+            held: held::HeldFunctions::new(),
             store,
             worker,
             records: Records {
@@ -463,6 +472,20 @@ impl ShaderCache {
         made
     }
 
+    /// The directory round trips the threads that asked have made: the questions about an entry
+    /// (`store::Counters::holds_questions`) and the reads of one
+    /// (`store::Counters::entry_reads`), each one filesystem call. What the device tests of a
+    /// creation's directory round trips read: the count is a fact of the structure where
+    /// `WorkCounts::shader_cache_read_nanos`, which times the very same calls, is a figure of the
+    /// host and its load.
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+    pub(crate) fn directory_trips(&self) -> (u64, u64) {
+        (
+            self.store.counters.holds_questions.load(Ordering::Relaxed),
+            self.store.counters.entry_reads.load(Ordering::Relaxed),
+        )
+    }
+
     /// Makings handed a `VkPipelineCache` the device already held for their record
     /// (`store::Counters::driver_caches_shared`): what the device tests of the sharing read.
     #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
@@ -513,18 +536,27 @@ impl ShaderCache {
     /// counts in no hit or miss: a hit here is not a lookup answered, and a miss is not a
     /// translation. Its one `stat` is counted in the directory's read time
     /// (`WorkCounts::shader_cache_read_nanos`).
+    ///
+    /// **Asked of the directory once per function.** Nothing of the pipeline state reaches the
+    /// name, so the answer is the function's and the profile's; a `true` is kept under those two
+    /// (`held.rs`) and a sweep of states over one function pair asks the directory nothing after
+    /// the creation that put its stages there.
     pub(super) fn holds_function(
         &self,
         compile: &metal2vulkan::device::Device,
         key: &FunctionCompileKey,
     ) -> bool {
-        let name = entry_name(
-            self.store.directory().build(),
-            EntryKind::Function,
-            key.digest(),
-            &compile.profile_fingerprint(),
-        );
-        self.store.holds(&name)
+        let profile = compile.profile_fingerprint();
+        self.held
+            .holds((key.digest(), &profile), self.store.removals(), || {
+                let name = entry_name(
+                    self.store.directory().build(),
+                    EntryKind::Function,
+                    key.digest(),
+                    &profile,
+                );
+                self.store.holds(&name)
+            })
     }
 
     /// Keep `function`, which `compile` compiled; its encoded length.

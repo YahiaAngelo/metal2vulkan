@@ -23,6 +23,11 @@
 //! nothing). `shader_cache_off_thread.rs` holds that move as its own contract over its own sweep;
 //! here the counts say which cost the printed median is and is not made of.
 //!
+//! It also prints the directory's own share of that median: the read time of the same window and
+//! the round trips it is the time of (`tests::render_directory_trips` reads those counts
+//! marginally, which is where a claim about them belongs; the figure here is what they cost
+//! against a whole creation on this host).
+//!
 //! # The warm-up, and why the median is warm
 //!
 //! Metal's compiler service keys its compiled output on the function's AIR and keeps it across
@@ -106,6 +111,8 @@ fn what_a_render_pipeline_state_creation_costs_over_one_function_pair() {
         kept.push(state);
     }
     let before = device.shader_cache_statistics();
+    let before_directory = device.work_counts().shader_cache_read_nanos;
+    let before_trips = device.shared().shader_cache.directory_trips();
     let mut times = Vec::with_capacity(SWEEP);
     for i in 0..SWEEP {
         let at = Instant::now();
@@ -116,6 +123,8 @@ fn what_a_render_pipeline_state_creation_costs_over_one_function_pair() {
         kept.push(state);
     }
     let after = device.shader_cache_statistics();
+    let directory = device.work_counts().shader_cache_read_nanos - before_directory;
+    let trips = device.shared().shader_cache.directory_trips();
     let (median, least, most, total) = figures(&times);
     let warm_up: Vec<u128> = warm_up.iter().map(Duration::as_micros).collect();
     println!(
@@ -142,5 +151,16 @@ fn what_a_render_pipeline_state_creation_costs_over_one_function_pair() {
         on_thread, 0,
         "no timed creation may write a cache file on its own thread, so no creation's time holds \
          a journalled filesystem write: {on_thread} did"
+    );
+    // The directory's share of the median, which is the one part of a creation's own CPU that is
+    // attributable to the call rather than to the driver: the same window's read time, over the
+    // round trips it is the time of (`tests::render_directory_trips` reads the counts marginally).
+    println!(
+        "RENDER-CREATION-COST: the timed creations read the directory for {} us in all, {} us a \
+         creation, over {} questions about an entry and {} reads of one",
+        directory / 1000,
+        directory / 1000 / SWEEP as u64,
+        trips.0 - before_trips.0,
+        trips.1 - before_trips.1
     );
 }

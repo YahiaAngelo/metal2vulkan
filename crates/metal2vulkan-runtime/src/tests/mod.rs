@@ -220,6 +220,8 @@ mod render;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod render_creation_cost;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod render_directory_trips;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod render_sibling_work;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod render_stage_digests;

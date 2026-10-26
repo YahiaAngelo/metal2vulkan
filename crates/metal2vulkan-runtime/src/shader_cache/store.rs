@@ -227,6 +227,22 @@ pub(crate) struct Counters {
     ///
     /// [`ShaderCacheStatistics`]: super::ShaderCacheStatistics
     pub(crate) driver_caches_shared: AtomicU64,
+    /// Questions about an entry ([`Store::holds`]) that reached the filesystem: one `stat` each.
+    /// A question the write queue answered is not one, since it reached no directory. Not in
+    /// [`ShaderCacheStatistics`]; the device tests of a creation's directory round trips read it
+    /// here, because a count of round trips is a fact of the structure where
+    /// [`read_nanos`](Self::read_nanos) is a figure of the host.
+    ///
+    /// [`ShaderCacheStatistics`]: super::ShaderCacheStatistics
+    pub(crate) holds_questions: AtomicU64,
+    /// Reads of an entry's bytes ([`Store::read`]) that reached the filesystem: one `open` each,
+    /// whatever it found. One the write queue answered is not one. Counted and read as
+    /// [`holds_questions`](Self::holds_questions) is, and apart from it because the two are
+    /// different calls at different sites: a question is a `stat` of a name a creation is about
+    /// to decide by, a read is an `open` of bytes it wants.
+    ///
+    /// [`ShaderCacheStatistics`]: super::ShaderCacheStatistics
+    pub(crate) entry_reads: AtomicU64,
     /// Nanoseconds the directory's reads took on the threads that asked for an artifact: the
     /// questions about an entry ([`Store::holds`]), the reads of one ([`Store::load`],
     /// [`Store::load_content`]), the refresh of a hit's access time, and the removal of an entry
@@ -426,9 +442,19 @@ impl Store {
         if self.asked.as_ref().is_some_and(|asked| asked.holds(&path)) {
             return true;
         }
+        count(&self.counters.holds_questions);
         timed(&self.counters.read_nanos, || {
             fs::metadata(&path).is_ok_and(|metadata| metadata.len() <= self.entry_limit())
         })
+    }
+
+    /// The entries this store has removed from the directory: the ones it evicted past the cap
+    /// and the ones a decoder refused. A removal can take the very file a question about an entry
+    /// answered `true` for, so an answer kept under a function's key is kept only while this
+    /// figure stands still (`held.rs`).
+    pub(crate) fn removals(&self) -> u64 {
+        self.counters.evictions.load(Ordering::Relaxed)
+            + self.counters.rejected.load(Ordering::Relaxed)
     }
 
     /// The entry named `name`, as `decode` accepts it. A hit refreshes the entry's access
@@ -528,6 +554,7 @@ impl Store {
         if let Some(bytes) = self.asked.as_ref().and_then(|asked| asked.pending(path)) {
             return Found::Queued(bytes);
         }
+        count(&self.counters.entry_reads);
         timed(&self.counters.read_nanos, || {
             let file = match fs::File::open(path) {
                 Ok(file) => file,

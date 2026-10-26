@@ -258,6 +258,11 @@ impl<'a> Sources<'a> {
     /// the creation's variant record is worth writing: a record names a pipeline to look up, and
     /// a key whose pipeline the directory does not hold answers nothing
     /// (`ShaderCache::record_variant_pipeline`).
+    ///
+    /// The question about a stage's function names that stage's compile key and the device's
+    /// profile, and nothing of the pipeline state, so the device asks the directory once per
+    /// function however many states link over it (`ShaderCache::holds_function`,
+    /// `shader_cache/held.rs`).
     pub(crate) fn linked_render(
         &self,
         pipeline: RenderPipeline,

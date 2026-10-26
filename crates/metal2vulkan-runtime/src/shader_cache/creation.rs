@@ -16,6 +16,21 @@
 //!   pipeline key is kept per variant key too. The creation's budget decides only whether an
 //!   answer comes at all: a refused answer (a deadline, a cancellation, a decode's error) is not
 //!   kept, so the next creation asks again.
+//! - **And by more than they read, which costs a sweep a trip each.** The key is every field,
+//!   where the four answers read only some: the stages, `rasterization_enabled`,
+//!   `support_indirect_command_buffers`, the two call-stack depths, whether `depth_format` names
+//!   an attachment, and each color attachment's format, write mask, `blending_enabled` and four
+//!   blend factors (`reflection::linked`'s `fragment_output` and `writes_depth_unattached`). So a
+//!   sweep that moves a field none of them reads -- a vertex descriptor's formats, strides or
+//!   step functions, the topology class, the sample state -- asks the directory for a sibling's
+//!   answers and works them out again, for an answer identical to the previous sibling's. A
+//!   sweep that moves a write mask or a blend factor is **not** such a case: a fragment color
+//!   output is kept or dropped by its attachment's mask, format and blending, so those answers
+//!   really can differ between siblings and the key must hold them. Narrowing the key is the
+//!   translator's to do, beside `render_descriptor_key` and under the same discipline (a field
+//!   added to the descriptor must not compile until the key decides about it); doing it here,
+//!   from the runtime's reading of which fields the translator's analysis happens to touch,
+//!   would break silently the next time it touches one more.
 //! - **In memory first, then the directory.** A lookup asks the device's maps, then the
 //!   directory's entry (kept in the maps when found); what a creation works out goes to both.
 //!   The entries live in the build's directory like the artifacts, so a build never reads
