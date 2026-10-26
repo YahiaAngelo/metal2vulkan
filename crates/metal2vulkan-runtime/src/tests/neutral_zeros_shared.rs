@@ -41,6 +41,22 @@
 //! and the test requires it to, so a later change cannot quietly start sharing one buffer between
 //! commands that may store through the binding.
 //!
+//! # A dispatch count's own fixed cost
+//!
+//! The two dispatch checks read `new_buffer_bytes_cleared` as the difference between **two
+//! dispatch counts**, not as an absolute, because a command buffer of this kernel pays a fixed
+//! cost that is not its neutral's and does not grow with its dispatches: `scale_and_offset`
+//! stores through a buffer slot's descriptor view, so its plan binds a write-only store sink
+//! (`NeutralResource::Sink`, one storage descriptor of the stage) at every dispatch, and the
+//! first region any command of the command buffer takes opens the upload arena's first chunk,
+//! which is a new buffer cleared whole (`upload.rs`'s `FIRST_CHUNK_BYTES`). Measured on this M3
+//! Max: that chunk is the whole of what a read-only neutral's dispatches clear, and the same one
+//! chunk at every dispatch count these checks run, so the difference between two counts cancels
+//! it and leaves exactly the per-dispatch cost each check is about. An absolute of zero was what the
+//! read-only check asked for before the store sink existed, and it is not a claim this kernel can
+//! carry: the only way to reach it would be to share a region a shader stores through, which is
+//! the fault the writable check is here to catch.
+//!
 //! What none of it covers: a draw or dispatch whose read-only slot is unbound **and** whose
 //! length differs from `zero_buffer_bytes` on this device, since one device offers one length; and
 //! the fully-bound case, which binds no neutral at all and whose per-draw work was already one
@@ -239,19 +255,38 @@ fn dispatched(dispatches: usize, unbound: u64) -> (u64, crate::WorkCounts, crate
     (device.neutral_zeros_made(), before, after)
 }
 
-/// A kernel's unbound `constant` slot is a read-only binding: sixty-four dispatches share the
-/// device's one zero buffer and none of them allocates or zeroes a buffer for it.
+/// A kernel's unbound `constant` slot is a read-only binding: the dispatches share the device's
+/// one zero buffer, so twice as many of them cost nothing more -- no second zero buffer, not a
+/// further `VkBuffer` and not a byte more of a new buffer written to zero. Read as the difference
+/// between two dispatch counts, which cancels the command buffer's own fixed cost (the module
+/// docs).
 #[test]
 fn dispatches_share_the_devices_one_zero_buffer() {
-    let (made, before, after) = dispatched(64, 2);
+    let run = |dispatches| {
+        let (made, before, after) = dispatched(dispatches, 2);
+        (
+            made,
+            after.new_buffer_bytes_cleared - before.new_buffer_bytes_cleared,
+            after.object_churn.vk_buffers_made - before.object_churn.vk_buffers_made,
+        )
+    };
+    let (made_8, cleared_8, buffers_8) = run(8);
+    let (made_16, cleared_16, buffers_16) = run(16);
     assert_eq!(
-        made, 1,
-        "64 dispatches made {made} zero buffers for their unbound `constant` slot, not 1"
+        (made_8, made_16),
+        (1, 1),
+        "8 and 16 dispatches made {made_8} and {made_16} zero buffers for their unbound \
+         `constant` slot, not 1 each: zero would mean no neutral was bound and the check proved \
+         nothing, more than one that they stopped sharing it"
     );
-    let cleared = after.new_buffer_bytes_cleared - before.new_buffer_bytes_cleared;
+    // The per-dispatch allocate-and-zero this guards: a fresh dedicated 64 KiB `VkBuffer` a
+    // dispatch, bound to memory and written to zero, and destroyed or parked after.
     assert_eq!(
-        cleared, 0,
-        "64 dispatches wrote {cleared} bytes of a new buffer to zero for a read-only neutral"
+        (cleared_16, buffers_16),
+        (cleared_8, buffers_8),
+        "8 dispatches wrote {cleared_8} bytes of new buffers to zero and made {buffers_8} of \
+         them, 16 wrote {cleared_16} and made {buffers_16}: eight more dispatches must cost \
+         nothing for a read-only neutral they share"
     );
 }
 
@@ -260,10 +295,13 @@ fn dispatches_share_the_devices_one_zero_buffer() {
 ///
 /// This is the half that must NOT be shared: the kernel stores through `output`, and one buffer
 /// shared by every command would hand a later command what an earlier one wrote. The claim is
-/// that the regions still scale with the dispatches -- twice as many dispatches clear twice the
-/// bytes -- so a change that started sharing them fails here rather than silently handing one
-/// command another's stores. Measured as a ratio of two runs rather than an absolute, because
-/// what a region costs is a chunk size and an alignment and neither is this test's business.
+/// that the regions still scale with the dispatches -- each further dispatch clears a region's
+/// worth more -- so a change that started sharing them fails here rather than silently handing
+/// one command another's stores. Measured as the step between two dispatch counts rather than as
+/// an absolute, because what a region costs is a chunk size and an alignment, neither of which is
+/// this test's business, and because the command buffer's own fixed cost is not a region at all
+/// (the module docs). A step is what catches sharing: shared, every count clears the same fixed
+/// bytes and the first step is zero.
 ///
 /// The device's zero-buffer count is deliberately not asserted here: `make_neutrals` pre-makes it
 /// at the pipeline's creation, whose plan has every slot unbound and so a read-only neutral among
@@ -274,16 +312,20 @@ fn a_written_slots_neutral_is_not_shared() {
         let (_, before, after) = dispatched(dispatches, 1);
         after.new_buffer_bytes_cleared - before.new_buffer_bytes_cleared
     };
-    let eight = cleared(8);
-    let sixteen = cleared(16);
+    // One more dispatch's own region, past the command buffer's fixed cost, which both counts pay
+    // once.
+    let one = cleared(2) - cleared(1);
     assert!(
-        eight > 0,
-        "8 dispatches with a written slot unbound took no region of their own, so they shared one"
+        one > 0,
+        "a second dispatch with a written slot unbound cleared no further bytes, so the two \
+         shared one region"
     );
+    let eight = cleared(16) - cleared(8);
     assert_eq!(
-        sixteen,
-        eight * 2,
-        "8 dispatches cleared {eight} bytes and 16 cleared {sixteen}, which is not one region \
-         each: a written slot's neutral must not be shared between commands"
+        eight,
+        one * 8,
+        "one further dispatch cleared {one} bytes more and eight further dispatches cleared \
+         {eight} more, which is not one region each: a written slot's neutral must not be shared \
+         between commands"
     );
 }
