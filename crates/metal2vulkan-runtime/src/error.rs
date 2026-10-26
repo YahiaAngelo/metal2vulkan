@@ -2068,13 +2068,13 @@ pub enum CommandBufferError {
     /// mapping update reads its buffer as it runs; a call refused at its encoding is refused
     /// again, and the calls after it run); this fails only an encoder that cannot be encoded
     /// again: one of a command buffer that used command predication; a render pass recorded later
-    /// (an indirect command buffer's execution, a draw whose pipeline was being made) or whose end
-    /// captured its draws' tile reach. Each of Metal's submissions holding such an encoder ran
-    /// nothing (the command buffer's split), every other ran, the event signals fired and the
-    /// handlers ran. What the command buffer's encoders made resident
-    /// (`use_resource`, `use_heap`) and what its commands reach unnamed follow the rebind as
-    /// Metal's do. The device announces the first (`Degradation::EncodedUseRebound`). A command
-    /// buffer submitted before the rebind keeps the old pages, as Metal's does.
+    /// (an indirect command buffer's execution) or whose end captured its draws' tile reach. Each
+    /// of Metal's submissions holding such an encoder ran nothing (the command buffer's split),
+    /// every other ran, the event signals fired and the handlers ran. What the command buffer's
+    /// encoders made resident (`use_resource`, `use_heap`) and what its commands reach unnamed
+    /// follow the rebind as Metal's do. The device announces the first
+    /// (`Degradation::EncodedUseRebound`). A command buffer submitted before the rebind keeps the
+    /// old pages, as Metal's does.
     EncodedUseRebound,
     /// A command of the command buffer used a buffer over the caller's host pages (a no-copy
     /// buffer, a heap over the caller's memory, or a buffer placed in one) that was detached
