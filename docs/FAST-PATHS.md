@@ -122,6 +122,20 @@ recorded here.
   the submissions on the committing thread, the GT held at its efficient 300 MHz by its governor
   (GuC SLPC). A submission check or submission handler, which run on that thread, holds back every
   other command buffer's submission while it runs.
+- **A present that samples a guest plane copies the whole plane in, and Metal requires it.** Where
+  a window's sink draws a guest's 3840x2160 plane into its swapchain texture, it does so in its own
+  command buffer, and Metal shows a command buffer any CPU write made since its commit -- probed on
+  an Apple M3 Max, a write made while an earlier command buffer ran reached the next, already
+  committed one. So the copy in is required rather than redundant, and carrying a shadow's standing
+  across the encoders of one command buffer, which is sound, does not reach it. The sink's texture
+  is also a different `MTLTexture` over the same plane, so it takes its own shadow image and its own
+  first copy in, while the guest's own pass into that plane pays only its damage rectangle. That is
+  8,294,400 texels per present. Neither route out is open: aliasing the plane as a linear image
+  needs a row pitch the guest chooses and whose memory stays in place, and refreshing only a damaged
+  rectangle needs a rectangle no present carries -- a surface present hands over a whole surface and
+  nothing more -- while recovering the damage by comparing frames is the copy skipping that is ruled
+  out.
+
 - **Idle dma-buf imports are released.** RADV lists every imported memory in every kernel
   submission, so a no-copy buffer's dma-buf import that only blits have read is released after its
   idle window (2 s, doubled at each import again up to 64 s). The encoding thread pays its import
@@ -300,15 +314,6 @@ driver's. Each is open work.
   colour attachment copies less than everything (`ShadowUse::loads`, its damage rectangle); a
   sampler's reach is unknowable, so the whole-texel copy for a sampled use is not slack. Not
   announced.
-
-- **A present that samples a guest plane pays its whole texel count however small the damage, and
-  that copy is Metal's own.** Where a window's sink draws a 4K plane into its swapchain texture, it
-  does so in its own command buffer, which Metal shows any CPU write made since the guest's commit,
-  so the copy in is required rather than redundant and no carry of an encoder's standing removes it.
-  Its texture is also a different `MTLTexture` over the same plane and so takes its own shadow image
-  and its own first copy in, while the guest's own pass into that plane pays only its damage
-  rectangle. The costs that would remove it are a row pitch that lets the plane alias a linear image
-  (`linear_plan::aliases`), or sampling fewer texels. Not announced.
 
 - **Command queues past the device's `VkQueue`s share one, so one's command buffers wait behind
   another's whole command buffer where Metal's wait only inside one command.** Measured on Metal's
