@@ -134,7 +134,7 @@ pub fn synthesized_stage(
     m: &mut Meter,
 ) -> Result<(StageModule, Requirements), Error> {
     let module = vertex_module(r, last_first)?;
-    crate::spirv::verify::verify(&module, p, m)?;
+    let stats = crate::spirv::verify::verify(&module, p, m)?;
     let module = crate::spirv::serialize::serialize_for(module, p)?;
     let words = crate::spirv::serialize::relocate(&module, table)?;
     Ok((
@@ -155,6 +155,7 @@ pub fn synthesized_stage(
             own_pixel_textures: Vec::new(),
             snapshot_textures: Vec::new(),
             private_bytes: 0,
+            stats,
         },
         module.requirements,
     ))

@@ -128,6 +128,14 @@ pub fn main() -> Result<()> {
         pipeline.stage.entry_point,
     );
 
+    // What the module the driver will compile contains: the verifier's counts of it.
+    let stats = pipeline.stage.stats;
+    println!(
+        "{} blocks, {} instructions",
+        stats.blocks, stats.instructions
+    );
+    assert!(stats.reachable_blocks <= stats.blocks);
+
     // The same kernel as an entry of a bare module, through the device's profile: no library,
     // the same compile, and its module linked alone.
     let bitcode = fixture_bitcode("sampling")?;

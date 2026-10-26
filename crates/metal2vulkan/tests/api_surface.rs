@@ -336,6 +336,7 @@ surface! {
         struct LinkedSource O;
         struct StageEntries O;
         struct StandaloneModule N;
+        struct ModuleStats N;
         enum PrecisionNote E;
         enum Reconvergence N;
         struct RenderPipeline N;
@@ -1214,6 +1215,87 @@ fn compiled_functions_round_trip_through_the_public_api() {
                 .instantiate_dispatch(&state, &dispatch)
         );
     }
+}
+
+/// A stage's module statistics: filled by the compile, the same counts the compiled function
+/// states before linking, kept across an artifact round-trip, and left out of the content digest,
+/// which already covers the words they describe.
+#[test]
+fn a_stage_states_what_its_module_contains() {
+    let Some(bc) = fixture("store_const") else {
+        return;
+    };
+    let dev = device("moltenvk-m3");
+    let f = FunctionDescriptor::new(
+        Library::from_air(&bc)
+            .expect("library")
+            .function("store_const")
+            .expect("function"),
+    );
+    let compiled = dev
+        .compile_function(&f, &LoweringInputs::new(), &Budget::standard())
+        .expect("function");
+    let pipeline = dev
+        .compile_compute_pipeline(
+            &ComputePipelineDescriptor::new(StageSource::Function(f)),
+            &Budget::standard(),
+        )
+        .expect("pipeline");
+    let stats = pipeline.stage.stats;
+    assert!(
+        stats.functions > 0 && stats.blocks > 0 && stats.instructions > 0,
+        "{stats:?}"
+    );
+    assert_eq!(
+        stats.reachable_blocks, stats.blocks,
+        "a module with no construct declares no unreachable merge"
+    );
+    assert!(stats.loops <= stats.constructs, "{stats:?}");
+    assert_eq!(
+        compiled.module_stats(),
+        stats,
+        "linking adds no instruction"
+    );
+
+    let cached = ComputePipeline::from_bytes_for_key(&pipeline.to_bytes(), &pipeline.key, &dev)
+        .expect("pipeline decode");
+    assert_eq!(cached.stage.stats, stats, "a cache hit states them too");
+
+    let mut miscounted = pipeline.clone();
+    miscounted.stage.stats.blocks += 1;
+    assert_eq!(
+        miscounted.content_digest(),
+        pipeline.content_digest(),
+        "the counts describe the words the digest already covers"
+    );
+
+    // A kernel with control flow of its own: the constructs and loops are counted, and the
+    // structurizer makes no loop the input does not have.
+    let Some(bc) = fixture("kernel_nested_loop_constant_weight_walk") else {
+        return;
+    };
+    let looping = dev
+        .compile_compute_pipeline(
+            &ComputePipelineDescriptor::new(StageSource::Function(FunctionDescriptor::new(
+                Library::from_air(&bc)
+                    .expect("library")
+                    .function("nested_loop_constant_weight_walk")
+                    .expect("function"),
+            ))),
+            &Budget::standard(),
+        )
+        .expect("pipeline")
+        .stage
+        .stats;
+    assert!(looping.loops > 0, "{looping:?}");
+    assert!(looping.constructs >= looping.loops, "{looping:?}");
+    assert!(looping.blocks > stats.blocks, "{looping:?} over {stats:?}");
+    // The selection merges SPIR-V requires this kernel's breaks and continues to declare are
+    // reached by no path, so its reachable blocks are below its blocks.
+    assert!(
+        looping.reachable_blocks < looping.blocks,
+        "{looping:?}: a declared merge no path reaches"
+    );
 }
 
 /// The content digests are public: a pipeline's names what it says, not the build that compiled it.

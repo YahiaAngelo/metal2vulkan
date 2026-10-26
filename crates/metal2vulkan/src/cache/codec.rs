@@ -32,9 +32,9 @@ use crate::metal;
 use crate::metal::format::{ExtendedRange, WordAttachment, WordField};
 use crate::metal::{CompareFunction, TextureWriteRoundingMode};
 use crate::pipeline::artifact::{
-    ComputePipeline, ComputePipelineMetalInfo, PrecisionNote, Reconvergence, RenderPipeline,
-    RuntimeDependency, SpecClause, SpecConstant, SpecTest, SpecializationLayout, SpecializedNote,
-    StageModule, StrategyCensus, StrategyUse,
+    ComputePipeline, ComputePipelineMetalInfo, ModuleStats, PrecisionNote, Reconvergence,
+    RenderPipeline, RuntimeDependency, SpecClause, SpecConstant, SpecTest, SpecializationLayout,
+    SpecializedNote, StageModule, StrategyCensus, StrategyUse,
 };
 use crate::pipeline::descriptor::TessellationDescriptor;
 use crate::pipeline::facts::{Mechanism, RuntimeFact, UniformViewChoice};
@@ -743,6 +743,51 @@ impl Codec for SpirvCapability {
     }
 }
 
+/// The module statistics, encoded in full and digested as zero: every count is a function of the
+/// module's words, which the digest already covers, so including them would move every artifact's
+/// digest without telling it anything. The destructuring is exhaustive, so a field added to
+/// [`ModuleStats`] fails to compile until it is written here.
+impl Codec for ModuleStats {
+    const LEAF: bool = false;
+    fn digest(&self) -> Node {
+        let ModuleStats {
+            functions: _,
+            blocks: _,
+            reachable_blocks: _,
+            instructions: _,
+            constructs: _,
+            loops: _,
+        } = self;
+        Node::ZERO
+    }
+    fn put(&self, w: &mut Writer) {
+        let ModuleStats {
+            functions,
+            blocks,
+            reachable_blocks,
+            instructions,
+            constructs,
+            loops,
+        } = self;
+        functions.put(w);
+        blocks.put(w);
+        reachable_blocks.put(w);
+        instructions.put(w);
+        constructs.put(w);
+        loops.put(w);
+    }
+    fn get(r: &mut Reader<'_>) -> Result<Self, Malformed> {
+        Ok(ModuleStats {
+            functions: Codec::get(r)?,
+            blocks: Codec::get(r)?,
+            reachable_blocks: Codec::get(r)?,
+            instructions: Codec::get(r)?,
+            constructs: Codec::get(r)?,
+            loops: Codec::get(r)?,
+        })
+    }
+}
+
 // Sampler state carries floats; `vk::SamplerDesc` compares them by bits, as `f32`'s codec
 // round-trips them.
 codec_struct! {
@@ -1263,7 +1308,7 @@ codec_struct! {
     RelocatableModule { words, relocs, requirements }
     FunctionArtifact {
         key, module, interface, facts, subgroup, reconvergence, precision, strategies, blob,
-        requirements, variant_bits, profile, kernel, reflection, slot_writes, specialized,
+        requirements, variant_bits, profile, kernel, reflection, slot_writes, specialized, stats,
     }
     StageReflection { bindings, attributes }
     SlotWrite { name, parameter, binding_type, index, count, used, access, writes }
@@ -1301,6 +1346,7 @@ codec_struct! {
         stage, entry_point, spirv, specialization, required_subgroup_size, stage_flags,
         reconvergence, precision_notes, strategies, constant_blob, rounded_colors,
         specialized_notes, half_bit_colors, own_pixel_textures, snapshot_textures, private_bytes,
+        stats,
     }
     SpecializedNote { note, when }
     SpecClause { all }

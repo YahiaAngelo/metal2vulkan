@@ -2708,7 +2708,7 @@ fn compile_kept<K>(
         precision.push(PrecisionNote::DeviceSampling);
         precision.sort_unstable();
     }
-    crate::spirv::verify::verify(&module, p, m)?;
+    let stats = crate::spirv::verify::verify(&module, p, m)?;
     let kept = keep(&module);
     let mut symbols =
         crate::pipeline::link::contract::stage_symbols(&module, &plan.families.stage_io.interface)?;
@@ -2902,6 +2902,7 @@ fn compile_kept<K>(
         reconvergence: crate::lower::simd::reconvergence(&plan),
         precision,
         strategies: emitted_census(&plan, helper_guard),
+        stats,
         blob: plan.families.access.blob.as_ref().map(|b| b.bytes.clone()),
         requirements,
         variant_bits: 0,

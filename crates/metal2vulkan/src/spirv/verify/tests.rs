@@ -254,7 +254,7 @@ fn meter() -> Meter {
     Meter::new(&Budget::default())
 }
 
-fn structure(m: &TypedModule) -> Result<VerifyReport, VerifyError> {
+fn structure(m: &TypedModule) -> Result<ModuleStats, VerifyError> {
     check_structure(m, &mut meter())
 }
 

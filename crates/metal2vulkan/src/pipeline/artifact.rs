@@ -153,6 +153,9 @@ pub struct StageModule {
     /// (`StageInterface::private_bytes`): what `PrecisionNote::FunctionStorageAssumed`'s
     /// announcement names. 0 for a stage the link makes itself.
     pub private_bytes: u64,
+    /// What [`spirv`](Self::spirv) contains: its functions, blocks, instructions, structured
+    /// constructs and loops.
+    pub stats: ModuleStats,
 }
 
 impl StageModule {
@@ -283,6 +286,67 @@ impl StageModule {
             Some(v) => (v & u64::from(t.mask) == u64::from(t.bits)) == t.equal,
         })
     }
+}
+
+/// What one translated module contains: the counts the finalize verifier takes of it on every
+/// translation, in every build.
+///
+/// They are the module [`StageModule::spirv`] holds: the verifier counts the module it checked,
+/// and serialization and relocation assign literals without adding or removing an instruction.
+/// [`CompiledFunction::module_stats`](crate::library::CompiledFunction::module_stats) states the
+/// same counts for a function compiled on its own, which its linked stage repeats.
+///
+/// A caller reads them to watch the size of what it hands a driver: a larger module costs more to
+/// compile on the drivers measured. Canonicalization inlines every direct call before the module
+/// is emitted, so the counts are the whole program's, not one function's.
+///
+/// How closely [`blocks`](Self::blocks) stands for the program a driver compiles depends on
+/// [`functions`](Self::functions). A driver inlines before it charges, so a module of few
+/// functions is one whose blocks are the program's; a module that calls a many-block function from
+/// many sites holds a program far larger than its own blocks, and the two cases read alike in
+/// `blocks` alone. Lowering emits such functions itself: the handle-table and root-table searches
+/// are unrolled branch-free steps, emitted once and called at every access.
+///
+/// The counts compare one module against the next of the same shader, not one shader against
+/// another. Measured cost per block differed several-fold between a synthetic module and a real
+/// workload, so a per-block figure taken from one shader predicts nothing for the next;
+/// [`instructions`](Self::instructions) is the second number for that reason.
+///
+/// [`blocks`](Self::blocks) alone does not say whose blocks they are. Translation adds blocks of
+/// its own (inlining, and the structurizer's layout of control flow as SPIR-V requires), and the
+/// input has blocks of its own, and a count that has risen can be either.
+/// [`loops`](Self::loops) and [`constructs`](Self::constructs) separate them: the structurizer
+/// makes no loop the input does not have, so a `blocks` that rises while `loops` holds still is
+/// translation's own work or a changed shape of the same control flow, not new control flow in the
+/// shader. The AIR side of that comparison is the caller's own, through `metal2vulkan-air`: for
+/// the counts the input itself holds, before inlining, decode it and count the blocks of each
+/// function's body (`metal2vulkan_air::decode`, then each `ir::Function`'s `body`); for the ones
+/// canonicalization produced, walk the entry
+/// [`DeviceProfile::specialized_entry`](crate::device::DeviceProfile::specialized_entry) gives,
+/// which is that AIR specialized and canonicalized.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ModuleStats {
+    /// Functions: the entry point, and the ones canonicalization and lowering left beside it.
+    /// A module of few functions is one whose [`blocks`](Self::blocks) stand for the whole
+    /// program a driver compiles.
+    pub functions: u32,
+    /// Basic blocks, over every function the module holds.
+    pub blocks: u32,
+    /// Blocks reachable from their function's entry, never above [`blocks`](Self::blocks). It is
+    /// below it by the merge blocks SPIR-V requires a construct to declare that no path reaches —
+    /// both arms of a conditional inside a loop leaving the construct, say — which the module
+    /// terminates with `OpUnreachable`. A bound, not a lever: the difference is blocks the driver
+    /// still reads and no invocation runs.
+    pub reachable_blocks: u32,
+    /// Instructions, phis and terminators. It moved with [`blocks`](Self::blocks) in every
+    /// module measured, and is cheaper to reason about.
+    pub instructions: u64,
+    /// Structured constructs: selection, switch and loop headers.
+    pub constructs: u32,
+    /// Loops. The structurizer makes none of its own, so this is the input's own loop count.
+    pub loops: u32,
 }
 
 /// A precision note a stage records only where a specialized module runs an arm that keeps its

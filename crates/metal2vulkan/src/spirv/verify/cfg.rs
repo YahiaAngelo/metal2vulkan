@@ -6,7 +6,7 @@ use crate::spirv::error::Dangling;
 use crate::spirv::ids::{BlockId, FuncId, Value};
 use crate::spirv::ir::{Block, Function, Inst, Merge, Terminator, Type, TypedModule, ValueOrigin};
 
-use super::{Ledger, VerifyError, VerifyReport, Violation};
+use super::{Ledger, ModuleStats, VerifyError, Violation};
 
 /// "None" in the dense `u32` side tables.
 pub(super) const NONE: u32 = u32::MAX;
@@ -501,7 +501,7 @@ pub(super) fn check_function(
     facts: &ModuleFacts<'_>,
     func: FuncId,
     cons: &mut ModuleConstructs,
-    report: &mut VerifyReport,
+    report: &mut ModuleStats,
     meter: &mut Meter,
 ) -> Result<(), VerifyError> {
     let ModuleFacts {
@@ -539,7 +539,7 @@ fn check_function_in(
     ctx: &FnCtx<'_>,
     cons: &mut ModuleConstructs,
     tangled_fn: &[bool],
-    report: &mut VerifyReport,
+    report: &mut ModuleStats,
     meter: &mut Meter,
 ) -> Result<(), VerifyError> {
     let m = ctx.m;

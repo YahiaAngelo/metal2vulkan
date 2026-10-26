@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::cache::{write_hex, Hash256};
 use crate::device::requirements::Requirements;
 use crate::device::subgroup::SubgroupRequirement;
-use crate::pipeline::artifact::{PrecisionNote, Reconvergence, StrategyCensus};
+use crate::pipeline::artifact::{ModuleStats, PrecisionNote, Reconvergence, StrategyCensus};
 use crate::pipeline::facts::RuntimeFact;
 use crate::pipeline::interface::{AttributeFetch, SlotInterface, StageInterface};
 use crate::pipeline::lower_inputs::VertexFetch;
@@ -95,6 +95,14 @@ impl CompiledFunction {
     /// The reconvergence the function's module relies on (`StageModule::reconvergence`).
     pub fn reconvergence(&self) -> Reconvergence {
         self.0.reconvergence
+    }
+
+    /// What the function's module contains: its functions, blocks, instructions, structured
+    /// constructs and loops, as its linked stage states them (`StageModule::stats`). Linking the
+    /// function resolves its symbols and adds no instruction, so these are the counts of the
+    /// module a pipeline of it hands the driver.
+    pub fn module_stats(&self) -> ModuleStats {
+        self.0.stats
     }
 
     /// The subgroup size the function's simd tier pins, if any (its stage's
@@ -192,6 +200,9 @@ pub struct FunctionArtifact {
     pub reconvergence: Reconvergence,
     pub precision: Vec<PrecisionNote>,
     pub strategies: StrategyCensus,
+    /// What the finalize verifier counted of the module: what its linked stage states as
+    /// `StageModule::stats`.
+    pub stats: ModuleStats,
     /// Constant data the function reads through `WriteSource::ConstantBlob`.
     pub blob: Option<Arc<[u8]>>,
     pub requirements: Requirements,

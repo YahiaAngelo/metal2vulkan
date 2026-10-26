@@ -4239,6 +4239,12 @@ field	metal2vulkan::pipeline::MeshRecords.primitives	pub primitives: u32
 field	metal2vulkan::pipeline::MeshRecords.slot_words	pub slot_words: u32
 field	metal2vulkan::pipeline::MeshRecords.vertex_words	pub vertex_words: u32
 field	metal2vulkan::pipeline::MeshRecords.vertices	pub vertices: u32
+field	metal2vulkan::pipeline::ModuleStats.blocks	pub blocks: u32
+field	metal2vulkan::pipeline::ModuleStats.constructs	pub constructs: u32
+field	metal2vulkan::pipeline::ModuleStats.functions	pub functions: u32
+field	metal2vulkan::pipeline::ModuleStats.instructions	pub instructions: u64
+field	metal2vulkan::pipeline::ModuleStats.loops	pub loops: u32
+field	metal2vulkan::pipeline::ModuleStats.reachable_blocks	pub reachable_blocks: u32
 field	metal2vulkan::pipeline::PipelineInterface.command_writes	pub command_writes: CommandWrites
 field	metal2vulkan::pipeline::PipelineInterface.needs_handle_translation	pub needs_handle_translation: bool
 field	metal2vulkan::pipeline::PipelineInterface.needs_pointer_translation	pub needs_pointer_translation: bool
@@ -4376,6 +4382,7 @@ field	metal2vulkan::pipeline::StageModule.specialized_notes	pub specialized_note
 field	metal2vulkan::pipeline::StageModule.spirv	pub spirv: Arc<[u32]>
 field	metal2vulkan::pipeline::StageModule.stage	pub stage: vk::ShaderStage
 field	metal2vulkan::pipeline::StageModule.stage_flags	pub stage_flags: vk::PipelineShaderStageCreateFlags
+field	metal2vulkan::pipeline::StageModule.stats	pub stats: ModuleStats
 field	metal2vulkan::pipeline::StageModule.strategies	pub strategies: StrategyCensus
 field	metal2vulkan::pipeline::StandInUse.format	pub format: vk::Format
 field	metal2vulkan::pipeline::StandInUse.formatless	pub formatless: bool
@@ -8840,6 +8847,7 @@ method	metal2vulkan::library::CompiledFunction::attribute_fetches	pub fn attribu
 method	metal2vulkan::library::CompiledFunction::from_bytes	pub fn from_bytes(bytes: &[u8], device: &Device) -> Result<CompiledFunction, ArtifactError>
 method	metal2vulkan::library::CompiledFunction::from_bytes_for_key	pub fn from_bytes_for_key(bytes: &[u8], key: &FunctionCompileKey, device: &Device) -> Result<CompiledFunction, ArtifactError>
 method	metal2vulkan::library::CompiledFunction::key	pub fn key(&self) -> &FunctionCompileKey
+method	metal2vulkan::library::CompiledFunction::module_stats	pub fn module_stats(&self) -> ModuleStats
 method	metal2vulkan::library::CompiledFunction::numbered_samplers	pub fn numbered_samplers(&self) -> &[crate::pipeline::NumberedSampler]
 method	metal2vulkan::library::CompiledFunction::precision_notes	pub fn precision_notes(&self) -> &[PrecisionNote]
 method	metal2vulkan::library::CompiledFunction::reads_resident_roots	pub fn reads_resident_roots(&self) -> bool
@@ -9686,6 +9694,7 @@ struct	metal2vulkan::pipeline::LinkedSource	#[derive(Clone, Copy, Debug)] pub st
 struct	metal2vulkan::pipeline::LoweringInputs	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)] #[non_exhaustive] pub struct LoweringInputs
 struct	metal2vulkan::pipeline::MeshPipelineDescriptor	#[derive(Clone, Debug, PartialEq, Eq)] #[non_exhaustive] pub struct MeshPipelineDescriptor
 struct	metal2vulkan::pipeline::MeshRecords	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct MeshRecords
+struct	metal2vulkan::pipeline::ModuleStats	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct ModuleStats
 struct	metal2vulkan::pipeline::PipelineInterface	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct PipelineInterface
 struct	metal2vulkan::pipeline::PipelineLayout	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct PipelineLayout
 struct	metal2vulkan::pipeline::PlacedField	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct PlacedField
@@ -9947,6 +9956,7 @@ trait-impl	metal2vulkan::metal::state::StencilDescriptor impl Default	impl Defau
 trait-impl	metal2vulkan::pipeline::ComputePipeline impl Fitted	impl Fitted for ComputePipeline
 trait-impl	metal2vulkan::pipeline::ComputePipeline impl PipelineArtifact	impl PipelineArtifact for ComputePipeline
 trait-impl	metal2vulkan::pipeline::LinkedFunction impl From<Function>	impl From<Function> for LinkedFunction
+trait-impl	metal2vulkan::pipeline::ModuleStats impl Codec	impl Codec for ModuleStats
 trait-impl	metal2vulkan::pipeline::PrivateRenderState impl Default	impl Default for PrivateRenderState
 trait-impl	metal2vulkan::pipeline::PrivateRenderState impl Eq	impl Eq for PrivateRenderState
 trait-impl	metal2vulkan::pipeline::PrivateRenderState impl PartialEq	impl PartialEq for PrivateRenderState

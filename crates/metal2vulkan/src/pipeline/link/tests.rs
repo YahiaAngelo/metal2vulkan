@@ -157,6 +157,7 @@ pub(super) fn artifact(
         reconvergence: Reconvergence::Guaranteed,
         precision: Vec::new(),
         strategies: StrategyCensus::default(),
+        stats: crate::pipeline::artifact::ModuleStats::default(),
         blob: None,
         requirements,
         variant_bits: 0,

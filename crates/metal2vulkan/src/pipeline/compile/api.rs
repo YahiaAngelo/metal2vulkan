@@ -1111,7 +1111,7 @@ fn depth16_stage(
         return Ok(None);
     }
     let module = depth16::fragment_module(v.depth16_bias_raises)?;
-    crate::spirv::verify::verify(&module, p, m)?;
+    let stats = crate::spirv::verify::verify(&module, p, m)?;
     let module = crate::spirv::serialize::serialize_for(module, p)?;
     let words = crate::spirv::serialize::relocate(&module, &*linked)?;
     stages.push(StageModule {
@@ -1131,6 +1131,7 @@ fn depth16_stage(
         own_pixel_textures: Vec::new(),
         snapshot_textures: Vec::new(),
         private_bytes: 0,
+        stats,
     });
     let placement = depth16::fragment_placement();
     if let Some((offset, size)) = placement.push_range {
@@ -1618,6 +1619,9 @@ fn stage_module(a: &FunctionArtifact, linked: &Linked, i: usize) -> Result<Stage
         own_pixel_textures: a.interface.own_pixel_textures.clone(),
         snapshot_textures: a.interface.snapshot_textures.clone(),
         private_bytes: a.interface.private_bytes,
+        // Link resolves the module's symbols and adds no instruction, so the function's own
+        // counts are the stage's.
+        stats: a.stats,
     })
 }
 

@@ -334,8 +334,9 @@ budget, and exceeding one is `Error::LimitExceeded`, permanent for that input.
 A `ComputePipeline` is immutable plain data:
 
 - `stage`: a `StageModule` (SPIR-V 1.5 words valid for the device, the entry point, specialization
-  constants, a required subgroup size and stage flags, precision notes, and `private_bytes`, the
-  private memory a thread keeps, as `StageInterface::private_bytes` states it too);
+  constants, a required subgroup size and stage flags, precision notes, `private_bytes`, the
+  private memory a thread keeps, as `StageInterface::private_bytes` states it too, and `stats`,
+  what the module contains);
 - `layout`: the pipeline layout, dense and complete; create it as it is;
 - `interface`, `dependencies`: what it binds and what bind-time state it depends on (section 5);
 - `metal_info`: answers to Metal's per-pipeline queries (`maxTotalThreadsPerThreadgroup`, ...);
@@ -348,6 +349,56 @@ placeholders (a kernel's local size is 1). Create each pipeline from a planned d
 `requiredSubgroupSizeStages`; full subgroups need `computeFullSubgroups`. A pipeline compiled for
 one device pins only what that device can take; `DeviceProfile::check` tells whether another
 device can.
+
+### What the module contains
+
+Every stage states the size and shape of its module, counted by the verifier that runs on every
+translation, in every build: `stage.stats`, a `ModuleStats`. A function compiled on its own states
+the same counts as `module_stats()`, before it is linked. Reading them is how a caller watches the
+size of what it hands a driver, and what in it grew.
+
+```rust
+let stats = pipeline.stage.stats;
+println!(
+    "{} blocks, {} instructions",
+    stats.blocks, stats.instructions
+);
+assert!(stats.reachable_blocks <= stats.blocks);
+```
+
+- `blocks` and `instructions` are the module's size: a larger module costs more to compile on the
+  drivers measured. Canonicalization inlines every direct call before the module is emitted, so
+  they count the whole program, not one function.
+- `functions` -- the entry point and the functions left beside it -- says how far `blocks` stands
+  for that program. A driver inlines before it charges, so a module of few functions is one whose
+  blocks are the program's, while a module that calls a many-block function from many sites holds
+  a program far larger than its own blocks; the two read alike in `blocks` alone. Lowering emits
+  such functions itself: the handle-table and root-table searches are unrolled branch-free steps,
+  emitted once and called at every access.
+- Compare one module against the next of the same shader, not one shader against another. Measured
+  cost per block differed several-fold between a synthetic module and a real workload, so a
+  per-block figure taken from one shader predicts nothing for the next; `instructions` is the
+  second number for that reason.
+- `constructs` (selection, switch and loop headers) and `loops` say whose blocks those are.
+  Translation adds blocks of its own -- inlining, and the structurizer's layout of control flow as
+  SPIR-V requires -- and the input has blocks of its own. The structurizer makes no loop the input
+  does not have, so a `blocks` that has risen while `loops` holds still is translation's work or a
+  changed shape of the same control flow, not new control flow in the shader.
+- `reachable_blocks` is a bound, not a lever. It is never above `blocks`, and below it by the merge
+  blocks SPIR-V requires a construct to declare that no path reaches -- both arms of a conditional
+  inside a loop leaving the construct, say -- which the module terminates with `OpUnreachable`. The
+  difference is blocks the driver still reads and no invocation runs.
+- The AIR side of the comparison is yours, through `metal2vulkan-air`. For the counts the input
+  itself holds, before inlining, decode it and count the blocks of each function's body
+  (`metal2vulkan_air::decode`, then each `ir::Function`'s `body`); for the ones canonicalization
+  produced, walk the entry `DeviceProfile::specialized_entry` gives, which is that AIR specialized
+  and canonicalized. A decoded function's `ir::InstKind::Call` sites give each callee's call
+  count, which is what turns its own blocks into the program inlining will make of it.
+
+The counts are of the module `spirv` holds: the verifier counts the module it checked, and
+serialization and relocation assign link numbers without adding or removing an instruction. They
+are part of the encoded artifact, so a cache hit states them too, and they are left out of
+`content_digest`, which already covers the words they describe.
 
 ### A kernel with `[[stage_in]]`
 
@@ -938,9 +989,9 @@ assert_eq!(linked, pipeline);
 
 - A compiled function states before linking what its stage will: `stage()`, `requirements()`
   (check it against another profile with `DeviceProfile::check`), `precision_notes()`,
-  `reconvergence()`, `required_subgroup_size()`, `requires_full_subgroups()`, and
-  `writes_memory()` (stores or atomics, which a render pipeline drawn in more than one color
-  group refuses).
+  `reconvergence()`, `required_subgroup_size()`, `requires_full_subgroups()`, `module_stats()`
+  (section 3) and `writes_memory()` (stores or atomics, which a render pipeline drawn in more than
+  one color group refuses).
   `compile_function_with_report` also returns a `CompileReport` of what the compile cost.
 - A render pipeline's stages compile under inputs that a decode of its functions learns.
   `render_pipeline_key` returns `RenderPipelineKeys`: each stage's function key, and the inputs to

@@ -43,6 +43,10 @@
 //!   `shaderZeroInitializeWorkgroupMemory`, and the requirements are a subset of the profile
 //!   (`Internal(RequirementsExceedProfile)`).
 //!
+//! A pass counts what it covered as it checks it, and that count is the module's public
+//! [`ModuleStats`]: the verifier runs on every translation, so the statistics cost nothing beyond
+//! it.
+//!
 //! Work is linear in the module plus, per branch edge, the number of constructs it leaves; it is
 //! metered on the per-attempt [`Meter`] and every table is charged to its ledger.
 
@@ -57,23 +61,10 @@ use std::fmt;
 use crate::budget::Meter;
 use crate::device::profile::DeviceProfile;
 use crate::error::{Capability, Error, InternalError, InternalKind};
+use crate::pipeline::artifact::ModuleStats;
 use crate::spirv::error::{BuildError, Dangling};
 use crate::spirv::ids::{BlockId, FuncId, GlobalId, Value};
 use crate::spirv::ir::TypedModule;
-
-/// What a successful verification covered.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct VerifyReport {
-    pub functions: u32,
-    pub blocks: u32,
-    /// Blocks reachable from their function's entry.
-    pub reachable_blocks: u32,
-    /// Instructions, phis, and terminators.
-    pub instructions: u64,
-    /// Structured constructs (selections, switches, loops).
-    pub constructs: u32,
-    pub loops: u32,
-}
 
 /// A broken verifier rule, naming where.
 #[non_exhaustive]
@@ -255,7 +246,7 @@ pub fn verify(
     m: &TypedModule,
     profile: &DeviceProfile,
     meter: &mut Meter,
-) -> Result<VerifyReport, Error> {
+) -> Result<ModuleStats, Error> {
     check(m, profile, meter).map_err(Error::from)
 }
 
@@ -264,7 +255,7 @@ pub fn check(
     m: &TypedModule,
     profile: &DeviceProfile,
     meter: &mut Meter,
-) -> Result<VerifyReport, VerifyError> {
+) -> Result<ModuleStats, VerifyError> {
     let report = check_structure(m, meter)?;
     rules::profile_rules(m, profile)?;
     Ok(report)
@@ -272,7 +263,7 @@ pub fn check(
 
 /// Every rule that does not depend on a device profile. Tests of builder families that no
 /// committed profile enables use this; products always run [`verify`].
-pub fn check_structure(m: &TypedModule, meter: &mut Meter) -> Result<VerifyReport, VerifyError> {
+pub fn check_structure(m: &TypedModule, meter: &mut Meter) -> Result<ModuleStats, VerifyError> {
     let mut ledger = Ledger { bytes: 0 };
     let r = check_in(m, meter, &mut ledger);
     meter.release(ledger.bytes);
@@ -283,16 +274,16 @@ fn check_in(
     m: &TypedModule,
     meter: &mut Meter,
     ledger: &mut Ledger,
-) -> Result<VerifyReport, VerifyError> {
+) -> Result<ModuleStats, VerifyError> {
     let layout = cfg::Layout::build(m, meter, ledger)?;
     let defs = cfg::Defs::build(m, meter, ledger)?;
     let calls = rules::CallGraph::build(m, meter, ledger)?;
     let tangled_fn = calls.check_and_propagate(meter)?;
-    let mut report = VerifyReport {
+    let mut report = ModuleStats {
         functions: u32::try_from(m.functions.len()).unwrap_or(u32::MAX),
         blocks: u32::try_from(m.blocks.len()).unwrap_or(u32::MAX),
         loops: u32::try_from(m.loops.len()).unwrap_or(u32::MAX),
-        ..VerifyReport::default()
+        ..ModuleStats::default()
     };
     let mut constructs = cfg::ModuleConstructs::new(m, meter, ledger)?;
     let facts = cfg::ModuleFacts {

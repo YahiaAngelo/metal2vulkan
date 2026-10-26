@@ -49,6 +49,7 @@ fn stage_module_bytes_are_little_endian_words() {
         snapshot_textures: Vec::new(),
         private_bytes: 0,
         specialized_notes: Vec::new(),
+        stats: ModuleStats::default(),
     };
     assert_eq!(
         m.spirv_bytes(),
@@ -117,6 +118,7 @@ fn a_stage_s_notes_under_a_specialization_are_its_held_clauses() {
                 }],
             },
         ],
+        stats: ModuleStats::default(),
     };
     let key = |values: &[(u32, u32)]| {
         let mut k = SpecializationKey::new();
