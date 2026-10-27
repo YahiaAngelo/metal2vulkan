@@ -64,6 +64,7 @@ mod engine_function_constant_interface;
 mod engine_function_constant_pointers;
 mod engine_gated_texture_slots;
 mod engine_gep_index;
+mod engine_global_bindings;
 mod engine_global_builtins;
 mod engine_graphics_binder;
 mod engine_half_moves;
