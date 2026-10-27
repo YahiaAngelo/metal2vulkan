@@ -268,18 +268,135 @@ fn unknown_key_is_refused() {
     expect_abi(k.decode(), AbiError::UnknownKey);
 }
 
-/// MSL 3.2's program-scope buffer bindings (`!air.global_bindings`) are valid AIR this version
-/// does not implement: refused as unsupported, not as malformed input.
+/// A program-scope texture global (`!{ ptr addrspace(1) }` in constant space, externally
+/// initialized `undef`), as `xcrun metal` 32023.921 writes `texture2d<half> t [[texture(n)]];`.
+fn bound_texture_global(b: &mut ModuleBuilder, name: &str, space: AddrSpace) -> GlobalId {
+    let dev = b.ptr(AddrSpace::Device);
+    let st = b.struct_ty(&[dev]);
+    let undef = b.constant(st, Const::Undef);
+    let name = b.sym(name);
+    b.global(Global {
+        name,
+        value_ty: st,
+        space,
+        constant: true,
+        init: Some(undef),
+        externally_initialized: true,
+        linkage: Linkage::Internal,
+        visibility: Default::default(),
+        unnamed_addr: Default::default(),
+        align: None,
+        section: None,
+    })
+}
+
+/// The argument node of a program-scope texture binding at `[[texture(slot)]]`: an entry
+/// parameter's node with parameter index `i32 -1`.
+fn global_texture_arg<'a>(slot: u64) -> Vec<O<'a>> {
+    vec![
+        I(u64::from(u32::MAX)),
+        S("air.texture"),
+        S("air.location_index"),
+        I(slot),
+        I(1),
+        S("air.sample"),
+        S("air.arg_type_name"),
+        S("texture2d<half, sample>"),
+        S("air.arg_name"),
+        S("lut"),
+    ]
+}
+
+/// MSL 3.2's program-scope bindings (`!air.global_bindings`): each entry names its global and an
+/// argument node of an entry parameter's shape, decoded to the role it binds.
 #[test]
-fn program_scope_bindings_are_unsupported_not_malformed() {
+fn program_scope_texture_bindings_decode() {
     let mut k = Kernel::standard();
-    let binding = node(&mut k.b, &[S("air.global_binding")]);
+    let g = bound_texture_global(&mut k.b, "lut", AddrSpace::Constant);
+    let arg = node(&mut k.b, &global_texture_arg(10));
+    let binding = node(&mut k.b, &[S("air.global_binding"), G(g), N(arg)]);
     k.b.named_md("air.global_bindings", &[binding]);
-    let err = k.decode().unwrap_err();
+    let abi = k.decode().unwrap();
+    assert_eq!(
+        abi.global_bindings,
+        vec![GlobalBinding {
+            global: g,
+            role: ParamRole::Texture(TextureArg {
+                location: Slot {
+                    index: AbiInt::Const(10),
+                    count: AbiInt::Const(1),
+                },
+                access: Access::Sample,
+                raster_order_group: None,
+            }),
+            ty: ArgTypeInfo {
+                size: None,
+                align: None,
+                name: Some(DiagName::new("texture2d<half, sample>")),
+            },
+            name: Some(DiagName::new("lut")),
+        }]
+    );
+    // The entry's own parameters are unchanged: the binding is not one of them.
+    assert_eq!(abi.entries[0].params.len(), 4);
+}
+
+/// A malformed program-scope binding is refused as malformed; a role this version does not bind
+/// at program scope is refused as unsupported.
+#[test]
+fn program_scope_bindings_are_checked() {
+    let decode = |entry: &dyn Fn(&mut ModuleBuilder, GlobalId) -> MdId| {
+        let mut k = Kernel::standard();
+        let g = bound_texture_global(&mut k.b, "lut", AddrSpace::Constant);
+        let binding = entry(&mut k.b, g);
+        k.b.named_md("air.global_bindings", &[binding]);
+        k.decode()
+    };
+    // The parameter index of a binding is -1.
+    let err = decode(&|b, g| {
+        let mut ops = global_texture_arg(0);
+        ops[0] = I(0);
+        let arg = node(b, &ops);
+        node(b, &[S("air.global_binding"), G(g), N(arg)])
+    });
+    expect_abi(err, AbiError::BadValue);
+    // The entry's key, global, and argument node, nothing more.
+    let err = decode(&|b, g| {
+        let arg = node(b, &global_texture_arg(0));
+        node(b, &[S("air.global_binding"), G(g), N(arg), I(0)])
+    });
+    expect_abi(err, AbiError::UnknownKey);
+    let err = decode(&|b, g| {
+        let arg = node(b, &global_texture_arg(0));
+        node(b, &[S("air.global_bind"), G(g), N(arg)])
+    });
+    expect_abi(err, AbiError::UnknownKey);
+    // A role other than a buffer, texture, or sampler is valid AIR not bound at program scope.
+    let err = decode(&|b, g| {
+        let arg = node(
+            b,
+            &[
+                I(u64::from(u32::MAX)),
+                S("air.visible_function_table"),
+                S("air.location_index"),
+                I(0),
+                I(1),
+            ],
+        );
+        node(b, &[S("air.global_binding"), G(g), N(arg)])
+    })
+    .unwrap_err();
     let Error::Unsupported(u) = err else {
         panic!("not unsupported: {err:?}")
     };
     assert_eq!(u.feature, Feature::ProgramScopeBinding);
+    // The bound global lives in constant space.
+    let mut k = Kernel::standard();
+    let g = bound_texture_global(&mut k.b, "lut", AddrSpace::Device);
+    let arg = node(&mut k.b, &global_texture_arg(0));
+    let binding = node(&mut k.b, &[S("air.global_binding"), G(g), N(arg)]);
+    k.b.named_md("air.global_bindings", &[binding]);
+    expect_abi(k.decode(), AbiError::BadValue);
     // Any other named list outside the closed set is still a key outside the contract.
     let mut k = Kernel::standard();
     let other = node(&mut k.b, &[S("air.no_such_entry")]);
@@ -2238,6 +2355,7 @@ fn pointee_size_and_layout_checks() {
         entries: vec![],
         function_constants: vec![],
         static_samplers: vec![],
+        global_bindings: vec![],
         visible_function_refs: vec![],
         visible_functions: vec![],
         core_image_kernels: vec![],

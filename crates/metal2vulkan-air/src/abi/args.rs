@@ -9,16 +9,16 @@ use super::md::{kept_bytes, Ops, Site, Tok};
 use super::structs::Structs;
 use super::{
     AbiInt, AccelerationStructureKind, Access, ArgTypeInfo, BufferArg, Builtin, ControlPointField,
-    DepthQualifier, ImageblockArg, ImageblockKind, IndirectArg, Interpolation, MeshField,
-    MeshFieldRole, MeshOutputs, MeshTopology, ObjectArg, OutputBinding, OutputRole, ParamBinding,
-    ParamRole, PatchInput, Predicate, Sampling, Slot, Stage, StructRef, TextureArg, UserKey,
-    Varying,
+    DepthQualifier, GlobalBinding, ImageblockArg, ImageblockKind, IndirectArg, Interpolation,
+    MeshField, MeshFieldRole, MeshOutputs, MeshTopology, ObjectArg, OutputBinding, OutputRole,
+    ParamBinding, ParamRole, PatchInput, Predicate, Sampling, Slot, Stage, StructRef, TextureArg,
+    UserKey, Varying,
 };
 use crate::bitcode::PointeeTable;
 use crate::budget::Meter;
 use crate::error::Error;
-use crate::error::{AbiError, DiagName};
-use crate::ir::{AddrSpace, FuncId, MdId, Module, Type, TypeId, TypeLayouts};
+use crate::error::{AbiError, DiagName, Feature, InputError, InputErrorKind};
+use crate::ir::{AddrSpace, FuncId, GlobalId, MdId, Module, Type, TypeId, TypeLayouts};
 
 /// The decoder state shared by every node: the module, the meter, the layout arena, and the two
 /// tables that reach the IR type holding an argument buffer (see [`MemberSpace`]).
@@ -329,6 +329,58 @@ impl<'m> Cx<'m, '_> {
             role,
             unused: node.attrs.unused,
             predicate: node.predicate,
+            ty: node.attrs.ty(),
+            name: node.attrs.name.clone(),
+        })
+    }
+
+    /// Decode the argument node of one `!air.global_bindings` entry, which binds `global`: an
+    /// entry parameter's node whose parameter index is `i32 -1`. Its role is a buffer (in device
+    /// or constant space), a texture, or a sampler; any other role, and a predicate, are refused
+    /// as not implemented. `global` must be a constant-space object, which the binding fills.
+    pub(super) fn global_binding(
+        &mut self,
+        id: MdId,
+        global: GlobalId,
+    ) -> Result<GlobalBinding, Error> {
+        let entry = self
+            .m
+            .global(global)
+            .and_then(|g| self.m.symbols().get(g.name))
+            .map_or_else(|| DiagName::new(""), super::md::diag);
+        let node = self.node(id, Context::Input, &entry)?;
+        let unsupported = |site: &Site| {
+            Error::from(InputError::new(
+                InputErrorKind::Unsupported(Feature::ProgramScopeBinding),
+                site.at(Some("air.global_binding")),
+            ))
+        };
+        if node.index != Some(u32::MAX) {
+            return Err(node.site.err(AbiError::BadValue, None));
+        }
+        if node.predicate.is_some() {
+            return Err(unsupported(&node.site));
+        }
+        let in_constant_space = self
+            .m
+            .global(global)
+            .is_some_and(|g| g.space == AddrSpace::Constant);
+        if !in_constant_space {
+            return Err(node
+                .site
+                .err(AbiError::BadValue, Some("air.global_binding")));
+        }
+        let layouts = node.layouts(|id, site| Structs::get(self, id, site, None))?;
+        let role = self.role(&node, layouts, Context::Input, None, MemberSpace::Unstated)?;
+        if !matches!(
+            role,
+            ParamRole::Buffer(_) | ParamRole::Texture(_) | ParamRole::Sampler { .. }
+        ) {
+            return Err(unsupported(&node.site));
+        }
+        Ok(GlobalBinding {
+            global,
+            role,
             ty: node.attrs.ty(),
             name: node.attrs.name.clone(),
         })

@@ -798,9 +798,10 @@ pub enum Feature {
     /// its pixel holds or a color's coverage mask, or a store to the samples of a coverage mask.
     /// Tile functions and fragment imageblocks run on single-sample passes only.
     Imageblocks,
-    /// A program-scope buffer binding of MSL 3.2 (macOS 15 and later), `constant T* constant p
-    /// [[buffer(n)]];` in Apple's `!air.global_bindings` list, valid AIR this version does not
-    /// implement yet.
+    /// A program-scope binding of MSL 3.2 (macOS 15 and later) in Apple's `!air.global_bindings`
+    /// list that this version does not implement: a binding of a role other than a buffer,
+    /// texture, or sampler, or one a function constant gates; a use of a bound global other than
+    /// a load of it; or a bound global in a linked or dynamic library's module.
     ProgramScopeBinding,
 }
 
