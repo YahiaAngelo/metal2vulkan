@@ -23,6 +23,7 @@ mod command_buffers;
 mod constant_fields;
 mod conversions;
 mod float_compares;
+mod global_bindings;
 mod global_builtins;
 mod private_memory;
 mod table_copies;
@@ -43,6 +44,7 @@ fn abi(entries: Vec<EntryPoint>, fcs: Vec<FunctionConstantDecl>) -> AirAbi {
         entries,
         function_constants: fcs,
         static_samplers: Vec::new(),
+        global_bindings: Vec::new(),
         visible_function_refs: Vec::new(),
         visible_functions: Vec::new(),
         core_image_kernels: Vec::new(),
