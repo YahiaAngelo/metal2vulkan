@@ -110,6 +110,8 @@ pub struct AirAbi {
     pub function_constants: Vec<FunctionConstantDecl>,
     /// `!air.sampler_states`: constexpr samplers.
     pub static_samplers: Vec<StaticSampler>,
+    /// `!air.global_bindings`: program-scope variables bound to argument-table slots.
+    pub global_bindings: Vec<GlobalBinding>,
     /// `!air.visible_function_references`.
     pub visible_function_refs: Vec<VisibleFunctionRef>,
     /// `!air.visible`: the functions this module exports to the Metal linker, in list order.
@@ -135,6 +137,21 @@ impl AirAbi {
     /// role is `air.visible_function_table`). Linear in the layouts.
     pub fn reaches_function_tables(&self, ep: &EntryPoint) -> bool {
         ep.reaches_role(&self.structs, |r| matches!(r, ParamRole::FunctionTable(_)))
+    }
+
+    /// Refuse the module as a linked one (a visible function's, a dynamic library's) when it binds
+    /// program-scope variables: canonicalization makes a bound global's loads parameters of the
+    /// entry that is specialized, and an imported function's are not.
+    pub fn linkable(&self) -> Result<(), Error> {
+        if self.global_bindings.is_empty() {
+            return Ok(());
+        }
+        let at = crate::error::Location::metadata(None, None, Some("air.global_bindings"));
+        Err(
+            crate::error::Unsupported::not_implemented(crate::error::Feature::ProgramScopeBinding)
+                .at(at)
+                .into(),
+        )
     }
 
     /// The entry point for function `func`.
@@ -1126,6 +1143,27 @@ pub struct StaticSampler {
     pub global: GlobalId,
     /// The state those words decode to.
     pub state: SamplerState,
+}
+
+/// A program-scope variable bound to an argument-table slot (`!air.global_bindings`), such as
+/// `texture2d<half> t [[texture(n)]];` or `constant T* constant p [[buffer(n)]];` at program scope.
+///
+/// Each entry is `!{!"air.global_binding", <global>, <argument node>}`. The argument node has an
+/// entry parameter's shape with `i32 -1` for its parameter index. The global is a constant-space,
+/// externally initialized `undef` object holding the handle or pointer the slot binds; a function
+/// reads it with a load of the global. Canonicalization makes each such load in an entry a read of
+/// a parameter of this binding's role appended to the entry, so the slot binds like the same
+/// parameter would.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlobalBinding {
+    /// The global the binding fills.
+    pub global: GlobalId,
+    /// What the slot holds: a buffer, texture, or sampler role.
+    pub role: ParamRole,
+    /// `air.arg_type_size`, `air.arg_type_align_size`, and `air.arg_type_name`, as stated.
+    pub ty: ArgTypeInfo,
+    /// `air.arg_name`, for diagnostics.
+    pub name: Option<DiagName>,
 }
 
 /// What an `air.visible_function_reference` names.

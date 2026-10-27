@@ -12,7 +12,7 @@ use super::{
 use crate::bitcode::PointeeTable;
 use crate::budget::Meter;
 use crate::error::Error;
-use crate::error::{AbiError, DiagName, Feature, InputError, InputErrorKind, Location};
+use crate::error::{AbiError, DiagName, Location};
 use crate::ir::{MdId, Module, Type, TypeId, TypeLayouts};
 
 /// The closed set of named metadata lists.
@@ -35,6 +35,7 @@ enum Named {
     SourceFileName,
     ModuleFlags,
     Ident,
+    GlobalBindings,
 }
 
 const NAMED: &[(&str, Named)] = &[
@@ -58,11 +59,10 @@ const NAMED: &[(&str, Named)] = &[
     ("air.source_file_name", Named::SourceFileName),
     ("llvm.module.flags", Named::ModuleFlags),
     ("llvm.ident", Named::Ident),
+    // Program-scope bindings (MSL 3.2): each entry `!{!"air.global_binding", <global>, <arg>}`
+    // binds a program-scope variable to an argument-table slot.
+    ("air.global_bindings", Named::GlobalBindings),
 ];
-
-/// Apple's named list of a module's program-scope buffer bindings (MSL 3.2): each entry
-/// `!{!"air.global_binding", <global>, <binding>}` binds a buffer to a program-scope pointer.
-const GLOBAL_BINDINGS: &str = "air.global_bindings";
 
 /// Decode every named list of `m`. Entries are decoded kernel, vertex, fragment, object, mesh,
 /// each in list order.
@@ -76,14 +76,6 @@ pub(super) fn decode(
     for named in m.named_md() {
         meter.tick(1)?;
         let name = m.symbols().get(named.name).unwrap_or_default();
-        // MSL 3.2's program-scope buffer bindings: valid AIR, not implemented yet, so refused as
-        // unsupported rather than as a key outside the input's contract.
-        if name == GLOBAL_BINDINGS.as_bytes() {
-            return Err(Error::from(InputError::new(
-                InputErrorKind::Unsupported(Feature::ProgramScopeBinding),
-                Location::metadata(Some(diag(name)), None, None),
-            )));
-        }
         let kind = NAMED
             .iter()
             .find(|(s, _)| s.as_bytes() == name)
@@ -105,6 +97,7 @@ pub(super) fn decode(
         entries: Vec::new(),
         function_constants: Vec::new(),
         static_samplers: Vec::new(),
+        global_bindings: Vec::new(),
         visible_function_refs: Vec::new(),
         visible_functions: Vec::new(),
         core_image_kernels: Vec::new(),
@@ -179,6 +172,22 @@ pub(super) fn decode(
                     n.finish()?;
                     let state = decode_global(m, global, &site)?;
                     abi.static_samplers.push(StaticSampler { global, state });
+                }
+            }
+            Named::GlobalBindings => {
+                cx.meter.reserve(&mut abi.global_bindings, ops.len())?;
+                for &id in ops {
+                    cx.meter.tick(1)?;
+                    let key = Some("air.global_binding");
+                    let mut n = Ops::node(m, id, site.clone())?;
+                    if n.string(key)? != b"air.global_binding" {
+                        return Err(site.err(AbiError::UnknownKey, key));
+                    }
+                    let global = n.global(key)?;
+                    let arg = n.child(key)?;
+                    n.finish()?;
+                    let binding = cx.global_binding(arg, global)?;
+                    abi.global_bindings.push(binding);
                 }
             }
             Named::VisibleFunctionReferences => {

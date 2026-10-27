@@ -1636,6 +1636,7 @@ field	metal2vulkan-air::abi::AirAbi.compile	pub compile: CompileOptions
 field	metal2vulkan-air::abi::AirAbi.core_image_kernels	pub core_image_kernels: Vec<CoreImageKernel>
 field	metal2vulkan-air::abi::AirAbi.entries	pub entries: Vec<EntryPoint>
 field	metal2vulkan-air::abi::AirAbi.function_constants	pub function_constants: Vec<FunctionConstantDecl>
+field	metal2vulkan-air::abi::AirAbi.global_bindings	pub global_bindings: Vec<GlobalBinding>
 field	metal2vulkan-air::abi::AirAbi.language	pub language: Option<LanguageVersion>
 field	metal2vulkan-air::abi::AirAbi.limits	pub limits: ModuleLimits
 field	metal2vulkan-air::abi::AirAbi.linkage_signature	pub linkage_signature: Option<LinkageSignature>
@@ -1684,6 +1685,10 @@ field	metal2vulkan-air::abi::FunctionConstantDecl.index	pub index: u32
 field	metal2vulkan-air::abi::FunctionConstantDecl.name	pub name: DiagName
 field	metal2vulkan-air::abi::FunctionConstantDecl.ty	pub ty: TypeId
 field	metal2vulkan-air::abi::FunctionConstantDecl.type_name	pub type_name: DiagName
+field	metal2vulkan-air::abi::GlobalBinding.global	pub global: GlobalId
+field	metal2vulkan-air::abi::GlobalBinding.name	pub name: Option<DiagName>
+field	metal2vulkan-air::abi::GlobalBinding.role	pub role: ParamRole
+field	metal2vulkan-air::abi::GlobalBinding.ty	pub ty: ArgTypeInfo
 field	metal2vulkan-air::abi::ImageblockArg.alias_implicit	pub alias_implicit: bool
 field	metal2vulkan-air::abi::ImageblockArg.data_size	pub data_size: Option<u32>
 field	metal2vulkan-air::abi::ImageblockArg.kind	pub kind: ImageblockKind
@@ -7168,6 +7173,7 @@ method	metal2vulkan-air::Entry::may_write_textures	pub fn may_write_textures(&se
 method	metal2vulkan-air::Lockstep::inserted	pub fn inserted(&self, i: crate::ir::InstId) -> bool
 method	metal2vulkan-air::abi::AirAbi::check_container	pub fn check_container(&mut self, m: &Module, f: &LibraryFunction<'_>, meter: &mut Meter) -> Result<(), Error>
 method	metal2vulkan-air::abi::AirAbi::control_point_fetches	pub fn control_point_fetches(&self) -> impl Iterator<Item = FuncId> + '_
+method	metal2vulkan-air::abi::AirAbi::linkable	pub fn linkable(&self) -> Result<(), Error>
 method	metal2vulkan-air::abi::AirAbi::reaches_function_tables	pub fn reaches_function_tables(&self, ep: &EntryPoint) -> bool
 method	metal2vulkan-air::abi::AirAbi::struct_info	pub fn struct_info(&self, r: StructRef) -> Option<&StructInfo>
 method	metal2vulkan-air::abi::AirAbi::visible_function_stubs	pub fn visible_function_stubs(&self) -> impl Iterator<Item = (FuncId, &VisibleSymbol)> + '_
@@ -9250,6 +9256,7 @@ struct	metal2vulkan-air::abi::CoreImageOutput	#[derive(Clone, Debug, PartialEq, 
 struct	metal2vulkan-air::abi::CoreImageParam	#[derive(Clone, Debug, PartialEq, Eq)] pub struct CoreImageParam
 struct	metal2vulkan-air::abi::EntryPoint	#[derive(Clone, Debug, PartialEq, Eq)] pub struct EntryPoint
 struct	metal2vulkan-air::abi::FunctionConstantDecl	#[derive(Clone, Debug, PartialEq, Eq)] pub struct FunctionConstantDecl
+struct	metal2vulkan-air::abi::GlobalBinding	#[derive(Clone, Debug, PartialEq, Eq)] pub struct GlobalBinding
 struct	metal2vulkan-air::abi::Half	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct Half(pub u16)
 struct	metal2vulkan-air::abi::ImageblockArg	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct ImageblockArg
 struct	metal2vulkan-air::abi::IndirectArg	#[derive(Clone, Debug, PartialEq, Eq, Hash)] pub struct IndirectArg

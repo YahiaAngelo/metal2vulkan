@@ -1436,9 +1436,10 @@ pub enum Feature {
     /// function under the indexed form, an indirect or amplified draw, and an indexed draw whose
     /// indices run past its buffer or whose index offset is not a multiple of the index size.
     TileReach,
-    /// A program-scope buffer binding of MSL 3.2 (macOS 15 and later), `constant T* constant p
-    /// [[buffer(n)]];` in Apple's `!air.global_bindings` list, valid AIR this version does not
-    /// implement yet.
+    /// A program-scope binding of MSL 3.2 (macOS 15 and later) in Apple's `!air.global_bindings`
+    /// list that this version does not implement: a binding of a role other than a buffer,
+    /// texture, or sampler, or one a function constant gates; a use of a bound global other than
+    /// a load of it; or a bound global in a linked or dynamic library's module.
     ProgramScopeBinding,
     /// A sequentially consistent fence (`seq_cst` `atomic_thread_fence`, an LLVM `fence seq_cst`,
     /// or a `seq_cst` barrier ordering device memory), whose total order with the command

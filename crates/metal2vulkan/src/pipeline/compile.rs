@@ -427,7 +427,9 @@ fn dynamic_links(
     for library in &order.libraries {
         m.tick(1)?;
         let code = match air::decode(library.module(), m) {
-            Ok(air::Decoded { module, abi, .. }) => Ok(LinkedCode { module, abi }),
+            Ok(air::Decoded { module, abi, .. }) => {
+                abi.linkable().map(|()| LinkedCode { module, abi })
+            }
             Err(
                 e @ (air::error::Error::Budget(_)
                 | air::error::Error::Cancelled
@@ -1727,7 +1729,7 @@ pub(crate) fn linked_modules(
                     let code = match air::decode(s.bitcode, m) {
                         Ok(air::Decoded { module, abi, .. }) => {
                             refs(&abi, &mut queue, m)?;
-                            Ok(LinkedCode { module, abi })
+                            abi.linkable().map(|()| LinkedCode { module, abi })
                         }
                         Err(
                             e @ (air::error::Error::Budget(_)
@@ -1780,7 +1782,7 @@ pub(crate) fn linked_modules(
                     if abi.static_samplers.is_empty() {
                         continue;
                     }
-                    let code = Ok(LinkedCode { module, abi });
+                    let code = abi.linkable().map(|()| LinkedCode { module, abi });
                     let functions = Vec::new();
                     out.push((key.air_hash, LinkedModule { functions, code }));
                     out.len() - 1

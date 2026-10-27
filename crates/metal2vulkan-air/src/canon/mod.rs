@@ -51,7 +51,9 @@
 //!    stores** take their AIR 2.8 form, their extent, stride and origin built from the elements per
 //!    row, the origin and the constant transpose flag (`legacy_matrix`). **Global built-in
 //!    variables**: each `air.get_*` read of a program-scope built-in becomes a read of a built-in
-//!    parameter appended to the entry (`global_builtin`).
+//!    parameter appended to the entry (`global_builtin`). **Program-scope bindings**: each load of a
+//!    global `!air.global_bindings` binds becomes a read of a parameter of the binding's role
+//!    appended to the entry (`global_binding`).
 //! 10. **ABI resolution and pruning**: predicate-gated parameters and outputs that are off
 //!     disappear from the entry point, a read of an absent argument takes its absent value (the
 //!     null reference of a resource argument) or is refused, global-valued ABI integers become
@@ -77,6 +79,7 @@ mod erase;
 mod fc;
 mod fold;
 pub mod function_table;
+mod global_binding;
 mod global_builtin;
 mod inline;
 mod interface;
@@ -646,6 +649,10 @@ pub fn specialize_dynamic(
     // Global built-in variables: each read becomes a read of a built-in parameter added to the
     // entry, but one Metal refuses in the entry's stage.
     let (body, global_builtins) = global_builtin::expand(body, &mut parts, func, &ep.stage, m)?;
+    // Program-scope bindings: each load of a bound global becomes a read of a parameter of the
+    // binding's role added to the entry.
+    let (body, global_bindings) =
+        global_binding::expand(body, &mut parts, func, &abi.global_bindings, m)?;
     // The entry's body it replaces (decoded, or devirtualized before inlining) is freed.
     if let Some(replaced) = parts
         .funcs
@@ -670,6 +677,8 @@ pub fn specialize_dynamic(
     }
     // The built-in parameters the global built-ins' reads became.
     ep.params.extend(global_builtins);
+    // The resource parameters the program-scope bindings' reads became.
+    ep.params.extend(global_bindings);
     // A table whose every use devirtualization rewrote is read as a buffer of words.
     let mut function_tables = BTreeSet::new();
     for p in &mut ep.params {
