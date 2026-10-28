@@ -433,6 +433,99 @@ fn a_cell_stride_is_rounded_up_to_the_alignment() {
     assert!(ran > 0);
 }
 
+/// A synthetic kernel whose explicit layout is one `half` (`air.imageblock_data_size` 2, aligned
+/// to 2) but which stores a `half2` `(x, y)` into the cell at its `lid`, then, from thread
+/// `(0, 0)` after the imageblock barrier, writes the whole imageblock as a `half2` slice (`{slice}`
+/// the slice's element) to the texture at `(0, 0)`. A kernel iOS 27 ships accesses its cells so.
+fn wide_access_kernel(slice: &str) -> String {
+    format!(
+        r#"%"struct.metal::_imageblock_base" = type {{ ptr addrspace(4) }}
+
+define void @wide_access(%"struct.metal::_imageblock_base" %block, ptr addrspace(1) %out, <2 x i16> %lid) {{
+  %cell = call ptr addrspace(4) @air.imageblock_data(<2 x i16> %lid, i32 0, i16 0)
+  %x = extractelement <2 x i16> %lid, i64 0
+  %y = extractelement <2 x i16> %lid, i64 1
+  %xh = uitofp i16 %x to half
+  %yh = uitofp i16 %y to half
+  %v0 = insertelement <2 x half> undef, half %xh, i64 0
+  %v = insertelement <2 x half> %v0, half %yh, i64 1
+  store <2 x half> %v, ptr addrspace(4) %cell, align 4
+  call void @air.wg.barrier(i32 8, i32 1)
+  %first = icmp eq <2 x i16> %lid, zeroinitializer
+  %all = call i1 @air.all.v2i1(<2 x i1> %first)
+  br i1 %all, label %write, label %done
+
+write:
+  %origin = call ptr addrspace(4) @air.imageblock_data(<2 x i16> zeroinitializer, i32 0, i16 0)
+  call void @air.write_imageblock_slice_to_texture_2d.{slice}(ptr addrspace(1) %out, ptr addrspace(4) %origin, i1 false, <2 x i16> zeroinitializer, <2 x i16> undef, <2 x i32> zeroinitializer, i32 0, i1 false, i32 2)
+  br label %done
+
+done:
+  ret void
+}}
+
+declare ptr addrspace(4) @air.imageblock_data(<2 x i16>, i32, i16)
+declare void @air.wg.barrier(i32, i32)
+declare i1 @air.all.v2i1(<2 x i1>)
+declare void @air.write_imageblock_slice_to_texture_2d.{slice}(ptr addrspace(1), ptr addrspace(4), i1, <2 x i16>, <2 x i16>, <2 x i32>, i32, i1, i32)
+
+!air.kernel = !{{!0}}
+!0 = !{{ptr @wide_access, !1, !2}}
+!1 = !{{}}
+!2 = !{{!3, !5, !6}}
+!3 = !{{i32 0, !"air.imageblock", !"explicit", !"air.imageblock_data_size", i32 2, !"air.struct_type_info", !4, !"air.arg_type_align_size", i32 2, !"air.arg_type_name", !"imageblock<Luma, layout_explicit>", !"air.arg_name", !"block"}}
+!4 = !{{i32 0, i32 2, i32 0, !"half", !"v"}}
+!5 = !{{i32 1, !"air.texture", !"air.location_index", i32 0, i32 1, !"air.write", !"air.arg_type_name", !"texture2d<half, write>", !"air.arg_name", !"out"}}
+!6 = !{{i32 2, !"air.thread_position_in_threadgroup", !"air.arg_type_name", !"ushort2", !"air.arg_name", !"lid"}}
+"#
+    )
+}
+
+/// A cell holds every byte its accesses reach: the `half2` stored into each cell of a `half`
+/// layout makes the stride 4 bytes (`RuntimeFact::ImageblockSize`), so no cell's store lands on
+/// its neighbour's, and the `half2` slice (refused before as reaching past the cell) writes texel
+/// `(x, y)` as `(x, y, 0, 0)`. A slice of the layout's own `half` keeps every texel's first lane.
+#[test]
+fn a_cell_holds_every_byte_its_accesses_reach() {
+    let (w, h) = (4u32, 3u32);
+    let mut ran = 0;
+    for (slice, lanes) in [("v2f16", 2), ("f16", 1)] {
+        let Some(bc) = assemble_text(&format!("wide-{slice}"), &wide_access_kernel(slice)) else {
+            return;
+        };
+        for (stem, p) in committed_profiles().expect("profiles") {
+            let Some((plan, m)) = module(&bc, "wide_access", &stem, &p) else {
+                continue;
+            };
+            assert!(
+                plan.facts
+                    .contains(&RuntimeFact::ImageblockSize { cell_bytes: 4 }),
+                "{stem} {slice}: {:?}",
+                plan.facts
+            );
+            let d = Dispatch {
+                local: [w, h],
+                block: [w, h],
+                buffers: &[],
+                threadgroup: &[],
+            };
+            let (_, imgs) = run(&plan, &m, &d, &[poisoned(0, [w + 1, h + 1], 1)]);
+            for y in 0..=h {
+                for x in 0..=w {
+                    let want = match (x < w && y < h, lanes) {
+                        (false, _) => POISON,
+                        (true, 2) => [fl(x as f32), fl(y as f32), 0, 0],
+                        (true, _) => [fl(x as f32), 0, 0, 0],
+                    };
+                    assert_eq!(texel(&imgs[0], 0, x, y), want, "{stem} {slice} ({x}, {y})");
+                }
+            }
+            ran += 1;
+        }
+    }
+    assert!(ran > 0);
+}
+
 /// The imageblock parameter's own value (its `_imageblock_base` struct) has no lowered form: the
 /// `extractvalue` reading it is refused `Lowering(Access)` there.
 #[test]
