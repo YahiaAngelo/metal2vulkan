@@ -31,6 +31,7 @@ mod engine_bias_reach;
 mod engine_bicubic;
 mod engine_binder;
 mod engine_bit_manipulation;
+mod engine_block_read;
 mod engine_buffer_table;
 mod engine_chosen_pointers;
 mod engine_color_groups;
