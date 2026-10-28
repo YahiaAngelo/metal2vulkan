@@ -27,7 +27,9 @@
 //!    would refuse it. **Devirtualization** then makes the inlined body's calls through constant
 //!    function addresses direct, reads visible-function tables as buffers of words, and makes each
 //!    call through a table a switch over the functions it may call; the direct calls this makes are
-//!    inlined in turn, round after round, until none is made.
+//!    inlined in turn, round after round, until none is made. **Texture block reads**
+//!    (`air.block_read_texture_2d.<T>`) of a constant extent become their texel reads, each stored
+//!    into the call's destination row by row (`block_read`).
 //! 7. **SCCP** over the inlined entry, including `air.is_function_constant_defined` and loads of
 //!    bound constants; unreachable blocks are deleted. A value use of an unsupplied constant that
 //!    survives is `Error::NeedsInput(FunctionConstant)`.
@@ -65,6 +67,7 @@
 //! which per-function SCCP could not, and deletes the callees' dead paths with the caller's.
 
 mod async_copy;
+mod block_read;
 mod command_writes;
 mod const_loads;
 mod devirt;
@@ -577,6 +580,8 @@ pub fn specialize_dynamic(
     // A kernel's simdgroup asynchronous copies complete when their calls return, shared by the
     // simdgroup's lanes, and each wait is a simdgroup barrier.
     let body = async_copy::expand(body, &mut parts, ep, m)?;
+    // Texture block reads: each becomes its texel reads, stored row by row.
+    let body = block_read::expand(body, &mut parts, ep.func, m)?;
 
     // SCCP. The body it read is freed as soon as it has run.
     let solved = {
