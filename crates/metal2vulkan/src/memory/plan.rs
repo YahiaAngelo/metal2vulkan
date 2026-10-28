@@ -48,8 +48,8 @@ use std::sync::Arc;
 
 use super::abi_index::AbiIndex;
 use super::provenance::{
-    self, grow, imageblock_cell, CellFacts, Class, ConstForm, HandleClass, OffsetRange, PrivForm,
-    Provenance, Repr, Root, RootSetId, RootSets, RootUse, Shape,
+    self, grow, imageblock_cell, CellFacts, Class, ConstForm, Extent, HandleClass, OffsetRange,
+    PrivForm, Provenance, Repr, Root, RootSetId, RootSets, RootUse, Shape,
 };
 use super::window;
 use crate::air::abi::{AbiInt, Access, ImageblockKind, ParamRole};
@@ -128,8 +128,8 @@ pub struct DynamicRegion {
 
 /// A kernel's explicit imageblock: `width · height` cells `cell_bytes` apart
 /// (`air.imageblock_data_size` rounded up to `air.arg_type_align_size`, so every cell is as
-/// aligned as the first), the extent the compute encoder sets, so it follows the
-/// `[[threadgroup(n)]]` regions.
+/// aligned as the first, or wider where the kernel reaches past it, `Planner::cell_reach`), the
+/// extent the compute encoder sets, so it follows the `[[threadgroup(n)]]` regions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ImageblockRegion {
     pub param: u32,
@@ -1624,7 +1624,9 @@ impl Planner<'_> {
     /// `air.imageblock_data` names no imageblock, so a kernel with two has none;
     /// `lower::access::imageblock` refuses a use without one. The cell stride is the data size
     /// rounded up to the alignment (Metal's own sizes already are multiples): the layout is
-    /// unobservable, and a stride that is not would misalign every other cell's fields.
+    /// unobservable, and a stride that is not would misalign every other cell's fields. Where the
+    /// kernel's accesses reach past it, the stride is their end rounded up to the alignment and to a
+    /// word ([`Planner::cell_reach`]).
     ///
     /// A tile function's implicit imageblock: with an explicit layout aliased onto it, that
     /// layout's cell, as above but a whole number of words (its members are the attachments'
@@ -1657,9 +1659,17 @@ impl Planner<'_> {
                 } else {
                     align
                 };
+                let declared = size.checked_next_multiple_of(align)?;
+                // A kernel's cell holds every byte its accesses reach (`cell_reach`).
+                let cell_bytes = match self.cell_reach() {
+                    Some(end) if !arg.alias_implicit && end > declared => {
+                        end.checked_next_multiple_of(align.max(4))?
+                    }
+                    _ => declared,
+                };
                 Some(ImageblockRegion {
                     param: b.param,
-                    cell_bytes: size.checked_next_multiple_of(align)?,
+                    cell_bytes,
                 })
             }
             (None, Some((b, arg))) => {
@@ -1676,6 +1686,33 @@ impl Planner<'_> {
             }
             _ => None,
         }
+    }
+
+    /// The end of the widest in-cell extent the entry's imageblock cells are accessed at, when
+    /// every access's extent is known.
+    ///
+    /// Metal gives each pixel of an imageblock its own storage, reached only through
+    /// `imageblock_data(coord)`; no cell's bytes are reachable from another's. A kernel may access
+    /// a cell past its layout's `air.imageblock_data_size` (a kernel iOS 27 ships
+    /// stores a `half2` into each cell of a `half` layout, then writes a `half2` slice of them),
+    /// and the program is correct on Apple's GPUs only if those bytes stay the cell's own. The
+    /// cell stride then covers them: a stride of the data size would overlap each such access with
+    /// the next cell's, which Metal's per-pixel storage never does, and a program that stays within
+    /// the data size cannot observe the wider stride (the layout is opaque). An access of unknown
+    /// extent leaves the declared stride, as before.
+    fn cell_reach(&self) -> Option<u32> {
+        let mut end = 0i64;
+        for (root, u) in &self.prov.uses {
+            if !imageblock_cell(self.e, *root) {
+                continue;
+            }
+            match u.extent {
+                Extent::Empty => {}
+                Extent::Span { hi, .. } => end = end.max(hi),
+                Extent::Unknown => return None,
+            }
+        }
+        u32::try_from(end).ok()
     }
 
     /// Whether `v` is an implicit imageblock parameter.
