@@ -1,7 +1,9 @@
 //! A kernel's explicit imageblock.
 //!
 //! Metal gives each threadgroup of a kernel dispatch its own imageblock: `width · height` cells of
-//! the explicit layout's `air.imageblock_data_size` bytes, the extent the compute encoder sets
+//! the explicit layout's `air.imageblock_data_size` bytes (each pixel's storage its own: a cell
+//! the kernel accesses past the data size, at known offsets, is widened to hold those bytes,
+//! `memory::plan`), the extent the compute encoder sets
 //! (`setImageblockWidth:height:`), its contents undefined when the threadgroup starts. The kernel
 //! reaches it only through `air.imageblock_data(coord, 0, 0)`, the cell at `coord` (a `ushort2`),
 //! the extent queries `air.get_imageblock_{width,height}`, and slice writes to a texture
