@@ -2428,3 +2428,124 @@ fn a_normalized_attachment_is_bound_through_its_bits() {
     }
     assert!(planned > 0);
 }
+
+/// A tile function that reads attachment 0's `half4` at its thread's cell, writes it into
+/// attachment 1 (`RGBA16Float`) and back into attachment 0.
+const XR_COPY: &str = r#"
+target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v24:32:32-v32:32:32-v48:64:64-v64:64:64-v96:128:128-v128:128:128-v192:256:256-v256:256:256-v512:512:512-v1024:1024:1024-n8:16:32"
+target triple = "air64_v28-apple-macosx26.0.0"
+
+%"struct.metal::_imageblock_base" = type { ptr addrspace(4) }
+
+define void @xr_copy(%"struct.metal::_imageblock_base" %0, <2 x i16> noundef %1) local_unnamed_addr #0 {
+  %3 = tail call fast <4 x half> @air.load.implicit_imageblock.v4f16(i32 0, <2 x i16> %1, i32 0, i16 0) #2
+  tail call void @air.store.implicit_imageblock.v4f16(<4 x half> %3, i32 1, <2 x i16> %1, i32 0, i16 0) #3
+  tail call void @air.store.implicit_imageblock.v4f16(<4 x half> %3, i32 0, <2 x i16> %1, i32 0, i16 0) #3
+  ret void
+}
+
+declare <4 x half> @air.load.implicit_imageblock.v4f16(i32, <2 x i16>, i32, i16) local_unnamed_addr #1
+declare void @air.store.implicit_imageblock.v4f16(<4 x half>, i32, <2 x i16>, i32, i16) local_unnamed_addr #1
+
+attributes #0 = { mustprogress nounwind willreturn }
+attributes #1 = { mustprogress nounwind willreturn }
+attributes #2 = { nounwind willreturn memory(read) }
+attributes #3 = { nounwind willreturn memory(write) }
+
+!air.kernel = !{!0}
+!air.version = !{!5}
+!air.language_version = !{!6}
+
+!0 = !{ptr @xr_copy, !1, !2}
+!1 = !{}
+!2 = !{!3, !4}
+!3 = !{i32 0, !"air.imageblock", !"implicit", !"air.struct_type_info", !7, !"air.arg_type_align_size", i32 8, !"air.arg_type_name", !"imageblock<Data, layout_implicit>", !"air.arg_name", !"block"}
+!4 = !{i32 1, !"air.thread_position_in_threadgroup", !"air.arg_type_name", !"ushort2", !"air.arg_name", !"pos"}
+!5 = !{i32 2, i32 8, i32 0}
+!6 = !{!"Metal", i32 4, i32 0, i32 0}
+!7 = !{i32 0, i32 8, i32 0, !"half4", !"color", !"air.render_target", i32 0, i32 8, i32 8, i32 0, !"half4", !"copy", !"air.render_target", i32 1}
+"#;
+
+/// An extended-range attachment (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`) is staged through its
+/// raw codes: a tile function's implicit read is the codes' tile value (the shadow load's decode,
+/// `extended_range::tile_model`), and a store of that value writes the codes back, a color code
+/// above 1022 as 1022 (Metal's tile holds none above it), in either scheduling order.
+#[test]
+fn an_extended_range_attachment_is_staged_through_its_codes() {
+    use crate::lower::arith::extended_range::tests::{raw, tile_model};
+    use crate::metal::format::ExtendedRange;
+    let path = std::env::temp_dir().join(format!("m2v-xr-copy-{}.ll", std::process::id()));
+    std::fs::write(&path, XR_COPY).expect("write the fixture");
+    let bc = match llvm_assemble(&path) {
+        Ok(b) => b,
+        Err(AssembleError::Missing(why)) => {
+            eprintln!("SKIPPED: {why}");
+            return;
+        }
+        Err(AssembleError::Rejected(why)) => panic!("llvm-as rejected xr_copy: {why}"),
+    };
+    let _ = std::fs::remove_file(&path);
+    let (area, tile) = ([16u32, 8u32], [8u32, 8u32]);
+    let forms = [
+        (PixelFormat::RGB10A82PXR10, ExtendedRange::Planes { srgb: false }),
+        (PixelFormat::BGR10XR, ExtendedRange::Bgr10 { srgb: false }),
+        (PixelFormat::BGRA10XR, ExtendedRange::Bgra10 { srgb: false }),
+    ];
+    let mut ran = 0;
+    for (pf, form) in forms {
+        let alpha = |c: u32| match form {
+            ExtendedRange::Planes { .. } => c % 256,
+            _ => 384 + c % 511,
+        };
+        let codes_of = |n: u32| {
+            let c = (n * 8) % 1024;
+            [c, 1023 - c, (n * 56 + 3) % 1024, alpha(n * 2)]
+        };
+        let inputs = tile_inputs(&[pf, PixelFormat::RGBA16Float]);
+        for (profile, p) in committed_profiles().expect("profiles") {
+            let Some((plan, m)) = module(&bc, "xr_copy", &profile, &p, &inputs) else {
+                continue;
+            };
+            let slot = plan.families.access.tile.as_ref().expect("a tile plan").slots[0];
+            assert_eq!(slot.extended, Some(form), "{profile} {pf:?}");
+            let mut codes = Image::new(attachment(0), [area[0], area[1], 1], 1, 1, 1);
+            let copy = Image::new(attachment(1), [area[0], area[1], 1], 1, 1, 1);
+            for (n, t) in (0u32..).zip(codes.texels.iter_mut()) {
+                *t = raw(form, codes_of(n), n * 13);
+            }
+            let d = Tiles {
+                area,
+                tile,
+                threads: tile,
+                buffer: vec![0; 16],
+                attachments: &[],
+                nominal: None,
+            };
+            let (_, images) = run_images(&plan, &m, &d, vec![codes.clone(), copy]);
+            for n in 0..area[0] * area[1] {
+                let i = n as usize;
+                let want: Vec<u32> = tile_model(form, codes_of(n))
+                    .iter()
+                    .map(|v| u32::from(f32_to_half_bits(v.to_bits())))
+                    .collect();
+                assert_eq!(images[1][i].to_vec(), want, "{profile} {pf:?} texel {n}: the tile value");
+                let mut back = codes_of(n);
+                for c in &mut back[..3] {
+                    *c = (*c).min(1022);
+                }
+                let mask = raw(form, [1023, 1023, 1023, 1023], 0);
+                let mask = match form {
+                    ExtendedRange::Planes { .. } => [mask[0], 0xFF, 0, 0],
+                    _ => mask,
+                };
+                let want = raw(form, back, 0);
+                let got = images[0][i];
+                for k in 0..4 {
+                    assert_eq!(got[k] & mask[k], want[k] & mask[k], "{profile} {pf:?} texel {n} word {k}: the codes");
+                }
+            }
+            ran += 1;
+        }
+    }
+    assert!(ran > 0, "no committed profile stages an extended-range attachment");
+}
