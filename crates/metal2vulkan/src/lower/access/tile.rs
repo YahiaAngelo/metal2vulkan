@@ -65,8 +65,21 @@
 //! green and blue 0 and alpha 1 and a store drops (probes 9d and 9e), or `half` lanes of the same:
 //! a load rounds each channel's unpacked `float` to `half` by the device's rounding (Metal rounds
 //! the exact value `c / D` once, probe 12), and a store converts a `half` as the `float` of the
-//! same value ([`NormAccess`]). Every other format
-//! converts between the pixel and the cell in a way not read yet:
+//! same value ([`NormAccess`]).
+//!
+//! **Extended-range formats.** Metal's tile memory holds a `BGR10_XR`, `BGRA10_XR` or
+//! `RGB10A8_2P_XR10` attachment (and the `_sRGB` twins) as `half` through a render pass
+//! (`bind::extended_shadow`): a load fills it with the `half` of each stored code's value, and
+//! the store writes the codes of what the tile holds. The staging does the same: the attachment's
+//! image is its raw format (`ExtendedRange::raw_format`, viewed as [`staging_format`]), the load
+//! decodes each texel to its tile value (`extended_range::tile_value`, the framebuffer fetch's and
+//! the shadow load's own decode) and keeps the four `half`s' bits in the cell, and the store
+//! encodes the cell's `half`s back (`extended_range::encode`, a fragment write's encode). The cell
+//! is an `RGBA16Float` attachment's, so an implicit access is that attachment's (`half4`), and a
+//! read after the function's own write gives the `half`s it wrote, as Metal's tile does. A tile
+//! dispatch's writes are the codes alone, which ends the pass's shadows (the runtime's
+//! `render/extended_shadow.rs`). An aliased layout's member of such an attachment is not read
+//! yet. Every other format converts between the pixel and the cell in a way not read yet:
 //! `Unsupported{TileShading, NotImplemented}`.
 //!
 //! **Tile threadgroup memory**. A tile function's `[[threadgroup(n)]]` arguments are its tile's
@@ -123,7 +136,7 @@ use crate::device::requirements::{FormatUsage, VkFeature};
 use crate::error::{
     Attachment, Capability, DescriptorError, Error, Feature, RuntimeInput, Unsupported,
 };
-use crate::lower::arith::{math, ops, pack, FloatFmt, Form, Held};
+use crate::lower::arith::{extended_range, math, ops, pack, FloatFmt, Form, Held};
 use crate::lower::dispatch::KernelBuiltin;
 use crate::lower::emit::EmitCx;
 use crate::lower::select::SelectCx;
@@ -131,7 +144,7 @@ use crate::lower::sync::barrier::{memory_model, semantics};
 use crate::lower::texture::{held_texel, to_image, ImageDecl, TexelClass, TexelConv, TexelForm};
 use crate::memory::arena::ArenaMem;
 use crate::memory::leaf::{self, Leaf, Path, WordMem, WordOps};
-use crate::metal::format::FormatEmulation;
+use crate::metal::format::{ExtendedRange, FormatEmulation};
 use crate::metal::PixelFormat;
 use crate::pipeline::artifact::PrecisionNote;
 use crate::pipeline::facts::RuntimeFact;
@@ -143,7 +156,7 @@ use crate::spirv::builder::{FunctionBuilder, ModuleBuilder};
 use crate::spirv::error::BResult;
 use crate::spirv::ids::{ConstId, FuncId, GlobalId, Value as SValue};
 use crate::spirv::ir::{
-    BinOp, ConstBits, Dim, ImageOperands, ImageType, ImageUsage, MemAccess, MemoryOrder, Scope,
+    BinOp, ConstBits, Dim, GlslOp, ImageOperands, ImageType, ImageUsage, MemAccess, MemoryOrder, Scope,
     StorageClass, Type as SType,
 };
 
@@ -214,6 +227,9 @@ pub struct TileSlot {
     /// ([`TileSlot::leaf`]'s), or a normalized attachment's lanes (four bytes a `float` lane, two
     /// a `half` one, of its channels or four), which an implicit access's type fills.
     pub member: u32,
+    /// Where the attachment is extended-range ([`tile_extended`]): the image holds its raw codes,
+    /// which the staging decodes into the cell's `half`s and encodes back (see the module docs).
+    pub extended: Option<ExtendedRange>,
 }
 
 /// The conversion between a normalized attachment's texel bits, which its cell holds, and the
@@ -360,7 +376,15 @@ impl TilePlan {
         let per: u64 = pass
             + self
                 .staged()
-                .map(|s| 96 + 4 * u64::from(s.leaf.cost()))
+                .map(|s| {
+                    let convert = match s.extended {
+                        Some(_) => u64::from(
+                            extended_range::DECODE_WORDS + extended_range::ENCODE_WORDS,
+                        ) + 64,
+                        None => 0,
+                    };
+                    96 + 4 * u64::from(s.leaf.cost()) + convert
+                })
                 .sum::<u64>();
         if per == 0 {
             0
@@ -413,6 +437,18 @@ fn texel_of(pf: PixelFormat) -> Option<(Held, u8, TexelClass)> {
     })
 }
 
+/// The extended-range form of an attachment of pixel format `pf` whose tile the staging decodes
+/// and encodes (see the module docs): `BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, and their
+/// `_sRGB` twins.
+pub fn tile_extended(pf: PixelFormat) -> Option<ExtendedRange> {
+    match ExtendedRange::of(pf)? {
+        x @ (ExtendedRange::Bgr10 { .. }
+        | ExtendedRange::Bgra10 { .. }
+        | ExtendedRange::Planes { .. }) => Some(x),
+        _ => None,
+    }
+}
+
 /// The format the staging views an attachment of pixel format `pf` through: its own for an integer
 /// format, and for a float one the unsigned-integer format of the same channels and widths, which
 /// is in the same compatibility class, so the staging moves the texel's bits. A float view would
@@ -421,6 +457,14 @@ pub fn staging_format(pf: PixelFormat) -> PixelFormat {
     use PixelFormat as P;
     if let Some((_, staging)) = normalized(pf) {
         return staging;
+    }
+    // An extended-range attachment's raw format (`ExtendedRange::raw_format`).
+    if let Some(x) = tile_extended(pf) {
+        return match x {
+            ExtendedRange::Planes { .. } => P::RG32Uint,
+            ExtendedRange::Bgra10 { .. } => P::RGBA16Uint,
+            _ => P::R32Uint,
+        };
     }
     match pf {
         P::R16Float => P::R16Uint,
@@ -594,6 +638,19 @@ fn slot(
     pixel_format: PixelFormat,
     cell_bytes: u32,
 ) -> Result<TileSlot, Error> {
+    // An extended-range attachment's cell is an `RGBA16Float` one's; its image the raw codes.
+    if let Some(x) = tile_extended(pixel_format) {
+        if at.aliased {
+            return Err(not_implemented());
+        }
+        let mut s = slot(cx, at, PixelFormat::RGBA16Float, cell_bytes)?;
+        let (raw, _, class) = texel_of(staging_format(pixel_format)).ok_or_else(not_implemented)?;
+        s.pixel_format = pixel_format;
+        s.class = class;
+        s.conv = conv_of(raw, class);
+        s.extended = Some(x);
+        return Ok(s);
+    }
     let Member {
         color,
         offset,
@@ -665,6 +722,7 @@ fn slot(
         stored: false,
         norm,
         member,
+        extended: None,
     })
 }
 
@@ -961,7 +1019,9 @@ pub fn finish(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         cx.push.insert(PushField::DispatchRegion);
     }
     let mut staged = 0u32;
+    let mut converts = Vec::new();
     for s in p.slots.iter_mut().filter(|s| s.staged) {
+        converts.extend(s.extended);
         s.format = storage_format(profile, s.pixel_format)
             .map_err(|e| e.at_attachment(Attachment::Color(s.color)))?;
         cx.facts.insert(RuntimeFact::TileAttachmentFormat {
@@ -984,6 +1044,9 @@ pub fn finish(cx: &mut SelectCx<'_>) -> Result<(), Error> {
     cx.descriptors.storage_images = cx.descriptors.storage_images.saturating_add(staged);
     // The tile's index is a grid builtin.
     cx.push.insert(PushField::DispatchRegion);
+    for x in converts {
+        cx.families.arith.converts(x);
+    }
     Ok(())
 }
 
@@ -1284,24 +1347,42 @@ fn cells_pass<'c>(
                     Pass::Load => {
                         let mem = crate::lower::sync::memory_model::coherence(cx.plan).texel(fb)?;
                         let texel = fb.read(img, pixel, &ImageOperands::default(), mem)?;
-                        let texel = lanes(fb, texel, s.bits.form.lanes)?;
-                        let held = held_texel(fb, s.class, form, texel)?;
+                        let held = match s.extended {
+                            // The tile value of the codes, as the cell's `half` bits.
+                            Some(x) => {
+                                let v = extended_range::tile_value(fb, x, texel)?;
+                                half_bits(fb, v)?
+                            }
+                            None => {
+                                let texel = lanes(fb, texel, s.bits.form.lanes)?;
+                                held_texel(fb, s.class, form, texel)?
+                            }
+                        };
                         cell_access(cx, fb, s.bits, off, Some(held))?;
                     }
                     Pass::Store => {
                         let Some(held) = cell_access(cx, fb, s.bits, off, None)? else {
                             return Err(cx.fail("a tile cell load without a value"));
                         };
-                        let held = widen(fb, held, s)?;
-                        let texel = to_image(
-                            fb,
-                            &image_decl(s),
-                            TexelForm {
-                                conv: s.conv,
-                                lanes: 4,
-                            },
-                            held,
-                        )?;
+                        let texel = match s.extended {
+                            // The codes of the cell's `half`s.
+                            Some(x) => {
+                                let v = half_values(fb, held)?;
+                                extended_range::encode(fb, x, v)?
+                            }
+                            None => {
+                                let held = widen(fb, held, s)?;
+                                to_image(
+                                    fb,
+                                    &image_decl(s),
+                                    TexelForm {
+                                        conv: s.conv,
+                                        lanes: 4,
+                                    },
+                                    held,
+                                )?
+                            }
+                        };
                         let mem = crate::lower::sync::memory_model::coherence(cx.plan).texel(fb)?;
                         fb.write(img, pixel, texel, &ImageOperands::default(), mem)?;
                     }
@@ -1433,6 +1514,46 @@ fn widen(fb: &mut FunctionBuilder<'_>, v: SValue, s: &TileSlot) -> BResult<SValu
         parts.push(z);
     }
     fb.composite_construct(ty, &parts)
+}
+
+/// The bits of the four `half` values `v` (a `vec4` of `f32`, each lane a `half` value, so the
+/// narrowing is exact) as an `RGBA16Float` cell's lanes: a `uvec4`, each lane's low 16 bits.
+fn half_bits(fb: &mut FunctionBuilder<'_>, v: SValue) -> BResult<SValue> {
+    let u = fb.module().ty(SType::Int {
+        width: 32,
+        signed: false,
+    })?;
+    let uvec4 = fb.module().ty(SType::Vector { elem: u, len: 4 })?;
+    let lo = fb.vector_shuffle(v, v, &[0, 1])?;
+    let hi = fb.vector_shuffle(v, v, &[2, 3])?;
+    let w0 = fb.glsl(GlslOp::PackHalf2x16, &[lo])?;
+    let w1 = fb.glsl(GlslOp::PackHalf2x16, &[hi])?;
+    let mask = leaf::k32(fb, 0xffff)?;
+    let sixteen = leaf::k32(fb, 16)?;
+    let l0 = fb.binary(BinOp::BitwiseAnd, w0, mask)?;
+    let l1 = fb.binary(BinOp::ShiftRightLogical, w0, sixteen)?;
+    let l2 = fb.binary(BinOp::BitwiseAnd, w1, mask)?;
+    let l3 = fb.binary(BinOp::ShiftRightLogical, w1, sixteen)?;
+    fb.composite_construct(uvec4, &[l0, l1, l2, l3])
+}
+
+/// The four `half` values (a `vec4` of `f32`) of an `RGBA16Float` cell's lanes `bits` (a
+/// `uvec4`, each lane's low 16 bits), [`half_bits`]'s inverse.
+fn half_values(fb: &mut FunctionBuilder<'_>, bits: SValue) -> BResult<SValue> {
+    let mask = leaf::k32(fb, 0xffff)?;
+    let sixteen = leaf::k32(fb, 16)?;
+    let mut l = [bits; 4];
+    for (i, lane) in (0u32..).zip(l.iter_mut()) {
+        let x = fb.composite_extract(bits, &[i])?;
+        *lane = fb.binary(BinOp::BitwiseAnd, x, mask)?;
+    }
+    let hi0 = fb.binary(BinOp::ShiftLeftLogical, l[1], sixteen)?;
+    let hi1 = fb.binary(BinOp::ShiftLeftLogical, l[3], sixteen)?;
+    let w0 = fb.binary(BinOp::BitwiseOr, l[0], hi0)?;
+    let w1 = fb.binary(BinOp::BitwiseOr, l[2], hi1)?;
+    let lo = fb.glsl(GlslOp::UnpackHalf2x16, &[w0])?;
+    let hi = fb.glsl(GlslOp::UnpackHalf2x16, &[w1])?;
+    fb.vector_shuffle(lo, hi, &[0, 1, 2, 3])
 }
 
 /// Load (`stored` `None`) or store `leaf` at arena offset `off` of the imageblock region, which
