@@ -10,6 +10,13 @@
 //! non-zero floating-point vector splat so, where older writers used `DATA`), so either spelling
 //! decodes to the same constant. A scalar integer or float `NULL` is its zero value. The same
 //! decoder serves the module-level block and a function's local block.
+//!
+//! A function's block may hold an empty inline-assembly value, `asm "", ""` of type `void ()`
+//! (what `__asm__ volatile("")` compiles to): it is no constant, so it is decoded as a marker
+//! ([`DecodedConst::empty_asm`]) that the function decoder accepts only as the callee of a call
+//! with no arguments, which it drops (the empty text runs no instruction). Any other use of it, a
+//! constant built from it included, and every other inline-assembly value (with text, constraints,
+//! operands or a result) stays refused as `Constant { code: 30 }`.
 
 use super::codes::*;
 use super::stream::{signed_vbr, Stream};
@@ -27,6 +34,8 @@ use crate::ir::{
 pub struct DecodedConst {
     pub id: ConstId,
     pub bc_type: u32,
+    /// An empty inline-assembly value (module docs): `id` is a placeholder no use may read.
+    pub empty_asm: bool,
 }
 
 /// What the constant decoder reads and writes.
@@ -34,6 +43,8 @@ pub(crate) struct ConstCx<'c> {
     pub bc_types: &'c BitcodeTypes,
     pub types: &'c TypeTable,
     pub consts: &'c mut ConstTable,
+    /// Whether an empty inline-assembly value may appear (a function's block only).
+    pub empty_asm: bool,
 }
 
 /// A constant record whose operands are value ids (absolute), not yet interned.
@@ -63,12 +74,14 @@ enum Raw {
         inbounds: bool,
         ops: Box<[u64]>,
     },
+    /// An empty inline-assembly value of pointer type `ty`: interned as `undef`, a placeholder.
+    EmptyAsm(TypeId),
 }
 
 impl Raw {
     fn for_each_operand(&self, mut f: impl FnMut(u64) -> Result<(), Error>) -> Result<(), Error> {
         match self {
-            Raw::Ready(_) => Ok(()),
+            Raw::Ready(_) | Raw::EmptyAsm(_) => Ok(()),
             Raw::Aggregate { elems: ops, .. } | Raw::Gep { ops, .. } => {
                 ops.iter().try_for_each(|&v| f(v))
             }
@@ -106,22 +119,88 @@ pub(crate) fn decode(
             return Ok(());
         }
         let (bc, ty) = cur.ok_or_else(|| s.malformed(B, code))?;
-        let entry = record(s, cx.consts, bc_types, types, code, ty, m)?;
+        let entry = if code == CST_INLINEASM && cx.empty_asm {
+            empty_asm(s, bc_types, types, ty)?
+        } else {
+            record(s, cx.consts, bc_types, types, code, ty, m)?
+        };
         grow(m, &mut raw)?;
         raw.push((entry, bc));
         Ok(())
     })?;
     let at = s.location();
+    // An empty inline-assembly value is no constant: one built from it is refused.
+    let marker = |v: u64| {
+        v.checked_sub(base)
+            .and_then(|i| usize::try_from(i).ok())
+            .and_then(|i| raw.get(i))
+            .is_some_and(|(r, _)| matches!(r, Raw::EmptyAsm(_)))
+    };
+    for (r, _) in &raw {
+        m.tick(1)?;
+        r.for_each_operand(|v| {
+            if marker(v) {
+                return Err(s.unsupported(Feature::Constant {
+                    code: CST_INLINEASM,
+                }));
+            }
+            Ok(())
+        })?;
+    }
     let ids = resolve(&raw, cx.consts, base, prior, m, &at)?;
     let mut out = Vec::new();
     m.reserve(&mut out, raw.len())?;
-    for ((_, bc_type), id) in raw.iter().zip(ids) {
+    for ((r, bc_type), id) in raw.iter().zip(ids) {
         out.push(DecodedConst {
             id,
             bc_type: *bc_type,
+            empty_asm: matches!(r, Raw::EmptyAsm(_)),
         });
     }
     Ok(out)
+}
+
+/// An `INLINEASM` record of type `ty` in a function's block: the empty no-op form (module docs),
+/// any flags (side effects, stack alignment, dialect, unwinding: none changes what empty text
+/// does). Any other is `Constant { code: 30 }`.
+fn empty_asm(
+    s: &Stream<'_>,
+    bc_types: &BitcodeTypes,
+    types: &TypeTable,
+    ty: TypeId,
+) -> Result<Raw, Error> {
+    const B: u32 = CONSTANTS_BLOCK;
+    let code = CST_INLINEASM;
+    let refused = || s.unsupported(Feature::Constant { code });
+    let ops = s.ops();
+    // [fnty, flags, 0 (asm text length), 0 (constraint length)]: nothing past the two lengths.
+    let [fnty, flags, 0, 0] = ops else {
+        return Err(if ops.len() < 4 {
+            s.malformed(B, code)
+        } else {
+            refused()
+        });
+    };
+    // sideeffect (1), alignstack (2), the dialect (4) and unwind (8).
+    if flags & !0xf != 0 {
+        return Err(s.malformed(B, code));
+    }
+    let fn_ty = bc_types
+        .ty(*fnty)
+        .ok_or_else(|| s.err(BitcodeError::BadType))?;
+    match (types.get(fn_ty), types.get(ty)) {
+        (
+            Some(Type::Function {
+                ret,
+                params,
+                vararg: false,
+            }),
+            Some(Type::Ptr { .. }),
+        ) if params.is_empty() && matches!(types.get(*ret), Some(Type::Void)) => {
+            Ok(Raw::EmptyAsm(ty))
+        }
+        _ => Err(refused()),
+    }
 }
 
 /// Decode one constant record of type `ty` (not `SETTYPE`).
@@ -396,6 +475,10 @@ fn build(
     };
     Ok(match r {
         Raw::Ready(c) => c.clone(),
+        &Raw::EmptyAsm(ty) => Constant {
+            ty,
+            value: Const::Undef,
+        },
         Raw::Aggregate { ty, elems } => Constant {
             ty: *ty,
             value: Const::Aggregate(many(elems, m)?),

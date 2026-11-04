@@ -169,6 +169,7 @@ pub(crate) fn decode(
         dropped: Vec::new(),
         call_enums: Vec::new(),
         marker_consts: Vec::new(),
+        empty_asm: Vec::new(),
         ret,
         func,
     };
@@ -219,6 +220,9 @@ struct FnDecoder {
     call_enums: Vec<(InstId, SiteEnums)>,
     /// The constant operands of the dropped marker calls, when the context keeps them.
     marker_consts: Vec<ConstId>,
+    /// The value numbers of the block's empty inline-assembly values, ascending: the callee of a
+    /// call with no arguments, which is dropped, and no other operand (`constants` module docs).
+    empty_asm: Vec<u32>,
     ret: TypeId,
     /// The function this block defines, to name it where a declaration mismatch is reported.
     func: FuncId,
@@ -244,6 +248,16 @@ impl Ops<'_> {
 
     fn next32(&mut self, s: &Stream<'_>) -> Result<u32, Error> {
         u32::try_from(self.next(s)?).map_err(|_| s.malformed(B, self.code))
+    }
+
+    /// The next operand as [`Ops::next32`] reads it, without consuming it.
+    fn peek32(&self, s: &Stream<'_>) -> Result<u32, Error> {
+        let v = self
+            .ops
+            .get(self.i)
+            .copied()
+            .ok_or_else(|| s.malformed(B, self.code))?;
+        u32::try_from(v).map_err(|_| s.malformed(B, self.code))
     }
 
     /// The next operand, if any is left.
@@ -310,6 +324,7 @@ impl FnDecoder {
             bc_types: cx.bc_types,
             types: cx.types,
             consts: cx.consts,
+            empty_asm: true,
         };
         let decoded = constants::decode(s, &mut ccx, u64::from(self.next), &prior, m)?;
         m.reserve(&mut self.local, decoded.len())?;
@@ -318,6 +333,10 @@ impl FnDecoder {
                 .consts
                 .ty(c.id)
                 .ok_or_else(|| s.err(BitcodeError::BadValueRef))?;
+            if c.empty_asm {
+                grow(m, &mut self.empty_asm)?;
+                self.empty_asm.push(self.next);
+            }
             self.local.push((Value::Const(c.id), ty));
             self.next = self
                 .next
@@ -587,6 +606,17 @@ impl FnDecoder {
         lookup(values, consts, self.module_count, &self.local, id)
     }
 
+    /// Refuse value `id` as an operand when it is an empty inline-assembly value: only a call's
+    /// callee may name one ([`FnDecoder::call`]).
+    fn not_empty_asm(&self, s: &Stream<'_>, id: u32) -> Result<(), Error> {
+        if self.empty_asm.binary_search(&id).is_ok() {
+            return Err(s.unsupported(Feature::Constant {
+                code: CST_INLINEASM,
+            }));
+        }
+        Ok(())
+    }
+
     /// A forward reference to value `id` of type `ty`.
     fn forward(&mut self, id: u32, ty: TypeId, m: &mut Meter) -> Result<Value, Error> {
         let k = u32::try_from(self.forward.len())
@@ -608,6 +638,7 @@ impl FnDecoder {
         m: &mut Meter,
     ) -> Result<Value, Error> {
         if id < self.next {
+            self.not_empty_asm(s, id)?;
             match self.get(cx.values, cx.consts, id) {
                 Some((v, t)) if t == ty => Ok(v),
                 _ => Err(s.err(BitcodeError::BadValueRef)),
@@ -642,6 +673,7 @@ impl FnDecoder {
         let rel = r.next32(s)?;
         let id = self.next.wrapping_sub(rel);
         if id < self.next {
+            self.not_empty_asm(s, id)?;
             return self
                 .get(cx.values, cx.consts, id)
                 .ok_or_else(|| s.err(BitcodeError::BadValueRef));
@@ -652,6 +684,9 @@ impl FnDecoder {
 
     /// A defined value by absolute id (switch cases, alloca sizes).
     fn absolute(&self, s: &Stream<'_>, cx: &FnCx<'_>, id: u64, ty: TypeId) -> Result<Value, Error> {
+        if let Ok(id) = u32::try_from(id) {
+            self.not_empty_asm(s, id)?;
+        }
         u32::try_from(id)
             .ok()
             .filter(|&id| id < self.next)
@@ -1370,6 +1405,24 @@ impl FnDecoder {
             (false, false, true) => TailKind::NoTail,
             _ => return Err(bad()),
         };
+        // An empty inline-assembly callee: a call of `void ()` with no arguments runs nothing, so
+        // it is dropped like a marker; one with arguments is refused when they are read.
+        let rel = r.peek32(s)?;
+        if self
+            .empty_asm
+            .binary_search(&self.next.wrapping_sub(rel))
+            .is_ok()
+        {
+            r.next32(s)?;
+            let void = matches!(cx.types.get(ret), Some(Type::Void));
+            if !void || !params.is_empty() || vararg || r.left() > 0 {
+                return Err(s.unsupported(Feature::Constant {
+                    code: CST_INLINEASM,
+                }));
+            }
+            r.end(s)?;
+            return self.drop_call(s, cx, m);
+        }
         let (callee, _) = self.pair(s, cx, r, m)?;
         let target = self.callee(cx, callee, fn_ty);
         let dropped = matches!(target, Target::Intrinsic(_, DeclClass::Drop(_)));

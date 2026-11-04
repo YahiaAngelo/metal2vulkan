@@ -92,6 +92,10 @@ pub(crate) const CST_DATA: u32 = 22;
 pub(crate) const CST_CE_GEP_WITH_INRANGE_INDEX_OLD: u32 = 24;
 pub(crate) const CST_POISON: u32 = 26;
 pub(crate) const CST_CE_GEP: u32 = 32;
+/// `INLINEASM: [fnty, flags, asmstrsize, asmstr..., conststrsize, conststr...]` (LLVM 13+). Only
+/// the empty no-op form is read, in a function's constants block (`constants::record`); every
+/// other one is refused as [`CST_UNSUPPORTED`] lists it.
+pub(crate) const CST_INLINEASM: u32 = 30;
 /// Constant codes LLVM defines that the typed model refuses: CE_SELECT, CE_EXTRACTELT,
 /// CE_INSERTELT, CE_SHUFFLEVEC, CE_CMP, INLINEASM_OLD, CE_SHUFVEC_EX, BLOCKADDRESS,
 /// INLINEASM_OLD2, CE_UNOP, DSO_LOCAL_EQUIVALENT, INLINEASM_OLD3, NO_CFI_VALUE, INLINEASM,

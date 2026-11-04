@@ -797,6 +797,7 @@ impl<'a> ModuleDecoder<'a> {
             bc_types,
             types: &self.parts.types,
             consts: &mut self.parts.consts,
+            empty_asm: false,
         };
         let base = values.len() as u64;
         let decoded = constants::decode(s, &mut cx, base, &prior, m)?;

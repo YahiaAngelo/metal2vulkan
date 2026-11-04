@@ -70,6 +70,7 @@ mod engine_heap_binder;
 mod engine_helper_threads;
 mod engine_image_shapes;
 mod engine_imageblock;
+mod engine_inline_asm;
 mod engine_index_words;
 mod engine_indirect_commands;
 mod engine_kernel_lod;
