@@ -1,13 +1,12 @@
 //! `lower::sync::barrier`: barriers, `air.atomic.fence`, and derivatives.
 //!
 //! - **Barriers** (`air.wg.barrier`, `air.simdgroup.barrier`). The execution scope is the one
-//!   `air::intrinsics::sync` decodes (an AIR 2.8 barrier's scope operand, never its spelling; an
-//!   AIR 2.9 barrier's name): a threadgroup barrier is `OpControlBarrier(Workgroup, …)`, compute
+//!   `air::intrinsics::sync` decodes (the barrier's name, in either AIR form): a threadgroup barrier is `OpControlBarrier(Workgroup, …)`, compute
 //!   only (a threadgroup barrier in a render stage is tile shading); a simdgroup barrier is
 //!   `OpControlBarrier(Subgroup, …)` in any stage, and makes the function's simd class cross-lane,
 //!   so the subgroup tier pins 32 lanes. Metal's `mem_flags` order the named memories among the
-//!   threads of the barrier's memory scope: the execution scope for an AIR 2.8 barrier, and for an
-//!   AIR 2.9 one its `thread_scope` operand (`Subgroup`, `Workgroup`, compute only, or `Device`,
+//!   threads of the barrier's memory scope, its scope operand (`Subgroup`, `Workgroup`, compute
+//!   only, or, in AIR 2.9, `Device`,
 //!   reported to the memory-model family as a fence's is; `thread_scope_thread` orders nothing
 //!   another thread observes, a pure execution barrier). The semantics are the barrier's order with
 //!   `UniformMemory` (`mem_device`), `WorkgroupMemory` (`mem_threadgroup`, and
@@ -113,8 +112,8 @@ pub fn semantics(flags: MemFlags, order: MemoryOrder, model: BarrierModel) -> Se
 pub struct Barrier {
     /// `Workgroup` or `Subgroup`: the execution scope.
     pub scope: Scope,
-    /// The memory scope: `scope`, unless an AIR 2.9 barrier's `thread_scope` names another and
-    /// the barrier orders memory.
+    /// The memory scope: the barrier's scope operand when the barrier orders memory, else
+    /// `scope`.
     pub memory: Scope,
     pub flags: MemFlags,
     /// The barrier's order at the Vulkan order.
