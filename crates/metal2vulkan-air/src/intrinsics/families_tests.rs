@@ -2362,8 +2362,8 @@ fn barrier_and_fence_immediates_bind() {
         }
     );
     assert_eq!(s.barrier_order(), Some(MemoryOrder::SeqCst));
-    // The AIR 2.8 scope is the operand's, whichever intrinsic spells it, and is also the memory
-    // scope.
+    // The AIR 2.8 execution scope is the name's; the operand is the memory scope alone (MSL 3.0's
+    // `simdgroup_barrier` is `air.simdgroup.barrier(flags, 1)`).
     let args = [c.i32(0), c.i32(1)];
     let Ok(Bound::Air(AirIntrinsic::Sync(s))) = bind(sg, &args, &c.table) else {
         panic!("bind");
@@ -2372,7 +2372,7 @@ fn barrier_and_fence_immediates_bind() {
         s,
         Sync::Barrier {
             name: BarrierName::Simdgroup,
-            scope: ThreadScope::Threadgroup,
+            scope: ThreadScope::Simdgroup,
             memory: ThreadScope::Threadgroup,
             ..
         }
