@@ -32,7 +32,9 @@
 //!    into the call's destination row by row (`block_read`).
 //! 7. **SCCP** over the inlined entry, including `air.is_function_constant_defined` and loads of
 //!    bound constants; unreachable blocks are deleted. A value use of an unsupplied constant that
-//!    survives is `Error::NeedsInput(FunctionConstant)`.
+//!    survives is `Error::NeedsInput(FunctionConstant)`. A constexpr sampler a sampling call takes
+//!    inline, as its one-word state (`inttoptr (i64 W to ptr addrspace(2))`), is then given an
+//!    internal constant global of its own, numbered after the listed ones (`inline_sampler`).
 //! 8. **Post-check**: no unknown intrinsic, indirect call, or call to an undefined non-intrinsic
 //!    function survives, and no reachable branch tests `undef`. A table call's refused candidate,
 //!    a table call no linked function answers, and a function pointer used as a value are refused
@@ -85,6 +87,7 @@ pub mod function_table;
 mod global_binding;
 mod global_builtin;
 mod inline;
+mod inline_sampler;
 mod interface;
 mod legacy_matrix;
 mod link;
@@ -602,6 +605,9 @@ pub fn specialize_dynamic(
     // A pointer loaded from a field of a constant global is the field's constant: a `constexpr
     // sampler` that SCCP's folded select picked is its sampler state. SCCP runs again over a body
     // that changed, to fold what those constants decide.
+    // A constexpr sampler a sampling call takes inline, as its state word, is given a global of
+    // its own, as a listed one has.
+    let (body, inline_samplers) = inline_sampler::expand(body, &mut parts, m)?;
     let (body, folded) = const_loads::fold(body, &mut parts, m)?;
     let body = if folded {
         let solved = {
@@ -717,6 +723,8 @@ pub fn specialize_dynamic(
         Some((pruned.gmap.get(global.index()).copied().flatten()?, state))
     };
     let mut static_samplers: Vec<_> = abi.static_samplers.iter().filter_map(kept).collect();
+    // The samplers written inline follow the listed ones (`inline_sampler`).
+    static_samplers.extend(inline_samplers.iter().filter_map(kept));
     // A function a table can hold is numbered whole, what the entry reaches of it or not; a
     // private function's or a library symbol's as far as the entry reaches it, as the stage's
     // own (Metal numbers none of a private function whose call a function constant removed).
