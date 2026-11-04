@@ -85,6 +85,19 @@ impl FunctionBuilder<'_> {
         }))
     }
 
+    /// `OpConvertUToAccelerationStructureKHR`: the acceleration structure at device address
+    /// `address`, a `u64` or a `uvec2` holding the address's low word first. An address of no
+    /// structure (0 included) must not be traversed: Vulkan defines no traversal of it.
+    pub fn structure_at(&mut self, address: Value) -> BResult<Value> {
+        const OP: crate::spv::Op = crate::spv::Op::ConvertUToAccelerationStructureKHR;
+        let address_ty = |n: &super::Num| {
+            n.is_uint() && ((n.width == 64 && n.n == 1) || (n.width == 32 && n.n == 2))
+        };
+        self.want(OP, 0, address, address_ty)?;
+        let ty = self.module().ty(Type::AccelerationStructure)?;
+        self.emit(Inst::RayQuery(RayQueryInst::FromAddress { address }), ty)
+    }
+
     /// `OpRayQueryProceedKHR`: `bool`, whether traversal stopped at a candidate the shader must
     /// decide on (`false` once traversal is complete).
     pub fn ray_query_proceed(&mut self, query: Value) -> BResult<Value> {

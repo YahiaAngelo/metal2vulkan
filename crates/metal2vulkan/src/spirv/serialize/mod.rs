@@ -2593,6 +2593,7 @@ impl Ser<'_> {
                         o.iter().map(|x| v(*x)).collect::<BResult<Vec<u32>>>()?
                     }
                     RayQueryInst::Proceed { query } => with(head()?, &[v(*query)?]),
+                    RayQueryInst::FromAddress { address } => with(head()?, &[v(*address)?]),
                     RayQueryInst::Get { query, which, .. } => {
                         with(head()?, &[v(*query)?, self.cid(*which)?])
                     }

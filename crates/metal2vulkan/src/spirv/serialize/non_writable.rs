@@ -156,7 +156,7 @@ fn memory_write(inst: &Inst) -> Option<Write> {
             | RayQueryInst::Proceed { query }
             | RayQueryInst::Confirm { query },
         ) => Some(Write::Pointer(*query)),
-        Inst::RayQuery(RayQueryInst::Get { .. }) => None,
+        Inst::RayQuery(RayQueryInst::Get { .. } | RayQueryInst::FromAddress { .. }) => None,
         Inst::Load { .. }
         | Inst::Unary { .. }
         | Inst::Binary { .. }

@@ -197,6 +197,68 @@ fn constant_flags_without_skips_need_no_primitive_culling() {
     assert_spirv_valid(m);
 }
 
+/// A structure made from a device address (`OpConvertUToAccelerationStructureKHR`) of a `uvec2`
+/// read at run time, and of a `u64`, is traversed as a bound one is: `spirv-val` accepts the
+/// module. An address of any other type is refused at its operand.
+#[test]
+fn a_structure_at_a_device_address_validates() {
+    let mut b = ModuleBuilder::new();
+    let u32_ = int(&mut b, 32, false);
+    let words = ssbo(&mut b, 0, u32_, 4);
+    let out = ssbo(&mut b, 1, u32_, 4);
+    let main = compute(&mut b, |f| {
+        let zero = cval(f, u32_, 0);
+        let one = cval(f, u32_, 1);
+        let lo = elem_ptr(f, words, zero);
+        let lo = f.load(lo, MemAccess::default()).expect("low word");
+        let hi = elem_ptr(f, words, one);
+        let hi = f.load(hi, MemAccess::default()).expect("high word");
+        let uvec2 = vec(f.module(), u32_, 2);
+        let address = f.composite_construct(uvec2, &[lo, hi]).expect("uvec2");
+        let accel = f.structure_at(address).expect("structure");
+        let u64_ = int(f.module(), 64, false);
+        let wide = f.convert(ConvOp::Bitcast, address, u64_).expect("u64");
+        f.structure_at(wide).expect("structure from a u64");
+        assert_eq!(
+            f.structure_at(lo).unwrap_err(),
+            BuildError::Operand {
+                op: crate::spv::Op::ConvertUToAccelerationStructureKHR,
+                rule: OperandRule::Category(0),
+            }
+        );
+        let f32_ = float(f.module(), 32);
+        let query = f.ray_query().expect("query");
+        let origin = vec3(f, 0, 0, 0);
+        let direction = vec3(f, 0, 0, 1.0f32.to_bits().into());
+        let tmin = cval(f, f32_, 0);
+        let tmax = cval(f, f32_, 100.0f32.to_bits().into());
+        let cull_mask = cval(f, u32_, 0xFF);
+        f.ray_query_initialize(
+            query,
+            RayInit {
+                accel,
+                flags: zero,
+                cull_mask,
+                origin,
+                tmin,
+                direction,
+                tmax,
+            },
+        )
+        .expect("initialize");
+        let more = f.ray_query_proceed(query).expect("proceed");
+        let more = f.select(more, one, zero).expect("proceeded");
+        let p = elem_ptr(f, out, zero);
+        f.store(p, more, MemAccess::default()).expect("store");
+    });
+    let m = finish_compute(b, main);
+    assert!(m
+        .requirements()
+        .spirv_capabilities
+        .contains(&SpirvCapability::of(crate::spv::Capability::RayQueryKHR)));
+    assert_spirv_valid(m);
+}
+
 /// The type rules keep a ray query out of loads, stores, aggregates, and interface storage, and
 /// an acceleration structure in exactly its own descriptor kind.
 #[test]
