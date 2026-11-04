@@ -2011,6 +2011,15 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
                     SyntheticBinding::FunctionTableDirectory => {
                         planner(&mut heap)?.directory(stage, set.set, b.binding)?
                     }
+                    // The structures an argument buffer can name, by their resource ids.
+                    SyntheticBinding::AccelerationStructureDirectory => {
+                        crate::bind::acceleration::plan_directory(
+                            &mut resources.template,
+                            shape.argument_acceleration_structures,
+                            stage,
+                            (set.set, b.binding),
+                        )?
+                    }
                     // The tables' words on a device without the array's features.
                     SyntheticBinding::FunctionTableSnapshot => {
                         planner(&mut heap)?.snapshot(stage, set.set, b.binding)?

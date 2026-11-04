@@ -882,7 +882,11 @@ The plan holds one `DescriptorWrite` per layout binding element (the resource at
 the binder synthesizes, or a neutral resource where nothing compatible is bound), the vertex
 buffers, and the `ResourceUse`s that drive staging, writeback and barriers. List in the state
 every live sampler state and visible-function table the command can reach through argument buffers
-(`argument_samplers`, function tables), and the resources it uses (`used_resources`).
+(`argument_samplers`, function tables), every acceleration structure it can reach through them with
+the device address of the top-level structure built for it (`argument_acceleration_structures`,
+which the plan's `AccelerationStructureDirectory` write maps from each `gpuResourceID`; an ID not
+listed is the null structure, which every ray misses), and the resources it uses
+(`used_resources`).
 
 A plan whose `variant` is not empty asks for another variant of the pipeline (a storage texture's
 format, a buffer range past the descriptor limit, a vertex buffer that fixed-function input cannot

@@ -487,6 +487,12 @@ pub(crate) struct ResourceTemplate {
     /// pipeline reads the tables' words there.
     #[cfg_attr(feature = "serde", serde(default))]
     pub function_table_addresses: bool,
+    /// Each stage's acceleration-structure directory.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub structure_directories: Vec<crate::bind::heap::PlannedHandleTable>,
+    /// The structures' shape the directories were planned for, when the plan has one.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub argument_acceleration_structures: Option<crate::bind::state::AccelerationStructuresShape>,
 }
 
 /// One bound texel buffer of a plan.
@@ -668,6 +674,14 @@ pub enum WriteSource {
     /// The encoder's tessellation factor buffer (`BindState::tessellation_factors`), a
     /// read-only storage buffer of the control stage over the draw's `DescriptorRange`.
     TessellationFactors,
+    /// The acceleration-structure directory of `stage` (`Synthetic(AccelerationStructureDirectory)`),
+    /// a read-only storage buffer of `bytes_len` bytes whose contents instantiation gives
+    /// (`DescriptorBytes`): the handle table's layout over
+    /// `BindState::argument_acceleration_structures`, each entry's element and flags words the low
+    /// and high words of its structure's device address
+    /// (`bind::acceleration`). The consumer binds exactly `bytes_len`
+    /// bytes, and makes resident (and builds before the command) every structure it lists.
+    AccelerationStructureDirectory { stage: Stage, bytes_len: u32 },
     /// The top-level structure of the acceleration structure bound at buffer slot `slot`
     /// (`setAccelerationStructure:atBufferIndex:`): the bound instance structure itself when
     /// `level` is `Instance`, and, when `level` is `Primitive`, the top-level structure of one

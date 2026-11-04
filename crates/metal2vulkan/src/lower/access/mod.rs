@@ -739,6 +739,10 @@ pub struct AccessPlan {
     /// sampler table ([`handle`]), one more storage descriptor, and its search reads the ids as
     /// this.
     pub sampler_table: Option<handle::HandleIds>,
+    /// Some acceleration structure is loaded from an argument buffer: the function reads the
+    /// stage's acceleration-structure directory ([`handle`]), one more storage descriptor, and its
+    /// search reads the ids as this.
+    pub structure_directory: Option<handle::HandleIds>,
     /// Memory-plan slots whose Metal address (`SlotGuestBase`) a pointer compare reads
     /// ([`mod@pointer`]): a slot no access bounds gets the window `Whole`, so the binder plans it
     /// and writes the field.
@@ -829,6 +833,9 @@ pub struct Declared {
     /// The stage's sampler table and its search, when a sampler handle is loaded from an
     /// argument buffer.
     pub sampler_table: Option<handle::HandleTable>,
+    /// The stage's acceleration-structure directory and its search, when an acceleration
+    /// structure is loaded from an argument buffer.
+    pub structure_directory: Option<handle::HandleTable>,
     /// The unit views of each accessed slot, by memory-plan slot index.
     pub units: Vec<views::UnitViews>,
     /// The module's resident-set search, when a function searches it more than once
@@ -1730,6 +1737,7 @@ pub fn declare(
         pulled: pulled::declare(mb, &plan.families.access)?,
         handle_table: handle::declare_table(mb, plan)?,
         sampler_table: handle::declare_sampler_table(mb, plan)?,
+        structure_directory: handle::declare_structure_directory(mb, plan)?,
         resolve: match dynamic::defines_search(&plan.families.access.dynamic) {
             true => {
                 let wide = dynamic::wide_type(mb)?;
@@ -2307,7 +2315,9 @@ fn note_ordered(cx: &mut SelectCx<'_>, s: &AccessStrategy) {
     let accesses: Vec<&Access> = match s {
         AccessStrategy::Load(a) | AccessStrategy::Store(a) => vec![a],
         AccessStrategy::Handle(
-            handle::HandleStrategy::Lookup(a) | handle::HandleStrategy::SamplerLookup(a),
+            handle::HandleStrategy::Lookup(a)
+            | handle::HandleStrategy::SamplerLookup(a)
+            | handle::HandleStrategy::StructureLookup(a),
         ) => a.static_access().into_iter().collect(),
         AccessStrategy::Memory(m) => {
             let mut v = Vec::new();
@@ -2383,6 +2393,11 @@ fn volatile_form(s: AccessStrategy) -> Result<AccessStrategy, Error> {
         AccessStrategy::Handle(handle::HandleStrategy::SamplerLookup(a)) => AccessStrategy::Handle(
             handle::HandleStrategy::SamplerLookup(Box::new(a.volatile())),
         ),
+        AccessStrategy::Handle(handle::HandleStrategy::StructureLookup(a)) => {
+            AccessStrategy::Handle(handle::HandleStrategy::StructureLookup(Box::new(
+                a.volatile(),
+            )))
+        }
         _ => return Err(refuse()),
     })
 }

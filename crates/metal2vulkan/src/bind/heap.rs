@@ -1570,6 +1570,10 @@ pub(crate) fn table_bytes(
     } else if !template.function_table_directories.is_empty() {
         return Err(internal("a function-table directory without its tables"));
     }
+    out.extend(crate::bind::acceleration::directory_bytes(
+        template,
+        &state.argument_acceleration_structures,
+    )?);
     Ok(out)
 }
 
@@ -1962,7 +1966,7 @@ fn heap_elements(
 /// The bytes of table `t` holding `entries` (`(resource id, element, flags)`, ids nonzero):
 /// deduplicated by id (the lowest element wins: both name the same resource), sorted by id, after
 /// leading null entries that pad it to its planned length.
-fn table_of(
+pub(crate) fn table_of(
     t: &PlannedHandleTable,
     mut entries: Vec<(u64, u32, u32)>,
 ) -> Result<crate::bind::instantiate::DescriptorBytes, BindError> {

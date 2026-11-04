@@ -277,11 +277,12 @@ pub use replay::{
     PredicationStepForm, PredicationStepModule,
 };
 pub use state::{
-    ArgumentFunctionTable, ArgumentSampler, ArgumentSamplersShape, BindShape, BindState,
-    BoundAccelerationStructure, BoundBuffer, BoundSampler, BoundSamplerShape, BoundTexture,
-    BufferShape, CompensatedViewport, FragmentTests, FunctionTablesShape, HeapPlacement,
-    ImageblockSize, ResourceClass, SamplerDescriptor, SamplerShape, StageInRegion, StageShape,
-    StageTable, TessellationFactorBuffer, TessellationFactors, TextureFacts, TextureShape,
+    AccelerationStructuresShape, ArgumentAccelerationStructure, ArgumentFunctionTable,
+    ArgumentSampler, ArgumentSamplersShape, BindShape, BindState, BoundAccelerationStructure,
+    BoundBuffer, BoundSampler, BoundSamplerShape, BoundTexture, BufferShape, CompensatedViewport,
+    FragmentTests, FunctionTablesShape, HeapPlacement, ImageblockSize, ResourceClass,
+    SamplerDescriptor, SamplerShape, StageInRegion, StageShape, StageTable,
+    TessellationFactorBuffer, TessellationFactors, TextureFacts, TextureShape,
     TileThreadgroupArgument, TileThreadgroupMemory, UsedClass, UsedResource, UsedShape,
     VertexAmplification, ViewMapping,
 };

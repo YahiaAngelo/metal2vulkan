@@ -994,6 +994,9 @@ mod bind_serde_round_trips {
             heap_placement: HeapPlacement::ResourceId,
             viewport_count: 3,
             function_tables: vec![crate::bind::ArgumentFunctionTable::new(0x7ab1_0001, 9)],
+            argument_acceleration_structures: vec![
+                crate::bind::ArgumentAccelerationStructure::new(0x5a_0001, 0xdead_0000_1000),
+            ],
             tile_threadgroup: tile_threadgroup(),
             // Clip mode's vertex clamp, unbounded above, which JSON holds as `null`.
             viewport_compensation: Some(
@@ -1068,6 +1071,9 @@ mod bind_serde_round_trips {
             )]),
             function_tables: crate::bind::FunctionTablesShape::of(&[
                 crate::bind::ArgumentFunctionTable::new(3, 0),
+            ]),
+            argument_acceleration_structures: crate::bind::AccelerationStructuresShape::of(&[
+                crate::bind::ArgumentAccelerationStructure::new(4, 0x1000),
             ]),
             tile_threadgroup: tile_threadgroup(),
             viewport_compensation: Some(ViewportCompensation::new(false)),

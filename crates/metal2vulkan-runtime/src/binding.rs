@@ -1795,7 +1795,8 @@ fn unexpected(source: &WriteSource) -> Error {
         | WriteSource::ExtendedShadow { .. } => {
             Error::NotImplemented(RuntimeGap::RenderAttachments)
         }
-        WriteSource::AccelerationStructure { .. } => {
+        WriteSource::AccelerationStructure { .. }
+        | WriteSource::AccelerationStructureDirectory { .. } => {
             Error::NotImplemented(RuntimeGap::AccelerationStructures)
         }
         _ => internal("a descriptor of a type that does not hold its write source"),

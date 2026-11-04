@@ -843,6 +843,7 @@ codec_enum! {
         TessellationRecords,
         DepthStandIn,
         StencilStandIn,
+        AccelerationStructureDirectory,
     }
     ResourceKind {
         Buffer, Texture, Sampler, Heap(f0), Synthetic(f0), InputAttachment(f0),

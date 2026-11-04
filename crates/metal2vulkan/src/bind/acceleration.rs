@@ -28,6 +28,19 @@
 //!   and custom index 0, no flags (the geometry's own opacity decides), and the geometry's table
 //!   offset as its record offset.
 //!
+//! - **Structures loaded from argument buffers.** A structure a function loads from an argument
+//!   buffer's member is its `gpuResourceID`, searched in the stage's acceleration-structure
+//!   directory (`Synthetic(AccelerationStructureDirectory)`, `WriteSource::
+//!   AccelerationStructureDirectory`), the handle table's layout over
+//!   `BindState::argument_acceleration_structures`: each listed structure with a nonzero id is the
+//!   entry `{id, address low, address high}` of the device address of the top-level structure the
+//!   consumer binds for it ([`directory_bytes`]), sorted by id after leading null entries, so an
+//!   id the list lacks finds the null entry, address 0, and every ray through it misses. The
+//!   directory holds the entries of the list's capacity class
+//!   (`AccelerationStructuresShape::entries`, at most the search's reach), a class past the reach
+//!   is [`BindError::HeapTooLarge`] at plan time and a list longer than the planned entries at
+//!   instantiation, and a listed structure without an address is not representable.
+//!
 //! Motion instances (`MTLAccelerationStructureMotionInstanceDescriptor`) have no representation:
 //! a ray query takes no time. A Vulkan instance references a bottom-level structure only, so an
 //! instance of an instance structure (Metal's multi-level instancing, a [`MetalInstance`] whose
@@ -36,7 +49,14 @@
 //! built. A multi-level intersector over a structure the consumer can build traverses its one
 //! level, which the translation reads as such.
 
-use crate::error::{Feature, Unsupported};
+use crate::bind::heap::{table_of, PlannedHandleTable};
+use crate::bind::instantiate::DescriptorBytes;
+use crate::bind::plan::compute::internal;
+use crate::bind::plan::{ResourceTemplate, WriteSource};
+use crate::bind::state::{AccelerationStructuresShape, ArgumentAccelerationStructure};
+use crate::error::{BindError, Feature, Unsupported};
+use crate::memory::handles::{TABLE_CAPACITY, TABLE_ENTRY_BYTES};
+use crate::pipeline::sym::Stage;
 use crate::pipeline::AccelerationStructureLevel;
 
 /// `VK_GEOMETRY_OPAQUE_BIT_KHR`.
@@ -238,6 +258,85 @@ pub fn primitive_wrap(
         ..MetalInstance::new()
     };
     instance_record(&instance, reference, geometry_table_offset)
+}
+
+/// The write of `stage`'s acceleration-structure directory at `(set, binding)`, planned into
+/// `template` for the listed structures' `shape`: the entries of its capacity class.
+pub(crate) fn plan_directory(
+    template: &mut ResourceTemplate,
+    shape: AccelerationStructuresShape,
+    stage: Stage,
+    (set, binding): (u32, u32),
+) -> Result<WriteSource, BindError> {
+    let capacity = u64::from(TABLE_CAPACITY);
+    if shape.least_count() > capacity {
+        return Err(BindError::HeapTooLarge {
+            count: shape.least_count(),
+            limit: capacity,
+        });
+    }
+    let entries = u32::try_from(shape.entries().min(capacity))
+        .map_err(|_| internal("an acceleration-structure directory beyond u32 entries"))?;
+    let bytes_len = entries
+        .checked_mul(TABLE_ENTRY_BYTES)
+        .ok_or_else(|| internal("an acceleration-structure directory beyond u32 bytes"))?;
+    template.structure_directories.push(PlannedHandleTable {
+        set,
+        binding,
+        stage,
+        entries,
+    });
+    template.argument_acceleration_structures = Some(shape);
+    Ok(WriteSource::AccelerationStructureDirectory { stage, bytes_len })
+}
+
+/// The bytes of the planned acceleration-structure directories of `template` for `structures`:
+/// each listed structure with a nonzero `gpuResourceID` is the entry `{id, address low, address
+/// high}`, sorted by id after leading null entries (the module docs). A list of another shape than
+/// the plan's is the plan's misuse; a list longer than the planned entries is
+/// [`BindError::HeapTooLarge`]; a listed structure without an address is not representable
+/// (`RayTracing`): no entry can name it, and the null entry would make its rays miss.
+pub(crate) fn directory_bytes(
+    template: &ResourceTemplate,
+    structures: &[ArgumentAccelerationStructure],
+) -> Result<Vec<DescriptorBytes>, BindError> {
+    let Some(shape) = template.argument_acceleration_structures else {
+        return match template.structure_directories.is_empty() {
+            true => Ok(Vec::new()),
+            false => Err(internal(
+                "an acceleration-structure directory without its shape",
+            )),
+        };
+    };
+    if AccelerationStructuresShape::of(structures) != shape {
+        return Err(internal(
+            "the bind state's shape differs from the plan's at its acceleration structures",
+        ));
+    }
+    let mut entries = Vec::with_capacity(structures.len());
+    for s in structures {
+        if s.resource_id == 0 {
+            continue;
+        }
+        if s.address == 0 {
+            return Err(BindError::Unsupported(Unsupported::not_representable(
+                Feature::RayTracing,
+            )));
+        }
+        entries.push((s.resource_id, s.address as u32, (s.address >> 32) as u32));
+    }
+    let count = structures.len() as u64 + 1;
+    let mut out = Vec::with_capacity(template.structure_directories.len());
+    for t in &template.structure_directories {
+        if count > u64::from(t.entries) {
+            return Err(BindError::HeapTooLarge {
+                count,
+                limit: u64::from(t.entries),
+            });
+        }
+        out.push(table_of(t, entries.clone())?);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -362,6 +362,14 @@ pub enum SyntheticBinding {
     /// stencil at texel `(x, y)` (each sample, multisampled at more than one), read and written
     /// inside the fragment's ordered pixel-interlock critical section.
     StencilStandIn,
+    /// The acceleration-structure directory: the handle table's layout over the acceleration
+    /// structures an argument buffer can name (`BindState::argument_acceleration_structures`),
+    /// whose resource ids live apart from the other objects': 16-byte entries `{id low, id high,
+    /// address low, address high}` sorted by id after leading null entries, each holding the
+    /// device address of the Vulkan top-level structure the consumer binds for the Metal
+    /// structure of that id. A structure the function loads from an argument buffer is the index
+    /// of the entry its id finds (0, the null entry of address 0, for an id the directory lacks).
+    AccelerationStructureDirectory,
 }
 
 /// What kind of resource a [`ResourceSlot`] names.
