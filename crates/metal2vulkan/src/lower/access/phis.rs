@@ -3,8 +3,9 @@
 //! A pointer phi's lowered representation refuses some incoming values, and each family that owns
 //! a representation asks about its own: a static fat pointer refuses a constant other than null
 //! and a blob pointer (`access::lowered_pointer`), a wide pointer anything neither null nor wide
-//! (`dynamic::lowered_pointer`), and a handle, an arena or typed-object offset, and a blob offset
-//! any constant (`handle`, `local`, `blob`). Every read of the phi's representation (each
+//! (`dynamic::lowered_pointer`), a handle any constant but null and a constexpr sampler's address
+//! (`handle`), and an arena or typed-object offset and a blob offset any constant (`local`,
+//! `blob`). Every read of the phi's representation (each
 //! operand, each block-crossing use) asked again, a walk of the incoming values per read, which
 //! was quadratic in a function whose many uses read a phi of many incoming values. Each answer is a
 //! function of the body, the memory plan, and the root sets selection read before any instruction

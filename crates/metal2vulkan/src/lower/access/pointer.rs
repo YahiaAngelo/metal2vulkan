@@ -611,24 +611,35 @@ pub fn null_operand(
     null_value(fb, &DemoteTy::FatPtr { wide: false })
 }
 
-/// The value phi `phi`'s copy on an incoming edge stores for incoming value `src`: a null
-/// pointer constant in the phi's representation, else `src`'s value.
+/// The value phi `phi`'s copy on an incoming edge stores for incoming value `src`: for a handle
+/// phi, a constant's handle index (`handle::phi_constant`: the null handle, a constexpr
+/// sampler's); for another phi, a null pointer constant in the phi's representation; else `src`'s
+/// value.
 pub fn phi_incoming(
     cx: &mut EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,
     phi: ValueId,
     src: ValueId,
 ) -> BResult<SValue> {
-    if null_source(cx, src) {
-        let ty = cx
+    let ty = cx
+        .plan
+        .phis
+        .binary_search_by_key(&phi, |(v, _)| *v)
+        .ok()
+        .and_then(|i| cx.plan.phis.get(i))
+        .map(|(_, t)| t.clone());
+    if matches!(ty, Some(DemoteTy::HandleIndex)) {
+        let handle = cx
             .plan
-            .phis
-            .binary_search_by_key(&phi, |(v, _)| *v)
-            .ok()
-            .and_then(|i| cx.plan.phis.get(i))
-            .map(|(_, t)| t.clone());
-        if let Some(ty) = ty {
-            if let Some(x) = null_value(fb, &ty)? {
+            .values
+            .value(src)
+            .and_then(|v| super::handle::phi_constant(cx.entry, v));
+        if let Some(h) = handle {
+            return k32(fb, h);
+        }
+    } else if null_source(cx, src) {
+        if let Some(ty) = &ty {
+            if let Some(x) = null_value(fb, ty)? {
                 return Ok(x);
             }
         }

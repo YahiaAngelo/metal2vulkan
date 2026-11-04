@@ -367,12 +367,38 @@ pub fn lowered_pointer(cx: &SelectCx<'_>, v: Value) -> Result<Option<DemoteTy>, 
         return Ok(None);
     };
     handle_domain(cx, v, class)?;
-    // A phi's incoming constant would need a pointer constant's materialization, which the
-    // emitter's operands do not provide.
+    // A phi's incoming constant is stored on its edge as its handle index (`phi_constant`): the
+    // null handle, or a constexpr sampler's, as `select` takes them (`handle_operand`). Any other
+    // constant stays refused.
     if super::phis::incoming(cx, v)?.is_some_and(|i| i.constant) {
-        return Err(refuse());
+        let Value::Inst(i) = v else {
+            return Err(refuse());
+        };
+        let Some(InstKind::Phi { incoming, .. }) = cx.body.insts.get(i).map(|x| &x.kind) else {
+            return Err(refuse());
+        };
+        for &(x, _) in incoming.iter() {
+            if matches!(x, Value::Const(_)) {
+                handle_operand(cx, x, class)?;
+            }
+        }
     }
     Ok(Some(DemoteTy::HandleIndex))
+}
+
+/// The handle index a handle phi's copy stores for incoming constant `v` on its edge: the null
+/// handle for a null, `undef` or `poison` pointer, a constexpr sampler's for its state's address.
+/// `None` for any other value; selection refused every other constant (`lowered_pointer`).
+pub fn phi_constant(entry: &crate::air::Entry, v: Value) -> Option<u32> {
+    use crate::air::ir::Const;
+    let Value::Const(c) = v else {
+        return None;
+    };
+    match entry.module.consts().get(c).map(|k| &k.value) {
+        Some(Const::Null | Const::Undef | Const::Poison) => Some(NULL_HANDLE),
+        Some(Const::GlobalAddr(g)) => handles::constexpr_candidate(entry, *g).map(|c| c.handle()),
+        _ => None,
+    }
 }
 
 /// The element a load of a value of AIR type `ty` (a handle, or a handle word's integer)
