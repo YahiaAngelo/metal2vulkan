@@ -896,6 +896,10 @@ pub enum RayQueryInst {
         committed: bool,
         which: ConstId,
     },
+    /// `OpConvertUToAccelerationStructureKHR`: the acceleration structure at device address
+    /// `address`, a `u64` or a `uvec2` (low word first). Not a query instruction, but of the same
+    /// extension's family; it has no query operand.
+    FromAddress { address: Value },
 }
 
 impl RayQueryInst {
@@ -922,6 +926,7 @@ impl RayQueryInst {
             RayQueryInst::Proceed { query }
             | RayQueryInst::Confirm { query }
             | RayQueryInst::Get { query, .. } => f(*query),
+            RayQueryInst::FromAddress { address } => f(*address),
         }
     }
 
@@ -947,6 +952,7 @@ impl RayQueryInst {
             RayQueryInst::Proceed { query }
             | RayQueryInst::Confirm { query }
             | RayQueryInst::Get { query, .. } => f(query),
+            RayQueryInst::FromAddress { address } => f(address),
         }
     }
 
@@ -956,7 +962,8 @@ impl RayQueryInst {
             RayQueryInst::Get { which, .. } => f(*which),
             RayQueryInst::Initialize { .. }
             | RayQueryInst::Proceed { .. }
-            | RayQueryInst::Confirm { .. } => {}
+            | RayQueryInst::Confirm { .. }
+            | RayQueryInst::FromAddress { .. } => {}
         }
     }
 
@@ -968,6 +975,7 @@ impl RayQueryInst {
             RayQueryInst::Proceed { .. } => Op::RayQueryProceedKHR,
             RayQueryInst::Confirm { .. } => Op::RayQueryConfirmIntersectionKHR,
             RayQueryInst::Get { value, .. } => value.to_spirv(),
+            RayQueryInst::FromAddress { .. } => Op::ConvertUToAccelerationStructureKHR,
         }
     }
 }
