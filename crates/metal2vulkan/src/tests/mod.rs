@@ -123,6 +123,7 @@ mod engine_rotated_weights;
 mod engine_sample_coordinates;
 mod engine_sampler;
 mod engine_sampler_completion;
+mod engine_sampler_phis;
 mod engine_sampler_tail;
 mod engine_sampler_unk;
 mod engine_selected_indices;
