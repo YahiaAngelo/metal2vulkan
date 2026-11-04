@@ -594,7 +594,6 @@ pub enum Op {
     TraceRayKHR = 4445,
     #[cfg(test)]
     ExecuteCallableKHR = 4446,
-    #[cfg(test)]
     ConvertUToAccelerationStructureKHR = 4447,
     #[cfg(test)]
     IgnoreIntersectionKHR = 4448,
@@ -2086,7 +2085,6 @@ impl std::fmt::Debug for Op {
             Self::TraceRayKHR => "TraceRayKHR",
             #[cfg(test)]
             Self::ExecuteCallableKHR => "ExecuteCallableKHR",
-            #[cfg(test)]
             Self::ConvertUToAccelerationStructureKHR => "ConvertUToAccelerationStructureKHR",
             #[cfg(test)]
             Self::IgnoreIntersectionKHR => "IgnoreIntersectionKHR",
@@ -3780,7 +3778,6 @@ impl Op {
             4445 => Self::TraceRayKHR,
             #[cfg(test)]
             4446 => Self::ExecuteCallableKHR,
-            #[cfg(test)]
             4447 => Self::ConvertUToAccelerationStructureKHR,
             #[cfg(test)]
             4448 => Self::IgnoreIntersectionKHR,
