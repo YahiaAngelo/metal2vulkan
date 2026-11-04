@@ -4,7 +4,8 @@
 //!
 //! ```text
 //! flags, cull_all = flags(settings)
-//! if ray_valid(origin, direction, tmin, tmax) && !cull_all {
+//! if ray_valid(origin, direction, tmin, tmax) && !cull_all && address != 0 {
+//!     as = OpConvertUToAccelerationStructureKHR address    (a loaded structure)
 //!     OpRayQueryInitializeKHR q, as, flags, mask, origin, tmin, direction, tmax
 //!     loop { if !OpRayQueryProceedKHR q { break }
 //!            if candidate type == triangle { OpRayQueryConfirmIntersectionKHR q } }
@@ -30,6 +31,11 @@
 //!
 //! Everything culled skips the traversal. The assumed geometry type, curve shapes, and identity
 //! transforms are promises about the structure, which change no result, so they are not read.
+//!
+//! **A loaded structure** is traversed at the device address its directory entry holds, its
+//! element and flags words as a `uvec2`. The null entry's address 0 names no structure, which
+//! Vulkan does not define a traversal of, so the call misses there without traversing, as through a
+//! structure of no instances.
 //!
 //! **The ray** is valid when its origin and direction are finite, `min_distance >= 0`, and
 //! `min_distance <= max_distance` (ordered: a NaN distance fails). Vulkan leaves any other ray
@@ -71,7 +77,10 @@ use crate::air::ir::{InstId, InstKind, Value};
 use crate::lower::access::local;
 use crate::lower::arith;
 use crate::lower::emit::EmitCx;
-use crate::lower::raytracing::{structure, table, IntersectPlan, RayTracingStrategy};
+use crate::lower::raytracing::{
+    structure, table, IntersectPlan, RayTracingStrategy, StructureSource,
+};
+use crate::memory::handles::{self, EntryField};
 use crate::memory::views::{self, View};
 use crate::pipeline::sym::PushField;
 use crate::pipeline::table::FunctionHandle;
@@ -331,7 +340,11 @@ fn intersect(
         forced_opacity: get(cx, fb, IntersectRole::ForcedOpacity)?,
         accept_any: get(cx, fb, IntersectRole::AcceptAny)?,
     };
-    let accel = structure(cx, fb, p.slot)?;
+    // A bound structure's descriptor, or a loaded one's address and whether it names one.
+    let (bound, address) = match p.structure {
+        StructureSource::Slot(slot) => (Some(structure(cx, fb, slot)?), None),
+        StructureSource::Loaded(entry) => (None, Some(loaded_address(cx, fb, entry)?)),
+    };
     let table = match p.table {
         Some(slot) => Some(table(cx, fb, slot)?),
         None => None,
@@ -339,15 +352,25 @@ fn intersect(
     let (flags, cull_all, ccw) = flags(fb, &settings)?;
     let valid = ray_valid(fb, origin, direction, tmin, tmax)?;
     let traced = fb.unary(UnOp::LogicalNot, cull_all)?;
-    let go = fb.binary(BinOp::LogicalAnd, valid, traced)?;
+    let mut go = fb.binary(BinOp::LogicalAnd, valid, traced)?;
+    if let Some((_, live)) = address {
+        go = fb.binary(BinOp::LogicalAnd, go, live)?;
+    }
     let Some(record_ty) = arith::spirv_type(fb.module(), &p.record)? else {
         return Err(cx.fail("an intersect record without a lowered type"));
     };
     let zero = fb.module().constant(Constant::Null { ty: record_ty })?;
     let zero = fb.module().const_value(zero)?;
     let query = fb.ray_query()?;
+    // The loaded structure is made in the traversal's arm, where its address names one; the
+    // placeholder is never read.
+    let placeholder = match (bound, address) {
+        (Some(accel), _) => accel,
+        (None, Some((words, _))) => words,
+        (None, None) => return Err(cx.fail("an intersect call without its structure")),
+    };
     let ray = RayInit {
-        accel,
+        accel: placeholder,
         flags,
         cull_mask,
         origin,
@@ -383,6 +406,13 @@ fn intersect(
         go,
         Box::new(
             move |fb: &mut FunctionBuilder<'_>, fault: &mut Option<ResultField>| {
+                let ray = match address {
+                    Some((words, _)) => RayInit {
+                        accel: fb.structure_at(words)?,
+                        ..ray
+                    },
+                    None => ray,
+                };
                 fb.ray_query_initialize(query, ray)?;
                 traverse(fb, query, table)?;
                 let (record, hit) = committed(fb, query, &fields, ccw, record_ty, fault)?;
@@ -434,6 +464,31 @@ fn intersect(
         None,
     )?;
     Ok(())
+}
+
+/// The device address directory entry `entry` (a loaded structure's value) holds, as a `uvec2` of
+/// its element and flags words (low word first), and whether it is nonzero: the null entry's is 0.
+fn loaded_address(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    entry: crate::air::ir::ValueId,
+) -> BResult<(SValue, SValue)> {
+    let Some(directory) = cx.decl.families.access.structure_directory else {
+        return Err(cx.fail("a loaded acceleration structure without its directory"));
+    };
+    let k = cx.operand(fb, entry)?;
+    let lo = handles::entry_field(fb, directory.table, k, EntryField::Element)?;
+    let hi = handles::entry_field(fb, directory.table, k, EntryField::Flags)?;
+    let u32_ = fb.module().ty(SType::Int {
+        width: 32,
+        signed: false,
+    })?;
+    let uvec2 = fb.module().ty(SType::Vector { elem: u32_, len: 2 })?;
+    let words = fb.composite_construct(uvec2, &[lo, hi])?;
+    let either = fb.binary(BinOp::BitwiseOr, lo, hi)?;
+    let zero = u32c(fb, 0)?;
+    let live = fb.binary(BinOp::INotEqual, either, zero)?;
+    Ok((words, live))
 }
 
 /// Word `word` of `view`, or 0 at or past its bound range `len` (in words).

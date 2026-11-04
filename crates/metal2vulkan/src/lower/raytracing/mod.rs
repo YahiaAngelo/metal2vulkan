@@ -5,6 +5,20 @@
 //! descriptor bound at that slot (`ResourceKind::AccelerationStructure`); the binder binds a
 //! top-level structure there, wrapping a primitive-level one in one identity instance.
 //!
+//! **A structure loaded from an argument buffer** (a `primitive_acceleration_structure` or
+//! `instance_acceleration_structure` member, read as its 8-byte `gpuResourceID`) is the index of
+//! its entry in the stage's acceleration-structure directory (`access::handle`'s structure lookup,
+//! `memory::handles`), which the binder writes from the structures the consumer lists
+//! (`BindState::argument_acceleration_structures`): each entry holds the device address of the
+//! Vulkan top-level structure bound for that Metal structure, the binder's one-instance wrap of a
+//! primitive structure included. The intersect call reads the address from the entry and makes the
+//! structure of it (`OpConvertUToAccelerationStructureKHR`); the null entry, the answer for the null
+//! id and for every id the directory lacks, holds address 0, which the call never traverses: it
+//! misses, as a ray through a structure of no instances does. The member's level is the one the
+//! tags must name, as an argument's is. The call reads the load's value directly: a structure
+//! merged by a `phi` or `select`, copied, or loaded through a pointer whose member is not known is
+//! refused.
+//!
 //! An `air.intersect` call ([`Intersect`]) is one complete traversal: a ray query initialized
 //! with the ray and the flags the intersector's settings select, `OpRayQueryProceedKHR` until
 //! traversal completes, committing the triangle candidates its intersection function table
@@ -66,12 +80,14 @@
 //! argument, or through an intersection function buffer, and a table argument read otherwise
 //! (a `set_buffer`, refused at that reader) (`IntersectionFunctionTable`); motion
 //! (`NotRepresentable`: a ray query has no time, which decides before the rest of the call);
-//! curves; a structure that is not an entry argument (an argument-buffer member) or an array of
-//! them; a result used other than by `extractvalue`, or its primitive-data pointer read; and a
-//! profile without `rayQuery`, `accelerationStructure`, and `bufferDeviceAddress`. A multi-level
+//! curves; a structure that is neither an entry argument nor a load of an argument-buffer member
+//! (an array of arguments, a merge of loaded structures); a result used other than by
+//! `extractvalue`, or its primitive-data pointer read; and a profile without `rayQuery`,
+//! `accelerationStructure`, and `bufferDeviceAddress`. A multi-level
 //! intersector whose `max_levels` is computed, or a constant outside the 2 to 32 Metal's compiler
 //! accepts, is not Metal's (`InvalidInput`). An instance count of a structure that is not an entry
-//! argument is refused (`NotImplemented`); the count itself needs no device feature.
+//! argument (a loaded one included) is refused (`NotImplemented`); the count itself needs no device
+//! feature.
 
 mod emit;
 
@@ -89,7 +105,7 @@ use crate::air::intrinsics::{
 };
 use crate::air::ir::{
     AddrSpace, ArgIdx, Body, Callee, CastOp, Const, FuncId, Inst, InstId, InstKind, Type, TypeId,
-    Value,
+    Value, ValueId,
 };
 use crate::budget::{tree_bytes, vec_bytes, Growth, Meter};
 use crate::device::requirements::VkFeature;
@@ -102,6 +118,7 @@ use crate::lower::arith;
 use crate::lower::emit::EmitCx;
 use crate::lower::select::{decl_name, param_binding, FamilyPlans, Plan, SelectCx};
 use crate::lower::strategy::FamilyStrategy;
+use crate::memory::handles;
 use crate::memory::provenance::primitive_data_root;
 use crate::memory::provenance::{OffsetRange, Root};
 use crate::memory::views::{self, View, ViewKind};
@@ -165,11 +182,22 @@ pub enum RayTracingStrategy {
     InstanceCount(SlotRef),
 }
 
+/// Where an intersect call's acceleration structure comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StructureSource {
+    /// The descriptor bound at this Metal buffer slot: an entry argument.
+    Slot(u32),
+    /// The acceleration-structure directory entry this value holds: a structure loaded from an
+    /// argument buffer (`HandleStrategy::StructureLookup`), traversed at the device address the
+    /// entry holds, and never at the null entry's 0.
+    Loaded(ValueId),
+}
+
 /// How one intersect call lowers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IntersectPlan {
-    /// The Metal buffer slot of its acceleration structure.
-    pub slot: u32,
+    /// Its acceleration structure.
+    pub structure: StructureSource,
     pub tags: IntersectTags,
     /// The lowered record: the result's fields, in order, without the primitive-data pointer.
     pub record: DemoteTy,
@@ -211,6 +239,9 @@ const LEVEL_IDS_WORDS: u32 = 48;
 /// An upper estimate of an instance count read: the member index constant, the access chain, and
 /// the load of the push field (or its argument-table read).
 const INSTANCE_COUNT_WORDS: u32 = 16;
+/// An upper estimate of reaching a loaded structure besides the search: its entry's two address
+/// words, their vector, the null test, and the conversion.
+const LOADED_STRUCTURE_WORDS: u32 = 2 * handles::ENTRY_FIELD_WORDS + 24;
 
 impl IntersectPlan {
     /// An upper estimate of the words the call emits.
@@ -230,7 +261,12 @@ impl IntersectPlan {
                 .saturating_add(l.instance.words())
                 .saturating_add(l.user.words())
         });
+        let loaded = match self.structure {
+            StructureSource::Loaded(_) => LOADED_STRUCTURE_WORDS,
+            StructureSource::Slot(_) => 0,
+        };
         INTERSECT_WORDS
+            .saturating_add(loaded)
             .saturating_add(INTERSECT_FIELD_WORDS.saturating_mul(fields))
             .saturating_add(table)
             .saturating_add(levels)
@@ -334,6 +370,33 @@ pub fn declare(
     Ok(d)
 }
 
+/// That the profile can build and query acceleration structures: `rayQuery`,
+/// `accelerationStructure`, and `bufferDeviceAddress`.
+fn require_ray_queries(cx: &SelectCx<'_>) -> Result<(), Error> {
+    let enabled = &cx.profile.fields().enabled.features;
+    let missing: Vec<Capability> = [
+        VkFeature::RayQuery,
+        VkFeature::AccelerationStructure,
+        VkFeature::BufferDeviceAddress,
+    ]
+    .into_iter()
+    .filter(|f| !enabled.contains(f))
+    .map(Capability::Feature)
+    .collect();
+    match missing.is_empty() {
+        true => Ok(()),
+        false => Err(Unsupported::needs_any_of(Feature::RayTracing, vec![missing]).into()),
+    }
+}
+
+/// The level of a structure of `kind`.
+fn level_of(kind: AccelerationStructureKind) -> AccelerationStructureLevel {
+    match kind {
+        AccelerationStructureKind::Primitive => AccelerationStructureLevel::Primitive,
+        AccelerationStructureKind::Instance => AccelerationStructureLevel::Instance,
+    }
+}
+
 /// The Metal buffer slot of acceleration-structure argument `b`: a single argument, not an
 /// array of them.
 fn slot_of(b: &ParamBinding) -> Result<(u32, AccelerationStructureLevel), Error> {
@@ -343,11 +406,7 @@ fn slot_of(b: &ParamBinding) -> Result<(u32, AccelerationStructureLevel), Error>
     let (AbiInt::Const(slot), AbiInt::Const(1)) = (arg.location.index, arg.location.count) else {
         return Err(Unsupported::not_implemented(Feature::RayTracing).into());
     };
-    let level = match kind {
-        AccelerationStructureKind::Primitive => AccelerationStructureLevel::Primitive,
-        AccelerationStructureKind::Instance => AccelerationStructureLevel::Instance,
-    };
-    Ok((slot, level))
+    Ok((slot, level_of(*kind)))
 }
 
 /// Plan a used acceleration-structure argument (its descriptor, on a profile that can build and
@@ -371,19 +430,7 @@ pub fn select_param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<(), Error
     if counts_only {
         return Ok(());
     }
-    let enabled = &cx.profile.fields().enabled.features;
-    let missing: Vec<Capability> = [
-        VkFeature::RayQuery,
-        VkFeature::AccelerationStructure,
-        VkFeature::BufferDeviceAddress,
-    ]
-    .into_iter()
-    .filter(|f| !enabled.contains(f))
-    .map(Capability::Feature)
-    .collect();
-    if !missing.is_empty() {
-        return Err(Unsupported::needs_any_of(Feature::RayTracing, vec![missing]).into());
-    }
+    require_ray_queries(cx)?;
     let (slot, level) = slot_of(b)?;
     if cx
         .families
@@ -1275,14 +1322,26 @@ fn intersect(
         },
         None => return Err(invariant("an intersect call without its table")),
     };
-    // The structure is an entry argument whose level the tags name.
-    let Some(b) = arg(IntersectRole::Structure).and_then(|s| cx.param(s)) else {
-        return Err(refuse(
-            cx,
-            Unsupported::not_implemented(Feature::RayTracing),
-        ));
+    // The structure is an entry argument, or one loaded from an argument buffer's member, whose
+    // level the tags name.
+    let Some(operand) = arg(IntersectRole::Structure) else {
+        return Err(invariant("an intersect call without its structure"));
     };
-    let (slot, level) = slot_of(b)?;
+    let (structure, level) = match cx.param(operand) {
+        Some(b) => {
+            let (slot, level) = slot_of(b)?;
+            (StructureSource::Slot(slot), level)
+        }
+        None => match loaded_structure(cx, operand, m) {
+            Some(found) => found?,
+            None => {
+                return Err(refuse(
+                    cx,
+                    Unsupported::not_implemented(Feature::RayTracing),
+                ));
+            }
+        },
+    };
     let levels_agree = matches!(
         (t.instancing, level),
         (Instancing::None, AccelerationStructureLevel::Primitive)
@@ -1327,12 +1386,50 @@ fn intersect(
     // lowering's: the artifact says so.
     cx.precision.insert(PrecisionNote::DeviceRayIntersection);
     Ok(RayTracingStrategy::Intersect(Box::new(IntersectPlan {
-        slot,
+        structure,
         tags: t,
         record,
         table,
         levels,
     })))
+}
+
+/// The structure operand `v` of an intersect call when it is the value of a non-atomic load of an
+/// argument buffer's acceleration-structure member (`access::handle`'s structure lookup): its
+/// directory entry's value and the member's level, on a profile that can build and query
+/// acceleration structures. `None` for any other operand (a parameter is the caller's; a merge, a
+/// copy, or a structure loaded otherwise is refused there). Every reader of the load is an intersect
+/// call reading it as its structure only: the access family refuses the others (a store, a compare,
+/// a conversion) as the ray tracing family.
+fn loaded_structure(
+    cx: &mut SelectCx<'_>,
+    v: Value,
+    m: &mut Meter,
+) -> Option<Result<(StructureSource, AccelerationStructureLevel), Error>> {
+    let Value::Inst(d) = v else { return None };
+    let InstKind::Load {
+        ptr,
+        align,
+        atomic: None,
+        ..
+    } = &cx.body.insts.get(d)?.kind
+    else {
+        return None;
+    };
+    if !crate::lower::access::handle::loaded_structure(cx, v) {
+        return None;
+    }
+    let (ptr, bytes) = (*ptr, align.map_or(1, |a| a.bytes()));
+    Some((|| {
+        m.tick(1)?;
+        let kind = handles::structure_member(cx.entry, cx.memory, cx.body, ptr, bytes)?;
+        require_ray_queries(cx)?;
+        let entry = cx
+            .values
+            .id(v)
+            .ok_or_else(|| invariant("a loaded structure out of the value range"))?;
+        Ok((StructureSource::Loaded(entry), level_of(kind)))
+    })())
 }
 
 /// The levels `max_levels<n>` may name: the range Metal's compiler accepts (measured with metal
