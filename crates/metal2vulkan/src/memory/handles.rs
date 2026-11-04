@@ -60,10 +60,22 @@
 //! state the shader reads of a sampler it learns at run time (pixel coordinates, and with them the
 //! exact fetch and the centre of a nearest pixel sampler's texel). A null entry's element and word
 //! are 0: the neutral sampler, and the state of `MTLSamplerDescriptor`'s defaults.
+//!
+//! **Loaded acceleration structures**. An acceleration structure loaded from an argument buffer's
+//! `primitive_acceleration_structure` or `instance_acceleration_structure` member
+//! ([`structure_member`]) is the guest's resource id of the `MTLAccelerationStructure`, searched in
+//! the stage's **acceleration-structure directory** (`Synthetic(AccelerationStructureDirectory)`),
+//! the handle table's layout over the structures an argument buffer can name, in its entry form:
+//! the handle is the index of the entry found, 0 (the null entry) for a miss. The entry's element
+//! and flags words hold the low and high words of the device address of the Vulkan top-level
+//! structure the consumer binds for that Metal structure; the null entry's address is 0, the null
+//! structure, which the ray tracing family never traverses.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::air::abi::{AbiHandle, AbiInt, Access as AbiAccess, ParamBinding, ParamRole};
+use crate::air::abi::{
+    AbiHandle, AbiInt, AccelerationStructureKind, Access as AbiAccess, ParamBinding, ParamRole,
+};
 use crate::air::ir::{AddrSpace, Body, GlobalId, InstId, InstKind, Type, Value};
 use crate::air::Entry;
 use crate::error::{Error, Feature, InternalError, InternalKind, LowerFamily, Unsupported};
@@ -498,6 +510,17 @@ pub fn heap_handle(mp: &MemoryPlan, v: Value) -> Option<HandleClass> {
     }
 }
 
+/// Whether `v` is an acceleration structure loaded from memory: the value of an instruction whose
+/// handle class is an acceleration structure's and whose every root is `Dynamic` or null, with a
+/// `Dynamic` one. Which member the load reads is [`structure_member`]'s.
+pub fn structure_handle(mp: &MemoryPlan, v: Value) -> bool {
+    matches!(
+        (v, mp.repr(v)),
+        (Value::Inst(_), Some(Repr::Handle { class: HandleClass::AccelerationStructure, cands }))
+            if heap_roots(mp.roots(cands))
+    )
+}
+
 /// Whether `v` is a heap texture handle (the value of an instruction).
 fn is_heap(mp: &MemoryPlan, v: Value) -> bool {
     matches!(
@@ -536,12 +559,13 @@ struct LoadedMember {
     access: MemberHandle,
 }
 
-/// What an argument-buffer handle member holds: a texture, by its heap array access, or a
-/// sampler.
+/// What an argument-buffer handle member holds: a texture, by its heap array access, a sampler,
+/// or an acceleration structure of its level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MemberHandle {
     Texture(ImageAccess),
     Sampler,
+    Structure(AccelerationStructureKind),
 }
 
 /// The heap array access of a texture handle loaded through buffer pointer `ptr` with alignment
@@ -565,7 +589,9 @@ pub fn member_access(
 ) -> Result<ImageAccess, Error> {
     match loaded_member(e, mp, body, ptr, align)?.access {
         MemberHandle::Texture(access) => Ok(access),
-        MemberHandle::Sampler => Err(not_implemented(Feature::ArgumentBufferTextures)),
+        MemberHandle::Sampler | MemberHandle::Structure(_) => {
+            Err(not_implemented(Feature::ArgumentBufferTextures))
+        }
     }
 }
 
@@ -856,6 +882,7 @@ fn handle_of(m: &crate::air::abi::Member) -> Option<MemberHandle> {
             Some(MemberHandle::Texture(ImageAccess::Storage))
         }
         AbiHandle::Sampler => Some(MemberHandle::Sampler),
+        AbiHandle::AccelerationStructure(kind) => Some(MemberHandle::Structure(kind)),
         _ => None,
     }
 }
@@ -910,7 +937,28 @@ pub fn sampler_member(
 ) -> Result<(), Error> {
     match loaded_member(e, mp, body, ptr, align)?.access {
         MemberHandle::Sampler => Ok(()),
-        MemberHandle::Texture(_) => Err(not_implemented(Feature::ArgumentBufferTextures)),
+        MemberHandle::Texture(_) | MemberHandle::Structure(_) => {
+            Err(not_implemented(Feature::ArgumentBufferTextures))
+        }
+    }
+}
+
+/// The level of the acceleration structure loaded through buffer pointer `ptr` with alignment
+/// `align` (bytes): that of the argument buffer's `primitive_acceleration_structure` or
+/// `instance_acceleration_structure` member the load reads, known as for [`member_access`]. A load
+/// whose member is not known, or is no acceleration structure (a plain buffer's bytes read as one
+/// included), is refused `NotImplemented(RayTracing)`: only a member names what the 8 bytes are.
+pub fn structure_member(
+    e: &Entry,
+    mp: &MemoryPlan,
+    body: &Body,
+    ptr: Value,
+    align: u64,
+) -> Result<AccelerationStructureKind, Error> {
+    match loaded_member(e, mp, body, ptr, align).map(|m| m.access) {
+        Ok(MemberHandle::Structure(kind)) => Ok(kind),
+        Ok(_) | Err(Error::Unsupported(_)) => Err(not_implemented(Feature::RayTracing)),
+        Err(other) => Err(other),
     }
 }
 

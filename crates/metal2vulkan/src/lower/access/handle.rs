@@ -46,6 +46,16 @@
 //! family reads the entry's element, which indexes the sampler array of each sampling's use, and
 //! its state word (`metal::sampler::SamplerWord`) where the sampling reads the sampler's state.
 //!
+//! **Loaded acceleration structures**. An acceleration structure loaded from an argument buffer's
+//! `primitive_acceleration_structure` or `instance_acceleration_structure` member
+//! (`memory::handles::structure_member`) is searched the same way in the stage's
+//! acceleration-structure directory ([`HandleStrategy::StructureLookup`],
+//! `access.handle.structure_lookup`), in its entry form: the value is the index of the structure's
+//! directory entry, 0 (the null entry) for a miss. The ray tracing family reads the entry's
+//! device address where an intersect call traverses the structure, its only reader; any other
+//! reader is refused as the ray tracing family (`pointer::unlowered`). A load whose member is not
+//! known, or is no acceleration structure, is `NotImplemented(RayTracing)`.
+//!
 //! Every other use of a handle value here (a store, a compare, `ptrtoint`, a load through a
 //! handle) is refused. A static handle parked in a forwarding private cell is its index there
 //! (`access::cell`); one loaded from any other thread or threadgroup memory stays
@@ -162,6 +172,9 @@ pub enum HandleStrategy {
     /// A sampler handle loaded from an argument buffer: the 8-byte resource id the access reads,
     /// searched in the sampler table.
     SamplerLookup(Box<IdLoad>),
+    /// An acceleration structure loaded from an argument buffer: the 8-byte resource id the access
+    /// reads, searched in the acceleration-structure directory.
+    StructureLookup(Box<IdLoad>),
 }
 
 /// Where a heap handle's resource id is read.
@@ -231,6 +244,9 @@ impl HandleStrategy {
             HandleStrategy::SamplerLookup(a) => {
                 a.reach(slots).qualify("access.handle.sampler_lookup")
             }
+            HandleStrategy::StructureLookup(a) => {
+                a.reach(slots).qualify("access.handle.structure_lookup")
+            }
         }
     }
 
@@ -246,9 +262,9 @@ impl HandleStrategy {
             HandleStrategy::Load(Element::Dynamic { .. }) => 40,
             // The id's load, its two words, and the call; the search is the module's routine,
             // counted once ([`routine_words`]).
-            HandleStrategy::Lookup(a) | HandleStrategy::SamplerLookup(a) => {
-                LOOKUP_CALL_WORDS.saturating_add(a.words())
-            }
+            HandleStrategy::Lookup(a)
+            | HandleStrategy::SamplerLookup(a)
+            | HandleStrategy::StructureLookup(a) => LOOKUP_CALL_WORDS.saturating_add(a.words()),
         }
     }
 }
@@ -688,6 +704,20 @@ pub fn select(
                 _ => return Err(refuse()),
             }
         }
+        // An acceleration structure loaded from an argument buffer's member: its directory entry.
+        InstKind::Load {
+            ptr,
+            align,
+            volatile: false,
+            atomic: None,
+            ..
+        } if loaded_structure(cx, here) => HandleStrategy::StructureLookup(Box::new(lookup(
+            cx,
+            *ptr,
+            *align,
+            Table::Structures,
+            m,
+        )?)),
         // The `inttoptr` of a handle word is its handle.
         InstKind::Cast {
             op: CastOp::IntToPtr,
@@ -757,6 +787,14 @@ enum Table {
     Handles,
     /// The sampler table: a sampler's.
     Samplers,
+    /// The acceleration-structure directory: an acceleration structure's.
+    Structures,
+}
+
+/// Whether `v` is an acceleration structure loaded from memory: a handle of that class whose
+/// every root is `Dynamic` or null, with a `Dynamic` one (`memory::handles::structure_handle`).
+pub(crate) fn loaded_structure(cx: &SelectCx<'_>, v: Value) -> bool {
+    handles::structure_handle(cx.memory, v)
 }
 
 /// The resource-id load of a heap texture or sampler handle through buffer pointer `ptr` (the
@@ -775,6 +813,9 @@ fn lookup(
             handles::member_access(cx.entry, cx.memory, cx.body, ptr, bytes).map(|_| ())?
         }
         Table::Samplers => handles::sampler_member(cx.entry, cx.memory, cx.body, ptr, bytes)?,
+        Table::Structures => {
+            handles::structure_member(cx.entry, cx.memory, cx.body, ptr, bytes).map(|_| ())?
+        }
     }
     let leaf = Leaf {
         form: Form {
@@ -818,6 +859,7 @@ fn lookup(
     let planned = match table {
         Table::Handles => &mut cx.families.access.handle_table,
         Table::Samplers => &mut cx.families.access.sampler_table,
+        Table::Structures => &mut cx.families.access.structure_directory,
     };
     if planned.is_none() {
         *planned = Some(ids);
@@ -845,7 +887,11 @@ pub fn routine_words(plan: &AccessPlan) -> impl Iterator<Item = (&'static str, u
         let words = handles::lookup_routine_words(ids == HandleIds::U64, handles::Lookup::Entry);
         ("access.handle.sampler_lookup", u64::from(words))
     });
-    handles.into_iter().chain(samplers)
+    let structures = plan.structure_directory.map(|ids| {
+        let words = handles::lookup_routine_words(ids == HandleIds::U64, handles::Lookup::Entry);
+        ("access.handle.structure_lookup", u64::from(words))
+    });
+    handles.into_iter().chain(samplers).chain(structures)
 }
 
 /// How the handle-table search reads an entry's resource id: as one `u64` on a profile with
@@ -908,6 +954,30 @@ pub fn declare_sampler_table(mb: &mut ModuleBuilder, plan: &Plan) -> BResult<Opt
     Ok(Some(HandleTable { lookup, table }))
 }
 
+/// The binding symbol of the acceleration-structure directory of `stage`.
+pub fn structure_directory_symbol(stage: crate::pipeline::sym::Stage) -> ResourceSlot {
+    ResourceSlot {
+        stage,
+        kind: ResourceKind::Synthetic(SyntheticBinding::AccelerationStructureDirectory),
+        index: 0,
+    }
+}
+
+/// Declare the stage's acceleration-structure directory and the module's search of it in its
+/// entry form, when the plan loads an acceleration structure from an argument buffer.
+pub fn declare_structure_directory(
+    mb: &mut ModuleBuilder,
+    plan: &Plan,
+) -> BResult<Option<HandleTable>> {
+    let Some(ids) = plan.families.access.structure_directory else {
+        return Ok(None);
+    };
+    let sym = structure_directory_symbol(plan.stage);
+    let table = handles::declare_table(mb, sym, ids == HandleIds::U64)?;
+    let lookup = handles::define_lookup(mb, table, handles::Lookup::Entry)?;
+    Ok(Some(HandleTable { lookup, table }))
+}
+
 /// Emit handle strategy `s`, defining value `vid`.
 pub fn emit(
     cx: &mut EmitCx<'_>,
@@ -961,7 +1031,9 @@ pub fn emit(
             let base = k32(fb, *handle_lo)?;
             fb.binary(BinOp::IAdd, base, delta)?
         }
-        HandleStrategy::Lookup(a) | HandleStrategy::SamplerLookup(a) => {
+        HandleStrategy::Lookup(a)
+        | HandleStrategy::SamplerLookup(a)
+        | HandleStrategy::StructureLookup(a) => {
             let id = match a.as_ref() {
                 IdLoad::Static(a) => {
                     let p = cx.operand(fb, a.ptr)?;
@@ -975,6 +1047,7 @@ pub fn emit(
             };
             let table = match s {
                 HandleStrategy::SamplerLookup(_) => cx.decl.families.access.sampler_table,
+                HandleStrategy::StructureLookup(_) => cx.decl.families.access.structure_directory,
                 _ => cx.decl.families.access.handle_table,
             };
             let Some(table) = table else {

@@ -607,6 +607,15 @@ fn plan(p: &ComputePipeline, device: &Device, shape: &BindShape) -> Result<Bindi
                     SyntheticBinding::FunctionTableDirectory => {
                         planner(&mut heap)?.directory(Stage::Kernel, set.set, b.binding)?
                     }
+                    // The structures an argument buffer can name, by their resource ids.
+                    SyntheticBinding::AccelerationStructureDirectory => {
+                        crate::bind::acceleration::plan_directory(
+                            &mut resources.template,
+                            shape.argument_acceleration_structures,
+                            Stage::Kernel,
+                            (set.set, b.binding),
+                        )?
+                    }
                     // The tables' words on a device without the array's features.
                     SyntheticBinding::FunctionTableSnapshot => {
                         planner(&mut heap)?.snapshot(Stage::Kernel, set.set, b.binding)?

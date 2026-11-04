@@ -3110,6 +3110,9 @@ field	metal2vulkan-runtime::WorkCounts.ycbcr_textures_in_place	pub ycbcr_texture
 field	metal2vulkan-runtime::WorkCounts.ycbcr_whole_conversions	pub ycbcr_whole_conversions: u64
 field	metal2vulkan::Budget.cancel	pub cancel: Option<CancelToken>
 field	metal2vulkan::Budget.deadline	pub deadline: Option<Instant>
+field	metal2vulkan::bind::AccelerationStructuresShape.class	pub class: u8
+field	metal2vulkan::bind::ArgumentAccelerationStructure.address	pub address: u64
+field	metal2vulkan::bind::ArgumentAccelerationStructure.resource_id	pub resource_id: u64
 field	metal2vulkan::bind::ArgumentBufferLayout.alignment	pub alignment: u64
 field	metal2vulkan::bind::ArgumentBufferLayout.encoded_length	pub encoded_length: u64
 field	metal2vulkan::bind::ArgumentBufferLayout.members	pub members: Vec<ArgumentMember>
@@ -3143,6 +3146,7 @@ field	metal2vulkan::bind::AstcDecode.hdr	pub hdr: bool
 field	metal2vulkan::bind::AstcDecode.height	pub height: u32
 field	metal2vulkan::bind::AstcDecode.srgb	pub srgb: bool
 field	metal2vulkan::bind::AstcDecode.width	pub width: u32
+field	metal2vulkan::bind::BindShape.argument_acceleration_structures	pub argument_acceleration_structures: AccelerationStructuresShape
 field	metal2vulkan::bind::BindShape.argument_samplers	pub argument_samplers: ArgumentSamplersShape
 field	metal2vulkan::bind::BindShape.depth_clamp_range	pub depth_clamp_range: bool
 field	metal2vulkan::bind::BindShape.dropped_colors	pub dropped_colors: BTreeSet<u32>
@@ -3169,6 +3173,7 @@ field	metal2vulkan::bind::BindShape.vertex_amplification	pub vertex_amplificatio
 field	metal2vulkan::bind::BindShape.viewport_compensation	pub viewport_compensation: Option<ViewportCompensation>
 field	metal2vulkan::bind::BindShape.zeroed_colors	pub zeroed_colors: BTreeMap<u32, metal::PixelFormat>
 field	metal2vulkan::bind::BindState.alpha_test_reference	pub alpha_test_reference: Option<f32>
+field	metal2vulkan::bind::BindState.argument_acceleration_structures	pub argument_acceleration_structures: Vec<ArgumentAccelerationStructure>
 field	metal2vulkan::bind::BindState.argument_samplers	pub argument_samplers: Vec<ArgumentSampler>
 field	metal2vulkan::bind::BindState.blend_color	pub blend_color: [f32; 4]
 field	metal2vulkan::bind::BindState.depth_clamp_range	pub depth_clamp_range: Option<[f32; 2]>
@@ -8500,6 +8505,10 @@ method	metal2vulkan::Budget::with_deadline	pub fn with_deadline(deadline: Option
 method	metal2vulkan::CancelToken::cancel	pub fn cancel(&self)
 method	metal2vulkan::CancelToken::is_cancelled	pub fn is_cancelled(&self) -> bool
 method	metal2vulkan::CancelToken::new	pub fn new() -> CancelToken
+method	metal2vulkan::bind::AccelerationStructuresShape::entries	pub fn entries(&self) -> u64
+method	metal2vulkan::bind::AccelerationStructuresShape::least_count	pub fn least_count(&self) -> u64
+method	metal2vulkan::bind::AccelerationStructuresShape::of	pub fn of(structures: &[ArgumentAccelerationStructure]) -> AccelerationStructuresShape
+method	metal2vulkan::bind::ArgumentAccelerationStructure::new	pub fn new(resource_id: u64, address: u64) -> ArgumentAccelerationStructure
 method	metal2vulkan::bind::ArgumentBufferLayout::argument	pub fn argument(&self, index: u32) -> Option<ArgumentPlace>
 method	metal2vulkan::bind::ArgumentBufferLayout::from_buffer_binding	pub fn from_buffer_binding(binding: &BufferBinding) -> Result<ArgumentBufferLayout, ArgumentLayoutError>
 method	metal2vulkan::bind::ArgumentBufferLayout::from_descriptors	pub fn from_descriptors(descriptors: &[ArgumentDescriptor]) -> Result<ArgumentBufferLayout, ArgumentLayoutError>
@@ -9646,6 +9655,8 @@ struct	metal2vulkan-runtime::WarmStatistics	#[derive(Clone, Copy, Debug, Default
 struct	metal2vulkan-runtime::WorkCounts	#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)] pub struct WorkCounts
 struct	metal2vulkan::Budget	#[derive(Clone, Debug, Default)] #[non_exhaustive] pub struct Budget
 struct	metal2vulkan::CancelToken	#[derive(Clone, Debug, Default)] pub struct CancelToken(Arc<AtomicBool>)
+struct	metal2vulkan::bind::AccelerationStructuresShape	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)] #[non_exhaustive] pub struct AccelerationStructuresShape
+struct	metal2vulkan::bind::ArgumentAccelerationStructure	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct ArgumentAccelerationStructure
 struct	metal2vulkan::bind::ArgumentBufferLayout	#[derive(Clone, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct ArgumentBufferLayout
 struct	metal2vulkan::bind::ArgumentDescriptor	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct ArgumentDescriptor
 struct	metal2vulkan::bind::ArgumentFunctionTable	#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))] #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub struct ArgumentFunctionTable
@@ -12562,6 +12573,7 @@ variant	metal2vulkan::bind::UsedClass::Buffer	Buffer
 variant	metal2vulkan::bind::UsedClass::Heap	Heap
 variant	metal2vulkan::bind::UsedClass::Texture	Texture(TextureShape)
 variant	metal2vulkan::bind::WriteSource::AccelerationStructure	AccelerationStructure { slot: SlotRef, level: AccelerationStructureLevel }
+variant	metal2vulkan::bind::WriteSource::AccelerationStructureDirectory	AccelerationStructureDirectory { stage: Stage, bytes_len: u32 }
 variant	metal2vulkan::bind::WriteSource::ArgumentSampler	ArgumentSampler { index: u32, compare: bool, integer: bool }
 variant	metal2vulkan::bind::WriteSource::ArgumentTable	ArgumentTable { stage: Stage, bytes_len: u32 }
 variant	metal2vulkan::bind::WriteSource::Attachment	Attachment { color_index: u32 }
@@ -14138,6 +14150,7 @@ variant	metal2vulkan::pipeline::Symbol::Component	Component(VaryingKey)
 variant	metal2vulkan::pipeline::Symbol::DescriptorSet	DescriptorSet(ResourceSlot)
 variant	metal2vulkan::pipeline::Symbol::Location	Location(VaryingKey)
 variant	metal2vulkan::pipeline::Symbol::SpecId	SpecId(SpecKey)
+variant	metal2vulkan::pipeline::SyntheticBinding::AccelerationStructureDirectory	AccelerationStructureDirectory
 variant	metal2vulkan::pipeline::SyntheticBinding::ArgumentTable	ArgumentTable
 variant	metal2vulkan::pipeline::SyntheticBinding::ConstantBlob	ConstantBlob
 variant	metal2vulkan::pipeline::SyntheticBinding::ControlPointIndices	ControlPointIndices

@@ -546,6 +546,8 @@ surface! {
         struct ArgumentSamplersShape N;
         struct ArgumentFunctionTable N;
         struct FunctionTablesShape N;
+        struct ArgumentAccelerationStructure N;
+        struct AccelerationStructuresShape N;
         struct TileThreadgroupMemory N;
         struct TileThreadgroupArgument N;
         struct CompensatedViewport N;

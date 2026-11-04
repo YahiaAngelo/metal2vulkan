@@ -165,6 +165,15 @@ pub struct BindState {
     /// sizes before it).
     #[cfg_attr(feature = "serde", serde(default))]
     pub function_tables: Vec<ArgumentFunctionTable>,
+    /// Every live acceleration structure an argument buffer's acceleration-structure member can
+    /// name, in any order, each with the device address of the Vulkan top-level structure the
+    /// consumer binds for it: the structures a function loads from an argument buffer are searched
+    /// here by `gpuResourceID` (the stage's `Synthetic(AccelerationStructureDirectory)`), and an id
+    /// it lacks, or the null id, is the null structure, which every ray misses. Only the capacity
+    /// class of the list enters a plan ([`AccelerationStructuresShape`]); the ids and addresses
+    /// are per command.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub argument_acceleration_structures: Vec<ArgumentAccelerationStructure>,
     /// The render encoder's tile threadgroup memory: the render pass's `threadgroupMemoryLength`
     /// and each argument `setThreadgroupMemoryLength:offset:atIndex:` placed in it, which a tile
     /// function's `[[threadgroup(n)]]` arguments read (`RuntimeFact::TileThreadgroupMemory`). Empty
@@ -620,6 +629,32 @@ impl ArgumentFunctionTable {
     }
 }
 
+/// One live acceleration structure an argument buffer can name
+/// (`BindState::argument_acceleration_structures`).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ArgumentAccelerationStructure {
+    /// The Metal structure's `gpuResourceID`, the 8 bytes an argument buffer's member holds; 0 is
+    /// the null structure's, which never names one.
+    pub resource_id: u64,
+    /// The device address (`vkGetAccelerationStructureDeviceAddressKHR`) of the Vulkan top-level
+    /// structure the consumer binds for the Metal structure: an instance structure's own, or a
+    /// primitive structure's one-instance wrap ([`primitive_wrap`](crate::bind::primitive_wrap)).
+    /// A listed structure without one (0) cannot be represented.
+    pub address: u64,
+}
+
+impl ArgumentAccelerationStructure {
+    /// The structure whose `gpuResourceID` is `resource_id`, traversed at `address`.
+    pub fn new(resource_id: u64, address: u64) -> ArgumentAccelerationStructure {
+        ArgumentAccelerationStructure {
+            resource_id,
+            address,
+        }
+    }
+}
+
 /// A render encoder's tessellation factor state: `setTessellationFactorBuffer:offset:
 /// instanceStride:` and `setTessellationFactorScale:`. A patch draw reads each patch's factors
 /// (`MTLTriangleTessellationFactorsHalf` or `MTLQuadTessellationFactorsHalf`) from the buffer as
@@ -716,6 +751,9 @@ impl BindState {
             render_area: self.render_area,
             argument_samplers: ArgumentSamplersShape::of(&self.argument_samplers),
             function_tables: FunctionTablesShape::of(&self.function_tables),
+            argument_acceleration_structures: AccelerationStructuresShape::of(
+                &self.argument_acceleration_structures,
+            ),
             tile_threadgroup: self.tile_threadgroup.clone(),
             viewport_compensation: self.viewport_compensation.map(|c| c.compensation),
             zeroed_colors: self.zeroed_colors.clone(),
@@ -817,6 +855,7 @@ impl BindState {
             render_area,
             argument_samplers,
             function_tables,
+            argument_acceleration_structures,
             tile_threadgroup,
             viewport_compensation,
             zeroed_colors,
@@ -846,6 +885,8 @@ impl BindState {
             && self.render_area == *render_area
             && argument_samplers.is_of(&self.argument_samplers)
             && FunctionTablesShape::of(&self.function_tables) == *function_tables
+            && AccelerationStructuresShape::of(&self.argument_acceleration_structures)
+                == *argument_acceleration_structures
             && self.tile_threadgroup == *tile_threadgroup
             && self.viewport_compensation.map(|c| c.compensation) == *viewport_compensation
             && self.zeroed_colors == *zeroed_colors
@@ -1639,6 +1680,10 @@ pub struct BindShape {
     /// `BindState.function_tables`: the function-table array's and directories' length class.
     #[cfg_attr(feature = "serde", serde(default))]
     pub function_tables: FunctionTablesShape,
+    /// `BindState.argument_acceleration_structures`: the acceleration-structure directories'
+    /// length class.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub argument_acceleration_structures: AccelerationStructuresShape,
     /// `BindState.tile_threadgroup`: a tile function's threadgroup offsets and tile memory
     /// specialization.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -1913,6 +1958,38 @@ impl FunctionTablesShape {
     }
 
     /// The least count of tables plus the null entry a list of this class has.
+    pub fn least_count(&self) -> u64 {
+        least_count(self.class)
+    }
+}
+
+/// The projection of `BindState::argument_acceleration_structures` that can change a plan: the
+/// capacity class of the list's length, as [`ArgumentSamplersShape`]'s. A plan holds
+/// [`AccelerationStructuresShape::entries`] entries in each acceleration-structure directory, so a
+/// structure made or released changes the shape only when the count leaves its class.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AccelerationStructuresShape {
+    /// The capacity class: the list's length plus the null entry is at most
+    /// `ArgumentSamplersShape::MIN_ENTRIES << class` (the least such class).
+    pub class: u8,
+}
+
+impl AccelerationStructuresShape {
+    /// The shape of the structures `structures`.
+    pub fn of(structures: &[ArgumentAccelerationStructure]) -> AccelerationStructuresShape {
+        AccelerationStructuresShape {
+            class: capacity_class(structures.len()),
+        }
+    }
+
+    /// The entries of the class (the null entry included).
+    pub fn entries(&self) -> u64 {
+        ArgumentSamplersShape::MIN_ENTRIES << self.class
+    }
+
+    /// The least count of structures plus the null entry a list of this class has.
     pub fn least_count(&self) -> u64 {
         least_count(self.class)
     }

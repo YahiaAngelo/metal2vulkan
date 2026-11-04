@@ -1007,7 +1007,11 @@ The plan holds one `DescriptorWrite` per layout binding element (the resource at
 the binder synthesizes, or a neutral resource where nothing compatible is bound), the vertex
 buffers, and the `ResourceUse`s that drive staging, writeback and barriers. List in the state
 every live sampler state and visible-function table the command can reach through argument buffers
-(`argument_samplers`, function tables), and the resources it uses (`used_resources`). A consumer
+(`argument_samplers`, function tables), every acceleration structure it can reach through them with
+the device address of the top-level structure built for it (`argument_acceleration_structures`,
+which the plan's `AccelerationStructureDirectory` write maps from each `gpuResourceID`; an ID not
+listed is the null structure, which every ray misses), and the resources it uses
+(`used_resources`). A consumer
 that lists those in token order says so (`used_in_token_order`), and one that points every root
 table at a resident set it uploads apart, holding them and the ranges it lists
 (`resident_ranges`), says that (`resident_apart`, with `ResidentSet` and
