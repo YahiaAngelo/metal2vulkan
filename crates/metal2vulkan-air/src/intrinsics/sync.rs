@@ -9,16 +9,17 @@
 //! language version, and AIR 2.8 drops the operand, so the 2-operand form is a `seq_cst` barrier.
 //! Which form a declaration has is read from its type.
 //!
-//! The scopes differ by form. In AIR 2.8 a barrier's scope operand is both its **execution** and
-//! its memory scope, read from the operand, never from the name: AIR also spells a
-//! threadgroup-wide barrier through `air.simdgroup.barrier`. In AIR 2.9 the operand is MSL 4.1's
-//! `thread_scope` argument, the **memory** scope alone (the threads that observe the ordered
-//! accesses: MSL §6.10.1), and the name is the execution scope: `threadgroup_barrier`
-//! (`air.wg.barrier`) synchronizes the threadgroup and `simdgroup_barrier`
-//! (`air.simdgroup.barrier`) the simdgroup whatever scope they are given (Apple's compiler writes
-//! `threadgroup_barrier(..., thread_scope_simdgroup)` as `air.wg.barrier` with scope 4). Metal's
-//! headers pass the name's own scope in every language before MSL 4.1, so the two readings agree on
-//! every barrier those spell. A value outside the modeled enumerations leaves the call unknown.
+//! In both forms the name is the **execution** scope and the scope operand the **memory** scope
+//! alone (MSL 4.1's `thread_scope` argument: the threads that observe the ordered accesses, MSL
+//! §6.10.1): `threadgroup_barrier` (`air.wg.barrier`) synchronizes the threadgroup and
+//! `simdgroup_barrier` (`air.simdgroup.barrier`) the simdgroup, whatever scope they are given.
+//! The operand does not follow the name: Apple's compiler writes MSL 3.0 and 3.1's
+//! `simdgroup_barrier` as `air.simdgroup.barrier` with scope 1 (threadgroup) in AIR 2.6 through 2.9,
+//! and MSL 3.2's with scope 4 (simdgroup); `threadgroup_barrier(..., thread_scope_simdgroup)` is
+//! `air.wg.barrier` with scope 4. Measured on an M1 Pro (macOS 27): an AIR 2.8
+//! `air.simdgroup.barrier(mem_threadgroup, 1)` does not wait for the threadgroup's other
+//! simdgroups, where `air.wg.barrier` does. A value outside the modeled enumerations leaves the
+//! call unknown.
 
 use super::atomic::{MemoryOrder, ThreadScope};
 use super::sig::{ImmKind, Immediates, Operand, Signature};
@@ -54,14 +55,23 @@ impl MemFlags {
     }
 }
 
-/// Which intrinsic a barrier was spelled with: its execution scope in the AIR 2.9 form (in the
-/// AIR 2.8 form that is the `scope` operand).
+/// Which intrinsic a barrier was spelled with: its execution scope in either form.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BarrierName {
     /// `air.wg.barrier`.
     Threadgroup,
     /// `air.simdgroup.barrier`.
     Simdgroup,
+}
+
+impl BarrierName {
+    /// The execution scope the name spells: the threads the barrier waits for.
+    fn scope(self) -> ThreadScope {
+        match self {
+            BarrierName::Threadgroup => ThreadScope::Threadgroup,
+            BarrierName::Simdgroup => ThreadScope::Simdgroup,
+        }
+    }
 }
 
 /// A decoded barrier or fence.
@@ -77,9 +87,9 @@ pub enum Sync {
         /// The AIR 2.9 form's `memory_order` immediate; `None` for the AIR 2.8 form, which has
         /// no such operand and orders as `seq_cst` ([`Sync::barrier_order`]).
         order: Option<MemoryOrder>,
-        /// The execution scope: the operand in the AIR 2.8 form, the name's in the AIR 2.9 form.
+        /// The execution scope: the name's, in either form.
         scope: ThreadScope,
-        /// The memory scope: the operand in either form (in the AIR 2.8 form, also `scope`).
+        /// The memory scope: the operand, in either form.
         memory: ThreadScope,
     },
     /// A memory fence (`atomic_thread_fence`).
@@ -164,16 +174,17 @@ impl Sync {
             return Ok(None);
         };
         Ok(match self {
+            // The AIR 2.8 form: the operand is the memory scope, the execution scope the name's.
             Sync::Barrier {
                 name, order: None, ..
             } => match ThreadScope::from_raw(imm.get(1)?) {
-                Some(scope @ (ThreadScope::Threadgroup | ThreadScope::Simdgroup)) => {
+                Some(memory @ (ThreadScope::Threadgroup | ThreadScope::Simdgroup)) => {
                     Some(Sync::Barrier {
                         name,
                         flags,
                         order: None,
-                        scope,
-                        memory: scope,
+                        scope: name.scope(),
+                        memory,
                     })
                 }
                 _ => None,
@@ -192,10 +203,7 @@ impl Sync {
                     name,
                     flags,
                     order: Some(order),
-                    scope: match name {
-                        BarrierName::Threadgroup => ThreadScope::Threadgroup,
-                        BarrierName::Simdgroup => ThreadScope::Simdgroup,
-                    },
+                    scope: name.scope(),
                     memory,
                 }),
                 _ => None,
