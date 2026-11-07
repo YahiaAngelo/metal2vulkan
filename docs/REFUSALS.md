@@ -27,7 +27,7 @@ Columns:
 
 | Kind | Variants | With a site | Reach system | Reach app | Reach rare | Reach none | Unassessed |
 |---|---|---|---|---|---|---|---|
-| Translator and front-end refusals | 128 | 128 | 6 | 32 | 71 | 19 | 0 |
+| Translator and front-end refusals | 128 | 128 | 6 | 31 | 72 | 19 | 0 |
 | Runtime gaps | 74 | 74 | 1 | 8 | 47 | 18 | 0 |
 | Apple-only calls | 4 | 4 | 0 | 0 | 0 | 4 | 0 |
 | Binder refusals at a device limit | 9 | 9 | 0 | 1 | 7 | 1 | 0 |
@@ -41,7 +41,7 @@ Columns:
 
 | Kind | `metal-measured` | `metal-documented` | `metal-takes` | `device` | `ours` | `unknown` | `delegated` | `-` |
 |---|---|---|---|---|---|---|---|---|
-| Translator and front-end refusals | 0 | 0 | 0 | 48 | 57 | 0 | 0 | 23 |
+| Translator and front-end refusals | 0 | 0 | 0 | 48 | 58 | 0 | 0 | 22 |
 | Runtime gaps | 0 | 0 | 0 | 0 | 74 | 0 | 0 | 0 |
 | Apple-only calls | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 4 |
 | Binder refusals at a device limit | 0 | 0 | 0 | 9 | 0 | 0 | 0 | 0 |
@@ -645,7 +645,7 @@ Each refusal's sites, with the function that builds it.
 - `feature::RasterizationRateMap`: `crates/metal2vulkan/src/lower/fragment/mod.rs (select)`
 - `feature::GpuEncodedIndirectCommands`: `crates/metal2vulkan/src/bind/replay.rs (preprocess)`; `crates/metal2vulkan/src/bind/replay.rs (replay_preprocess_module)`; `crates/metal2vulkan/src/bind/replay/draws.rs (draw_replay_module)`; `crates/metal2vulkan/src/bind/replay/draws.rs (draw_replay_preprocess)`; `crates/metal2vulkan/src/bind/replay/flat.rs (flat_dispatch_module)`; `crates/metal2vulkan/src/bind/replay/merged.rs (draw_merge_module)`; `crates/metal2vulkan/src/lower/access/encode.rs (needs, 2 sites)`; `crates/metal2vulkan/src/lower/access/encode.rs (select_command)`; `crates/metal2vulkan/src/lower/access/mod.rs (plan_replay, 3 sites)`; `crates/metal2vulkan/src/lower/stage_io/plan.rs (finish_merged)`; `crates/metal2vulkan/src/lower/stage_io/plan.rs (merged)`; `crates/metal2vulkan/src/lower/stage_io/plan.rs (param)`; `crates/metal2vulkan/src/pipeline/compile.rs (plan_one, 2 sites)`
 - `feature::VulkanVersion`: `crates/metal2vulkan/src/ash_interop/query.rs (query)`; `crates/metal2vulkan/src/device/derive.rs (with_deviations)`
-- `feature::Constant`: `crates/metal2vulkan-air/src/bitcode/constants.rs (decode)`; `crates/metal2vulkan-air/src/bitcode/constants.rs (empty_asm)`; `crates/metal2vulkan-air/src/bitcode/constants.rs (record, 2 sites)`; `crates/metal2vulkan-air/src/bitcode/function.rs (call)`; `crates/metal2vulkan-air/src/bitcode/function.rs (not_empty_asm)`; `crates/metal2vulkan/src/error/mod.rs (from)`
+- `feature::Constant`: `crates/metal2vulkan-air/src/bitcode/constants.rs (record, 2 sites)`; `crates/metal2vulkan/src/error/mod.rs (from)`
 - `feature::Attribute`: `crates/metal2vulkan-air/src/bitcode/attrs.rs (known)`; `crates/metal2vulkan/src/error/mod.rs (from)`
 - `feature::BitcodeRecord`: `crates/metal2vulkan-air/src/bitcode/attrs.rs (decode_lists)`; `crates/metal2vulkan-air/src/bitcode/function.rs (symtab)`; `crates/metal2vulkan-air/src/bitcode/metadata.rs (decode, 2 sites)`; `crates/metal2vulkan-air/src/bitcode/module.rs (check_bodies)`; `crates/metal2vulkan-air/src/bitcode/module.rs (symtab)`; `crates/metal2vulkan/src/error/mod.rs (from)`
 - `feature::SyncScope`: `crates/metal2vulkan-air/src/bitcode/function.rs (atomic)`; `crates/metal2vulkan/src/error/mod.rs (from)`
