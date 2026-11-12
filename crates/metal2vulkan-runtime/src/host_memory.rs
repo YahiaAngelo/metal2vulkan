@@ -1031,7 +1031,9 @@ fn mapping(line: &str, access: Access) -> Option<(u64, u64, bool)> {
 
 /// What a device knows to import host memory.
 pub(super) struct Importer {
-    functions: ash::ext::external_memory_host::DeviceFn,
+    /// `VK_EXT_external_memory_host`'s functions; `None` on a device that imports no host pointer
+    /// but imports dma-bufs, whose no-copy buffers all take the dma-buf route ([`Importer::new`]).
+    functions: Option<ash::ext::external_memory_host::DeviceFn>,
     /// The host's page size.
     pub(super) page: u64,
     /// `minImportedHostPointerAlignment`.
@@ -1049,9 +1051,13 @@ pub(super) struct Importer {
 }
 
 impl Importer {
-    /// The importer of a device, or the refusal every no-copy buffer on it gets: the device did
-    /// not enable `VK_EXT_external_memory_host`, the runtime does not know the host's page size,
-    /// or the device cannot bind a buffer of `usage` to imported host memory.
+    /// The importer of a device, or the refusal every no-copy buffer on it gets: the device
+    /// enabled neither `VK_EXT_external_memory_host` nor the dma-buf route, the runtime does not
+    /// know the host's page size, or the device cannot bind a buffer of `usage` to imported host
+    /// memory. A device with the dma-buf route but no host-pointer import (Honeykrisp on Apple
+    /// silicon) gets an importer that refuses every pointer ([`Importer::memory_types`]), so each
+    /// no-copy buffer with a dma-buf source is made over dma-bufs of its pages, and one without
+    /// is refused as before.
     ///
     /// # Safety
     ///
@@ -1068,16 +1074,39 @@ impl Importer {
         dma_buf: bool,
         dma_buf_images: bool,
     ) -> Result<Importer, Unsupported> {
+        let page = host_page().ok_or_else(|| Unsupported::not_implemented(Feature::HostMemory))?;
+        let handle = device.handle();
+        let load = |name: &std::ffi::CStr| {
+            // SAFETY: the device is live, and the loader serves `vkGetDeviceProcAddr` after its
+            // word is put back; the extension is enabled.
+            let function = unsafe {
+                loader_word.restore();
+                instance.get_device_proc_addr(handle, name.as_ptr())
+            };
+            function.map_or(std::ptr::null(), |function| function as *const c_void)
+        };
+        let dma_buf = dma_buf.then(|| ash::khr::external_memory_fd::DeviceFn::load(load));
+        let dma_buf_images = dma_buf.is_some() && dma_buf_images;
         if !enabled
             .extensions
             .contains(&VkExtension::ExtExternalMemoryHost)
         {
-            return Err(Unsupported::needs(
-                Feature::HostMemory,
-                metal2vulkan::error::Capability::Extension(VkExtension::ExtExternalMemoryHost),
-            ));
+            if dma_buf.is_none() {
+                return Err(Unsupported::needs(
+                    Feature::HostMemory,
+                    metal2vulkan::error::Capability::Extension(VkExtension::ExtExternalMemoryHost),
+                ));
+            }
+            // The pages' dma-bufs are imported whole pages at a time.
+            return Ok(Importer {
+                functions: None,
+                page,
+                alignment: page,
+                dma_buf,
+                dma_buf_images,
+                sparse_granule: std::sync::OnceLock::new(),
+            });
         }
-        let page = host_page().ok_or_else(|| Unsupported::not_implemented(Feature::HostMemory))?;
         let mut host = vk::PhysicalDeviceExternalMemoryHostPropertiesEXT::default();
         let mut properties = vk::PhysicalDeviceProperties2::default().push_next(&mut host);
         // SAFETY: the caller's contract; the structure belongs to an enabled extension.
@@ -1097,19 +1126,7 @@ impl Importer {
         {
             return Err(Unsupported::not_representable(Feature::HostMemory));
         }
-        let handle = device.handle();
-        let load = |name: &std::ffi::CStr| {
-            // SAFETY: the device is live, and the loader serves `vkGetDeviceProcAddr` after its
-            // word is put back; the extension is enabled.
-            let function = unsafe {
-                loader_word.restore();
-                instance.get_device_proc_addr(handle, name.as_ptr())
-            };
-            function.map_or(std::ptr::null(), |function| function as *const c_void)
-        };
-        let functions = ash::ext::external_memory_host::DeviceFn::load(load);
-        let dma_buf = dma_buf.then(|| ash::khr::external_memory_fd::DeviceFn::load(load));
-        let dma_buf_images = dma_buf.is_some() && dma_buf_images;
+        let functions = Some(ash::ext::external_memory_host::DeviceFn::load(load));
         Ok(Importer {
             functions,
             page,
@@ -1194,7 +1211,9 @@ impl Importer {
         Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) })
     }
 
-    /// The memory types `pointer` can be imported into (`vkGetMemoryHostPointerPropertiesEXT`).
+    /// The memory types `pointer` can be imported into (`vkGetMemoryHostPointerPropertiesEXT`);
+    /// `ERROR_INVALID_EXTERNAL_HANDLE`, a refusal ([`import_refused`]), on a device that imports
+    /// no host pointer, so the pages take the dma-buf route.
     ///
     /// # Safety
     ///
@@ -1205,10 +1224,13 @@ impl Importer {
         device: &ash::Device,
         pointer: NonNull<u8>,
     ) -> Result<u32, vk::Result> {
+        let Some(functions) = &self.functions else {
+            return Err(vk::Result::ERROR_INVALID_EXTERNAL_HANDLE);
+        };
         let mut properties = vk::MemoryHostPointerPropertiesEXT::default();
         // SAFETY: the caller's contract; the function was loaded for this device.
         let result = unsafe {
-            (self.functions.get_memory_host_pointer_properties_ext)(
+            (functions.get_memory_host_pointer_properties_ext)(
                 device.handle(),
                 vk::ExternalMemoryHandleTypeFlags::HOST_ALLOCATION_EXT,
                 pointer.as_ptr().cast_const().cast(),
