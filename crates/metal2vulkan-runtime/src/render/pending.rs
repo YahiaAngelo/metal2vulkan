@@ -103,6 +103,10 @@ pub(super) struct PendingDraw {
     /// The view mask of the storage barrier it records first
     /// (`render_target::between_storage_draws`), where it has one.
     pub(super) storage_barrier: Option<u32>,
+    /// The view mask of the barrier of the subpass's dependency on itself it records first
+    /// (`render_target::between_draws`): before a draw that fetches without rasterization-order
+    /// access.
+    pub(super) draws_barrier: Option<u32>,
     /// The view mask and destination stages of the barrier from its instance's earlier
     /// indirect argument reads it records first (`render_target::after_indirect_reads`), where it
     /// has one.
@@ -197,6 +201,9 @@ impl PendingDraw {
         // the encoder's draws count in, with none active in this secondary before it. Without its
         // pipeline it records them around no draw.
         unsafe {
+            if let Some(view_mask) = self.draws_barrier {
+                render_target::between_draws(raw, cb, view_mask);
+            }
             if let Some(view_mask) = self.storage_barrier {
                 render_target::between_storage_draws(raw, cb, view_mask);
             }
