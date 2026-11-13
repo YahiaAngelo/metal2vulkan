@@ -238,25 +238,11 @@ fn unsupported_features(profile: &DeviceProfile) -> Vec<Unsupported> {
             vec![profile.addressed_needs()],
         ));
     }
-    if !f.fragment.pixel_interlock && !f.fragment.sample_interlock {
-        out.push(Unsupported::needs_any_of(
-            Feature::RasterOrderGroups,
-            vec![
-                vec![feature(VkFeature::FragmentShaderPixelInterlock)],
-                vec![feature(VkFeature::FragmentShaderSampleInterlock)],
-            ],
-        ));
-    }
-    // Ordered by rasterization-order access, or by the pixel interlock's storage form.
-    if !f.fragment.rasterization_order_color_access && !f.fragment.pixel_interlock {
-        out.push(Unsupported::needs_any_of(
-            Feature::FramebufferFetch,
-            vec![
-                vec![feature(VkFeature::RasterizationOrderColorAttachmentAccess)],
-                vec![feature(VkFeature::FragmentShaderPixelInterlock)],
-            ],
-        ));
-    }
+    // Raster order groups: ordered by an interlock, or with none unordered within a draw
+    // (`PrecisionNote::UnorderedRasterOrderGroups`), so no device lacks them.
+    // Framebuffer fetch: ordered by rasterization-order access or by the pixel interlock's
+    // storage form, and with neither through input attachments unordered within a draw
+    // (`PrecisionNote::UnorderedFetch`), so no device lacks it.
     // `[[barycentric_coord]]`: the device's builtins, or varyings a generated geometry stage
     // writes (`pipeline::link::geometry`).
     if !f.fragment.barycentric && !f.fragment.geometry_shader {

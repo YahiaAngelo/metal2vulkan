@@ -145,7 +145,6 @@ pub(super) fn select_param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<Co
     if cx.stage != Stage::Fragment {
         return Err(cx.invariant("a color input outside a fragment function"));
     }
-    let frag = cx.profile.fields().fragment;
     let AbiInt::Const(color) = *index else {
         return Err(not_lowered());
     };
@@ -178,7 +177,7 @@ pub(super) fn select_param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<Co
     }
     // On a device with the pixel interlock `fetch::plan` refused a blocked attachment already;
     // here neither ordered form exists.
-    if !frag.rasterization_order_color_access {
+    if !super::fetch::inputs_order(cx.profile) {
         return Err(unordered(cx, color));
     }
     // The input attachment of an image holding Metal's channels rotated (`ARGB8Unorm` in
@@ -213,6 +212,7 @@ pub(super) fn select_param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<Co
             .is_some_and(super::RotatedInputBlend::reads);
     if !known.iter().any(|c| c.color == color) && !blended {
         cx.descriptors.input_attachments = cx.descriptors.input_attachments.saturating_add(1);
+        super::fetch::note_input_read(cx);
         cx.facts.insert(RuntimeFact::FramebufferFetch { color });
     }
     // An extended-range attachment's input reads its raw texels, decoded to the tile value, a
