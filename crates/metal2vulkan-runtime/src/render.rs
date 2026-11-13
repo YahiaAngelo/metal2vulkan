@@ -6978,32 +6978,24 @@ impl RenderLowering {
         unsafe { render_target::between_draws(raw, self.current.draws, view_mask) };
     }
 
-    /// On a device without the fragment shader pixel interlock, what keeps draws in Metal's order
-    /// where nothing else orders their fragments: a draw whose pipeline reads input attachments
-    /// without rasterization-order access (`framebuffer_fetch::inputs_unordered`), and any draw
-    /// after one whose fragment function wrote memory (a raster order group's resources, which
-    /// such a device runs outside a critical section, `PrecisionNote::UnorderedRasterOrderGroups`),
-    /// records after a barrier of its subpass's dependency on itself
-    /// ([`Self::barrier_between_draws`]), as Metal orders those accesses after every earlier
-    /// draw's fragments of the pixel. The overlapping fragments of one draw stay unordered
-    /// (`PrecisionNote::UnorderedFetch`, `UnorderedRasterOrderGroups`).
+    /// On a device without the fragment shader pixel interlock, a draw after one whose fragment
+    /// function wrote memory (a raster order group's resources, which such a device runs outside a
+    /// critical section, `PrecisionNote::UnorderedRasterOrderGroups`) records after a barrier of
+    /// its subpass's dependency on itself ([`Self::barrier_between_draws`]), as Metal orders those
+    /// accesses after every earlier draw's fragments of the pixel; the overlapping fragments of one
+    /// draw stay unordered. A draw that fetches through input attachments without
+    /// rasterization-order access records its own barrier (`draw_resident`).
     fn order_unordered_fetch(&mut self) {
         let profile = self.core.device().compile_device().profile();
         if profile.fragment().pixel_interlock {
             return;
         }
-        let (fetches, writes) = match self.pipeline.as_ref().map(RenderPipelineState::kind) {
-            Some(RenderStateKind::Graphics(state)) => {
-                let graphics = &state.base().graphics;
-                (
-                    self.layout.fetch_inputs && !graphics.input_attachments.is_empty(),
-                    graphics.fragment_writes_memory,
-                )
-            }
-            _ => (false, false),
+        let writes = match self.pipeline.as_ref().map(RenderPipelineState::kind) {
+            Some(RenderStateKind::Graphics(state)) => state.base().graphics.fragment_writes_memory,
+            _ => false,
         };
-        let unordered_fetch = fetches && framebuffer_fetch::inputs_unordered(profile);
-        if unordered_fetch || self.fragment_memory_written {
+        // A draw that fetches records its own barrier (`draw_resident`).
+        if self.fragment_memory_written {
             self.barrier_between_draws();
             self.fragment_memory_written = false;
         }
@@ -10079,6 +10071,35 @@ impl RenderLowering {
             // (`InterlockedStorage`).
             let after_writes = interlocked.meets(self.current.interlocked_writes);
             barriered |= after_writes;
+            // A draw that fetches through input attachments without rasterization-order access
+            // (`framebuffer_fetch::inputs_unordered`) records after a barrier of the subpass's
+            // dependency on itself, its instance's first draw too: measured on Borealis (Mesa
+            // 26.3, Apple M1 Pro), a fetch reads the attachment's memory, which the barrier brings
+            // up to date. Without one, fragments of a draw that overlap read garbage (NaN), even
+            // the instance's first draw over its load action's clear; after one they read the
+            // texel as it was before the draw (`PrecisionNote::UnorderedFetch`).
+            let fetch_barrier = self.layout.fetch_inputs
+                && !graphics.input_attachments.is_empty()
+                && framebuffer_fetch::inputs_unordered(device.compile_device().profile());
+            barriered |= fetch_barrier;
+            let mut draws_barrier = None;
+            if fetch_barrier {
+                let view_mask = self.current.shape.view_mask;
+                self.current.rerecord = None;
+                self.current.barriers = true;
+                match (pending.is_some(), &mut self.current.kept) {
+                    (true, _) => draws_barrier = Some(view_mask),
+                    (false, Some(kept)) => kept.barrier(view_mask),
+                    // SAFETY: as for the storage barrier below.
+                    (false, None) => unsafe {
+                        render_target::between_draws(
+                            device.shared().vk(),
+                            self.current.draws,
+                            view_mask,
+                        )
+                    },
+                }
+            }
             let mut storage_barrier = None;
             if after_writes {
                 let view_mask = self.current.shape.view_mask;
@@ -10355,6 +10376,7 @@ impl RenderLowering {
                     draw: self.draw_calls,
                     variant: variant.key().clone(),
                     specialization: variant.constants(specialization),
+                    draws_barrier,
                     storage_barrier,
                     indirect_barrier,
                     geometry_barrier,
