@@ -2483,6 +2483,7 @@ impl RenderExecution {
             state: Versioned::new(snapshot.state.clone()),
             scissors: snapshot.scissors.clone(),
             pipeline: None,
+            fragment_memory_written: false,
             routed: None,
             vertex: snapshot.vertex.clone(),
             fragment: snapshot.fragment.clone(),

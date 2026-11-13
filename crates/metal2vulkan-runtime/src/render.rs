@@ -1433,6 +1433,10 @@ pub(crate) struct RenderLowering {
     /// Apart from `state`: setting them keeps the draws' shapes (`ScissorRects`).
     scissors: ScissorRects,
     pipeline: Option<RenderPipelineState>,
+    /// On a device without the fragment shader pixel interlock: a draw recorded since the
+    /// instance's last barrier between draws ran a fragment function that writes memory, so the
+    /// next draw records after one ([`Self::order_unordered_fetch`]).
+    fragment_memory_written: bool,
     /// The routing of the drawing state last set (`ShapeInputs::routing`), which its check
     /// and each of its draws (their settings and their coverage) read.
     routed: Option<Routed>,
@@ -2088,6 +2092,7 @@ impl RenderLowering {
             layout: Versioned::new(layout),
             passes: vec![(shape, compatible)],
             pipeline: None,
+            fragment_memory_written: false,
             routed: None,
             vertex: ArgumentTable::default(),
             fragment: ArgumentTable::default(),
@@ -6973,6 +6978,38 @@ impl RenderLowering {
         unsafe { render_target::between_draws(raw, self.current.draws, view_mask) };
     }
 
+    /// On a device without the fragment shader pixel interlock, what keeps draws in Metal's order
+    /// where nothing else orders their fragments: a draw whose pipeline reads input attachments
+    /// without rasterization-order access (`framebuffer_fetch::inputs_unordered`), and any draw
+    /// after one whose fragment function wrote memory (a raster order group's resources, which
+    /// such a device runs outside a critical section, `PrecisionNote::UnorderedRasterOrderGroups`),
+    /// records after a barrier of its subpass's dependency on itself
+    /// ([`Self::barrier_between_draws`]), as Metal orders those accesses after every earlier
+    /// draw's fragments of the pixel. The overlapping fragments of one draw stay unordered
+    /// (`PrecisionNote::UnorderedFetch`, `UnorderedRasterOrderGroups`).
+    fn order_unordered_fetch(&mut self) {
+        let profile = self.core.device().compile_device().profile();
+        if profile.fragment().pixel_interlock {
+            return;
+        }
+        let (fetches, writes) = match self.pipeline.as_ref().map(RenderPipelineState::kind) {
+            Some(RenderStateKind::Graphics(state)) => {
+                let graphics = &state.base().graphics;
+                (
+                    self.layout.fetch_inputs && !graphics.input_attachments.is_empty(),
+                    graphics.fragment_writes_memory,
+                )
+            }
+            _ => (false, false),
+        };
+        let unordered_fetch = fetches && framebuffer_fetch::inputs_unordered(profile);
+        if unordered_fetch || self.fragment_memory_written {
+            self.barrier_between_draws();
+            self.fragment_memory_written = false;
+        }
+        self.fragment_memory_written |= writes;
+    }
+
     /// Order the pass's load actions before the draws after a memory barrier over the render
     /// targets after the fragment stage (`fence.rs`), where it comes before any draw of the pass
     /// recorded (`loads_ordered`). Past one, the draws before it order themselves
@@ -7640,6 +7677,7 @@ impl RenderLowering {
         empty: bool,
     ) -> Result<(), Error> {
         self.sync_heaps();
+        self.order_unordered_fetch();
         // The encoder's kept draw again, which no call came between: its Vulkan draw alone
         // (`render/draw_again.rs`). Any other draw forgets it, and keeps itself where it can.
         let mut checked = None;

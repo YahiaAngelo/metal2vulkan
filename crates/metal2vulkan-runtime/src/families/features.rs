@@ -1014,18 +1014,15 @@ impl FeatureRow {
             // and two-channel 8-bit sRGB formats on NVIDIA and ANV, and on NVIDIA the packed
             // 16-bit ones and `RGB9E5Float`) does not fetch an attachment
             // of it (`NotImplemented(Format)` per pipeline): the row's gap there. A device with
-            // neither form has no ordered fetch.
+            // neither form fetches through input attachments unordered within a draw
+            // (`PrecisionNote::UnorderedFetch`, `framebuffer_fetch::inputs_unordered`).
             F::ProgrammableBlending => first([
                 match (through_inputs(f.profile), through_storage(f.profile)) {
                     (true, _) => None,
                     (false, true) if renders_through_words(f.profile) => {
                         not_implemented(Feature::FramebufferFetch)
                     }
-                    (false, true) => None,
-                    (false, false) => Some(refused(Unsupported::needs(
-                        Feature::FramebufferFetch,
-                        Capability::Feature(VkFeature::RasterizationOrderColorAttachmentAccess),
-                    ))),
+                    (false, _) => None,
                 },
             ]),
             // Separate depth and stencil textures of one pass: their resolve of a stencil drawn

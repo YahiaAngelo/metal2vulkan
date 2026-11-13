@@ -10,9 +10,13 @@
 //! - **Storage attachments in the ordered pixel interlock** (`GraphicsState::storage_attachments`),
 //!   where it has `fragmentShaderPixelInterlock` alone (RADV, ANV, NVIDIA and MoltenVK).
 //!
-//! Where neither form is open to the pipeline (a device with neither feature, or a pipeline state
-//! the storage form cannot keep exact, such as a blending fetched attachment), the compile layer
-//! refuses the pipeline: an unordered read could see a pixel before an earlier fragment's write.
+//! A device with neither feature (Honeykrisp on Apple's M1 and M2) fetches through input
+//! attachments without rasterization-order access ([`inputs_unordered`]): every draw that reads
+//! one records after a barrier of its subpass's dependency on itself, so it reads every earlier
+//! draw's writes, while the overlapping fragments of one draw stay unordered, which the compile
+//! layer notes (`PrecisionNote::UnorderedFetch`). On a device with the pixel interlock, a pipeline
+//! state the storage form cannot keep exact (such as a blending fetched attachment) is refused: an
+//! unordered read could see a pixel before an earlier fragment's write.
 //!
 //! The input attachment form ([`through_inputs`]): a pass cannot foresee which of its draws
 //! fetch, so on such a device every color render target is also an input attachment
@@ -107,10 +111,28 @@ use metal2vulkan::vk::{Format, ImageCreateFlags, ImageUsageFlags, NumericFormat}
 use std::collections::BTreeMap;
 
 /// Whether the compile layer reads `profile`'s fetched color attachments as input attachments
-/// in rasterization order (`lower::fragment::fetch`): where the device has
-/// `rasterizationOrderColorAttachmentAccess`.
+/// (`lower::fragment::fetch`): in rasterization order where the device has
+/// `rasterizationOrderColorAttachmentAccess`, and unordered within a draw where it has neither that
+/// nor the pixel interlock ([`inputs_unordered`]).
 pub(crate) fn through_inputs(profile: &DeviceProfile) -> bool {
+    inputs_ordered(profile) || inputs_unordered(profile)
+}
+
+/// Whether `profile`'s input attachment form is ordered by rasterization-order attachment access
+/// (`rasterizationOrderColorAttachmentAccess`).
+pub(crate) fn inputs_ordered(profile: &DeviceProfile) -> bool {
     profile.fragment().rasterization_order_color_access
+}
+
+/// Whether `profile` fetches through input attachments without rasterization-order access: a
+/// device with neither that access nor `fragmentShaderPixelInterlock` (Honeykrisp on Apple's M1
+/// and M2, Mesa 26.3). A draw that fetches records after a barrier of the subpass's dependency on
+/// itself (`render_target::between_draws`), so it reads what every earlier draw wrote, but the
+/// overlapping fragments of one draw are unordered: the compile layer notes
+/// `PrecisionNote::UnorderedFetch`.
+pub(crate) fn inputs_unordered(profile: &DeviceProfile) -> bool {
+    let fragment = profile.fragment();
+    !fragment.rasterization_order_color_access && !fragment.pixel_interlock
 }
 
 /// Whether the compile layer reads `profile`'s fetched color attachments as storage images in the

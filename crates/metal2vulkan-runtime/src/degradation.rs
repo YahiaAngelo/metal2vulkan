@@ -2541,6 +2541,16 @@ degradations! {
         /// module compiled with fast math, or written by fewer than four lanes, in the 8-bit unorm
         /// blend's rounded forms over the decoded texel. Metal's blend for these is not measured.
         UnmeasuredFetchBlend = "unmeasured-fetch-blend";
+        /// A framebuffer fetch on a device with neither rasterization-order color attachment
+        /// access nor the pixel interlock (Honeykrisp on Apple's M1 and M2): the function reads
+        /// an input attachment after a barrier from every earlier draw of the pass, but the
+        /// fragments of its own draw that cover one pixel are unordered, so a fetch may read the
+        /// texel before an earlier primitive of the same draw wrote it.
+        UnorderedFetch = "unordered-fetch";
+        /// A fragment function that names a raster order group on a device with no fragment
+        /// shader interlock (Honeykrisp on Apple's M1 and M2): draws stay ordered, but the
+        /// fragments of one draw that cover a pixel access the group's resources in no order.
+        UnorderedRasterOrderGroups = "unordered-raster-order-groups";
     }
 }
 

@@ -143,6 +143,23 @@ fn sample_rate(objects: &[IoObject]) -> bool {
     })
 }
 
+/// The interlock mode of a function that names a raster order group (and keeps no imageblock or
+/// storage attachment, which need [`mode`]): [`mode`]'s where the device has an interlock that
+/// serves it, else none, on a device with no interlock at all (Honeykrisp on Apple's M1 and M2):
+/// the body runs unordered, noted `PrecisionNote::UnorderedRasterOrderGroups`. The runtime records
+/// such a device's draws after a barrier of the subpass's dependency on itself where an earlier
+/// draw's fragment function wrote memory, so the accesses of different draws keep Metal's order;
+/// those of one draw's overlapping fragments do not.
+pub(super) fn group_mode(cx: &mut SelectCx<'_>) -> Result<Option<ExecMode>, Error> {
+    let f = cx.profile.fields().fragment;
+    if cx.stage == Stage::Fragment && !f.pixel_interlock && !f.sample_interlock {
+        cx.precision
+            .insert(crate::pipeline::artifact::PrecisionNote::UnorderedRasterOrderGroups);
+        return Ok(None);
+    }
+    mode(cx).map(Some)
+}
+
 /// The interlock mode of a function in a raster order group, or its refusal. Called once the
 /// stage interface is planned (`fragment::finish`).
 pub(super) fn mode(cx: &SelectCx<'_>) -> Result<ExecMode, Error> {

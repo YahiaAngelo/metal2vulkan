@@ -3178,6 +3178,19 @@ bound.
   mip filter or a runtime sampler's word does. The device takes the level of detail by Vulkan's
   rules, whose scale factor may be approximated; Metal's level of detail from derivatives is not
   measured. The sample may read another level or filter than Metal's near a boundary.
+- `metal2vulkan-degrade-unordered-raster-order-groups` (precision).
+  `PrecisionNote::UnorderedRasterOrderGroups`: A fragment function names a raster order group on a
+  device with no fragment shader interlock (Honeykrisp on Apple's M1 and M2): its body runs outside
+  any critical section. Each draw after one whose fragment function wrote memory records after a
+  barrier of its subpass's dependency on itself, so draws keep Metal's order; the fragments of one
+  draw that cover the same pixel access the group's resources in no order.
+- `metal2vulkan-degrade-unordered-fetch` (precision). `PrecisionNote::UnorderedFetch`: A fragment
+  function reads a color attachment on a device with neither rasterization-order color attachment
+  access nor the fragment shader pixel interlock (Honeykrisp on Apple's M1 and M2): it reads an input
+  attachment, and each draw that does records after a barrier of its subpass's dependency on itself,
+  so it reads what every earlier draw wrote. The fragments of the draw itself that cover one pixel
+  are not ordered: where its primitives overlap, a fetch may read the texel before an earlier
+  primitive's write.
 - `metal2vulkan-degrade-unmeasured-fetch-blend` (precision). `PrecisionNote::UnmeasuredFetchBlend`:
   A fragment function reads a color attachment the pipeline blends, on a device that orders
   framebuffer fetch only through the pixel interlock (MoltenVK, RADV, ANV), of a format whose Metal

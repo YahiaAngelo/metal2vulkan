@@ -142,6 +142,8 @@ fn notes() -> Vec<(&'static str, Ledger)> {
             DeviceAlphaCoverage,
             HalfOutputFastMathBlend,
             UnmeasuredFetchBlend,
+            UnorderedFetch,
+            UnorderedRasterOrderGroups,
             ReductionOrder,
             FunctionStorageAssumed,
             ColorAttachmentGroups,

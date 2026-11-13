@@ -163,6 +163,7 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         }
         // The attachment's input attachment, which a `[[color(n)]]` read of it shares (`color`).
         cx.descriptors.input_attachments = cx.descriptors.input_attachments.saturating_add(1);
+        super::fetch::note_input_read(cx);
         cx.facts.insert(RuntimeFact::FramebufferFetch { color });
         planned.insert(
             color,

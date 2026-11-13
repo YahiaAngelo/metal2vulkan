@@ -2087,6 +2087,21 @@ pub enum PrecisionNote {
     /// fast math at four lanes; under fast math Metal regroups the blend, unmeasured.
     /// Validation derives no tolerance from it.
     UnmeasuredFetchBlend,
+    /// A fragment function reads a color attachment (framebuffer fetch) on a device with neither
+    /// rasterization-order color attachment access nor the fragment shader pixel interlock
+    /// (Honeykrisp on Apple's M1 and M2): it reads an input attachment, after a barrier from every
+    /// earlier draw of the subpass, so it sees what those draws wrote, but the fragments of its
+    /// own draw that cover the same pixel (or sample) are not ordered, and a fetch may read the
+    /// texel before an earlier primitive's write of that draw. A draw whose primitives do not
+    /// overlap reads Metal's values. Validation derives no tolerance from it.
+    UnorderedFetch,
+    /// A fragment function names a raster order group (on a buffer, a texture, a color it reads or
+    /// an argument-buffer member) on a device with no fragment shader interlock (Honeykrisp on
+    /// Apple's M1 and M2): its body runs outside any critical section. Draws are ordered (each
+    /// draw after one whose fragment function wrote memory records after a barrier from it), but
+    /// the fragments of one draw that cover the same pixel access the group's resources in no
+    /// order, where Metal orders them by primitive. Validation derives no tolerance from it.
+    UnorderedRasterOrderGroups,
     /// A fragment function reads an `interpolant` through `interpolate_at_offset(offset)`, which
     /// Metal evaluates at the offset as given from the pixel's upper-left corner, at any distance
     /// and on no grid (the Apple M3 Max, macOS 27.0.1: an offset of 0.999 read at 0.999, one of

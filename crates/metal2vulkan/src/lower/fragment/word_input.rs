@@ -96,6 +96,7 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         let flags = crate::metal::state::color_write_mask(kept)
             .map_err(|e| e.at_attachment(Attachment::Color(color)))?;
         cx.descriptors.input_attachments = cx.descriptors.input_attachments.saturating_add(1);
+        super::fetch::note_input_read(cx);
         cx.facts.insert(RuntimeFact::FramebufferFetch { color });
         cx.facts
             .insert(RuntimeFact::WordInputMerge { color, kept: flags });

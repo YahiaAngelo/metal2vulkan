@@ -335,10 +335,33 @@ pub(crate) fn interlock_orders(p: &DeviceProfile) -> bool {
     !f.rasterization_order_color_access && f.pixel_interlock
 }
 
-/// Whether `p` orders framebuffer fetch through rasterization-order input attachments (lavapipe):
-/// rasterization-order color attachment access, which [`interlock_orders`] excludes.
+/// Whether `p` fetches through input attachments: in rasterization order where it has
+/// rasterization-order color attachment access (lavapipe), which [`interlock_orders`] excludes,
+/// and unordered within a draw where it has neither that access nor the pixel interlock
+/// ([`inputs_unordered`]).
 pub(crate) fn inputs_order(p: &DeviceProfile) -> bool {
-    p.fields().fragment.rasterization_order_color_access
+    p.fields().fragment.rasterization_order_color_access || inputs_unordered(p)
+}
+
+/// Whether `p` fetches through input attachments without rasterization-order access: neither
+/// `rasterizationOrderColorAttachmentAccess` nor `fragmentShaderPixelInterlock` (Honeykrisp on
+/// Apple's M1 and M2). The runtime records each draw that reads input attachments after a barrier
+/// of its subpass's dependency on itself, so a fetch reads every earlier draw's writes; where
+/// fragments of the same draw overlap a pixel, a fetch may read the texel before an earlier one's
+/// write. A function that reads an input attachment there notes `PrecisionNote::UnorderedFetch`
+/// ([`note_input_read`]).
+pub(crate) fn inputs_unordered(p: &DeviceProfile) -> bool {
+    let f = p.fields().fragment;
+    !f.rasterization_order_color_access && !f.pixel_interlock
+}
+
+/// Record, for a function that reads a color attachment as an input attachment, that the read
+/// is unordered within its draw on a device without rasterization-order access
+/// ([`inputs_unordered`]).
+pub(crate) fn note_input_read(cx: &mut SelectCx<'_>) {
+    if inputs_unordered(cx.profile) {
+        cx.precision.insert(PrecisionNote::UnorderedFetch);
+    }
 }
 
 /// Whether `pf` is a 16-bit float color format, whose blend of a `half` output of a module
@@ -1259,8 +1282,7 @@ pub(crate) fn extended_range_blend(
         alpha_operation: O::Add,
     };
     if !interlock_orders(p) {
-        let f = p.fields().fragment;
-        if !f.rasterization_order_color_access {
+        if !inputs_order(p) {
             return Err(Unsupported::needs(
                 Feature::FramebufferFetch,
                 Capability::Feature(VkFeature::FragmentShaderPixelInterlock),

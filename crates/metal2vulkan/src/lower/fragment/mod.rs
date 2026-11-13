@@ -351,12 +351,13 @@ pub fn finish(cx: &mut SelectCx<'_>, m: &mut Meter) -> Result<(), Error> {
     // raster order group.
     let shadow = cx.families.fragment.stencil.is_some();
     let storage = !cx.families.fragment.fetch.is_empty() || shadow;
-    let interlock =
-        if rog::declared(cx.entry) || cx.families.fragment.imageblock.is_some() || storage {
-            Some(rog::mode(cx)?)
-        } else {
-            None
-        };
+    let interlock = if cx.families.fragment.imageblock.is_some() || storage {
+        Some(rog::mode(cx)?)
+    } else if rog::declared(cx.entry) {
+        rog::group_mode(cx)?
+    } else {
+        None
+    };
     let snapshot = snapshot::finish(cx, interlock.is_some(), looped)?;
     let sites: Vec<InstId> = cx.families.fragment.discards.keys().copied().collect();
     let discard::DiscardPlan {
