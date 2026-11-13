@@ -151,6 +151,8 @@ pub(crate) fn holds_extended_shadows(
             .contains(&VkFeature::FragmentStoresAndAtomics)
         && profile.supports_format(Format::R16G16B16A16_SFLOAT, FormatUsage::StorageImage)
         && (samples <= 1 || profile.images().storage_multisample)
+}
+
 /// Whether `profile` fetches through input attachments without rasterization-order access: a
 /// device with neither that access nor `fragmentShaderPixelInterlock` (Honeykrisp on Apple's M1
 /// and M2, Mesa 26.3). A draw that fetches records after a barrier of the subpass's dependency on
