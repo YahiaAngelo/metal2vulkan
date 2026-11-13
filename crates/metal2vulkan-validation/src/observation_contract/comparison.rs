@@ -286,6 +286,8 @@ pub fn allowance(note: PrecisionNote) -> Allowance {
         | N::NotMipmappedAnisotropicFilter
         | N::DeviceSampleLevel
         | N::UnmeasuredFetchBlend
+        | N::UnorderedFetch
+        | N::UnorderedRasterOrderGroups
         | N::Fp8Value
         | N::MultisamplePosition
         | N::RasterizationRateMap
