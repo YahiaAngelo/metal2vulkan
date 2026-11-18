@@ -2106,7 +2106,8 @@ fn host_window(
     let at = pointer.as_ptr() as u64;
     let window = import_window(at, length, importer.page, 1)
         .map_err(|_| nil(call, Problem::BufferLength { length }))?;
-    let by_pointer = import_window(at, length, importer.page, importer.alignment).is_ok();
+    let by_pointer = importer.imports_pointers()
+        && import_window(at, length, importer.page, importer.alignment).is_ok();
     if !by_pointer && source.is_none() {
         return Err(not_importable());
     }

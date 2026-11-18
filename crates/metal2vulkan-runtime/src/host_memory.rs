@@ -1140,6 +1140,12 @@ impl Importer {
         })
     }
 
+    /// Whether the device imports host pointers (`VK_EXT_external_memory_host`): a device that
+    /// imports dma-bufs alone takes every no-copy object's pages as dma-bufs ([`Importer::new`]).
+    pub(super) fn imports_pointers(&self) -> bool {
+        self.functions.is_some()
+    }
+
     /// Whether the device imports dma-bufs (`VK_EXT_external_memory_dma_buf`), which a no-copy
     /// buffer's pages may come as where it refuses their pointer ([`DmaBufSource`]).
     pub(super) fn imports_dma_bufs(&self) -> bool {
