@@ -156,8 +156,8 @@ use crate::spirv::builder::{FunctionBuilder, ModuleBuilder};
 use crate::spirv::error::BResult;
 use crate::spirv::ids::{ConstId, FuncId, GlobalId, Value as SValue};
 use crate::spirv::ir::{
-    BinOp, ConstBits, Dim, GlslOp, ImageOperands, ImageType, ImageUsage, MemAccess, MemoryOrder, Scope,
-    StorageClass, Type as SType,
+    BinOp, ConstBits, Dim, GlslOp, ImageOperands, ImageType, ImageUsage, MemAccess, MemoryOrder,
+    Scope, StorageClass, Type as SType,
 };
 
 use super::imageblock::{self, ImageblockStrategy};
@@ -378,9 +378,10 @@ impl TilePlan {
                 .staged()
                 .map(|s| {
                     let convert = match s.extended {
-                        Some(_) => u64::from(
-                            extended_range::DECODE_WORDS + extended_range::ENCODE_WORDS,
-                        ) + 64,
+                        Some(_) => {
+                            u64::from(extended_range::DECODE_WORDS + extended_range::ENCODE_WORDS)
+                                + 64
+                        }
                         None => 0,
                     };
                     96 + 4 * u64::from(s.leaf.cost()) + convert

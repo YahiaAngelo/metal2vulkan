@@ -2487,7 +2487,10 @@ fn an_extended_range_attachment_is_staged_through_its_codes() {
     let _ = std::fs::remove_file(&path);
     let (area, tile) = ([16u32, 8u32], [8u32, 8u32]);
     let forms = [
-        (PixelFormat::RGB10A82PXR10, ExtendedRange::Planes { srgb: false }),
+        (
+            PixelFormat::RGB10A82PXR10,
+            ExtendedRange::Planes { srgb: false },
+        ),
         (PixelFormat::BGR10XR, ExtendedRange::Bgr10 { srgb: false }),
         (PixelFormat::BGRA10XR, ExtendedRange::Bgra10 { srgb: false }),
     ];
@@ -2506,7 +2509,13 @@ fn an_extended_range_attachment_is_staged_through_its_codes() {
             let Some((plan, m)) = module(&bc, "xr_copy", &profile, &p, &inputs) else {
                 continue;
             };
-            let slot = plan.families.access.tile.as_ref().expect("a tile plan").slots[0];
+            let slot = plan
+                .families
+                .access
+                .tile
+                .as_ref()
+                .expect("a tile plan")
+                .slots[0];
             assert_eq!(slot.extended, Some(form), "{profile} {pf:?}");
             let mut codes = Image::new(attachment(0), [area[0], area[1], 1], 1, 1, 1);
             let copy = Image::new(attachment(1), [area[0], area[1], 1], 1, 1, 1);
@@ -2528,7 +2537,11 @@ fn an_extended_range_attachment_is_staged_through_its_codes() {
                     .iter()
                     .map(|v| u32::from(f32_to_half_bits(v.to_bits())))
                     .collect();
-                assert_eq!(images[1][i].to_vec(), want, "{profile} {pf:?} texel {n}: the tile value");
+                assert_eq!(
+                    images[1][i].to_vec(),
+                    want,
+                    "{profile} {pf:?} texel {n}: the tile value"
+                );
                 let mut back = codes_of(n);
                 for c in &mut back[..3] {
                     *c = (*c).min(1022);
@@ -2541,11 +2554,18 @@ fn an_extended_range_attachment_is_staged_through_its_codes() {
                 let want = raw(form, back, 0);
                 let got = images[0][i];
                 for k in 0..4 {
-                    assert_eq!(got[k] & mask[k], want[k] & mask[k], "{profile} {pf:?} texel {n} word {k}: the codes");
+                    assert_eq!(
+                        got[k] & mask[k],
+                        want[k] & mask[k],
+                        "{profile} {pf:?} texel {n} word {k}: the codes"
+                    );
                 }
             }
             ran += 1;
         }
     }
-    assert!(ran > 0, "no committed profile stages an extended-range attachment");
+    assert!(
+        ran > 0,
+        "no committed profile stages an extended-range attachment"
+    );
 }

@@ -85,8 +85,8 @@
 mod adapt;
 mod aggregates;
 mod async_copy;
-mod byval;
 mod block_read;
+mod byval;
 mod command_writes;
 mod const_loads;
 mod devirt;

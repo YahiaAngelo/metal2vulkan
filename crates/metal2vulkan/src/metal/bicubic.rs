@@ -154,8 +154,12 @@ const A: u32 = 0b1000;
 pub(crate) fn runtime_cubic_nearest(word: u32) -> u32 {
     use crate::metal::sampler::SamplerWord;
     use crate::metal::{SamplerAddressMode, SamplerBorderColor};
-    let mut w = word & !(SamplerWord::MIP_FILTER | SamplerWord::ANISOTROPIC | SamplerWord::REDUCTION);
-    for (shift, mask) in SamplerWord::ADDRESS_SHIFT.into_iter().zip(SamplerWord::ADDRESS) {
+    let mut w =
+        word & !(SamplerWord::MIP_FILTER | SamplerWord::ANISOTROPIC | SamplerWord::REDUCTION);
+    for (shift, mask) in SamplerWord::ADDRESS_SHIFT
+        .into_iter()
+        .zip(SamplerWord::ADDRESS)
+    {
         let mode = SamplerAddressMode::try_from((w & mask) >> shift);
         if !matches!(
             mode,
@@ -168,7 +172,8 @@ pub(crate) fn runtime_cubic_nearest(word: u32) -> u32 {
             w = (w & !mask) | ((SamplerAddressMode::ClampToEdge as u32) << shift);
         }
     }
-    let border = SamplerBorderColor::try_from((w & SamplerWord::BORDER) >> SamplerWord::BORDER_SHIFT);
+    let border =
+        SamplerBorderColor::try_from((w & SamplerWord::BORDER) >> SamplerWord::BORDER_SHIFT);
     if !matches!(
         border,
         Ok(SamplerBorderColor::TransparentBlack

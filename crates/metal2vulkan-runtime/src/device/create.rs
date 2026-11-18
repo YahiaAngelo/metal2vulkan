@@ -609,7 +609,11 @@ pub(super) unsafe extern "system" fn deliver(
     if message.kind.validation && message.severity == MessageSeverity::Error {
         if let Some(path) = std::env::var_os("M2V_VALIDATION_BACKTRACE") {
             use std::io::Write as _;
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+            {
                 let _ = writeln!(
                     f,
                     "=== pid {} {}\n{}\n{}\n",
