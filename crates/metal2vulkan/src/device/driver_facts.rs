@@ -149,7 +149,18 @@ pub(crate) fn among<F: Copy + Ord>(
 /// `engine/multisample` that read center varyings in a function Metal runs per sample
 /// (`multisample_center_at_sample`, `multisample_counter` and `multisample_sampled_varying`, at 2
 /// and 4 samples) match Metal's words through MoltenVK with the varyings read as they are, on the
-/// M3 Max and the M4. One row per GPU, as measured.
+/// M3 Max and the M4. Honeykrisp (`VK_DRIVER_ID_MESA_HONEYKRISP`) reads such an input through the
+/// AGX iterator's `CENTER` mode, the pixel center, in every invocation (Mesa's `agx_compile.c`,
+/// `agx_interp_for_bary`; its per-sample loop shades every sample of a pixel in one invocation,
+/// `agx_nir_lower_msaa.c`), measured by `runtime_lane::pull_model_interpolation` on the Apple M1
+/// Pro (G13S C0), Mesa 26.3.0-devel (Borealis): with the row taken, every center draw at 1 and 4
+/// samples reads Metal's values within `2.4e-7`, as the `InterpolateAtOffset` form did. Its
+/// `InterpolateAtOffset` evaluates the triangle's coefficients in the shader and answers a
+/// coefficient vector it takes for invalid with the value at the tile's corner instead
+/// (`agx_nir_lower_interpolation.c`, `cf_valid`): a center varying read through it at more than
+/// one sample read values off by up to a tile on thin triangles (MercuryPoster's arc mesh, in a
+/// replay of its frame), which the iterator reads at the pixel center. The row names no vendor:
+/// Honeykrisp drives Apple's GPUs alone, and reports Mesa's vendor ID and no device ID for them.
 ///
 /// The two color-write conversions, measured by `runtime_lane::color_writes` through the device's
 /// own conversion (at the scratch commit 9bc673b64, 2026-10-07, and our probe on the UHD 770 the
@@ -554,6 +565,12 @@ pub(crate) const DEVIATIONS: &[Measured<DriverDeviation>] = &[
     Measured {
         device: Some(APPLE9),
         ..moltenvk_on_apple(DriverDeviation::MetalCenterVaryings)
+    },
+    Measured {
+        fact: DriverDeviation::MetalCenterVaryings,
+        driver: DriverId::MESA_HONEYKRISP,
+        vendor: None,
+        device: None,
     },
     mesa_on(
         DriverDeviation::MetalSmallFloatColorWrites,
