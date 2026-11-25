@@ -31,6 +31,16 @@ const ONE_GPU: &[(u32, &[u32])] = &[
     // `amd-780m-radv`), and Hawk Point's 0x1900, whose capture under the same RADV build
     // (`amd-780m-hawkpoint-radv`) differs from Phoenix's in its `deviceID` alone.
     (0x1002, &[0x15bf, 0x1900]),
+    // NVIDIA Blackwell GB20x GPUs: measured on the RTX 5080 Laptop GPU (0x2c19, GB203M),
+    // aliased for desktop and mobile GB202/GB203/GB205/GB206/GB207 siblings including the
+    // RTX 5070 Ti (0x2c05) and RTX 5080 (0x2c02).
+    (
+        0x10de,
+        &[
+            0x2c19, 0x2b85, 0x2b87, 0x2b8c, 0x2c02, 0x2c05, 0x2c18, 0x2c58, 0x2c59, 0x2d04, 0x2d05,
+            0x2d18, 0x2d19, 0x2d58, 0x2d59, 0x2d83, 0x2d98, 0x2f04,
+        ],
+    ),
 ];
 
 impl DeviceDescription {

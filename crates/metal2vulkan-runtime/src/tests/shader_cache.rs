@@ -1058,15 +1058,17 @@ fn every_making_of_a_record_s_name_takes_the_first_s_cache() {
     assert_eq!(torn_down(&live), ["vkDestroyPipelineCache"]);
 }
 
-/// A device keeps at most [`LIVE`] caches: the making of a further name is handed one of its own,
-/// destroyed once it returned, so nothing of its name is kept and the teardown destroys the
-/// bound's worth alone.
+/// A device keeps at most its configured bound of live caches (`LIVE = 4096` by default): when
+/// full, inserting a new name evicts and destroys the least recently used idle cache so active
+/// families stay resident without growing unboundedly.
 #[test]
 fn a_device_keeps_at_most_the_bound_of_live_caches() {
+    assert_eq!(LIVE, 4096);
     let scratch = Scratch::new();
     let store = store(scratch.path(), BUILD, 1 << 20);
-    let live = LiveCaches::default();
-    for n in 0..LIVE as u32 {
+    let limit = 4u32;
+    let live = LiveCaches::with_limit(limit as usize);
+    for n in 0..limit {
         let (calls, _) = described(
             &store,
             &live,
@@ -1076,42 +1078,50 @@ fn a_device_keeps_at_most_the_bound_of_live_caches() {
         );
         assert_eq!(calls, ["vkCreatePipelineCache", "vkGetPipelineCacheData"]);
     }
+    // Touch entry 0 so entry 1 becomes least recently used.
     let (calls, _) = described(
         &store,
         &live,
         (false, false),
         None,
-        Making::new("compute").text(&"past the bound"),
+        Making::new("compute").text(&0u32),
     );
-    assert_eq!(
-        calls,
-        [
-            "vkCreatePipelineCache",
-            "vkGetPipelineCacheData",
-            "vkDestroyPipelineCache"
-        ],
-        "a making past the bound kept its cache"
-    );
-    // The same name again: the device kept nothing of it, so it makes and destroys one again.
-    let (calls, _) = described(
-        &store,
-        &live,
-        (false, false),
-        None,
-        Making::new("compute").text(&"past the bound"),
-    );
-    assert_eq!(
-        calls,
-        [
-            "vkCreatePipelineCache",
-            "vkGetPipelineCacheData",
-            "vkDestroyPipelineCache"
-        ]
-    );
+    assert_eq!(calls, ["vkGetPipelineCacheData"]);
     assert_eq!(
         store.counters.driver_caches_shared.load(Ordering::Relaxed),
-        0,
-        "no making was handed another's cache"
+        1
+    );
+
+    // Past the bound: evicts LRU (entry 1), destroying its cache while keeping the new one live.
+    let (calls, kept) = described(
+        &store,
+        &live,
+        (false, false),
+        None,
+        Making::new("compute").text(&"past the bound"),
+    );
+    assert_eq!(
+        calls,
+        [
+            "vkCreatePipelineCache",
+            "vkDestroyPipelineCache",
+            "vkGetPipelineCacheData",
+        ],
+        "a making past the bound did not evict an idle cache"
+    );
+    // Calling the new name again hits the resident cache with no create or destroy.
+    let (calls, again) = described(
+        &store,
+        &live,
+        (false, false),
+        None,
+        Making::new("compute").text(&"past the bound"),
+    );
+    assert_eq!(calls, ["vkGetPipelineCacheData"]);
+    assert_eq!(again, kept);
+    assert_eq!(
+        store.counters.driver_caches_shared.load(Ordering::Relaxed),
+        2
     );
     assert_eq!(torn_down(&live), ["vkDestroyPipelineCache"]);
 }

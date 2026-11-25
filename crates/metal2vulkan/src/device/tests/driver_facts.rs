@@ -274,7 +274,7 @@ fn the_profile_takes_the_deviations_its_driver_is_measured_with() {
         let moltenvk = is_moltenvk_capture(stem);
         let want = match (moltenvk, stem.as_str()) {
             (true, _) => want_all,
-            (false, "nvidia-rtx5080-laptop") => nvidia_measured.clone(),
+            (false, "nvidia-rtx5080-laptop" | "nvidia-rtx50-linux") => nvidia_measured.clone(),
             (false, "lavapipe" | "gate-lavapipe" | "gate-lavapipe-x86_64") => {
                 vec![D::MetalFloatColorNans, D::MetalHalfStorageWrites]
             }
@@ -354,21 +354,25 @@ fn the_profile_takes_the_deviations_its_driver_is_measured_with() {
     );
     assert_eq!(p.fields().cube_gradients, vulkan);
     assert!(centered(&p));
-    // NVIDIA's color-NaN stores and `float` denormals: per GPU (the 3090 and the 5080 Laptop
-    // GPU, not another RTX 50), at every release; the small float color writes the 3090's alone.
+    // NVIDIA's color-NaN stores and `float` denormals: per GPU (the 3090 and Blackwell GB20x
+    // aliased to the 5080 Laptop GPU, not an unmeasured Ada GPU), at every release; the small
+    // float color writes the 3090's alone.
     use crate::device::driver_facts::NVIDIA_RTX_5080_LAPTOP;
     let laptop = super::profile("nvidia-rtx5080-laptop");
     assert_eq!(laptop.device_id, NVIDIA_RTX_5080_LAPTOP);
     let mut rtx_3090 = laptop.clone();
     rtx_3090.device_id = NVIDIA_RTX_3090;
-    let mut desktop = laptop.clone();
-    desktop.device_id = 0x2c02;
+    let mut rtx_5070_ti = laptop.clone();
+    rtx_5070_ti.device_id = 0x2c05;
+    let mut unmeasured_ada = laptop.clone();
+    unmeasured_ada.device_id = 0x2684;
     let mut later = laptop.clone();
     later.driver_version += 1 << 6;
     let mut rtx_3090_measured = nvidia_measured.clone();
     rtx_3090_measured.insert(2, D::MetalSmallFloatColorWrites);
     assert_eq!(taken(&profile_of(rtx_3090)), rtx_3090_measured);
-    assert_eq!(taken(&profile_of(desktop)), Vec::new());
+    assert_eq!(taken(&profile_of(rtx_5070_ti)), nvidia_measured);
+    assert_eq!(taken(&profile_of(unmeasured_ada)), Vec::new());
     assert_eq!(taken(&profile_of(later)), nvidia_measured);
 }
 
@@ -529,8 +533,26 @@ fn the_committed_profiles_drivers_have_their_facts() {
                 SUBPIXEL_SNAP,
             ],
         ),
-        ("nvidia-pascal-linux", vec![DENORMALS, PLANES]),
-        ("nvidia-rtx50-linux", vec![DENORMALS, PLANES]),
+        (
+            "nvidia-pascal-linux",
+            vec![DENORMALS, PLANES, STALL, STALL_1024],
+        ),
+        (
+            "nvidia-rtx50-linux",
+            vec![
+                ZERO,
+                DENORMALS,
+                EITHER_CODE,
+                FETCH,
+                SPLIT,
+                PLANES,
+                BC6H,
+                BC7,
+                ROWS,
+                STALL,
+                STALL_1024,
+            ],
+        ),
         (
             "nvidia-rtx5080-laptop",
             vec![
@@ -613,10 +635,8 @@ fn a_gpu_under_another_of_its_device_ids_takes_its_measured_rows() {
     );
 }
 
-/// NVIDIA's driver stalls a submission about once in every thousand semaphore operations on the
-/// two GPUs measured, the RTX 5080 Laptop GPU and the RTX 3090, which take the fact at every
-/// release; another GPU of the driver (an RTX 5080 desktop GPU) does not, so it waits for
-/// completed timelines as every other driver does. No other driver has it.
+/// NVIDIA's driver stalls a submission about once in every thousand semaphore operations across
+/// NVIDIA proprietary GPUs at every release. No other driver has it.
 #[test]
 fn nvidia_s_semaphore_stall_holds_on_the_gpus_measured() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../metal2vulkan-validation/profiles");
@@ -629,9 +649,9 @@ fn nvidia_s_semaphore_stall_holds_on_the_gpus_measured() {
     let mut rtx_3090 = laptop.clone();
     rtx_3090.device_id = NVIDIA_RTX_3090;
     assert!(rtx_3090.driver_facts().contains(&STALL));
-    let mut desktop = laptop.clone();
-    desktop.device_id = 0x2c02;
-    assert!(!desktop.driver_facts().contains(&STALL));
+    let mut rtx_5070_ti = laptop.clone();
+    rtx_5070_ti.device_id = 0x2c05;
+    assert!(rtx_5070_ti.driver_facts().contains(&STALL));
     let mut later = laptop.clone();
     later.driver_version += 1 << 6;
     assert!(later.driver_facts().contains(&STALL));
@@ -640,16 +660,14 @@ fn nvidia_s_semaphore_stall_holds_on_the_gpus_measured() {
         .filter(|row| row.fact == STALL)
         .map(|row| row.driver)
         .collect();
-    assert_eq!(drivers, [DriverId::NVIDIA_PROPRIETARY; 2]);
+    assert_eq!(drivers, [DriverId::NVIDIA_PROPRIETARY]);
 }
 
-/// NVIDIA's driver stalls in one signalling submission of every 1024 to a queue on the GPU
-/// measured, the RTX 5080 Laptop GPU, at every release, so the runtime takes that stall while
-/// idle there; the RTX 3090 and an RTX 5080 desktop GPU, not measured in that form, do not take
-/// the fact, nor does RADV, measured without it, or any other driver.
+/// NVIDIA's driver stalls in one signalling submission of every 1024 to a queue across NVIDIA
+/// proprietary GPUs at every release, so the runtime takes that stall while idle there; RADV,
+/// measured without it, and other drivers do not take the fact.
 #[test]
 fn nvidia_s_every_1024th_signalling_submit_stall_holds_on_the_gpu_measured() {
-    use crate::device::driver_facts::NVIDIA_RTX_5080_LAPTOP;
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../metal2vulkan-validation/profiles");
     let read = |stem: &str| {
         let text = std::fs::read_to_string(dir.join(format!("{stem}.json"))).expect(stem);
@@ -662,10 +680,10 @@ fn nvidia_s_every_1024th_signalling_submit_stall_holds_on_the_gpu_measured() {
     assert!(later.driver_facts().contains(&STALL_1024));
     let mut rtx_3090 = laptop.clone();
     rtx_3090.device_id = NVIDIA_RTX_3090;
-    assert!(!rtx_3090.driver_facts().contains(&STALL_1024));
-    let mut desktop = laptop.clone();
-    desktop.device_id = 0x2c02;
-    assert!(!desktop.driver_facts().contains(&STALL_1024));
+    assert!(rtx_3090.driver_facts().contains(&STALL_1024));
+    let mut rtx_5070_ti = laptop.clone();
+    rtx_5070_ti.device_id = 0x2c05;
+    assert!(rtx_5070_ti.driver_facts().contains(&STALL_1024));
     for stem in [
         "amd-rdna3-radv",
         "moltenvk-m3",
@@ -679,10 +697,7 @@ fn nvidia_s_every_1024th_signalling_submit_stall_holds_on_the_gpu_measured() {
         .filter(|row| row.fact == STALL_1024)
         .map(|row| (row.driver, row.device))
         .collect();
-    assert_eq!(
-        rows,
-        [(DriverId::NVIDIA_PROPRIETARY, Some(NVIDIA_RTX_5080_LAPTOP))]
-    );
+    assert_eq!(rows, [(DriverId::NVIDIA_PROPRIETARY, None)]);
 }
 
 /// RADV on a GPU no row names takes RADV's driver-wide fact alone: the Radeon 780M's own

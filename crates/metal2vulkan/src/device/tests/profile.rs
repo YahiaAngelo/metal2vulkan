@@ -1102,6 +1102,7 @@ fn function_storage_is_the_measured_value_of_the_device() {
         ("amd-780m-radv", 96 * kib),
         ("intel-irisxe-rplp-anv", 32 * kib),
         ("intel-uhd770-rpls-anv", 32 * kib),
+        ("nvidia-rtx50-linux", 32 * kib),
         ("nvidia-rtx5080-laptop", 32 * kib),
         ("moltenvk-m3", 192 * kib),
         ("gate-lavapipe", 48 * kib),
@@ -1166,9 +1167,9 @@ fn anv_carries_the_vertex_grouping_at_every_release() {
 }
 
 /// `DriverWorkaround::DontInlineKeepsCalls`, a cost fact, is keyed on the GPUs measured with it:
-/// NVIDIA's driver on the RTX 3090 and on the RTX 5080 Laptop GPU (`scripts/making-bench`), at
-/// every release. Another GPU of the vendor (the desktop RTX 50's committed profile, Pascal's),
-/// another vendor's ID, or another driver (NVK, Mesa's, MoltenVK) does not carry it.
+/// NVIDIA's driver on the RTX 3090 and on Blackwell GB20x GPUs aliased to the RTX 5080 Laptop GPU
+/// (`scripts/making-bench`), at every release. Another GPU of the vendor (Pascal's committed
+/// profile), another vendor's ID, or another driver (NVK, Mesa's, MoltenVK) does not carry it.
 #[test]
 fn nvidia_keeps_dont_inline_calls_on_its_measured_gpu() {
     use crate::device::profile::DriverWorkaround;
@@ -1200,8 +1201,11 @@ fn nvidia_keeps_dont_inline_calls_on_its_measured_gpu() {
         let desc = DeviceDescription::from_khronos_json(&text, None).unwrap();
         assert_eq!(
             carries(&desc),
-            stem == "nvidia-rtx5080-laptop",
-            "{stem}: the RTX 5080 Laptop GPU's is the one committed profile of a measured GPU"
+            matches!(
+                stem.as_str(),
+                "nvidia-rtx5080-laptop" | "nvidia-rtx50-linux"
+            ),
+            "{stem}: only Blackwell GB20x profiles are committed profiles of a measured GPU"
         );
     }
     assert!(!carries(&profile("nvidia-pascal-linux")));
