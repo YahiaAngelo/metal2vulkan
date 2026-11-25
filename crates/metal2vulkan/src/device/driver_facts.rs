@@ -2188,15 +2188,18 @@ pub(crate) const MEASURED: &[Measured<DriverFact>] = &[
         device: Some(APPLE9),
         ..moltenvk_on_apple(DriverFact::DontCareStoreIsMetals)
     },
-    nvidia_on(
-        DriverFact::SemaphoreOperationsStallSubmits,
-        NVIDIA_RTX_5080_LAPTOP,
-    ),
-    nvidia_on(DriverFact::SemaphoreOperationsStallSubmits, NVIDIA_RTX_3090),
-    nvidia_on(
-        DriverFact::SignallingSubmitsStallEvery1024,
-        NVIDIA_RTX_5080_LAPTOP,
-    ),
+    Measured {
+        fact: DriverFact::SemaphoreOperationsStallSubmits,
+        driver: DriverId::NVIDIA_PROPRIETARY,
+        vendor: Some(NVIDIA_VENDOR_ID),
+        device: None,
+    },
+    Measured {
+        fact: DriverFact::SignallingSubmitsStallEvery1024,
+        driver: DriverId::NVIDIA_PROPRIETARY,
+        vendor: Some(NVIDIA_VENDOR_ID),
+        device: None,
+    },
     moltenvk_on_apple(DriverFact::TimestampsWaitForEveryQueue),
     Measured {
         fact: DriverFact::TimestampPoolsAreCounterSampleBuffers,

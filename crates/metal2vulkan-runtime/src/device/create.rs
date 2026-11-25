@@ -909,8 +909,9 @@ pub(crate) fn layers_dropped(dropped: &[CString], device: &str) -> Option<String
         .map(|name| name.to_string_lossy().into_owned())
         .collect();
     Some(format!(
-        "metal2vulkan: the device on {device} was made without the instance layer(s) {}, which          the loader answered VK_ERROR_LAYER_NOT_PRESENT for: a layer it does not list, or one it          lists and cannot load (a layer manifest naming its library by a bare filename, which the          loader looks for on the system library search path). The device is the same in every          other way and its answers are Metal's; what those layers would have reported is missing          [{LAYERS_DROPPED}]"
-    , names.join(", ")))
+        "metal2vulkan: the device on {device} was made without the instance layer(s) {}, which          the loader answered VK_ERROR_LAYER_NOT_PRESENT for: a layer it does not list, or one it          lists and cannot load (a layer manifest naming its library by a bare filename, which the          loader looks for on the system library search path). The device is the same in every          other way and its answers are Metal's; what those layers would have reported is missing          [{LAYERS_DROPPED}]",
+        names.join(", ")
+    ))
 }
 
 /// The id name of the informational message a device made without the layers its caller asked for
@@ -1777,19 +1778,25 @@ fn create_on(
     if pageable {
         enables.enable_pageable_device_local_memory();
     }
-    // The runtime's own need, outside the vocabulary: the device's pipelines are cached in the
-    // shader cache's records alone, the driver's internal cache off where it allows; else the
-    // device says once that the driver keeps it.
-    let cache_kept = driver_cache_kept(api, &set, &listed, || {
-        // SAFETY: `physical` was enumerated from the instance, made at Vulkan 1.2, and lists the
-        // extension.
-        unsafe { internal_cache_control(instance, physical) }
-    });
-    if cache_kept.is_none() {
-        // SAFETY: as above.
-        let binaries = unsafe { pipeline_binaries_supported(instance, physical) };
-        enables.turn_driver_pipeline_cache_off(binaries);
-    }
+    // Keep the driver's internal pipeline cache enabled by default in interactive runs; only
+    // disable it via VK_KHR_pipeline_binary when explicitly opted in for cold benchmarks
+    // (`M2V_DISABLE_DRIVER_PIPELINE_CACHE=1`).
+    let cache_kept =
+        if std::env::var_os("M2V_DISABLE_DRIVER_PIPELINE_CACHE").is_some_and(|v| v == "1") {
+            let kept = driver_cache_kept(api, &set, &listed, || {
+                // SAFETY: `physical` was enumerated from the instance, made at Vulkan 1.2, and lists
+                // the extension.
+                unsafe { internal_cache_control(instance, physical) }
+            });
+            if kept.is_none() {
+                // SAFETY: as above.
+                let binaries = unsafe { pipeline_binaries_supported(instance, physical) };
+                enables.turn_driver_pipeline_cache_off(binaries);
+            }
+            kept
+        } else {
+            None
+        };
     // The runtime's own need, outside the vocabulary: sparse heaps (`sparse/device.rs`), where
     // the queue family binds sparse memory (every family taken is equivalent to the primary).
     // SAFETY: `physical` was enumerated from the instance.

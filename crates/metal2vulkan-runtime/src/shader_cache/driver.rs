@@ -109,11 +109,11 @@ const MAGIC: [u8; 8] = *b"M2VPPLC\0";
 /// its records, never a misread.
 pub(crate) const VERSION: u32 = 2;
 
-/// The most `VkPipelineCache`es a device keeps live, one per record name. Past it a making of a
-/// further name is handed a cache of its own, destroyed once the making returned, so a program
-/// that makes pipelines of unboundedly many families keeps a bounded number of the driver's
-/// caches.
-pub(crate) const LIVE: usize = 256;
+/// The most `VkPipelineCache`es a device keeps live, one per record name. Once full, the least
+/// recently used idle entry is evicted and destroyed so active pipeline families stay resident
+/// while keeping a bounded number of the driver's caches; if every entry is concurrently in use,
+/// the making is handed a cache of its own, destroyed once the making returns.
+pub(crate) const LIVE: usize = 4096;
 /// The identity's bytes.
 const IDENTITY: usize = 4 + 4 + 4 + 16;
 /// Bytes before the data.
@@ -341,14 +341,50 @@ impl Live {
     }
 }
 
+struct LiveMap {
+    entries: HashMap<Hash256, (Arc<Live>, u64)>,
+    tick: u64,
+    limit: usize,
+}
+
+impl LiveMap {
+    fn new(limit: usize) -> LiveMap {
+        LiveMap {
+            entries: HashMap::new(),
+            tick: 0,
+            limit,
+        }
+    }
+
+    fn next_tick(&mut self) -> u64 {
+        self.tick = self.tick.wrapping_add(1);
+        self.tick
+    }
+}
+
 /// The `VkPipelineCache`es a device keeps, one per record name, at most [`LIVE`] of them (the
 /// module docs).
-#[derive(Default)]
 pub(crate) struct LiveCaches {
-    caches: Mutex<HashMap<Hash256, Arc<Live>>>,
+    caches: Mutex<LiveMap>,
+}
+
+impl Default for LiveCaches {
+    fn default() -> LiveCaches {
+        LiveCaches {
+            caches: Mutex::new(LiveMap::new(LIVE)),
+        }
+    }
 }
 
 impl LiveCaches {
+    /// A map capped at `limit` live caches, for unit tests.
+    #[cfg(test)]
+    pub(crate) fn with_limit(limit: usize) -> LiveCaches {
+        LiveCaches {
+            caches: Mutex::new(LiveMap::new(limit)),
+        }
+    }
+
     /// The device's cache of the record of `key`, and whether the device holds it (so a later
     /// making of the name is handed this one and its caller destroys nothing). A cache is made
     /// here, from the record where one loads, when the device holds none of that name; `None`
@@ -364,25 +400,56 @@ impl LiveCaches {
         raw: &ash::Device,
         key: &Hash256,
     ) -> Option<(Arc<Live>, bool)> {
-        if let Some(live) = lock(&self.caches).get(key) {
-            count(&store.counters.driver_caches_shared);
-            return Some((Arc::clone(live), true));
+        {
+            let mut caches = lock(&self.caches);
+            if caches.entries.contains_key(key) {
+                let tick = caches.next_tick();
+                let entry = caches.entries.get_mut(key)?;
+                entry.1 = tick;
+                let live = Arc::clone(&entry.0);
+                count(&store.counters.driver_caches_shared);
+                return Some((live, true));
+            }
         }
         let name = records.name(key);
         let made = Arc::new(make_live(store, &records.identity, raw, name)?);
         let mut caches = lock(&self.caches);
-        if let Some(live) = caches.get(key) {
-            let live = Arc::clone(live);
+        if caches.entries.contains_key(key) {
+            let tick = caches.next_tick();
+            let entry = caches.entries.get_mut(key)?;
+            entry.1 = tick;
+            let live = Arc::clone(&entry.0);
             drop(caches);
             // SAFETY: nothing was ever handed this cache, and the device is live.
             unsafe { made.destroy(raw) };
             count(&store.counters.driver_caches_shared);
             return Some((live, true));
         }
-        if caches.len() >= LIVE {
+        if caches.limit == 0 {
             return Some((made, false));
         }
-        caches.insert(*key, Arc::clone(&made));
+        let evicted = if caches.entries.len() >= caches.limit {
+            let victim = caches
+                .entries
+                .iter()
+                .filter(|(_, (live, _))| Arc::strong_count(live) == 1)
+                .min_by_key(|(_, (_, last_used))| *last_used)
+                .map(|(k, _)| *k);
+            match victim {
+                Some(victim_key) => caches.entries.remove(&victim_key).map(|(live, _)| live),
+                None => return Some((made, false)),
+            }
+        } else {
+            None
+        };
+        let tick = caches.next_tick();
+        caches.entries.insert(*key, (Arc::clone(&made), tick));
+        drop(caches);
+        if let Some(evicted) = evicted {
+            // SAFETY: `strong_count` was 1 while removing from the map under the mutex, so no
+            // making holds or can obtain this cache, and the device is live.
+            unsafe { evicted.destroy(raw) };
+        }
         Some((made, true))
     }
 
@@ -393,7 +460,7 @@ impl LiveCaches {
     ///
     /// As [`Live::destroy`]'s.
     pub(crate) unsafe fn destroy(&self, raw: &ash::Device) {
-        for (_, live) in lock(&self.caches).drain() {
+        for (_, (live, _)) in lock(&self.caches).entries.drain() {
             // SAFETY: the caller's.
             unsafe { live.destroy(raw) };
         }
